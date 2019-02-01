@@ -16,21 +16,21 @@ static volatile unsigned int * const UART_TX_RDY   = (unsigned int *)0x4000211c;
 static void
 uart_putc(void *p, char c)
 {
-  irq_forbid();
+  //  irq_forbid();
   *UART_TXD = c;
   *UART_TX_TASK = 1;
   while(!*UART_TX_RDY) {
   }
   *UART_TX_RDY = 0;
   *UART_TX_TASK = 0;
-  irq_permit();
+  //  irq_permit();
 }
 
 
 
 
 void
-platform_console_init(void)
+platform_console_init_early(void)
 {
   *UART_PSELTXD = 6;
   *UART_PSELRXD = 8;
@@ -38,4 +38,19 @@ platform_console_init(void)
   *UART_BAUDRATE = 0x1d60000;
 
   init_printf(NULL, uart_putc);
+}
+
+
+void
+irq_2(void)
+{
+
+
+}
+
+void
+platform_console_init(void)
+{
+
+
 }

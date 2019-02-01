@@ -38,17 +38,4 @@ inline unsigned int irq_getpri(void)
   return pri;
 }
 
-
-inline void
-irq_forbid()
-{
-  asm volatile ("cpsid i\n\t");
-}
-
-inline void
-irq_permit()
-{
-    asm volatile ("cpsie i\n\t"
-                  "isb\n\t");
-}
-
+void irq_init(void);

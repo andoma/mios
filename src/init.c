@@ -8,6 +8,7 @@
 #include "sys.h"
 #include "task.h"
 #include "timer.h"
+#include "irq.h"
 
 #include "platform.h"
 
@@ -31,7 +32,7 @@ init(void)
   while(src < &_ebss)
     *src++ = 0;
 
-  platform_console_init();
+  platform_console_init_early();
 
   void *heap_start = (void *)&_ebss;
   void *heap_end =   platform_heap_end();
@@ -42,6 +43,8 @@ init(void)
   heap_init(heap_start, heap_end - heap_start);
 
   timer_init();
+
+  irq_init();
 
   extern void *main(void *);
   task_create(main, NULL, 256, "main");

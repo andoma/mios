@@ -4,6 +4,7 @@
         .thumb_func
 
 start:
+        cpsid i     // Disable interrupts, later enabled in irq_init()
         bl init
         mov r0, #2  // Threaded mode
         msr control, r0
@@ -32,12 +33,18 @@ pendsv:
         .thumb_func
 syscall:
         lsl r12, r12, 2
-        ldr pc, [r12, #0x40]
+        ldr pc, [r12, #1024]
 
         .section    .isr_vector,"aw",%progbits
         .align      2
         .global     vectors
         .type   vectors, %object
+
+
+        .altmacro
+        .macro insert_irq number
+        .long irq_\number
+        .endm
 
 vectors:
         .long _sdata          // Main stack (MSP) start before data-section
@@ -59,6 +66,12 @@ vectors:
         .long exc_reserved
         .long pendsv
         .long exc_systick
+
+        .set i,0
+        .rept 240
+        insert_irq %i
+        .set i, i+1
+        .endr
 
 syscall_table:
         .long sys_yield
