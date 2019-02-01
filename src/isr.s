@@ -1,20 +1,29 @@
         .syntax unified
         .text
-        .global exc_svc_thunk
         .thumb
         .thumb_func
 
-exc_svc_thunk:
+init0:
+        bl init
+        b multitask
+
+        .thumb_func
+pendsv:
         push {lr}
-        mrs r12, psp
-        stmdb r12!, {r4-r11}
-        msr psp, r12
-        bl svc_handler
-        pop {lr}
-        mrs r12, psp
-        ldmfd r12!, {r4-r11}
-        msr psp, r12
-        bx lr
+        mrs r0, psp
+        isb
+        stmdb r0!, {r4-r11}
+        bl sys_switch
+        ldmfd r0!, {r4-r11}
+        msr psp, r0
+        isb
+        pop {pc}
+
+
+        .thumb_func
+syscall:
+        lsl r12, r12, 2
+        ldr pc, [r12, #0x40]
 
         .section    .isr_vector,"aw",%progbits
         .align      2
@@ -22,20 +31,30 @@ exc_svc_thunk:
         .type   vectors, %object
 
 vectors:
-        .long 0x20001000
-        .long init
+        .long _sdata          // Main stack (MSP) start before data-section
+        .long init0
         .long exc_nmi
         .long exc_hard_fault
+
         .long exc_mm_fault
         .long exc_bus_fault
         .long exc_usage_fault
         .long exc_reserved
+
         .long exc_reserved
         .long exc_reserved
         .long exc_reserved
-        .long exc_svc_thunk
+        .long syscall
+
         .long exc_reserved
         .long exc_reserved
-        .long exc_pendsv
+        .long pendsv
         .long exc_systick
+
+syscall_table:
+        .long sys_yield
+        .long sys_relinquish
+        .long sys_task_start
+        .long sys_sleep
+
         .size vectors, . - vectors

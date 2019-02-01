@@ -1,7 +1,7 @@
 /* details on syntax can be found in GCC linker manual */
 
 MEMORY {
-  RAM   (xrw): ORIGIN = 0x20001000, LENGTH = 20K
+  RAM   (xrw): ORIGIN = 0x20000200, LENGTH = 20K
   FLASH (rx) : ORIGIN = 0x0, LENGTH = 256K
 }
 
@@ -22,7 +22,7 @@ SECTIONS {
                 _etext = .;             /* _etext is end of program code */
         } >FLASH                        /* this section is code, hence gos to FLASH */
 
-        .data : AT ( _etext ) {         /* AT specifies the LMA (load memory address) */
+        .data : AT ( _etext ) {         /* AT specifies the LMA (load memory address) */ 
                 . = ALIGN(4);           /* also, this section is for initialized
                                              global/static variables */
                 _sdata = .;

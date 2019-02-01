@@ -1,17 +1,44 @@
-#include "mios.h"
+#include <stdio.h>
+#include <assert.h>
+#include "sys.h"
+#include "task.h"
 
 
-volatile int x = 0;
+static void *
+main2(void *aux)
+{
+  int d = 0;
+  while(1) {
+    syscall1(SYS_sleep, HZ);
+    printf("hello in main2: %d\n", d);
+    d++;
+  }
+  return NULL;
+}
+
+static void *
+main3(void *aux)
+{
+  return NULL;
+  while(1) {
+    syscall1(SYS_sleep, 203);
+    printf("hello in main3\n");
+  }
+  return NULL;
+}
+
+
 
 int
-main()
+main(void)
 {
-  static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
-  static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
+  printf("Hello in main\n");
+  task_create(main2, NULL, 256, "main2");
+  task_create(main3, NULL, 256, "main3");
 
-  *SYST_RVR = 0xfffff;
-  *SYST_CSR = 7;
-  while(1) {
+  syscall1(SYS_sleep, 3000);
 
-  }
+  printf("OK main exits\n");
 }
+
+
