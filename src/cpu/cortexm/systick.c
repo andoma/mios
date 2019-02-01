@@ -31,7 +31,6 @@ exc_systick(void)
   }
 
   while((t = LIST_FIRST(&pending)) != NULL) {
-    printf("Fire %p cb=%p\n", t, t->t_cb);
     LIST_REMOVE(t, t_link);
     t->t_countdown = 0;
     t->t_cb(t->t_opaque);
@@ -52,8 +51,6 @@ timer_arm(timer_t *t, unsigned int delta)
 
   t->t_countdown = delta;
   LIST_INSERT_HEAD(&timers, t, t_link);
-  printf("timer arm:%p\n", LIST_FIRST(&timers));
-
   irq_enable(s);
 }
 
@@ -62,8 +59,9 @@ static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 void
 timer_init(void)
 {
-  uint32_t pri = IRQ_PRI(IRQ_LEVEL_CLOCK);
-  *SYST_SHPR3 = pri << 24; // SysTick runs at irq level 1
+  uint32_t shpr3 = *SYST_SHPR3;
+  shpr3 = 0x00ffffff | (IRQ_PRI(IRQ_LEVEL_CLOCK) << 24);
+  *SYST_SHPR3 = shpr3;
 
   uint32_t timer_calibration = 64000000 / 100;
   *SYST_RVR = timer_calibration - 1;

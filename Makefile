@@ -1,19 +1,22 @@
-O=build
-
-TOOLCHAIN := arm-none-eabi-
+PLATFORM ?= nrf52
 
 GLOBALDEPS := Makefile
 
-CFLAGS += -mcpu=cortex-m4 -mthumb -g3 -Os -fno-builtin -nostdinc -Werror -Wall
-CFLAGS += -I. -Iinclude
-LDFLAGS += ${CFLAGS} -nostartfiles -nodefaultlibs -Wl,-Tsrc/linker.ld
+O ?= build.${PLATFORM}
+
+P := src/platform/${PLATFORM}
+include ${P}/platform.mk
 
 
-SRCS += src/isr.s \
-	src/init.c \
+CFLAGS += -g3 -Os -fno-builtin -nostdinc -Werror -Wall
+CFLAGS += -I. -Iinclude -Isrc -Isrc/cpu -Isrc/platform -Isrc/cpu/${CPU}
+
+LDFLAGS += -nostartfiles -nodefaultlibs
+
+
+SRCS += src/init.c \
 	src/main.c \
 	src/task.c \
-	src/timer.c \
 
 SRCS += src/heap_simple.c
 
@@ -25,9 +28,9 @@ DEPS +=  ${OBJS:%.o=%.d}
 
 
 
-${O}/build.elf: ${OBJS} ${GLOBALDEPS} src/linker.ld
+${O}/build.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT}
 	@mkdir -p $(dir $@)
-	${TOOLCHAIN}gcc ${LDFLAGS} ${OBJS} -o $@
+	${TOOLCHAIN}gcc ${LDFLAGS} -Wl,-T${LDSCRIPT} ${OBJS} -o $@
 
 ${O}/%.o: %.c ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
@@ -35,7 +38,7 @@ ${O}/%.o: %.c ${GLOBALDEPS}
 
 ${O}/%.o: %.s ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
-	${TOOLCHAIN}gcc ${CFLAGS} -c $< -o $@
+	${TOOLCHAIN}gcc -MD -MP ${CFLAGS} -c $< -o $@
 
 clean:
 	rm -rf "${O}"

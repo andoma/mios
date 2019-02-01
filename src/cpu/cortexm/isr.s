@@ -3,9 +3,18 @@
         .thumb
         .thumb_func
 
-init0:
+start:
         bl init
-        b multitask
+        mov r0, #2  // Threaded mode
+        msr control, r0
+        isb
+        ldr r0, =idle_stack + 64
+        msr psp, r0
+        isb
+        mov r12, #1 // SYS_relinquish
+        svc #0
+idle:   wfi
+        b idle
 
         .thumb_func
 pendsv:
@@ -32,7 +41,7 @@ syscall:
 
 vectors:
         .long _sdata          // Main stack (MSP) start before data-section
-        .long init0
+        .long start
         .long exc_nmi
         .long exc_hard_fault
 
@@ -58,3 +67,7 @@ syscall_table:
         .long sys_sleep
 
         .size vectors, . - vectors
+
+        .bss
+        .align 8
+        .lcomm idle_stack 64

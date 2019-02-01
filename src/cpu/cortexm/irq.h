@@ -8,34 +8,47 @@
 
 #define IRQ_PRI(x) ((x) << IRQ_LEVEL_PRI_SHIFT)
 
-inline uint32_t
-irq_disable(uint32_t level)
+inline unsigned int
+irq_disable(unsigned int level)
 {
-  uint32_t old;
+  unsigned int old;
   asm volatile ("mrs %0, basepri\n\t" : "=r" (old));
   asm volatile ("msr basepri_max, %0\n\t" : : "r" (IRQ_PRI(level)));
   return old;
 }
 
 inline void
-irq_enable(uint32_t pri)
+irq_enable(unsigned int pri)
 {
   asm volatile ("msr basepri, %0\n\t" : : "r" (pri));
 }
 
 
 inline void
-irq_setpri(uint32_t pri)
+irq_setpri(unsigned int pri)
 {
   asm volatile ("msr basepri, %0\n\t" : : "r" (pri));
 }
 
 
-inline uint32_t
-irq_getpri(void)
+inline unsigned int irq_getpri(void)
 {
-  uint32_t pri;
+  unsigned int pri;
   asm volatile ("mrs %0, basepri\n\t" : "=r" (pri));
   return pri;
+}
+
+
+inline void
+irq_forbid()
+{
+  asm volatile ("cpsid i\n\t");
+}
+
+inline void
+irq_permit()
+{
+    asm volatile ("cpsie i\n\t"
+                  "isb\n\t");
 }
 

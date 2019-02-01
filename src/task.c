@@ -3,12 +3,10 @@
 #include <assert.h>
 #include <stdint.h>
 
-
 #include "task.h"
 #include "sys.h"
 #include "irq.h"
 
-static volatile unsigned int * const ICSR = (unsigned int *)0xe000ed04;
 static struct task_queue readyqueue = TAILQ_HEAD_INITIALIZER(readyqueue);
 
 static task_t idle_task = {
@@ -18,8 +16,6 @@ static task_t idle_task = {
 #define STACK_GUARD 0xbadc0de
 
 struct task *curtask = &idle_task;
-
-static uint32_t idle_task_stack[16] __attribute__((aligned(8)));
 
 void *
 sys_switch(void *cur_psp)
@@ -45,14 +41,14 @@ sys_switch(void *cur_psp)
 void
 sys_relinquish(void)
 {
-  *ICSR = 1 << 28;
+  sys_schedule();
 }
 
 void
 sys_yield(void)
 {
   TAILQ_INSERT_TAIL(&readyqueue, curtask, t_link);
-  *ICSR = 1 << 28;
+  sys_schedule();
 }
 
 
@@ -65,6 +61,7 @@ sys_task_start(task_t *t)
 void
 task_end(void)
 {
+  printf("Task %s exited\n", curtask->t_name);
   syscall0(SYS_relinquish);
 }
 
@@ -73,7 +70,7 @@ task_wakeup(void *opaque)
 {
   task_t *t = opaque;
   TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
-  *ICSR = 1 << 28;
+  sys_schedule();
 }
 
 void
@@ -97,7 +94,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   t->t_timer.t_opaque = t;
 
   uint32_t *stack_bottom = (void *)t->t_stack;
-  *stack_bottom = 0xbadc0de;
+  *stack_bottom = STACK_GUARD;
 
   uint32_t *stack = (void *)t->t_stack + stack_size;
 
@@ -111,18 +108,3 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   syscall1(SYS_task_start, (int)t);
   return t;
 }
-
-
-void __attribute__((naked))
-multitask(void)
-{
-  sys_set_control(2);
-  sys_isb();
-  sys_set_psp(&idle_task_stack[16]);
-  sys_isb();
-  syscall0(SYS_relinquish);
-  while(1) {
-    asm volatile ("wfi\n\t");
-  }
-}
-

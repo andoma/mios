@@ -9,9 +9,9 @@ main2(void *aux)
 {
   int d = 0;
   while(1) {
-    syscall1(SYS_sleep, HZ);
     printf("hello in main2: %d\n", d);
     d++;
+    syscall1(SYS_sleep, HZ);
   }
   return NULL;
 }
@@ -19,10 +19,9 @@ main2(void *aux)
 static void *
 main3(void *aux)
 {
-  return NULL;
   while(1) {
-    syscall1(SYS_sleep, 203);
     printf("hello in main3\n");
+    syscall1(SYS_sleep, 203);
   }
   return NULL;
 }
@@ -35,8 +34,6 @@ main(void)
   printf("Hello in main\n");
   task_create(main2, NULL, 256, "main2");
   task_create(main3, NULL, 256, "main3");
-
-  syscall1(SYS_sleep, 3000);
 
   printf("OK main exits\n");
 }
