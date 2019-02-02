@@ -44,11 +44,10 @@ init(void)
 
   timer_init();
 
-  irq_init();
-
   extern void *main(void *);
   task_create(main, NULL, 256, "main");
 
+  irq_init();
 }
 
 

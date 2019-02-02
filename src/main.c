@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <assert.h>
+
 #include "sys.h"
 #include "task.h"
-
+#include "irq.h"
 
 static void *
 main2(void *aux)
@@ -19,10 +20,8 @@ main2(void *aux)
 static void *
 main3(void *aux)
 {
-  while(1) {
-    printf("hello in main3\n");
-    syscall1(SYS_sleep, 203);
-  }
+  printf("hello in main3\n");
+  syscall1(SYS_sleep, 203);
   return NULL;
 }
 
@@ -32,6 +31,7 @@ int
 main(void)
 {
   printf("Hello in main\n");
+
   task_create(main2, NULL, 256, "main2");
   task_create(main3, NULL, 256, "main3");
 

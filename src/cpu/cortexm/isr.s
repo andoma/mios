@@ -4,7 +4,7 @@
         .thumb_func
 
 start:
-        cpsid i     // Disable interrupts, later enabled in irq_init()
+//        cpsie i     // Disable interrupts, later enabled in irq_init()
         bl init
         mov r0, #2  // Threaded mode
         msr control, r0

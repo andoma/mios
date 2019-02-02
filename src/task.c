@@ -21,20 +21,20 @@ void *
 sys_switch(void *cur_psp)
 {
   curtask->t_psp = cur_psp;
-  curtask->t_basepri = irq_getpri();
+  curtask->t_basepri = irq_forbid_save();
   task_t *t = TAILQ_FIRST(&readyqueue);
   if(t != NULL) {
     TAILQ_REMOVE(&readyqueue, t, t_link);
   } else {
     t = &idle_task;
   }
-#if 0
+#if 1
   printf("Switch from %s [pri:%x] to %s [pri:%x]\n",
          curtask->t_name, curtask->t_basepri,
          t->t_name, t->t_basepri);
 #endif
   curtask = t;
-  irq_setpri(t->t_basepri);
+  irq_forbid_restore(t->t_basepri);
   return t->t_psp;
 }
 
@@ -91,6 +91,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   t->t_basepri = 0;
   t->t_name = name;
   t->t_timer.t_cb = task_wakeup;
+  t->t_timer.t_countdown = 0;
   t->t_timer.t_opaque = t;
 
   uint32_t *stack_bottom = (void *)t->t_stack;

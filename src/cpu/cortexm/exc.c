@@ -6,7 +6,6 @@
 //static volatile unsigned int * const ICSR    = (unsigned int *)0xe000ed04;
 static volatile unsigned int * const HFSR    = (unsigned int *)0xe000ed2c;
 static volatile unsigned int * const CFSR    = (unsigned int *)0xe000ed28;
-static volatile unsigned int * const UFSR    = (unsigned int *)0xe000ed2a;
 //static volatile unsigned int * const MMAR    = (unsigned int *)0xe000ed34;
 
 
@@ -19,8 +18,8 @@ exc_nmi(void)
 void
 exc_hard_fault(void)
 {
-  panic("HARD FAULT, HFSR:0x%x CFSR:0x%x UFSR:0x%x\n",
-        *HFSR, *CFSR, *UFSR);
+  panic("HARD FAULT, HFSR:0x%x CFSR:0x%x\n",
+        *HFSR, *CFSR);
 }
 
 void

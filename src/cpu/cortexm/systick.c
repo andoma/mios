@@ -44,25 +44,21 @@ timer_arm(timer_t *t, unsigned int delta)
   if(!delta)
     delta = 1;
 
-  uint32_t s = irq_disable(IRQ_LEVEL_CLOCK);
+  uint32_t s = irq_forbid(IRQ_LEVEL_CLOCK);
 
   if(t->t_countdown)
     LIST_REMOVE(t, t_link);
 
   t->t_countdown = delta;
   LIST_INSERT_HEAD(&timers, t, t_link);
-  irq_enable(s);
+  irq_permit(s);
 }
 
-static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
+//static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 
 void
 timer_init(void)
 {
-  uint32_t shpr3 = *SYST_SHPR3;
-  shpr3 = 0x00ffffff | (IRQ_PRI(IRQ_LEVEL_CLOCK) << 24);
-  *SYST_SHPR3 = shpr3;
-
   uint32_t timer_calibration = 64000000 / 100;
   *SYST_RVR = timer_calibration - 1;
   *SYST_CSR = 7;
