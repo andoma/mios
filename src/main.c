@@ -26,7 +26,7 @@ main2(void *aux)
 {
   int d = 0;
 
-  if(1) {
+  if(0) {
     task_create(main3, NULL, 256, "main3");
   }
 
@@ -45,6 +45,11 @@ int
 main(void)
 {
   printf("Hello in main\n");
+  return 0;
+
+  while(1) {
+
+  }
 
   if(1) {
     task_create(main2, NULL, 256, "main2");

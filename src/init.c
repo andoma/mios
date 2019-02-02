@@ -45,7 +45,7 @@ init(void)
   timer_init();
 
   extern void *main(void *);
-  task_create(main, NULL, 256, "main");
+  task_create(main, NULL, 512, "main");
 
   irq_init();
 }
@@ -55,6 +55,7 @@ init(void)
 void
 panic(const char *fmt, ...)
 {
+  irq_off();
   printf("PANIC in %s: ", curtask ? curtask->t_name : "<notask>");
   va_list ap;
   va_start(ap, fmt);

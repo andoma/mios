@@ -16,6 +16,7 @@ start:
         mov r1, #(1 << 28)
         str r1, [r0]
         cpsie i     // Enable interrupts, off we go
+        isb
 idle:   wfi
         b idle
 

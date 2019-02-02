@@ -37,7 +37,7 @@ sys_switch(void *cur_psp)
     TAILQ_REMOVE(&readyqueue, t, t_link);
   }
 
-#if 1
+#if 0
   printf("Switch from %s to %s\n", curtask->t_name, t->t_name);
 #endif
 
@@ -115,7 +115,7 @@ task_wakeup(struct task_queue *waitable, int all)
 
 
 static void
-task_sleep_timer(void *opaque)
+task_sleep_timeout(void *opaque)
 {
   task_t *t = opaque;
 
@@ -139,16 +139,17 @@ void
 task_sleep(struct task_queue *waitable, int ticks)
 {
   timer_t timer;
-  timer.t_cb = task_sleep_timer;
-  timer.t_opaque = curtask;
-  timer.t_countdown = 0;
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
-  if(ticks)
+  if(ticks) {
+    timer.t_cb = task_sleep_timeout;
+    timer.t_opaque = curtask;
+    timer.t_countdown = 0;
     timer_arm(&timer, ticks);
+  }
 
   if(waitable != NULL) {
     curtask->t_waitable = waitable;
@@ -160,7 +161,9 @@ task_sleep(struct task_queue *waitable, int ticks)
     irq_permit(irq_lower());
   }
 
-  timer_disarm(&timer);
+  if(ticks) {
+    timer_disarm(&timer);
+  }
 
   irq_permit(s);
 }

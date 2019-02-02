@@ -12,6 +12,12 @@
 
 #define IRQ_LEVEL_TO_PRI(x) ((x) << IRQ_PRI_LEVEL_SHIFT)
 
+inline void
+irq_off(void)
+{
+  asm volatile ("cpsid i\n\t");
+}
+
 inline unsigned int
 irq_forbid(unsigned int level)
 {
