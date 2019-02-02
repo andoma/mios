@@ -10,7 +10,8 @@
 static struct task_queue readyqueue = TAILQ_HEAD_INITIALIZER(readyqueue);
 
 static task_t idle_task = {
-  .t_name = "idle"
+  .t_name = "idle",
+  .t_state = TASK_STATE_ZOMBIE,
 };
 
 #define STACK_GUARD 0xbadc0de
@@ -21,65 +22,41 @@ void *
 sys_switch(void *cur_psp)
 {
   curtask->t_psp = cur_psp;
-  curtask->t_basepri = irq_forbid_save();
-  task_t *t = TAILQ_FIRST(&readyqueue);
-  if(t != NULL) {
-    TAILQ_REMOVE(&readyqueue, t, t_link);
-  } else {
-    t = &idle_task;
+
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+
+  if(curtask->t_state == TASK_STATE_RUNNING) {
+    // Task should be running, re-insert in readyqueue
+    TAILQ_INSERT_TAIL(&readyqueue, curtask, t_link);
   }
+
+  task_t *t = TAILQ_FIRST(&readyqueue);
+  if(t == NULL) {
+    t = &idle_task;
+  } else {
+    TAILQ_REMOVE(&readyqueue, t, t_link);
+  }
+
 #if 1
-  printf("Switch from %s [pri:%x] to %s [pri:%x]\n",
-         curtask->t_name, curtask->t_basepri,
-         t->t_name, t->t_basepri);
+  printf("Switch from %s to %s\n", curtask->t_name, t->t_name);
 #endif
+
+  irq_permit(s);
+
   curtask = t;
-  irq_forbid_restore(t->t_basepri);
   return t->t_psp;
 }
 
-void
-sys_relinquish(void)
-{
-  sys_schedule();
-}
-
-void
-sys_yield(void)
-{
-  TAILQ_INSERT_TAIL(&readyqueue, curtask, t_link);
-  sys_schedule();
-}
-
-
-void
-sys_task_start(task_t *t)
-{
-  TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
-}
-
-void
-task_end(void)
-{
-  printf("Task %s exited\n", curtask->t_name);
-  syscall0(SYS_relinquish);
-}
 
 static void
-task_wakeup(void *opaque)
+task_end(void)
 {
-  task_t *t = opaque;
-  TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
-  sys_schedule();
+  curtask->t_state = TASK_STATE_ZOMBIE;
+  schedule();
+  irq_lower();
+  while(1) {
+  }
 }
-
-void
-sys_sleep(int ticks)
-{
-  timer_arm(&curtask->t_timer, ticks);
-  sys_relinquish();
-}
-
 
 
 task_t *
@@ -88,24 +65,109 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 {
   assert(stack_size >= 256);
   task_t *t = malloc(sizeof(task_t) + stack_size);
-  t->t_basepri = 0;
   t->t_name = name;
-  t->t_timer.t_cb = task_wakeup;
-  t->t_timer.t_countdown = 0;
-  t->t_timer.t_opaque = t;
+  t->t_waitable = NULL;
 
   uint32_t *stack_bottom = (void *)t->t_stack;
   *stack_bottom = STACK_GUARD;
 
   uint32_t *stack = (void *)t->t_stack + stack_size;
 
-  *--stack = 0x21000000;
+  *--stack = 0x21000000;  // PSR
   *--stack = (uint32_t) entry;
   *--stack = (uint32_t) task_end;
   for(int i = 0; i < 13; i++)
     *--stack = 0;
   t->t_psp = stack;
   stack[8] = (uint32_t) arg; // r0
-  syscall1(SYS_task_start, (int)t);
+  printf("Creating task %p %s\n", t, name);
+
+  t->t_state = 0;
+
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+  irq_permit(s);
+
+  schedule();
   return t;
+}
+
+
+void
+task_wakeup(struct task_queue *waitable, int all)
+{
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+
+  task_t *t;
+  while((t = TAILQ_FIRST(waitable)) != NULL) {
+    assert(t->t_state == TASK_STATE_SLEEPING);
+    assert(t->t_waitable == waitable);
+    TAILQ_REMOVE(waitable, t, t_link);
+    t->t_waitable = NULL;
+    t->t_state = TASK_STATE_RUNNING;
+    TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+    schedule();
+    if(!all)
+      break;
+  }
+  irq_permit(s);
+}
+
+
+static void
+task_sleep_timer(void *opaque)
+{
+  task_t *t = opaque;
+
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+
+  if(t->t_state == TASK_STATE_SLEEPING) {
+
+    if(t->t_waitable != NULL)
+      TAILQ_REMOVE(t->t_waitable, t, t_link);
+
+    t->t_state = TASK_STATE_RUNNING;
+    TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+    schedule();
+  }
+  irq_permit(s);
+}
+
+
+
+void
+task_sleep(struct task_queue *waitable, int ticks)
+{
+  timer_t timer;
+  timer.t_cb = task_sleep_timer;
+  timer.t_opaque = curtask;
+  timer.t_countdown = 0;
+
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  assert(curtask->t_state == TASK_STATE_RUNNING);
+  curtask->t_state = TASK_STATE_SLEEPING;
+
+  if(ticks)
+    timer_arm(&timer, ticks);
+
+  if(waitable != NULL) {
+    curtask->t_waitable = waitable;
+    TAILQ_INSERT_TAIL(waitable, curtask, t_link);
+  }
+
+  while(curtask->t_state == TASK_STATE_SLEEPING) {
+    schedule();
+    irq_permit(irq_lower());
+  }
+
+  timer_disarm(&timer);
+
+  irq_permit(s);
+}
+
+
+void
+sleephz(int ticks)
+{
+  task_sleep(NULL, ticks);
 }

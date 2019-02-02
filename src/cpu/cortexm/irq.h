@@ -1,9 +1,11 @@
 #pragma once
 
-#define IRQ_LEVEL_SVC      4
-#define IRQ_LEVEL_CONSOLE  4
-#define IRQ_LEVEL_CLOCK    4
-#define IRQ_LEVEL_SWITCH   4
+#define IRQ_LEVEL_SCHED    2
+
+#define IRQ_LEVEL_CONSOLE  3
+
+#define IRQ_LEVEL_CLOCK    6
+#define IRQ_LEVEL_SWITCH   7
 
 #define IRQ_PRI_LEVEL_SHIFT 5
 
@@ -26,19 +28,15 @@ irq_permit(unsigned int pri)
 }
 
 
-inline void
-irq_forbid_restore(unsigned int pri)
+inline unsigned int
+irq_lower(void)
 {
-  asm volatile ("msr basepri, %0\n\t" : : "r" (pri));
+  unsigned int old;
+  asm volatile ("mrs %0, basepri\n\t" : "=r" (old));
+  asm volatile ("msr basepri, %0\n\t" : : "r" (0));
+  return old;
 }
 
-inline unsigned int
-irq_forbid_save(void)
-{
-  unsigned int pri;
-  asm volatile ("mrs %0, basepri\n\t" : "=r" (pri));
-  return pri;
-}
 
 void irq_enable(int irq, int level);
 

@@ -44,15 +44,23 @@ timer_arm(timer_t *t, unsigned int delta)
   if(!delta)
     delta = 1;
 
-  uint32_t s = irq_forbid(IRQ_LEVEL_CLOCK);
-
   if(t->t_countdown)
     LIST_REMOVE(t, t_link);
 
   t->t_countdown = delta;
   LIST_INSERT_HEAD(&timers, t, t_link);
-  irq_permit(s);
 }
+
+void
+timer_disarm(timer_t *t)
+{
+  if(!t->t_countdown)
+    return;
+  LIST_REMOVE(t, t_link);
+  t->t_countdown = 0;
+}
+
+
 
 //static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 

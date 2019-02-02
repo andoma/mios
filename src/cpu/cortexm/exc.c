@@ -44,3 +44,10 @@ exc_reserved(void)
 {
   panic("Res");
 }
+
+
+void
+exc_svc(void)
+{
+  panic("SVC");
+}

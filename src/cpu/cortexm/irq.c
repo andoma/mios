@@ -31,21 +31,15 @@ irq_disable(int irq)
 }
 
 
-static volatile unsigned int * const SYST_SHPR2 = (unsigned int *)0xe000ed1c;
 static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 
 void
 irq_init(void)
 {
-  *SYST_SHPR2 =
-    (IRQ_LEVEL_TO_PRI(IRQ_LEVEL_SVC) << 24);
-
   *SYST_SHPR3 =
     (IRQ_LEVEL_TO_PRI(IRQ_LEVEL_CLOCK) << 24) |
     (IRQ_LEVEL_TO_PRI(IRQ_LEVEL_SWITCH) << 16);
 
-  //  platform_console_init();
+  platform_console_init();
 
-  asm volatile ("cpsie i\n\t"
-                "isb\n\t");
 }

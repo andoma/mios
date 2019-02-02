@@ -4,7 +4,7 @@
         .thumb_func
 
 start:
-//        cpsie i     // Disable interrupts, later enabled in irq_init()
+        cpsid i     // Disable interrupts
         bl init
         mov r0, #2  // Threaded mode
         msr control, r0
@@ -12,8 +12,10 @@ start:
         ldr r0, =idle_stack + 64
         msr psp, r0
         isb
-        mov r12, #1 // SYS_relinquish
-        svc #0
+        adr.w r0, #0xe000ed04
+        mov r1, #(1 << 28)
+        str r1, [r0]
+        cpsie i     // Enable interrupts, off we go
 idle:   wfi
         b idle
 
@@ -29,11 +31,6 @@ pendsv:
         isb
         pop {pc}
 
-
-        .thumb_func
-syscall:
-        lsl r12, r12, 2
-        ldr pc, [r12, #1024]
 
         .section    .isr_vector,"aw",%progbits
         .align      2
@@ -60,7 +57,7 @@ vectors:
         .long exc_reserved
         .long exc_reserved
         .long exc_reserved
-        .long syscall
+        .long exc_svc
 
         .long exc_reserved
         .long exc_reserved
@@ -72,12 +69,6 @@ vectors:
         insert_irq %i
         .set i, i+1
         .endr
-
-syscall_table:
-        .long sys_yield
-        .long sys_relinquish
-        .long sys_task_start
-        .long sys_sleep
 
         .size vectors, . - vectors
 
