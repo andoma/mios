@@ -80,27 +80,9 @@ uart_putc(void *p, char c)
 }
 
 
-
-void
-platform_console_init_early(void)
-{
-  *UART_PSELTXD = 6;
-  *UART_PSELRXD = 8;
-  *UART_ENABLE = 4;
-  *UART_BAUDRATE = 0x1d60000;
-  init_printf(NULL, uart_putc);
-}
-
-
-
-
-
 void
 irq_2(void)
 {
-  //  printf("RX %d\n", *UART_RXD);
-  //  irq_ack(2);
-
   if(*UART_RX_RDY) {
     *UART_RX_RDY = 0;
     rx_fifo[rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = *UART_RXD;
@@ -124,15 +106,9 @@ irq_2(void)
   }
 }
 
-void __attribute__((noinline))
-console_do_echo(char c)
-{
-  uart_putc(NULL, c);
-}
-
 
 static void *
-console_task(void *arg)
+console_echo_task(void *arg)
 {
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
 
@@ -146,22 +122,31 @@ console_task(void *arg)
 
     char c = rx_fifo[rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
     rx_fifo_rdptr++;
-    console_do_echo(c);
+    uart_putc(NULL, c);
     irq_permit(s);
     s = irq_forbid(IRQ_LEVEL_CONSOLE);
   }
   return NULL;
 }
 
+
+void
+platform_console_init_early(void)
+{
+  *UART_PSELTXD = 6;
+  *UART_PSELRXD = 8;
+  *UART_ENABLE = 4;
+  *UART_BAUDRATE = 0x1d60000;
+  init_printf(NULL, uart_putc);
+}
+
+
 void
 platform_console_init(void)
 {
-  //  init_printf(NULL, uart_putc2);
+  // Called just before we enable interrupts
   *UART_INTENSET = 0x84; // RXDRDY and TXDRDY
-  //*UART_INTENSET = 0x4; // RXDRDY
   *UART_RX_TASK = 1;
   irq_enable(2, IRQ_LEVEL_CONSOLE);
-
-
-  task_create(console_task, NULL, 256, "console");
+  task_create(console_echo_task, NULL, 256, "console");
 }
