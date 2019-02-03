@@ -174,3 +174,49 @@ sleephz(int ticks)
 {
   task_sleep(NULL, ticks);
 }
+
+
+void
+mutex_init(mutex_t *m)
+{
+  TAILQ_INIT(&m->waiters);
+  m->owner = NULL;
+}
+
+void
+mutex_lock(mutex_t *m)
+{
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+
+  if(m->owner != NULL) {
+    assert(m->owner != curtask);
+    curtask->t_state = TASK_STATE_SLEEPING;
+    curtask->t_waitable = &m->waiters;
+    TAILQ_INSERT_TAIL(&m->waiters, curtask, t_link);
+    while(m->owner != NULL) {
+      schedule();
+      irq_permit(irq_lower());
+    }
+  }
+  m->owner = curtask;
+
+  irq_permit(s);
+}
+
+void
+mutex_unlock(mutex_t *m)
+{
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  m->owner = NULL;
+
+  task_t *t = TAILQ_FIRST(&m->waiters);
+  if(t != NULL) {
+    TAILQ_REMOVE(&m->waiters, t, t_link);
+    t->t_waitable = NULL;
+    t->t_state = TASK_STATE_RUNNING;
+    TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+    schedule();
+  }
+  irq_permit(s);
+}
+

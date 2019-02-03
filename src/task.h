@@ -23,6 +23,12 @@ typedef struct task {
 
 extern task_t *curtask;
 
+typedef struct mutex {
+  struct task_queue waiters;
+  task_t *owner;
+} mutex_t;
+
+
 
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                     const char *name);
@@ -30,3 +36,10 @@ task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 void task_wakeup(struct task_queue *waitable, int all);
 
 void task_sleep(struct task_queue *waitable, int ticks);
+
+void mutex_init(mutex_t *m);
+
+void mutex_lock(mutex_t *m);
+
+void mutex_unlock(mutex_t *m);
+
