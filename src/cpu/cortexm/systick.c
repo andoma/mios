@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "timer.h"
-
+#include "platform.h"
 #include "sys.h"
 #include "irq.h"
 
@@ -14,9 +14,13 @@ LIST_HEAD(timer_list, timer);
 
 static struct timer_list timers;
 
+// This is bad, will wrap after 490 days with HZ = 100
+static uint32_t clock;
+
 void
 exc_systick(void)
 {
+  clock++;
   struct timer_list pending;
   LIST_INIT(&pending);
   timer_t *t, *n;
@@ -67,7 +71,14 @@ timer_disarm(timer_t *t)
 void
 timer_init(void)
 {
-  uint32_t timer_calibration = 64000000 / 100;
+  uint32_t timer_calibration = SYSTICK_RVR / HZ;
   *SYST_RVR = timer_calibration - 1;
   *SYST_CSR = 7;
+}
+
+
+uint32_t
+clock_get(void)
+{
+  return clock;
 }

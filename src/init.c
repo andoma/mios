@@ -9,6 +9,7 @@
 #include "task.h"
 #include "timer.h"
 #include "irq.h"
+#include "mios.h"
 
 #include "platform.h"
 
@@ -44,10 +45,12 @@ init(void)
 
   timer_init();
 
+  irq_init();
+
+  platform_init();
+
   extern void *main(void *);
   task_create(main, NULL, 512, "main");
-
-  irq_init();
 }
 
 

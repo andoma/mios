@@ -39,7 +39,4 @@ irq_init(void)
   *SYST_SHPR3 =
     (IRQ_LEVEL_TO_PRI(IRQ_LEVEL_CLOCK) << 24) |
     (IRQ_LEVEL_TO_PRI(IRQ_LEVEL_SWITCH) << 16);
-
-  platform_console_init();
-
 }

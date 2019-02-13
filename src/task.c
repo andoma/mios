@@ -66,7 +66,6 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   assert(stack_size >= 256);
   task_t *t = malloc(sizeof(task_t) + stack_size);
   t->t_name = name;
-  t->t_waitable = NULL;
 
   uint32_t *stack_bottom = (void *)t->t_stack;
   *stack_bottom = STACK_GUARD;
@@ -101,9 +100,7 @@ task_wakeup(struct task_queue *waitable, int all)
   task_t *t;
   while((t = TAILQ_FIRST(waitable)) != NULL) {
     assert(t->t_state == TASK_STATE_SLEEPING);
-    assert(t->t_waitable == waitable);
     TAILQ_REMOVE(waitable, t, t_link);
-    t->t_waitable = NULL;
     t->t_state = TASK_STATE_RUNNING;
     TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
     schedule();
@@ -114,17 +111,24 @@ task_wakeup(struct task_queue *waitable, int all)
 }
 
 
+typedef struct task_sleep {
+  task_t *task;
+  struct task_queue *waitable;
+} task_sleep_t;
+
+
 static void
 task_sleep_timeout(void *opaque)
 {
-  task_t *t = opaque;
+  const task_sleep_t *ts = opaque;
+  task_t *t = ts->task;
 
-  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(t->t_state == TASK_STATE_SLEEPING) {
 
-    if(t->t_waitable != NULL)
-      TAILQ_REMOVE(t->t_waitable, t, t_link);
+    if(ts->waitable != NULL)
+      TAILQ_REMOVE(ts->waitable, t, t_link);
 
     t->t_state = TASK_STATE_RUNNING;
     TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
@@ -139,20 +143,22 @@ void
 task_sleep(struct task_queue *waitable, int ticks)
 {
   timer_t timer;
+  task_sleep_t ts;
 
-  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
   if(ticks) {
+    ts.task = curtask;
+    ts.waitable = waitable;
     timer.t_cb = task_sleep_timeout;
-    timer.t_opaque = curtask;
+    timer.t_opaque = &ts;
     timer.t_countdown = 0;
     timer_arm(&timer, ticks);
   }
 
   if(waitable != NULL) {
-    curtask->t_waitable = waitable;
     TAILQ_INSERT_TAIL(waitable, curtask, t_link);
   }
 
@@ -186,12 +192,11 @@ mutex_init(mutex_t *m)
 void
 mutex_lock(mutex_t *m)
 {
-  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(m->owner != NULL) {
     assert(m->owner != curtask);
     curtask->t_state = TASK_STATE_SLEEPING;
-    curtask->t_waitable = &m->waiters;
     TAILQ_INSERT_TAIL(&m->waiters, curtask, t_link);
     while(m->owner != NULL) {
       schedule();
@@ -207,12 +212,12 @@ void
 mutex_unlock(mutex_t *m)
 {
   int s = irq_forbid(IRQ_LEVEL_SCHED);
+  assert(m->owner == curtask);
   m->owner = NULL;
 
   task_t *t = TAILQ_FIRST(&m->waiters);
   if(t != NULL) {
     TAILQ_REMOVE(&m->waiters, t, t_link);
-    t->t_waitable = NULL;
     t->t_state = TASK_STATE_RUNNING;
     TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
     schedule();

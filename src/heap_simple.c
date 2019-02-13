@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <sys/queue.h>
 #include <stddef.h>
+#include <string.h>
 #include "heap.h"
 
 
@@ -93,7 +94,7 @@ free(void *ptr)
   }
 }
 
-#if 0
+
 static size_t
 heap_usable_size(void *ptr)
 {
@@ -102,6 +103,7 @@ heap_usable_size(void *ptr)
   assert(hb->hb_magic == HEAP_MAGIC_ALLOC);
   return hb->hb_size - sizeof(heap_block_t);
 }
+
 
 void *
 realloc(void *ptr, size_t size)
@@ -117,12 +119,11 @@ realloc(void *ptr, size_t size)
       return NULL;
 
     if(ptr != NULL)
-      __builtin_memcpy(n, ptr, cursize);
+      memcpy(n, ptr, cursize);
   }
   free(ptr);
   return n;
 }
-#endif
 
 void
 heap_dump(void)

@@ -142,7 +142,7 @@ platform_console_init_early(void)
 
 
 void
-platform_console_init(void)
+nrf52_console_init(void)
 {
   // Called just before we enable interrupts
   *UART_INTENSET = 0x84; // RXDRDY and TXDRDY

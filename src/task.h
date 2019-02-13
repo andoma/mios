@@ -16,7 +16,6 @@ typedef struct task {
   TAILQ_ENTRY(task) t_link;
   const char *t_name;
   uint8_t t_state;
-  struct task_queue *t_waitable;
   void *t_psp;
   uint8_t t_stack[0];
 } task_t;
@@ -25,10 +24,8 @@ extern task_t *curtask;
 
 typedef struct mutex {
   struct task_queue waiters;
-  task_t *owner;
+  struct task *owner;
 } mutex_t;
-
-
 
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                     const char *name);

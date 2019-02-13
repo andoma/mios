@@ -10,7 +10,7 @@ uart_putc(void *p, char c)
 }
 
 void
-platform_console_init(void)
+platform_console_init_early(void)
 {
   init_printf((unsigned int *)0x4000c000, uart_putc);
 }

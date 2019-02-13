@@ -4,19 +4,26 @@ GLOBALDEPS := Makefile
 
 O ?= build.${PLATFORM}
 
+#
+# Include platform- (which in turn include CPU-) specific things
+#
 P := src/platform/${PLATFORM}
 include ${P}/platform.mk
 
 
-CFLAGS += -g3 -Os -fno-builtin -nostdinc -Werror -Wall
-CFLAGS += -I. -Iinclude -Isrc -Isrc/cpu -Isrc/platform -Isrc/cpu/${CPU}
+CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin
+CFLAGS += -I. -I${P} -Isrc/platform -I${C} -Isrc/cpu -Iinclude -Isrc
 
 LDFLAGS += -nostartfiles -nodefaultlibs
 
+#
+# Core
+#
 
 SRCS += src/init.c \
 	src/main.c \
 	src/task.c \
+	src/libc.c \
 
 SRCS += src/heap_simple.c
 
