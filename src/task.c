@@ -19,9 +19,9 @@ static task_t idle_task = {
 struct task *curtask = &idle_task;
 
 void *
-sys_switch(void *cur_psp)
+sys_switch(void *cur_sp)
 {
-  curtask->t_psp = cur_psp;
+  curtask->t_sp = cur_sp;
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
 
@@ -44,7 +44,7 @@ sys_switch(void *cur_psp)
   irq_permit(s);
 
   curtask = t;
-  return t->t_psp;
+  return t->t_sp;
 }
 
 
@@ -77,7 +77,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   *--stack = (uint32_t) task_end;
   for(int i = 0; i < 13; i++)
     *--stack = 0;
-  t->t_psp = stack;
+  t->t_sp = stack;
   stack[8] = (uint32_t) arg; // r0
   printf("Creating task %p %s\n", t, name);
 

@@ -16,7 +16,7 @@ typedef struct task {
   TAILQ_ENTRY(task) t_link;
   const char *t_name;
   uint8_t t_state;
-  void *t_psp;
+  void *t_sp;
   uint8_t t_stack[0];
 } task_t;
 
