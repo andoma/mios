@@ -48,8 +48,6 @@ void irq_enable(int irq, int level);
 
 void irq_disable(int irq);
 
-void irq_raise(int irq);
-
 inline void
 irq_ack(int irq)
 {
