@@ -16,25 +16,10 @@
 void
 init(void)
 {
-  extern unsigned long _sbss;
-  extern unsigned long _sdata;
-  extern unsigned long _etext;
-  extern unsigned long _ebss;
-  extern unsigned long _edata;
-
-  unsigned long *src, *dst;
-
-  src = &_etext;
-  dst = &_sdata;
-  while(dst < &_edata)
-    *dst++ = *src++;
-
-  src = &_sbss;
-  while(src < &_ebss)
-    *src++ = 0;
-
   platform_console_init_early();
 
+  extern unsigned long _edata;
+  extern unsigned long _ebss;
   void *heap_start = (void *)&_ebss;
   void *heap_end =   platform_heap_end();
 
