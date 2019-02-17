@@ -14,18 +14,26 @@ TAILQ_HEAD(task_queue, task);
 
 typedef struct task {
   TAILQ_ENTRY(task) t_link;
-  const char *t_name;
+  char t_name[16];
   uint8_t t_state;
   void *t_sp;
   uint8_t t_stack[0];
 } task_t;
 
-extern task_t *curtask;
+typedef struct sched_cpu {
+
+  task_t idle;
+  task_t *current;
+
+} sched_cpu_t;
+
 
 typedef struct mutex {
   struct task_queue waiters;
   struct task *owner;
 } mutex_t;
+
+void task_init_cpu(sched_cpu_t *sc, const char *cpu_name);
 
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                     const char *name);
@@ -40,3 +48,4 @@ void mutex_lock(mutex_t *m);
 
 void mutex_unlock(mutex_t *m);
 
+task_t *task_current(void);

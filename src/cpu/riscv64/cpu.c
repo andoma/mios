@@ -56,3 +56,14 @@ cpu_stack_init(uint64_t *stack, void *(*entry)(void *arg), void *arg,
   stack[18] = (uint64_t)arg;
   return stack;
 }
+
+static cpu_t cpu0;
+
+void
+cpu_init(void)
+{
+  strlcpy(cpu0.name, "cpu0", sizeof(cpu0.name));
+  task_init_cpu(&cpu0.sched, cpu0.name);
+
+  asm volatile ("csrw mscratch, %0\n\t" :: "r" (&cpu0));
+}

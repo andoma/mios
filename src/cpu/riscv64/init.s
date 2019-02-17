@@ -1,5 +1,9 @@
         .globl _start
 _start:
+        csrr x5, mhartid
+        bne x5, zero, secondary_cpu
+
+
         la x5, trap
         csrw mtvec, x5
         fence
@@ -16,9 +20,17 @@ _start:
         li x5, 0x8
         csrs mstatus, x5
 
-idle:
+1:
         wfi
-        j idle
+        j 1b
+
+secondary_cpu:
+1:
+        wfi
+        j 1b
+
+
+
 
         .align 4
 trap:

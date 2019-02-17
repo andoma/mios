@@ -9,6 +9,7 @@
 #include "task.h"
 #include "timer.h"
 #include "irq.h"
+#include "cpu.h"
 #include "mios.h"
 
 #include "platform.h"
@@ -32,6 +33,8 @@ init(void)
 
   irq_init();
 
+  cpu_init();
+
   platform_init();
 
   extern void *main(void *);
@@ -44,7 +47,8 @@ void
 panic(const char *fmt, ...)
 {
   irq_off();
-  printf("PANIC in %s: ", curtask ? curtask->t_name : "<notask>");
+  task_t *t = task_current();
+  printf("PANIC in %s: ", t ? t->t_name : "<notask>");
   va_list ap;
   va_start(ap, fmt);
   vprintf(fmt, ap);

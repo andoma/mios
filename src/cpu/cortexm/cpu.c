@@ -1,5 +1,17 @@
 #include "cpu.h"
 
+cpu_t cpu0 = {
+  .name = "cpu0",
+};
+
+
+void
+cpu_init(void)
+{
+  task_init_cpu(&cpu0.sched, cpu0.name);
+}
+
+
 void *
 cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
                void (*thread_exit)(void))

@@ -26,7 +26,7 @@ irq_permit(unsigned int mask)
 static inline void
 irq_off(void)
 {
-  __asm volatile("csrc mstatus,%0"::"r"(0x8)); // Disable all interrupts
+  asm volatile("csrc mstatus,%0"::"r"(0x8)); // Disable all interrupts
 }
 
 static inline void

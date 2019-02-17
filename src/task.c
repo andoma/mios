@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "task.h"
 #include "sys.h"
@@ -10,18 +11,37 @@
 
 static struct task_queue readyqueue = TAILQ_HEAD_INITIALIZER(readyqueue);
 
+#if 0
 static task_t idle_task = {
   .t_name = "idle",
   .t_state = TASK_STATE_ZOMBIE,
 };
+// struct task *curtask = &idle_task;
+#endif
 
 #define STACK_GUARD 0xbadc0de
 
-struct task *curtask = &idle_task;
+inline task_t *
+task_current(void)
+{
+  return curcpu()->sched.current;
+}
+
+void
+task_init_cpu(sched_cpu_t *sc, const char *cpu_name)
+{
+  sc->current = &sc->idle;
+  sc->idle.t_state = TASK_STATE_ZOMBIE;
+  snprintf(sc->idle.t_name, sizeof(sc->idle.t_name),
+           "idle_%s", cpu_name);
+}
+
 
 void *
 task_switch(void *cur_sp)
 {
+  cpu_t *cpu = curcpu();
+  task_t *const curtask = task_current();
   curtask->t_sp = cur_sp;
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
@@ -33,7 +53,7 @@ task_switch(void *cur_sp)
 
   task_t *t = TAILQ_FIRST(&readyqueue);
   if(t == NULL) {
-    t = &idle_task;
+    t = &cpu->sched.idle;
   } else {
     TAILQ_REMOVE(&readyqueue, t, t_link);
   }
@@ -47,7 +67,7 @@ task_switch(void *cur_sp)
 
   irq_permit(s);
 
-  curtask = t;
+  cpu->sched.current = t;
   return t->t_sp;
 }
 
@@ -55,6 +75,8 @@ task_switch(void *cur_sp)
 static void
 task_end(void)
 {
+  task_t *const curtask = task_current();
+
   curtask->t_state = TASK_STATE_ZOMBIE;
   schedule();
   irq_lower();
@@ -71,7 +93,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
     stack_size = MIN_STACK_SIZE;
 
   task_t *t = malloc(sizeof(task_t) + stack_size);
-  t->t_name = name;
+  strlcpy(t->t_name, name, sizeof(t->t_name));
 
   uint32_t *stack_bottom = (void *)t->t_stack;
   *stack_bottom = STACK_GUARD;
@@ -141,6 +163,8 @@ task_sleep_timeout(void *opaque)
 void
 task_sleep(struct task_queue *waitable, int ticks)
 {
+  task_t *const curtask = task_current();
+
   timer_t timer;
   task_sleep_t ts;
 
@@ -191,6 +215,8 @@ mutex_init(mutex_t *m)
 void
 mutex_lock(mutex_t *m)
 {
+  task_t *const curtask = task_current();
+
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(m->owner != NULL) {
@@ -210,6 +236,8 @@ mutex_lock(mutex_t *m)
 void
 mutex_unlock(mutex_t *m)
 {
+  task_t *const curtask = task_current();
+
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   assert(m->owner == curtask);
   m->owner = NULL;
