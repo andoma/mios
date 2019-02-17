@@ -66,11 +66,11 @@ handle_interrupt(int cause)
 
 
 int
-handle_trap(long cause, long epc, long mtval)
+handle_trap(long cause)
 {
   if(cause & (1ull << 63)) {
     // Interrupt
     return handle_interrupt(cause);
   }
-  panic("trap: cause:%lx pc:%lx mtval:%lx\n", cause, epc, mtval);
+  panic("trap: cause:%lx",cause); //  pc:%lx mtval:%lx\n", cause, epc, mtval);
 }
