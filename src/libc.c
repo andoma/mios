@@ -72,3 +72,23 @@ strlen(const char *s)
   }
   return r;
 }
+
+size_t
+strlcpy(char * restrict dst, const char * restrict src, size_t siz)
+{
+  const char *s0 = src;
+
+  while(siz > 1) {
+    if(*src == 0)
+      break;
+    *dst++ = *src++;
+    siz--;
+  }
+
+  if(siz > 0) {
+    *dst = 0;
+    siz--;
+  }
+
+  return (src - s0) + strlen(src);
+}
