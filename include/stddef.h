@@ -4,6 +4,6 @@
 
 #define offsetof(st, m) __builtin_offsetof(st, m)
 
-typedef unsigned int size_t;
+typedef __SIZE_TYPE__ size_t;
 
-typedef signed int ssize_t;
+typedef long signed int ssize_t;

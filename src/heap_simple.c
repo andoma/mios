@@ -131,7 +131,7 @@ heap_dump(void)
   heap_block_t *hb;
   printf(" --- Heap allocation dump ---\n");
   TAILQ_FOREACH(hb, &heap_blocks, hb_link) {
-    printf("  %s 0x%x @ %p\n",
+    printf("  %s 0x%zx @ %p\n",
            hb->hb_magic == HEAP_MAGIC_ALLOC ? "use " :
            hb->hb_magic == HEAP_MAGIC_FREE  ? "free" :
            "????",
