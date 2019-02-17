@@ -6,6 +6,7 @@
 #include "task.h"
 #include "sys.h"
 #include "irq.h"
+#include "cpu.h"
 
 static struct task_queue readyqueue = TAILQ_HEAD_INITIALIZER(readyqueue);
 
@@ -70,18 +71,11 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   uint32_t *stack_bottom = (void *)t->t_stack;
   *stack_bottom = STACK_GUARD;
 
-  uint32_t *stack = (void *)t->t_stack + stack_size;
-
-  *--stack = 0x21000000;  // PSR
-  *--stack = (uint32_t) entry;
-  *--stack = (uint32_t) task_end;
-  for(int i = 0; i < 13; i++)
-    *--stack = 0;
-  t->t_sp = stack;
-  stack[8] = (uint32_t) arg; // r0
-  printf("Creating task %p %s\n", t, name);
-
   t->t_state = 0;
+  t->t_sp = cpu_stack_init((void *)t->t_stack + stack_size, entry, arg,
+                           task_end);
+
+  printf("Creating task %p %s\n", t, name);
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
