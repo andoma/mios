@@ -20,7 +20,7 @@ static task_t idle_task = {
 struct task *curtask = &idle_task;
 
 void *
-sys_switch(void *cur_sp)
+task_switch(void *cur_sp)
 {
   curtask->t_sp = cur_sp;
 

@@ -48,7 +48,7 @@ pendsv:
         mrs r0, psp
         isb
         stmdb r0!, {r4-r11}
-        bl sys_switch
+        bl task_switch
         ldmfd r0!, {r4-r11}
         msr psp, r0
         isb

@@ -65,7 +65,7 @@ trap:
         sd x27, 13 * 8(sp)
 
         mv   a0, sp
-        jal  sys_switch
+        jal  task_switch
         mv   sp, a0
 
         ld  a0,  0 * 8(sp)
