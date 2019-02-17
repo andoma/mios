@@ -38,8 +38,11 @@ sys_switch(void *cur_sp)
     TAILQ_REMOVE(&readyqueue, t, t_link);
   }
 
-#if 0
-  printf("Switch from %s to %s\n", curtask->t_name, t->t_name);
+#if 1
+  printf("Switch from %s [sp:%p] to %s [sp:%p] s=0x%x\n",
+         curtask->t_name, curtask->t_sp,
+         t->t_name, t->t_sp,
+         s);
 #endif
 
   irq_permit(s);
@@ -64,7 +67,9 @@ task_t *
 task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
             const char *name)
 {
-  assert(stack_size >= 256);
+  if(stack_size < MIN_STACK_SIZE)
+    stack_size = MIN_STACK_SIZE;
+
   task_t *t = malloc(sizeof(task_t) + stack_size);
   t->t_name = name;
 
