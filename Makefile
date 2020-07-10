@@ -1,4 +1,4 @@
-PLATFORM ?= nrf52
+PLATFORM ?= lm3s811evb
 
 GLOBALDEPS := Makefile
 
@@ -55,7 +55,7 @@ ${O}/build.bin: ${O}/build.elf
 
 bin: ${O}/build.bin
 
-run: build/build.elf
-	qemu-system-arm -nographic -serial mon:stdio -machine lm3s811evb -cpu cortex-m4 -kernel $@
+run: build.lm3s811evb/build.elf
+	qemu-system-arm -nographic -serial mon:stdio -machine lm3s811evb -cpu cortex-m4 -kernel $<
 
 -include ${DEPS}
