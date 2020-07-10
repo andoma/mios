@@ -24,10 +24,9 @@ SRCS += src/init.c \
 	src/main.c \
 	src/task.c \
 	src/libc.c \
+	src/stdio.c \
 
 SRCS += src/heap_simple.c
-
-SRCS += ext/tinyprintf/tinyprintf.c
 
 OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}
