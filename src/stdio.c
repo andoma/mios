@@ -212,6 +212,9 @@ main(int argc, char **argv)
 
 static void *stdio_putc_arg;
 static void (*stdio_putc)(void *arg, char c);
+static void *stdio_getchar_arg;
+static int (*stdio_getchar)(void *arg);
+
 
 void
 init_printf(void *arg, void (*cb)(void *arg, char c))
@@ -219,6 +222,24 @@ init_printf(void *arg, void (*cb)(void *arg, char c))
   stdio_putc_arg = arg;
   stdio_putc = cb;
 }
+
+void
+init_getchar(void *arg, int (*cb)(void *arg))
+{
+  stdio_getchar_arg = arg;
+  stdio_getchar = cb;
+}
+
+
+
+int
+getchar(void)
+{
+  if(stdio_getchar == NULL)
+    return -1;
+  return stdio_getchar(stdio_getchar_arg);
+}
+
 
 
 static size_t
