@@ -15,7 +15,7 @@ GLOBALDEPS += ${P}/platform.mk ${C}/cpu.mk
 CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin
 CFLAGS += -I. -I${P} -Isrc/platform -I${C} -Isrc/cpu -Iinclude -Isrc
 
-LDFLAGS += -nostartfiles -nodefaultlibs
+LDFLAGS += -nostartfiles -nodefaultlibs -lgcc
 
 #
 # Core
@@ -37,7 +37,7 @@ DEPS +=  ${OBJS:%.o=%.d}
 
 ${O}/build.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT}
 	@mkdir -p $(dir $@)
-	${TOOLCHAIN}gcc ${LDFLAGS} -Wl,-T${LDSCRIPT} ${OBJS} -o $@
+	${TOOLCHAIN}gcc -Wl,-T${LDSCRIPT} ${OBJS} -o $@ ${LDFLAGS}
 
 ${O}/%.o: %.c ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
