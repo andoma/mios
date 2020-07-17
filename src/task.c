@@ -51,7 +51,7 @@ task_switch(void *cur_sp)
     TAILQ_REMOVE(&readyqueue, t, t_link);
   }
 
-#if 1
+#if 0
   printf("Switch from %s [sp:%p] to %s [sp:%p] s=0x%x\n",
          curtask->t_name, curtask->t_sp,
          t->t_name, t->t_sp,
@@ -94,8 +94,6 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   t->t_state = 0;
   t->t_sp = cpu_stack_init((void *)t->t_stack + stack_size, entry, arg,
                            task_end);
-
-  printf("Creating task %p %s\n", t, name);
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
