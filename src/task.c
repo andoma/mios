@@ -8,16 +8,9 @@
 #include "sys.h"
 #include "irq.h"
 #include "cpu.h"
+#include "mios.h"
 
 static struct task_queue readyqueue = TAILQ_HEAD_INITIALIZER(readyqueue);
-
-#if 0
-static task_t idle_task = {
-  .t_name = "idle",
-  .t_state = TASK_STATE_ZOMBIE,
-};
-// struct task *curtask = &idle_task;
-#endif
 
 #define STACK_GUARD 0xbadc0de
 
