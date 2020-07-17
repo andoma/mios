@@ -10,6 +10,7 @@ O ?= build.${PLATFORM}
 P := src/platform/${PLATFORM}
 include ${P}/platform.mk
 
+GLOBALDEPS += ${P}/platform.mk ${C}/cpu.mk
 
 CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin
 CFLAGS += -I. -I${P} -Isrc/platform -I${C} -Isrc/cpu -Iinclude -Isrc
