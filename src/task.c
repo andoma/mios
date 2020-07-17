@@ -37,6 +37,10 @@ task_switch(void *cur_sp)
   task_t *const curtask = task_current();
   curtask->t_sp = cur_sp;
 
+  if(cur_sp < (void *)curtask->t_stack) {
+    panic("Stack overflow");
+  }
+
   int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(curtask->t_state == TASK_STATE_RUNNING) {
