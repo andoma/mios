@@ -8,6 +8,10 @@ static volatile unsigned int * const HFSR    = (unsigned int *)0xe000ed2c;
 static volatile unsigned int * const CFSR    = (unsigned int *)0xe000ed28;
 //static volatile unsigned int * const MMAR    = (unsigned int *)0xe000ed34;
 
+static volatile unsigned short * const UFSR    = (unsigned short *)0xe000ed2a;
+static volatile unsigned char * const MMFSR    = (unsigned char *)0xe000ed28;
+static volatile unsigned int * const MMFAR    = (unsigned int *)0xe000ed34;
+
 
 void
 exc_nmi(void)
@@ -25,7 +29,7 @@ exc_hard_fault(void)
 void
 exc_mm_fault(void)
 {
-  panic("MM");
+  panic("MM fault: 0x%x address:0x%x", *MMFSR, *MMFAR);
 }
 
 void
@@ -36,7 +40,7 @@ exc_bus_fault(void)
 void
 exc_usage_fault(void)
 {
-  panic("Usage");
+  panic("Usage fault: 0x%x sp=%p", *UFSR, __builtin_frame_address(0));
 }
 
 void
