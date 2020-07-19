@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "cpu.h"
 
 cpu_t cpu0 = {
@@ -31,4 +33,11 @@ cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
     *--stack = 0;
   stack[8] = (uint32_t) arg; // r0
   return stack;
+}
+
+void
+cpu_fpu_ctx_init(int *ctx)
+{
+  memset(ctx, 0, sizeof(int) * 32);
+  ctx[32] = 1 << 24; // Enable flush-to-zero
 }

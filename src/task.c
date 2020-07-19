@@ -65,7 +65,7 @@ task_switch(void *cur_sp)
   irq_permit(s);
 
   cpu->sched.current = t;
-  cpu_enable_fpu(cpu->sched.current_fpu == t);
+  cpu_fpu_enable(cpu->sched.current_fpu == t);
 
   return t->t_sp;
 }
@@ -81,7 +81,7 @@ task_end(void)
 
   if(cpu->sched.current_fpu == curtask) {
     cpu->sched.current_fpu = NULL;
-    cpu_enable_fpu(0);
+    cpu_fpu_enable(0);
   }
 
   irq_permit(s);
@@ -118,6 +118,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   if(flags & TASK_FPU) {
     t->t_fpuctx = (void *)t->t_stack + stack_size;
+    cpu_fpu_ctx_init(t->t_fpuctx);
   } else {
     t->t_fpuctx = NULL;
   }

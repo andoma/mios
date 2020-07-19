@@ -64,7 +64,7 @@ exc_usage_fault(void)
 
     cpu_t *cpu = curcpu();
 
-    cpu_enable_fpu(1);
+    cpu_fpu_enable(1);
     if(cpu->sched.current_fpu) {
       int32_t *ctx = cpu->sched.current_fpu->t_fpuctx;
       asm volatile("vstm %0, {s0-s15}" :: "r"(ctx));
