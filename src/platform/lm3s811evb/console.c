@@ -44,7 +44,7 @@ uart_getc(void *arg)
 }
 
 
-void
+static void __attribute__((constructor(110)))
 platform_console_init_early(void)
 {
   init_printf((void *)UART_DR, uart_putc);
@@ -60,7 +60,7 @@ irq_5(void)
 }
 
 
-void
+static void  __attribute__((constructor(200)))
 lm3s811evb_console_init(void)
 {
   init_getchar(NULL, uart_getc);
