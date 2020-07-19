@@ -54,6 +54,10 @@ pendsv:
         isb
         pop {pc}
 
+        .thumb_func
+bus_fault:
+        mrs r0, psp
+        b exc_bus_fault
 
         .section    .isr_vector,"aw",%progbits
         .align      2
@@ -73,7 +77,7 @@ vectors:
         .long exc_hard_fault
 
         .long exc_mm_fault
-        .long exc_bus_fault
+        .long bus_fault
         .long exc_usage_fault
         .long exc_reserved
 

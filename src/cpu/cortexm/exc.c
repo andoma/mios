@@ -15,7 +15,9 @@ static volatile unsigned int * const CFSR    = (unsigned int *)0xe000ed28;
 
 static volatile unsigned short * const UFSR    = (unsigned short *)0xe000ed2a;
 static volatile unsigned char * const MMFSR    = (unsigned char *)0xe000ed28;
+static volatile unsigned char * const BFSR    = (unsigned char *)0xe000ed29;
 static volatile unsigned int * const MMFAR    = (unsigned int *)0xe000ed34;
+static volatile unsigned int * const BFAR    = (unsigned int *)0xe000ed38;
 
 
 void
@@ -38,9 +40,9 @@ exc_mm_fault(void)
 }
 
 void
-exc_bus_fault(void)
+exc_bus_fault(uint32_t *exc_frame)
 {
-  panic("Bus");
+  panic("Bus fault: 0x%x at 0x%x by 0x%x", *BFSR, *BFAR, exc_frame[6]);
 }
 
 
