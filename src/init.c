@@ -40,7 +40,7 @@ panic(const char *fmt, ...)
 {
   irq_off();
   task_t *t = task_current();
-  printf("PANIC in %s: ", t ? t->t_name : "<notask>");
+  printf("\n\nPANIC in %s: ", t ? t->t_name : "<notask>");
   va_list ap;
   va_start(ap, fmt);
   vprintf(fmt, ap);
