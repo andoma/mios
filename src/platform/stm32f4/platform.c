@@ -9,10 +9,6 @@
 
 #include "gpio.h"
 
-//static volatile unsigned int * const GPIOA_MODER   = (unsigned int *)0x40020000;
-//static volatile unsigned int * const GPIOA_OSPEEDR = (unsigned int *)0x40020008;
-//static volatile unsigned int * const GPIOA_AFRL    = (unsigned int *)0x40020020;
-
 static volatile unsigned int * const USART2_SR     = (unsigned int *)0x40004400;
 static volatile unsigned int * const USART2_DR     = (unsigned int *)0x40004404;
 static volatile unsigned int * const USART2_BBR    = (unsigned int *)0x40004408;
