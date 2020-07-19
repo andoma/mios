@@ -12,8 +12,6 @@ typedef struct timer {
 } timer_t;
 
 
-void timer_init(void);
-
 void timer_arm(timer_t *t, unsigned int delta);
 
 void timer_disarm(timer_t *t);

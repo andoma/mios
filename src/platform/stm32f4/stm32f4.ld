@@ -19,6 +19,10 @@ SECTIONS {
                 *(.rodata)              /* read only data */
                 *(.rodata*)
                 . = ALIGN(4);
+                _init_array = .;
+                *(.init_array)
+                *(SORT_BY_NAME(.init_array.*))
+                . = ALIGN(4);
                 _etext = .;             /* _etext is end of program code */
         } >FLASH                        /* this section is code, hence gos to FLASH */
 

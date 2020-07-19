@@ -55,9 +55,3 @@ irq_ack(int irq)
   NVIC_ICPR[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
 }
 
-
-
-
-
-void irq_init(void);
-

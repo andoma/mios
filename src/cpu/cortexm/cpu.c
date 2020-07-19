@@ -5,7 +5,7 @@ cpu_t cpu0 = {
 };
 
 
-void
+static void __attribute__((constructor(150)))
 cpu_init(void)
 {
   task_init_cpu(&cpu0.sched, cpu0.name);

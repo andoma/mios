@@ -22,4 +22,3 @@ curcpu(void)
   return &cpu0;
 }
 
-void cpu_init(void);

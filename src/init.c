@@ -17,25 +17,17 @@
 void
 init(void)
 {
-  platform_console_init_early();
+  extern unsigned long _init_array;
+  extern unsigned long _etext;
 
-  extern unsigned long _edata;
-  extern unsigned long _ebss;
-  void *heap_start = (void *)&_ebss;
-  void *heap_end =   platform_heap_end();
+  void **init_array_begin = (void *)&_init_array;
+  void **init_array_end = (void *)&_etext;
 
-  printf("RAM Layout edata:%p, ebss:%p, eheap:%p\n",
-         &_edata, &_ebss, heap_end);
-
-  heap_init(heap_start, heap_end - heap_start);
-
-  timer_init();
-
-  irq_init();
-
-  cpu_init();
-
-  platform_init();
+  while(init_array_begin != init_array_end) {
+    void (*init)(void) = *init_array_begin;
+    init();
+    init_array_begin++;
+  }
 
   extern void *main(void *);
   task_create(main, NULL, 512, "main");

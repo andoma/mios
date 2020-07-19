@@ -3,7 +3,9 @@
 #include <sys/queue.h>
 #include <stddef.h>
 #include <string.h>
+
 #include "heap.h"
+#include "platform.h"
 
 
 #define ALIGN(a, b) (((a) + (b) - 1) & ~((b) - 1))
@@ -22,8 +24,8 @@ TAILQ_HEAD(heap_block_queue, heap_block);
 static struct heap_block_queue heap_blocks;
 
 
-void
-heap_init(void *start, size_t size)
+static void
+heap_create(void *start, size_t size)
 {
   heap_block_t *hb = (void *)start;
   hb->hb_size = size;
@@ -31,6 +33,22 @@ heap_init(void *start, size_t size)
   TAILQ_INIT(&heap_blocks);
   TAILQ_INSERT_TAIL(&heap_blocks, hb, hb_link);
 }
+
+
+static void  __attribute__((constructor(120)))
+heap_init(void)
+{
+  extern unsigned long _edata;
+  extern unsigned long _ebss;
+  void *heap_start = (void *)&_ebss;
+  void *heap_end =   platform_heap_end();
+
+  printf("RAM Layout edata:%p, ebss:%p, eheap:%p\n",
+         &_edata, &_ebss, heap_end);
+
+  heap_create(heap_start, heap_end - heap_start);
+}
+
 
 
 void *

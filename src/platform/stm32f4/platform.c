@@ -39,7 +39,7 @@ uart_putc(void *p, char c)
 
 
 
-void
+static void __attribute__((constructor(110)))
 platform_console_init_early(void)
 {
   reg_set(RCC_AHB1ENR, 0x09);  // CLK ENABLE: GPIOA GPIOD
@@ -49,7 +49,6 @@ platform_console_init_early(void)
     gpio_conf_output(GPIO_D, i + 12, GPIO_PUSH_PULL,
                      GPIO_SPEED_LOW, GPIO_PULL_NONE);
   }
-
 
   gpio_set_output(GPIO_D, 15, 1);
   gpio_conf_af(GPIO_A, 2, 7, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
@@ -64,8 +63,8 @@ platform_console_init_early(void)
 
 
 
-void
+void  __attribute__((constructor(200)))
 platform_init(void)
 {
-
+  printf("platform init done\n");
 }

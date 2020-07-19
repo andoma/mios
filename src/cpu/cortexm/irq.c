@@ -33,7 +33,8 @@ irq_disable(int irq)
 
 static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 
-void
+
+static void __attribute__((constructor(140)))
 irq_init(void)
 {
   *SYST_SHPR3 =

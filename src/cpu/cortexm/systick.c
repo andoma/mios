@@ -68,7 +68,7 @@ timer_disarm(timer_t *t)
 
 //static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 
-void
+static void __attribute__((constructor(130)))
 timer_init(void)
 {
   uint32_t timer_calibration = SYSTICK_RVR / HZ;
