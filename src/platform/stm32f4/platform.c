@@ -8,11 +8,8 @@
 #include "stm32f4.h"
 
 #include "gpio.h"
-
-static volatile unsigned int * const USART2_SR     = (unsigned int *)0x40004400;
-static volatile unsigned int * const USART2_DR     = (unsigned int *)0x40004404;
-static volatile unsigned int * const USART2_BBR    = (unsigned int *)0x40004408;
-static volatile unsigned int * const USART2_CR1    = (unsigned int *)0x4000440c;
+#include "task.h"
+#include "mios.h"
 
 
 void *
@@ -23,20 +20,8 @@ platform_heap_end(void)
 
 
 
-
-static void
-uart_putc(void *p, char c)
-{
-  *USART2_DR = c;
-  while(!(*USART2_SR & (1 << 7))) {}
-}
-
-
-
-
-
-static void __attribute__((constructor(110)))
-platform_console_init_early(void)
+static void __attribute__((constructor(101)))
+platform_init_early(void)
 {
   reg_set(RCC_AHB1ENR, 0x09);  // CLK ENABLE: GPIOA GPIOD
   reg_set(RCC_APB1ENR, 0x20000); // CLK ENABLE: USART2
@@ -47,20 +32,27 @@ platform_console_init_early(void)
   }
 
   gpio_set_output(GPIO_D, 15, 1);
-  gpio_conf_af(GPIO_A, 2, 7, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  *USART2_CR1 = (1 << 13);
- // 16000000 / 115200;
-  *USART2_BBR = (8 << 4) | 11;
-  *USART2_CR1 = (1 << 13) | (1 << 3);
-
-  init_printf(NULL, uart_putc);
 }
 
 
 
-void  __attribute__((constructor(200)))
-platform_init(void)
+
+
+static void *
+blinker(void *arg)
 {
-  printf("platform init done\n");
+  while(1) {
+    gpio_set_output(GPIO_D, 12, 1);
+    sleephz(HZ / 2);
+    gpio_set_output(GPIO_D, 12, 0);
+    sleephz(HZ / 2);
+  }
+  return NULL;
 }
+
+static void __attribute__((constructor(800)))
+platform_init_late(void)
+{
+  task_create(blinker, NULL, 256, "blinker");
+}
+

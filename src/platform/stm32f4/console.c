@@ -1,4 +1,3 @@
-#if 0
 #include <assert.h>
 #include <stdio.h>
 
@@ -7,158 +6,202 @@
 #include "task.h"
 
 #include "platform.h"
+#include "reg.h"
+#include "gpio.h"
 
 
-static volatile unsigned int * const UART_INTENSET = (unsigned int *)0x40002304;
-static volatile unsigned int * const UART_ENABLE   = (unsigned int *)0x40002500;
-static volatile unsigned int * const UART_PSELTXD  = (unsigned int *)0x4000250c;
-static volatile unsigned int * const UART_PSELRXD  = (unsigned int *)0x40002514;
-static volatile unsigned int * const UART_TXD      = (unsigned int *)0x4000251c;
-static volatile unsigned int * const UART_RXD      = (unsigned int *)0x40002518;
-static volatile unsigned int * const UART_BAUDRATE = (unsigned int *)0x40002524;
-static volatile unsigned int * const UART_TX_TASK  = (unsigned int *)0x40002008;
-static volatile unsigned int * const UART_TX_RDY   = (unsigned int *)0x4000211c;
 
-static volatile unsigned int * const UART_RX_TASK  = (unsigned int *)0x40002000;
-static volatile unsigned int * const UART_RX_RDY   = (unsigned int *)0x40002108;
+#define USART_SR   0x00
+#define USART_DR   0x04
+#define USART_BBR  0x08
+#define USART_CR1  0x0c
 
 
-static struct task_queue uart_rx = TAILQ_HEAD_INITIALIZER(uart_rx);
-static struct task_queue uart_tx = TAILQ_HEAD_INITIALIZER(uart_tx);
 
-static uint8_t rx_fifo_rdptr;
-static uint8_t rx_fifo_wrptr;
-static uint8_t tx_fifo_rdptr;
-static uint8_t tx_fifo_wrptr;
+
+#define BAUDRATE 115200
+#define BBR_VALUE ((SYSTICK_RVR + (BAUDRATE - 1)) / BAUDRATE)
 
 #define TX_FIFO_SIZE 128
 #define RX_FIFO_SIZE 64
 
-static uint8_t tx_fifo[TX_FIFO_SIZE];
-static uint8_t rx_fifo[RX_FIFO_SIZE];
 
-static uint8_t tx_busy;
+typedef struct {
+
+  uint32_t reg_base;
+
+  struct task_queue wait_rx;
+  struct task_queue wait_tx;
+
+  uint8_t rx_fifo_rdptr;
+  uint8_t rx_fifo_wrptr;
+  uint8_t tx_fifo_rdptr;
+  uint8_t tx_fifo_wrptr;
+  uint8_t tx_busy;
+
+  uint8_t tx_fifo[TX_FIFO_SIZE];
+  uint8_t rx_fifo[RX_FIFO_SIZE];
+
+} uart_t;
+
+#define CR1_IDLE       (1 << 13) | (1 << 5) | (1 << 3) | (1 << 2)
+#define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
 
 static void
-uart_putc(void *p, char c)
+uart_putc(void *arg, char c)
 {
+  uart_t *u = arg;
+
   uint32_t primask;
   asm volatile ("mrs %0, primask\n\t" : "=r" (primask));
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
 
   if(primask || s) {
     // We are in an interrupt or all interrupts disabled, we busy wait
-    *UART_TXD = c;
-    *UART_TX_TASK = 1;
-    while(!*UART_TX_RDY) {
-    }
-    *UART_TX_RDY = 0;
-    *UART_TX_TASK = 0;
+    reg_wr(u->reg_base + USART_DR, c);
+    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
     irq_permit(s);
     return;
   }
 
   while(1) {
-    uint8_t avail = TX_FIFO_SIZE - (tx_fifo_rdptr - tx_fifo_wrptr);
-    if(avail == 0) {
-      assert(tx_busy);
-      task_sleep(&uart_tx, 0);
-      continue;
-    }
+    uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr);
 
-    if(!tx_busy) {
-      *UART_TXD = c;
-      *UART_TX_TASK = 1;
-      tx_busy = 1;
+    if(avail)
       break;
-    }
+    assert(u->tx_busy);
+    task_sleep(&u->wait_tx, 0);
+  }
 
-    tx_fifo[tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = c;
-    tx_fifo_wrptr++;
-    break;
+  if(!u->tx_busy) {
+    reg_wr(u->reg_base + USART_DR, c);
+    reg_wr(u->reg_base + USART_CR1, CR1_ENABLE_TXI);
+    u->tx_busy = 1;
+  } else {
+    u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = c;
+    u->tx_fifo_wrptr++;
   }
   irq_permit(s);
 }
 
 
-void
-irq_2(void)
+
+
+static int
+uart_getc(void *arg)
 {
-  if(*UART_RX_RDY) {
-    *UART_RX_RDY = 0;
-    rx_fifo[rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = *UART_RXD;
-    rx_fifo_wrptr++;
-    task_wakeup(&uart_rx, 1);
+  uart_t *u = arg;
+
+  int s = irq_forbid(IRQ_LEVEL_CONSOLE);
+
+  while(u->rx_fifo_wrptr == u->rx_fifo_rdptr)
+    task_sleep(&u->wait_rx, 0);
+
+  char c = u->rx_fifo[u->rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
+  u->rx_fifo_rdptr++;
+  irq_permit(s);
+  return c;
+}
+
+
+
+
+static void
+uart_irq(uart_t *u)
+{
+  const uint32_t sr = reg_rd(u->reg_base + USART_SR);
+
+  if(sr & (1 << 5)) {
+    const uint8_t c = reg_rd(u->reg_base + USART_DR);
+    u->rx_fifo[u->rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
+    u->rx_fifo_wrptr++;
+    task_wakeup(&u->wait_rx, 1);
   }
 
-  if(*UART_TX_RDY) {
-    *UART_TX_RDY = 0;
-
-    uint8_t avail = tx_fifo_wrptr - tx_fifo_rdptr;
+  if(sr & (1 << 7)) {
+    uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
     if(avail == 0) {
-      *UART_TX_TASK = 0;
-      tx_busy = 0;
+      u->tx_busy = 0;
+      reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
     } else {
-      char c = tx_fifo[tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
-      tx_fifo_rdptr++;
-      task_wakeup(&uart_tx, 1);
-      *UART_TXD = c;
+      uint8_t c = u->tx_fifo[u->tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
+      u->tx_fifo_rdptr++;
+      task_wakeup(&u->wait_tx, 1);
+      reg_wr(u->reg_base + USART_DR, c);
     }
   }
 }
 
 
-static void *
-console_echo_task(void *arg)
+static void
+uart_init(uart_t *u, int reg_base, int baudrate)
 {
-  int s = irq_forbid(IRQ_LEVEL_CONSOLE);
+  const unsigned int bbr = (SYSTICK_RVR + baudrate - 1) / baudrate;
 
+  u->reg_base = reg_base;
+  reg_wr(u->reg_base + USART_CR1, (1 << 13)); // ENABLE
+  reg_wr(u->reg_base + USART_BBR, bbr);
+  reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
+  TAILQ_INIT(&u->wait_rx);
+  TAILQ_INIT(&u->wait_tx);
+}
+
+
+
+
+static uart_t console;
+
+void
+irq_38(void)
+{
+  uart_t *u = &console;
+  //  gpio_set_output(GPIO_D, 13, 1);
+  uart_irq(u);
+  //  gpio_set_output(GPIO_D, 13, 0);
+}
+
+
+
+
+static void __attribute__((constructor(110)))
+console_init_early(void)
+{
+  // Configure PA2 for USART2 TX (Alternative Function 7)
+  gpio_conf_af(GPIO_A, 2, 7, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_A, 3, 7, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+
+  uart_init(&console, 0x40004400, 115200);
+
+  irq_enable(38, IRQ_LEVEL_CONSOLE);
+
+  init_printf(&console, uart_putc);
+  init_getchar(&console, uart_getc);
+}
+
+
+#if 0
+static void *
+console_status(void *a)
+{
+  sleephz(HZ / 2);
   while(1) {
+    sleephz(HZ);
 
-    uint8_t avail = rx_fifo_wrptr - rx_fifo_rdptr;
-    if(avail == 0) {
-      task_sleep(&uart_rx, 0);
-      continue;
-    }
-
-    char c = rx_fifo[rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
-    rx_fifo_rdptr++;
-    uart_putc(NULL, c);
+    int s = irq_forbid(IRQ_LEVEL_CONSOLE);
+    int a = console.stalls;
+    int b = console.starts;
+    int c = console.interrupts;
     irq_permit(s);
-    s = irq_forbid(IRQ_LEVEL_CONSOLE);
+    printf("%d %d %d\n", a, b, c);
   }
   return NULL;
 }
 
 
-void
-platform_console_init_early(void)
-{
-  *UART_PSELTXD = 6;
-  *UART_PSELRXD = 8;
-  *UART_ENABLE = 4;
-  *UART_BAUDRATE = 0x1d60000;
-  init_printf(NULL, uart_putc);
-}
 
-
-void
-nrf52_console_init(void)
+static void __attribute__((constructor(1000)))
+console_init_status(void)
 {
-  // Called just before we enable interrupts
-  *UART_INTENSET = 0x84; // RXDRDY and TXDRDY
-  *UART_RX_TASK = 1;
-  irq_enable(2, IRQ_LEVEL_CONSOLE);
-  task_create(console_echo_task, NULL, 256, "console");
+  task_create(console_status, NULL, 512, "status");
 }
 #endif
-
-
-
-
-void
-platform_console_init_early(void)
-{
-
-}
-

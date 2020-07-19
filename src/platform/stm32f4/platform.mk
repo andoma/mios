@@ -7,6 +7,7 @@ LDSCRIPT = ${P}/stm32f4.ld
 include ${C}/cpu.mk
 
 SRCS += ${P}/platform.c \
+	${P}/console.c \
 	${P}/gpio.c \
 
 
