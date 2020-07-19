@@ -4,22 +4,14 @@
 
 #include "irq.h"
 #include "platform.h"
+#include "reg.h"
+#include "stm32f4.h"
 
-static volatile unsigned int * const RCC_AHB1ENR = (unsigned int *)0x40023830;
-static volatile unsigned int * const RCC_APB1ENR = (unsigned int *)0x40023840;
+#include "gpio.h"
 
-static volatile unsigned int * const GPIOD_MODER   = (unsigned int *)0x40020c00;
-static volatile unsigned int * const GPIOD_OTYPER  = (unsigned int *)0x40020c04;
-static volatile unsigned int * const GPIOD_OSPEEDR = (unsigned int *)0x40020c08;
-static volatile unsigned int * const GPIOD_PUPDR   = (unsigned int *)0x40020c0c;
-static volatile unsigned int * const GPIOD_ODR     = (unsigned int *)0x40020c14;
-
-static volatile unsigned int * const GPIOA_MODER   = (unsigned int *)0x40020000;
-//static volatile unsigned int * const GPIOA_OTYPER  = (unsigned int *)0x40020004;
-static volatile unsigned int * const GPIOA_OSPEEDR = (unsigned int *)0x40020008;
-//static volatile unsigned int * const GPIOA_PUPDR   = (unsigned int *)0x4002000c;
-//static volatile unsigned int * const GPIOA_ODR     = (unsigned int *)0x40020014;
-static volatile unsigned int * const GPIOA_AFRL    = (unsigned int *)0x40020020;
+//static volatile unsigned int * const GPIOA_MODER   = (unsigned int *)0x40020000;
+//static volatile unsigned int * const GPIOA_OSPEEDR = (unsigned int *)0x40020008;
+//static volatile unsigned int * const GPIOA_AFRL    = (unsigned int *)0x40020020;
 
 static volatile unsigned int * const USART2_SR     = (unsigned int *)0x40004400;
 static volatile unsigned int * const USART2_DR     = (unsigned int *)0x40004404;
@@ -36,49 +28,31 @@ platform_heap_end(void)
 
 
 
-static void  __attribute__((unused))
+static void
 uart_putc(void *p, char c)
 {
   *USART2_DR = c;
-
-  *GPIOD_ODR |= 0x2000;
   while(!(*USART2_SR & (1 << 7))) {}
-  *GPIOD_ODR &= ~0x2000;
-}
-
-static void __attribute__((unused))
-delay(void)
-{
-  for(int i = 0; i < 50000; i++) {
-    asm("");
-  }
 }
 
 
-void
-platform_panic(void)
-{
-  *GPIOD_ODR = 0x4000;
-}
+
+
 
 void
 platform_console_init_early(void)
 {
-  *RCC_AHB1ENR |= 0x9; // CLK ENABLE: GPIOA GPIOD
+  reg_set(RCC_AHB1ENR, 0x09);  // CLK ENABLE: GPIOA GPIOD
+  reg_set(RCC_APB1ENR, 0x20000); // CLK ENABLE: USART2
 
-  *RCC_APB1ENR |= 0x20000; // CLK ENABLE: USART2
+  for(int i = 0; i < 4; i++) {
+    gpio_conf_output(GPIO_D, i + 12, GPIO_PUSH_PULL,
+                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  }
 
 
-  *GPIOD_MODER = (*GPIOD_MODER & 0x00ffffff) | 0x55000000;
-  *GPIOD_OTYPER = *GPIOD_OTYPER & 0xffff0fff;
-  *GPIOD_OSPEEDR = *GPIOD_OSPEEDR & 0x00ffffff;
-  *GPIOD_PUPDR = *GPIOD_PUPDR & 0x00ffffff;
-
-  *GPIOD_ODR = 0x8000;
-
-  *GPIOA_MODER   |= 2 << (2 * 2);
-  *GPIOA_OSPEEDR |= 2 << (2 * 2);
-  *GPIOA_AFRL    |= 7 << (2 * 4);
+  gpio_set_output(GPIO_D, 15, 1);
+  gpio_conf_af(GPIO_A, 2, 7, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
   *USART2_CR1 = (1 << 13);
  // 16000000 / 115200;
@@ -93,8 +67,5 @@ platform_console_init_early(void)
 void
 platform_init(void)
 {
-  delay();
-  *GPIOD_ODR = 0x0000;
-  delay();
-  *GPIOD_ODR = 0x1000;
+
 }
