@@ -30,7 +30,7 @@ init(void)
   }
 
   extern void *main(void *);
-  task_create(main, NULL, 512, "main");
+  task_create(main, NULL, 512, "main", TASK_FPU);
 }
 
 

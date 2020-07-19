@@ -6,11 +6,16 @@ cpu_t cpu0 = {
 
 static volatile unsigned int * const SHCSR = (unsigned int *)0xe000ed24;
 
+static volatile unsigned int * const FPCCR = (unsigned int *)0xe000ef34;
+
 
 static void __attribute__((constructor(150)))
 cpu_init(void)
 {
   task_init_cpu(&cpu0.sched, cpu0.name);
+
+  *FPCCR = 0; // No FPU lazy switching, we deal with it ourselves
+
   *SHCSR |= 0x7 << 16; // Enable UsageFault, BusFault, MemFault handlers
 }
 

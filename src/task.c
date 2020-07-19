@@ -65,6 +65,8 @@ task_switch(void *cur_sp)
   irq_permit(s);
 
   cpu->sched.current = t;
+  cpu_enable_fpu(cpu->sched.current_fpu == t);
+
   return t->t_sp;
 }
 
@@ -72,7 +74,17 @@ task_switch(void *cur_sp)
 static void
 task_end(void)
 {
+  cpu_t *cpu = curcpu();
   task_t *const curtask = task_current();
+
+  int s = irq_forbid(IRQ_LEVEL_SWITCH);
+
+  if(cpu->sched.current_fpu == curtask) {
+    cpu->sched.current_fpu = NULL;
+    cpu_enable_fpu(0);
+  }
+
+  irq_permit(s);
 
   curtask->t_state = TASK_STATE_ZOMBIE;
   schedule();
@@ -84,18 +96,32 @@ task_end(void)
 
 task_t *
 task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
-            const char *name)
+            const char *name, int flags)
 {
   if(stack_size < MIN_STACK_SIZE)
     stack_size = MIN_STACK_SIZE;
 
-  task_t *t = malloc(sizeof(task_t) + stack_size);
+  size_t fpu_ctx_size = 0;
+
+  if(flags & TASK_FPU) {
+    fpu_ctx_size += FPU_CTX_SIZE;
+  }
+
+  task_t *t = malloc(sizeof(task_t) + stack_size + fpu_ctx_size);
   strlcpy(t->t_name, name, sizeof(t->t_name));
 
   uint32_t *stack_bottom = (void *)t->t_stack;
+  memset(stack_bottom, 0xbb, stack_size);
   *stack_bottom = STACK_GUARD;
 
   t->t_state = 0;
+
+  if(flags & TASK_FPU) {
+    t->t_fpuctx = (void *)t->t_stack + stack_size;
+  } else {
+    t->t_fpuctx = NULL;
+  }
+
   t->t_sp = cpu_stack_init((void *)t->t_stack + stack_size, entry, arg,
                            task_end);
 

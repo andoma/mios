@@ -1,3 +1,8 @@
+#include <stdio.h>
+#include <stdint.h>
+
+#include "task.h"
+#include "cpu.h"
 #include "mios.h"
 
 //static volatile unsigned int * const UART0DR = (unsigned int *)0x4000c000;
@@ -37,9 +42,43 @@ exc_bus_fault(void)
 {
   panic("Bus");
 }
+
+
+
 void
 exc_usage_fault(void)
 {
+  uint16_t ufsr = *UFSR;
+  if(ufsr & 0x8) {
+
+    // NOCP (ie, tried to use FPU)
+
+    task_t *const t = task_current();
+
+    if(t == NULL || t->t_fpuctx == NULL) {
+      panic("Task %s tries to use FPU but is not allowed",
+            t ? t->t_name : "<none>");
+    }
+
+    cpu_t *cpu = curcpu();
+
+    cpu_enable_fpu(1);
+    if(cpu->sched.current_fpu) {
+      int32_t *ctx = cpu->sched.current_fpu->t_fpuctx;
+      asm volatile("vstm %0, {s0-s15}" :: "r"(ctx));
+      asm volatile("vstm %0, {s16-s31}" :: "r"(ctx + 16));
+      uint32_t fpscr;
+      asm volatile("vmrs %0, fpscr" :"=r"(fpscr));
+      ctx[32] = fpscr;
+    }
+
+    cpu->sched.current_fpu = t;
+    const int32_t *ctx = t->t_fpuctx;
+    asm volatile("vldm %0, {s0-s15}" :: "r"(ctx));
+    asm volatile("vldm %0, {s16-s31}" :: "r"(ctx + 16));
+    asm volatile("vmsr fpscr, %0" :: "r"(ctx[32]));
+    return;
+  }
   panic("Usage fault: 0x%x sp=%p", *UFSR, __builtin_frame_address(0));
 }
 

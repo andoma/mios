@@ -53,6 +53,6 @@ blinker(void *arg)
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
-  task_create(blinker, NULL, 256, "blinker");
+  task_create(blinker, NULL, 256, "blinker", 0);
 }
 
