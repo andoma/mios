@@ -15,7 +15,7 @@ GLOBALDEPS += ${P}/platform.mk ${C}/cpu.mk
 CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin -Werror
 CFLAGS += -I. -I${P} -Isrc/platform -I${C} -Isrc/cpu -Iinclude -Isrc
 
-LDFLAGS += -nostartfiles -nodefaultlibs -lgcc
+LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 
 #
 # Core
