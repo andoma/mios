@@ -52,14 +52,14 @@ uart_putc(void *arg, char c)
 {
   uart_t *u = arg;
 
-  uint32_t primask;
-  asm volatile ("mrs %0, primask\n\t" : "=r" (primask));
+  gpio_set_output(GPIO_D, 14, 1);
+
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
 
-  if(primask || s) {
-    // We are in an interrupt or all interrupts disabled, we busy wait
-    reg_wr(u->reg_base + USART_DR, c);
+  if(!can_sleep()) {
+    // We not on user thread, busy wait
     while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+    reg_wr(u->reg_base + USART_DR, c);
     irq_permit(s);
     return;
   }
@@ -82,6 +82,7 @@ uart_putc(void *arg, char c)
     u->tx_fifo_wrptr++;
   }
   irq_permit(s);
+  gpio_set_output(GPIO_D, 14, 0);
 }
 
 
@@ -155,9 +156,9 @@ void
 irq_38(void)
 {
   uart_t *u = &console;
-  //  gpio_set_output(GPIO_D, 13, 1);
+  gpio_set_output(GPIO_D, 13, 1);
   uart_irq(u);
-  //  gpio_set_output(GPIO_D, 13, 0);
+  gpio_set_output(GPIO_D, 13, 0);
 }
 
 

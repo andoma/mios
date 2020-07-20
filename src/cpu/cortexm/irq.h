@@ -57,3 +57,12 @@ irq_ack(int irq)
   NVIC_ICPR[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
 }
 
+
+static inline int
+can_sleep(void)
+{
+  unsigned int control;
+  asm volatile ("mrs %0, control\n\t" : "=r" (control));
+  return !!(control & 0x2);
+}
+
