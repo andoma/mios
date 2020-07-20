@@ -177,6 +177,10 @@ console_init_early(void)
 
   init_printf(&console, uart_putc);
   init_getchar(&console, uart_getc);
+  uart_putc(&console, '\n');
+  uart_putc(&console, '\n');
+  uart_putc(&console, '\n');
+
 }
 
 
