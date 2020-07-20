@@ -15,6 +15,12 @@
 #define GPIO_AFRH(x)    (GPIO_PORT(x) + 0x24)
 
 
+#define FLASH_ACR   0x40023c00
+
+
+#define RCC_CR      0x40023800
+#define RCC_PLLCFGR 0x40023804
+#define RCC_CFGR    0x40023808
 #define RCC_AHB1ENR 0x40023830
 #define RCC_APB1ENR 0x40023840
 

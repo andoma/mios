@@ -136,7 +136,7 @@ uart_irq(uart_t *u)
 static void
 uart_init(uart_t *u, int reg_base, int baudrate)
 {
-  const unsigned int bbr = (SYSTICK_RVR + baudrate - 1) / baudrate;
+  const unsigned int bbr = (APB1CLOCK + baudrate - 1) / baudrate;
 
   u->reg_base = reg_base;
   reg_wr(u->reg_base + USART_CR1, (1 << 13)); // ENABLE
