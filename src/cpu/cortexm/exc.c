@@ -51,8 +51,8 @@ void
 exc_usage_fault(void)
 {
   uint16_t ufsr = *UFSR;
+#ifdef __ARM_FP
   if(ufsr & 0x8) {
-
     // NOCP (ie, tried to use FPU)
 
     task_t *const t = task_current();
@@ -81,7 +81,8 @@ exc_usage_fault(void)
     asm volatile("vmsr fpscr, %0" :: "r"(ctx[32]));
     return;
   }
-  panic("Usage fault: 0x%x sp=%p", *UFSR, __builtin_frame_address(0));
+#endif
+  panic("Usage fault: 0x%x sp=%p", ufsr, __builtin_frame_address(0));
 }
 
 void
