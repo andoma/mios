@@ -23,13 +23,6 @@ platform_heap_end(void)
 static void __attribute__((constructor(101)))
 platform_init_early(void)
 {
-
-  for(int i = 0; i < 4; i++) {
-    gpio_conf_output(GPIO_D, i + 12, GPIO_PUSH_PULL,
-                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  }
-
-
   reg_wr(FLASH_ACR, 0x75); // D-CACHE I-CACHE PREFETCH, 5 wait states
 
   reg_wr(RCC_CFGR,
@@ -62,7 +55,13 @@ platform_init_early(void)
   gpio_conf_af(GPIO_C, 9, 0, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 #endif
 
+
   reg_set(RCC_AHB1ENR, 0x08);  // CLK ENABLE: GPIOD
+  for(int i = 0; i < 4; i++) {
+    gpio_conf_output(GPIO_D, i + 12, GPIO_PUSH_PULL,
+                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  }
+
   gpio_set_output(GPIO_D, 15, 1);
 
   reg_set(RCC_AHB1ENR, 0x01);  // CLK ENABLE: GPIOA
