@@ -5,27 +5,29 @@ O ?= build.${PLATFORM}
 
 T := $(shell realpath --relative-to ${CURDIR} $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
+GLOBALDEPS += ${T}/Makefile
+
 SRC := ${T}/src
 
 #
 # Include platform- (which in turn include CPU-) specific things
 #
 P := ${T}/src/platform/${PLATFORM}
-include ${P}/platform.mk
 
-#GLOBALDEPS := Makefile
-#GLOBALDEPS += ${P}/platform.mk ${C}/cpu.mk
+GLOBALDEPS += ${P}/${PLATFORM}.mk
+CPPFLAGS += -I${P}
+
+include ${P}/${PLATFORM}.mk
 
 CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin -Werror
 
-CPPFLAGS += -I${P} -I${SRC}/platform -I${C} -I${SRC}/cpu -I${T}/include -I${SRC}
+CPPFLAGS += -I${SRC}/platform -I${SRC}/cpu -I${T}/include -I${SRC}
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 
 #
 # Core
 #
-
 SRCS += ${SRC}/init.c \
 	${SRC}/main.c \
 	${SRC}/task.c \
