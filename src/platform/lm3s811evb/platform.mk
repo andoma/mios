@@ -1,7 +1,7 @@
 CPU := cortexm
 
-C := src/cpu/${CPU}
-include ${C}/cpu.mk
+C := ${SRC}/cpu/${CPU}
+include ${C}/${CPU}.mk
 
 SRCS += ${P}/platform.c \
 	${P}/console.c \
