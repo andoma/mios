@@ -3,7 +3,6 @@
 #include <task.h>
 #include <irq.h>
 
-#include "gpio.h"
 #include "uart.h"
 #include "stm32f4.h"
 
@@ -23,8 +22,6 @@ void
 uart_putc(void *arg, char c)
 {
   uart_t *u = arg;
-
-  gpio_set_output(GPIO_D, 14, 1);
 
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
 
@@ -54,7 +51,6 @@ uart_putc(void *arg, char c)
     u->tx_fifo_wrptr++;
   }
   irq_permit(s);
-  gpio_set_output(GPIO_D, 14, 0);
 }
 
 
