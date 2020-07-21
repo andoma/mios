@@ -1,17 +1,18 @@
+#include <string.h>
 #include <stdio.h>
 #include <assert.h>
 
 #include "task.h"
 #include "mios.h"
 
-int
+int  __attribute__((weak))
 main(void)
 {
-  printf("Welcome to main()\n");
-  printf("You can type freely here: ");
+  printf("Welcome to Mios default main()\n");
+  printf("Echo console> ");
   while(1) {
     int c = getchar();
-    if(c == -1)
+    if(c < 0)
       break;
     printf("%c", c);
   }
