@@ -10,7 +10,6 @@ static volatile unsigned int * const SHCSR = (unsigned int *)0xe000ed24;
 
 static volatile unsigned int * const FPCCR = (unsigned int *)0xe000ef34;
 
-static volatile unsigned int * const VTOR  = (unsigned int *)0xe000ed08;
 
 
 static void __attribute__((constructor(150)))
@@ -21,8 +20,6 @@ cpu_init(void)
   *FPCCR = 0; // No FPU lazy switching, we deal with it ourselves
 
   *SHCSR |= 0x7 << 16; // Enable UsageFault, BusFault, MemFault handlers
-
-  *VTOR = 0x08000000;
 }
 
 
