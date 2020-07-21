@@ -43,7 +43,7 @@ heap_init(void)
   void *heap_start = (void *)&_ebss;
   void *heap_end =   platform_heap_end();
 
-  printf("RAM Layout edata:%p, ebss:%p, eheap:%p\n",
+  printf("\n\n\nRAM Layout edata:%p, ebss:%p, eheap:%p\n",
          &_edata, &_ebss, heap_end);
 
   heap_create(heap_start, heap_end - heap_start);
