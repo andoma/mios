@@ -1,7 +1,9 @@
-TOOLCHAIN := arm-none-eabi-
+C := ${SRC}/cpu/cortexm
 
 GLOBALDEPS += ${C}/cortexm.mk
 CPPFLAGS += -I${C}
+
+TOOLCHAIN := arm-none-eabi-
 
 CFLAGS += -mcpu=cortex-m4 -mthumb
 

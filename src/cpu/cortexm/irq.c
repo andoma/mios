@@ -2,7 +2,6 @@
 
 #include "mios.h"
 #include "irq.h"
-#include "platform.h"
 
 void
 irq(void)

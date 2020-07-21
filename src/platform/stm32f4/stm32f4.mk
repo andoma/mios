@@ -1,11 +1,13 @@
-CPU := cortexm
+P := ${SRC}/platform/stm32f4
 
-CFLAGS += -mfpu=fpv4-sp-d16  -mfloat-abi=hard
+GLOBALDEPS += ${P}/stm32f4.mk
+CPPFLAGS += -I${P}
+
+CFLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 
 LDSCRIPT = ${P}/stm32f4.ld
 
-C := ${SRC}/cpu/${CPU}
-include ${C}/${CPU}.mk
+include ${SRC}/cpu/cortexm/cortexm.mk
 
 SRCS += ${P}/platform.c \
 	${P}/uart.c \

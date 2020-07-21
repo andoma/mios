@@ -3,8 +3,7 @@
 #include <stdio.h>
 
 #include "irq.h"
-#include "platform.h"
-#include "reg.h"
+#include "platform/platform.h"
 #include "stm32f4.h"
 
 #include "gpio.h"
@@ -63,9 +62,6 @@ platform_init_early(void)
   }
 
   gpio_set_output(GPIO_D, 15, 1);
-
-  reg_set(RCC_AHB1ENR, 0x01);  // CLK ENABLE: GPIOA
-  reg_set(RCC_APB1ENR, 0x20000); // CLK ENABLE: USART2
 }
 
 

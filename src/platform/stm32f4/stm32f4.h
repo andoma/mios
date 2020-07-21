@@ -1,18 +1,45 @@
 #pragma once
 
+#include <stdint.h>
 
-#define GPIO_PORT(x) (0x40020000 + ((x) * 0x400))
+static inline void
+reg_wr(uint32_t addr, uint32_t value)
+{
+  volatile uint32_t *ptr = (uint32_t *)addr;
+  *ptr = value;
+}
 
-#define GPIO_MODER(x)   (GPIO_PORT(x) + 0x00)
-#define GPIO_OTYPER(x)  (GPIO_PORT(x) + 0x04)
-#define GPIO_OSPEEDR(x) (GPIO_PORT(x) + 0x08)
-#define GPIO_PUPDR(x)   (GPIO_PORT(x) + 0x0c)
-#define GPIO_IDR(x)     (GPIO_PORT(x) + 0x10)
-#define GPIO_ODR(x)     (GPIO_PORT(x) + 0x14)
-#define GPIO_BSRR(x)    (GPIO_PORT(x) + 0x18)
-#define GPIO_LCKR(x)    (GPIO_PORT(x) + 0x1c)
-#define GPIO_AFRL(x)    (GPIO_PORT(x) + 0x20)
-#define GPIO_AFRH(x)    (GPIO_PORT(x) + 0x24)
+static inline uint32_t
+reg_rd(uint32_t addr)
+{
+  volatile uint32_t *ptr = (uint32_t *)addr;
+  return *ptr;
+}
+
+static inline void
+reg_set(uint32_t addr, uint32_t mask)
+{
+  volatile uint32_t *ptr = (uint32_t *)addr;
+  *ptr |= mask;
+}
+
+static inline void
+reg_clr(uint32_t addr, uint32_t mask)
+{
+  volatile uint32_t *ptr = (uint32_t *)addr;
+  *ptr &= ~mask;
+}
+
+static inline void
+reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
+{
+  volatile uint32_t *ptr = (uint32_t *)addr;
+
+  const uint32_t mask = ((1 << length) - 1) << shift;
+
+  *ptr = (*ptr & ~mask) | ((bits << shift) & mask);
+}
+
 
 
 #define FLASH_ACR   0x40023c00

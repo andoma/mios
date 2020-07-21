@@ -12,16 +12,11 @@ SRC := ${T}/src
 #
 # Include platform- (which in turn include CPU-) specific things
 #
-P := ${T}/src/platform/${PLATFORM}
-
-GLOBALDEPS += ${P}/${PLATFORM}.mk
-CPPFLAGS += -I${P}
-
-include ${P}/${PLATFORM}.mk
+include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
 CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin -Werror
 
-CPPFLAGS += -I${SRC}/platform -I${SRC}/cpu -I${T}/include -I${SRC}
+CPPFLAGS += -I${T}/include -I${SRC}
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 

@@ -2,8 +2,6 @@
 #include <irq.h>
 #include <task.h>
 
-#include "platform.h"
-
 
 static volatile unsigned int * const UART_DR    = (unsigned int *)0x4000c000;
 static volatile unsigned int * const UART_IMSC  = (unsigned int *)0x4000c038;

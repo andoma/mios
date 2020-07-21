@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "platform.h"
+#include "platform/platform.h"
 
 void *
 platform_heap_end(void)

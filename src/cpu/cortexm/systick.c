@@ -1,9 +1,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "timer.h"
-#include "platform.h"
+
+#include "clk_config.h"
 #include "sys.h"
 #include "irq.h"
+
+
 
 static volatile unsigned int * const SYST_CSR =   (unsigned int *)0xe000e010;
 static volatile unsigned int * const SYST_RVR =   (unsigned int *)0xe000e014;

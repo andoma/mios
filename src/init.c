@@ -12,8 +12,6 @@
 #include "cpu.h"
 #include "mios.h"
 
-#include "platform.h"
-
 void
 init(void)
 {

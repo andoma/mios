@@ -1,4 +1,3 @@
-#include "reg.h"
 #include "stm32f4.h"
 #include "gpio.h"
 

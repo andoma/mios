@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "heap.h"
-#include "platform.h"
+#include "platform/platform.h"
 
 
 #define ALIGN(a, b) (((a) + (b) - 1) & ~((b) - 1))

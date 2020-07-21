@@ -4,10 +4,10 @@
 #include <irq.h>
 
 #include "gpio.h"
-#include "reg.h"
 #include "uart.h"
+#include "stm32f4.h"
 
-#include "platform.h"
+#include "clk_config.h"
 
 
 #define USART_SR   0x00
