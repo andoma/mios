@@ -14,10 +14,10 @@ TAILQ_HEAD(task_queue, task);
 
 typedef struct task {
   TAILQ_ENTRY(task) t_link;
-  char t_name[16];
-  uint8_t t_state;
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
+  char t_name[16];
+  uint8_t t_state;
   uint8_t t_stack[0]  __attribute__ ((aligned (8)));
 } task_t;
 
