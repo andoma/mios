@@ -13,5 +13,4 @@ SRCS += ${P}/platform.c \
 	${P}/uart.c \
 	${P}/console.c \
 	${P}/gpio.c \
-
-
+	${P}/stm32f4_i2c.c \

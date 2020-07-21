@@ -6,6 +6,7 @@
 #include "task.h"
 
 #include "stm32f4.h"
+#include "stm32f4_i2c.h"
 #include "gpio.h"
 
 #include "uart.h"
@@ -35,6 +36,29 @@ board_init_console(void)
 
   init_printf(&console, uart_putc);
   init_getchar(&console, uart_getc);
+}
+
+
+
+
+struct i2c i2c1;
+
+
+static void __attribute__((constructor(110)))
+board_init_i2c(void)
+{
+  reg_set(RCC_AHB1ENR, 0x02);     // CLK ENABLE: GPIOB
+  reg_set(RCC_APB1ENR, 1 << 21);  // CLK ENABLE: I2C1
+
+  // Set GPIO ports in open drain
+  reg_set_bits(GPIO_OTYPER(GPIO_B), 6, 1, 1);
+  reg_set_bits(GPIO_OTYPER(GPIO_B), 7, 1, 1);
+
+  // Configure PB6, PB7 for I2C (Alternative Function 4)
+  gpio_conf_af(GPIO_B, 6, 4, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_B, 7, 4, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  i2c_init(&i2c1, I2C_BASE(0));
 }
 
 
