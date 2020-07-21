@@ -31,6 +31,8 @@ SRCS += ${SRC}/init.c \
 
 SRCS += ${SRC}/heap_simple.c
 
+SRCS += ${SRC}/drivers/ms5611.c
+
 OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}
 DEPS +=  ${OBJS:%.o=%.d}
