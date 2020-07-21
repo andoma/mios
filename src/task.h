@@ -18,7 +18,7 @@ typedef struct task {
   uint8_t t_state;
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
-  uint8_t t_stack[0];
+  uint8_t t_stack[0]  __attribute__ ((aligned (8)));
 } task_t;
 
 typedef struct sched_cpu {

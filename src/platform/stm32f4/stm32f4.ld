@@ -42,7 +42,7 @@ SECTIONS {
                 _sbss = .;              /* the . sets the symbol to value of current counter */
                 *(.bss)
                 *(COMMON)
-                . = ALIGN(4);
+                . = ALIGN(16);
                 _ebss = .;
         } >RAM
 }
