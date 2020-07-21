@@ -1,16 +1,24 @@
-#include <stdint.h>
-#include <stddef.h>
-#include <assert.h>
 #include <stdio.h>
-#include <stdarg.h>
-
-#include "heap.h"
-#include "sys.h"
-#include "task.h"
-#include "timer.h"
 #include "irq.h"
-#include "cpu.h"
+#include "task.h"
 #include "mios.h"
+
+
+int  __attribute__((weak))
+main(void)
+{
+  printf("Welcome to Mios default main()\n");
+  printf("Echo console> ");
+  while(1) {
+    int c = getchar();
+    if(c < 0)
+      break;
+    printf("%c", c);
+  }
+  printf("No console input\n");
+  return 0;
+}
+
 
 void
 init(void)
@@ -27,8 +35,7 @@ init(void)
     init_array_begin++;
   }
 
-  extern void *main(void *);
-  task_create(main, NULL, 512, "main", TASK_FPU);
+  task_create((void *)&main, NULL, 512, "main", TASK_FPU);
 }
 
 
@@ -54,3 +61,5 @@ __assert_func(const char *expr, const char *file, int line)
 {
   panic("ASSERT: %s at %s:%d\n", expr, file, line);
 }
+
+
