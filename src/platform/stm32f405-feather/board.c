@@ -11,6 +11,8 @@
 
 #include "uart.h"
 
+#define BLINK_GPIO GPIO_PC(1) // Red led close to USB connection
+
 static uart_t console;
 
 void
@@ -23,12 +25,14 @@ irq_71(void)
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  reg_set(RCC_AHB1ENR, 0x04);    // CLK ENABLE: GPIOC
   reg_set(RCC_APB2ENR, 1 << 5); // CLK ENABLE: USART6
 
   // Configure PA2 for USART6 TX (Alternative Function 8)
-  gpio_conf_af(GPIO_C, 6, 8, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_C, 7, 8, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+  gpio_conf_af(GPIO_PC(6), 8,
+               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  gpio_conf_af(GPIO_PC(7), 8,
+               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 
   uart_init(&console, 0x40011400, 115200 / 2);
 
@@ -47,16 +51,13 @@ struct i2c i2c1;
 static void __attribute__((constructor(110)))
 board_init_i2c(void)
 {
-  reg_set(RCC_AHB1ENR, 0x02);     // CLK ENABLE: GPIOB
   reg_set(RCC_APB1ENR, 1 << 21);  // CLK ENABLE: I2C1
 
-  // Set GPIO ports in open drain
-  reg_set_bits(GPIO_OTYPER(GPIO_B), 6, 1, 1);
-  reg_set_bits(GPIO_OTYPER(GPIO_B), 7, 1, 1);
-
   // Configure PB6, PB7 for I2C (Alternative Function 4)
-  gpio_conf_af(GPIO_B, 6, 4, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_B, 7, 4, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_PB(6), 4,
+               GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_PB(7), 4,
+               GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
   i2c_init(&i2c1, I2C_BASE(0));
 }
@@ -69,6 +70,8 @@ board_init_i2c(void)
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {
+  reg_set(RCC_AHB1ENR, 0x07);    // CLK ENABLE: GPIOA,B,C
+
   // Reset VTOR (if booting from DFU)
   static volatile unsigned int * const VTOR  = (unsigned int *)0xe000ed08;
   *VTOR = 0x08000000;
@@ -102,12 +105,11 @@ board_setup_clocks(void)
 
 
 
-  reg_set(RCC_AHB1ENR, 0x04);  // CLK ENABLE: GPIOC
 
-  gpio_conf_output(GPIO_C, 1, GPIO_PUSH_PULL,
+  gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
                    GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
-  gpio_set_output(GPIO_C, 1, 1); // Red LED
+  gpio_set_output(BLINK_GPIO, 1); // Red LED
 }
 
 
@@ -116,9 +118,9 @@ blinker(void *arg)
 {
   while(1) {
     sleephz(HZ / 2);
-    gpio_set_output(GPIO_C, 1, 0); // Red LED
+    gpio_set_output(BLINK_GPIO, 0); // Red LED
     sleephz(HZ / 2);
-    gpio_set_output(GPIO_C, 1, 1); // Red LED
+    gpio_set_output(BLINK_GPIO, 1); // Red LED
   }
   return NULL;
 }

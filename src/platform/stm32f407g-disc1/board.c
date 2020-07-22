@@ -15,9 +15,9 @@ static uart_t console;
 void
 irq_38(void)
 {
-  gpio_set_output(GPIO_D, 13, 1);
+  gpio_set_output(GPIO_PD(13), 1);
   uart_irq(&console);
-  gpio_set_output(GPIO_D, 13, 0);
+  gpio_set_output(GPIO_PD(13), 0);
 }
 
 
@@ -28,8 +28,10 @@ board_init_console(void)
   reg_set(RCC_APB1ENR, 0x20000); // CLK ENABLE: USART2
 
   // Configure PA2 for USART2 TX (Alternative Function 7)
-  gpio_conf_af(GPIO_A, 2, 7, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_A, 3, 7, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+  gpio_conf_af(GPIO_PA(2), 7,
+               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_PA(3), 7,
+               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 
   uart_init(&console, 0x40004400, 115200);
 
@@ -82,11 +84,11 @@ board_setup_clocks(void)
 
   reg_set(RCC_AHB1ENR, 0x08);  // CLK ENABLE: GPIOD
   for(int i = 0; i < 4; i++) {
-    gpio_conf_output(GPIO_D, i + 12, GPIO_PUSH_PULL,
+    gpio_conf_output(GPIO_PD(i + 12), GPIO_PUSH_PULL,
                      GPIO_SPEED_LOW, GPIO_PULL_NONE);
   }
 
-  gpio_set_output(GPIO_D, 15, 1);
+  gpio_set_output(GPIO_PD(15), 1);
 }
 
 
@@ -96,9 +98,9 @@ static void *
 blinker(void *arg)
 {
   while(1) {
-    gpio_set_output(GPIO_D, 12, 1);
+    gpio_set_output(GPIO_PD(12), 1);
     sleephz(HZ / 2);
-    gpio_set_output(GPIO_D, 12, 0);
+    gpio_set_output(GPIO_PD(12), 0);
     sleephz(HZ / 2);
   }
   return NULL;
