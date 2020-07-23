@@ -1,6 +1,7 @@
+#include "mios.h"
 #include "stm32f4.h"
 #include "gpio.h"
-
+#include "irq.h"
 
 #define GPIO_PORT_ADDR(x) (0x40020000 + ((x) * 0x400))
 
@@ -87,4 +88,124 @@ gpio_get_input(gpio_t gpio)
   uint32_t idr = reg_rd(GPIO_IDR(port));
 
   return !!((1 << bit) & idr);
+}
+
+
+typedef struct {
+  void (*cb)(void *arg);
+  void *arg;
+} gpio_irq_t;
+
+static gpio_irq_t gpio_irqs[16];
+
+
+#define SYSCFG_EXTICR(x) (0x40013808 + (4 * x))
+
+#define EXTI_IMR          0x40013c00
+#define EXTI_RTSR         0x40013c08
+#define EXTI_FTSR         0x40013c0c
+#define EXTI_PR           0x40013c14
+
+
+void
+gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
+              gpio_edge_t edge, int level)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  if(gpio_irqs[bit].cb)
+    panic("GPIO-IRQ for line %d already in use", bit);
+
+  gpio_conf_input(gpio, pull);
+
+  gpio_irqs[bit].cb  = cb;
+  gpio_irqs[bit].arg = arg;
+
+  const int icr = bit >> 2;
+  const int slice = bit & 3;
+
+  reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
+
+  if(edge & GPIO_FALLING_EDGE)
+    reg_set(EXTI_FTSR, 1 << bit);
+  else
+    reg_clr(EXTI_FTSR, 1 << bit);
+
+  if(edge & GPIO_RISING_EDGE)
+    reg_set(EXTI_RTSR, 1 << bit);
+  else
+    reg_clr(EXTI_RTSR, 1 << bit);
+
+  reg_set(EXTI_IMR, 1 << bit);
+
+
+  int irq;
+  if(bit < 5)
+    irq = bit + 6;
+  else if(bit < 10)
+    irq = 30;
+  else
+    irq = 47;
+
+  // XXX: Need conflict checking for different levels on shared IRQ lines
+  irq_enable(irq, level);
+}
+
+
+static void
+gpio_irq(int line)
+{
+  reg_wr(EXTI_PR, 1 << line);
+  gpio_irqs[line].cb(gpio_irqs[line].arg);
+}
+
+
+
+void
+irq_6(void)
+{
+  gpio_irq(0);
+}
+
+void
+irq_7(void)
+{
+  gpio_irq(1);
+}
+
+void
+irq_8(void)
+{
+  gpio_irq(2);
+}
+
+void
+irq_9(void)
+{
+  gpio_irq(3);
+}
+
+void
+irq_10(void)
+{
+  gpio_irq(4);
+}
+
+void
+irq_30(void)
+{
+  const uint32_t pr = reg_rd(EXTI_PR);
+  for(int i = 5; i <= 9; i++)
+    if((i << i) & pr)
+      gpio_irq(i);
+}
+
+void
+irq_47(void)
+{
+  const uint32_t pr = reg_rd(EXTI_PR);
+  for(int i = 10; i <= 15; i++)
+    if((i << i) & pr)
+      gpio_irq(i);
 }

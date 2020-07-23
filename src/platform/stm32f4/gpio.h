@@ -34,6 +34,13 @@ typedef enum {
   GPIO_SPEED_VERY_HIGH = 3,
 } gpio_output_speed_t;
 
+typedef enum {
+  GPIO_FALLING_EDGE    = 0x1,
+  GPIO_RISING_EDGE     = 0x2,
+  GPIO_BOTH_EDGES      = 0x3,
+} gpio_edge_t;
+
+
 
 typedef unsigned char gpio_t;
 
@@ -49,3 +56,7 @@ int gpio_get_input(gpio_t gpio);
 
 void gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
                   gpio_output_speed_t speed, gpio_pull_t pull);
+
+void gpio_conf_irq(gpio_t gpio, gpio_pull_t pull,
+                   void (*cb)(void *arg), void *arg,
+                   gpio_edge_t edge, int level);

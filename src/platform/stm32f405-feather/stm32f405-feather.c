@@ -70,7 +70,6 @@ board_init_i2c(void)
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {
-  reg_set(RCC_AHB1ENR, 0x07);    // CLK ENABLE: GPIOA,B,C
 
   // Reset VTOR (if booting from DFU)
   static volatile unsigned int * const VTOR  = (unsigned int *)0xe000ed08;
@@ -104,7 +103,9 @@ board_setup_clocks(void)
   while((reg_rd(RCC_CFGR) & 0xc) != 0x8) {}
 
 
+  reg_set(RCC_APB2ENR, 1 << 14); // CLK ENABLE: SYSCFG
 
+  reg_set(RCC_AHB1ENR, 0x07);    // CLK ENABLE: GPIOA,B,C
 
   gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
                    GPIO_SPEED_LOW, GPIO_PULL_NONE);
