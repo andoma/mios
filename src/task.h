@@ -35,6 +35,10 @@ typedef struct mutex {
   struct task *owner;
 } mutex_t;
 
+typedef struct cond {
+  struct task_queue waiters;
+} cond_t;
+
 void task_init_cpu(sched_cpu_t *sc, const char *cpu_name);
 
 #define TASK_FPU 0x1
@@ -46,10 +50,20 @@ void task_wakeup(struct task_queue *waitable, int all);
 
 void task_sleep(struct task_queue *waitable, int ticks);
 
+task_t *task_current(void);
+
+
 void mutex_init(mutex_t *m);
 
 void mutex_lock(mutex_t *m);
 
 void mutex_unlock(mutex_t *m);
 
-task_t *task_current(void);
+
+void cond_init(cond_t *c);
+
+void cond_signal(cond_t *c);
+
+void cond_broadcast(cond_t *c);
+
+void cond_wait(cond_t *c, mutex_t *m);

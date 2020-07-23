@@ -180,17 +180,14 @@ task_sleep_timeout(void *opaque)
   irq_permit(s);
 }
 
-
-
 void
-task_sleep(struct task_queue *waitable, int ticks)
+task_sleep_sched_locked(struct task_queue *waitable, int ticks)
 {
   task_t *const curtask = task_current();
 
   timer_t timer;
   task_sleep_t ts;
 
-  const int s = irq_forbid(IRQ_LEVEL_SCHED);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
@@ -216,6 +213,14 @@ task_sleep(struct task_queue *waitable, int ticks)
     timer_disarm(&timer);
   }
 
+}
+
+
+void
+task_sleep(struct task_queue *waitable, int ticks)
+{
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+  task_sleep_sched_locked(waitable, ticks);
   irq_permit(s);
 }
 
@@ -234,12 +239,12 @@ mutex_init(mutex_t *m)
   m->owner = NULL;
 }
 
-void
-mutex_lock(mutex_t *m)
+
+
+static void
+mutex_lock_sched_locked(mutex_t *m)
 {
   task_t *const curtask = task_current();
-
-  const int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(m->owner != NULL) {
     assert(m->owner != curtask);
@@ -251,16 +256,22 @@ mutex_lock(mutex_t *m)
     }
   }
   m->owner = curtask;
+}
 
+
+void
+mutex_lock(mutex_t *m)
+{
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+  mutex_lock_sched_locked(m);
   irq_permit(s);
 }
 
-void
-mutex_unlock(mutex_t *m)
+
+static void
+mutex_unlock_sched_locked(mutex_t *m)
 {
   task_t *const curtask = task_current();
-
-  int s = irq_forbid(IRQ_LEVEL_SCHED);
   assert(m->owner == curtask);
   m->owner = NULL;
 
@@ -271,6 +282,45 @@ mutex_unlock(mutex_t *m)
     TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
     schedule();
   }
+}
+
+
+void
+mutex_unlock(mutex_t *m)
+{
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  mutex_unlock_sched_locked(m);
+  irq_permit(s);
+}
+
+
+
+void
+cond_init(cond_t *c)
+{
+  TAILQ_INIT(&c->waiters);
+}
+
+
+void
+cond_signal(cond_t *c)
+{
+  task_wakeup(&c->waiters, 0);
+}
+
+void
+cond_broadcast(cond_t *c)
+{
+  task_wakeup(&c->waiters, 1);
+}
+
+void
+cond_wait(cond_t *c, mutex_t *m)
+{
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+  mutex_unlock_sched_locked(m);
+  task_sleep_sched_locked(&c->waiters, 0);
+  mutex_lock_sched_locked(m);
   irq_permit(s);
 }
 
