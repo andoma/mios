@@ -18,7 +18,7 @@
 
 
 void
-gpio_conf_input(int gpio, gpio_pull_t pull)
+gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
 {
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
@@ -30,7 +30,7 @@ gpio_conf_input(int gpio, gpio_pull_t pull)
 
 
 void
-gpio_conf_output(int gpio,
+gpio_conf_output(gpio_t gpio,
                  gpio_output_type_t type,
                  gpio_output_speed_t speed,
                  gpio_pull_t pull)
@@ -46,7 +46,7 @@ gpio_conf_output(int gpio,
 
 
 void
-gpio_conf_af(int gpio, int af, gpio_output_type_t type,
+gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
              gpio_output_speed_t speed, gpio_pull_t pull)
 {
   const int port = gpio >> 4;
@@ -69,10 +69,22 @@ gpio_conf_af(int gpio, int af, gpio_output_type_t type,
 
 
 void
-gpio_set_output(int gpio, int on)
+gpio_set_output(gpio_t gpio, int on)
 {
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
 
   reg_set(GPIO_BSRR(port), 1 << (bit + !on * 16));
+}
+
+
+int
+gpio_get_input(gpio_t gpio)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  uint32_t idr = reg_rd(GPIO_IDR(port));
+
+  return !!((1 << bit) & idr);
 }

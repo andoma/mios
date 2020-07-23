@@ -35,12 +35,17 @@ typedef enum {
 } gpio_output_speed_t;
 
 
-void gpio_conf_input(int gpio, gpio_pull_t pull);
+typedef unsigned char gpio_t;
 
-void gpio_conf_output(int gpio, gpio_output_type_t type,
+
+void gpio_conf_input(gpio_t gpio, gpio_pull_t pull);
+
+void gpio_conf_output(gpio_t gpio, gpio_output_type_t type,
                       gpio_output_speed_t speed, gpio_pull_t pull);
 
-void gpio_set_output(int gpio, int on);
+void gpio_set_output(gpio_t gpio, int on);
 
-void gpio_conf_af(int gpio, int af, gpio_output_type_t type,
+int gpio_get_input(gpio_t gpio);
+
+void gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
                   gpio_output_speed_t speed, gpio_pull_t pull);
