@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <sys/queue.h>
 
 #define HZ 100
@@ -16,5 +17,5 @@ void timer_arm(timer_t *t, unsigned int delta);
 
 void timer_disarm(timer_t *t);
 
-unsigned int clock_get(void);
+uint64_t clock_get(void);
 

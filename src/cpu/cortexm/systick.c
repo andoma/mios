@@ -10,20 +10,24 @@
 
 static volatile unsigned int * const SYST_CSR =   (unsigned int *)0xe000e010;
 static volatile unsigned int * const SYST_RVR =   (unsigned int *)0xe000e014;
-//static volatile unsigned int * const SYST_CVR =   (unsigned int *)0xe000e018;
+static volatile unsigned int * const SYST_VAL =   (unsigned int *)0xe000e018;
 //static volatile unsigned int * const SYST_CALIB = (unsigned int *)0xe000e01c;
 
 LIST_HEAD(timer_list, timer);
 
 static struct timer_list timers;
 
-// This is bad, will wrap after 490 days with HZ = 100
-static uint32_t clock;
+
+
+
+static uint64_t clock;
 
 void
 exc_systick(void)
 {
-  clock++;
+  if(*SYST_CSR & 0x10000)
+    clock += 1000000 / HZ;
+
   struct timer_list pending;
   LIST_INIT(&pending);
   timer_t *t, *n;
@@ -67,6 +71,8 @@ timer_disarm(timer_t *t)
   t->t_countdown = 0;
 }
 
+#define TICKS_PER_US (SYSTICK_RVR / 1000000)
+#define TICKS_PER_HZ (SYSTICK_RVR / HZ)
 
 
 //static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
@@ -74,14 +80,29 @@ timer_disarm(timer_t *t)
 static void __attribute__((constructor(130)))
 timer_init(void)
 {
-  uint32_t timer_calibration = SYSTICK_RVR / HZ;
-  *SYST_RVR = timer_calibration - 1;
+  *SYST_RVR = TICKS_PER_HZ - 1;
   *SYST_CSR = 7;
 }
 
 
-uint32_t
+
+uint64_t
 clock_get(void)
 {
-  return clock;
+  int s = irq_forbid(IRQ_LEVEL_CLOCK);
+
+  while(1) {
+    uint32_t remain = *SYST_VAL / TICKS_PER_US;
+    uint64_t c = clock;
+
+    c += 1000000 - remain;
+
+    if(*SYST_CSR & 0x10000) {
+      clock += 1000000 / HZ;
+      continue;
+    }
+
+    irq_permit(s);
+    return c;
+  }
 }
