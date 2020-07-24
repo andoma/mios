@@ -6,7 +6,6 @@
 #include "platform/platform.h"
 #include "stm32f4.h"
 
-#include "gpio.h"
 #include "task.h"
 #include "mios.h"
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "i2c.h"
+#include <io.h>
 
 typedef struct ms5611 ms5611_t;
 

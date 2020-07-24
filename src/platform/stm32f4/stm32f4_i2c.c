@@ -1,13 +1,12 @@
 #include <assert.h>
 #include <stdio.h>
+#include <io.h>
 
 #include "irq.h"
 #include "stm32f4.h"
-#include "gpio.h"
+
 #include "mios.h"
 #include "task.h"
-
-#include "i2c.h"
 
 #define I2C_BASE(x)   (0x40005400 + ((x) * 0x400))
 

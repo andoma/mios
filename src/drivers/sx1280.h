@@ -1,7 +1,6 @@
 #pragma once
 
-#include "gpio.h"
-#include "spi.h"
+#include <io.h>
 
 typedef enum {
   STDBY_RC   = 0x00,

@@ -24,7 +24,7 @@ LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 # Core
 #
 SRCS += ${SRC}/mios.c \
-	${SRC}/i2c.c \
+	${SRC}/io.c \
 	${SRC}/task.c \
 	${SRC}/libc.c \
 	${SRC}/stdio.c \

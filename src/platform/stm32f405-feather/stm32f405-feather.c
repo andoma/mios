@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <io.h>
 
 #include "mios.h"
 #include "irq.h"
@@ -7,7 +8,6 @@
 
 #include "stm32f4.h"
 #include "stm32f4_i2c.h"
-#include "gpio.h"
 
 #include "uart.h"
 

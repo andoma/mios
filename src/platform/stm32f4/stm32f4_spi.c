@@ -1,13 +1,11 @@
 #include <assert.h>
 #include <stdio.h>
+#include <io.h>
 
 #include "irq.h"
 #include "stm32f4.h"
-#include "gpio.h"
 #include "mios.h"
 #include "task.h"
-
-#include "spi.h"
 
 struct spi {
   uint32_t base_addr;
