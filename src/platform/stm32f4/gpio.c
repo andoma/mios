@@ -197,7 +197,7 @@ irq_30(void)
 {
   const uint32_t pr = reg_rd(EXTI_PR);
   for(int i = 5; i <= 9; i++)
-    if((i << i) & pr)
+    if((1 << i) & pr)
       gpio_irq(i);
 }
 
@@ -206,6 +206,6 @@ irq_47(void)
 {
   const uint32_t pr = reg_rd(EXTI_PR);
   for(int i = 10; i <= 15; i++)
-    if((i << i) & pr)
+    if((1 << i) & pr)
       gpio_irq(i);
 }
