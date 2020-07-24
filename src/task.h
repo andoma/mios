@@ -48,7 +48,7 @@ task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
 void task_wakeup(struct task_queue *waitable, int all);
 
-void task_sleep(struct task_queue *waitable, int ticks);
+int task_sleep(struct task_queue *waitable, int ticks);
 
 task_t *task_current(void);
 

@@ -62,13 +62,14 @@ timer_arm(timer_t *t, unsigned int delta)
   LIST_INSERT_HEAD(&timers, t, t_link);
 }
 
-void
+int
 timer_disarm(timer_t *t)
 {
   if(!t->t_countdown)
-    return;
+    return 1;
   LIST_REMOVE(t, t_link);
   t->t_countdown = 0;
+  return 0;
 }
 
 #define TICKS_PER_US (SYSTICK_RVR / 1000000)

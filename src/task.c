@@ -180,7 +180,7 @@ task_sleep_timeout(void *opaque)
   irq_permit(s);
 }
 
-void
+int
 task_sleep_sched_locked(struct task_queue *waitable, int ticks)
 {
   task_t *const curtask = task_current();
@@ -210,18 +210,19 @@ task_sleep_sched_locked(struct task_queue *waitable, int ticks)
   }
 
   if(ticks) {
-    timer_disarm(&timer);
+    return timer_disarm(&timer);
   }
-
+  return 0;
 }
 
 
-void
+int
 task_sleep(struct task_queue *waitable, int ticks)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_sched_locked(waitable, ticks);
+  const int r = task_sleep_sched_locked(waitable, ticks);
   irq_permit(s);
+  return r;
 }
 
 

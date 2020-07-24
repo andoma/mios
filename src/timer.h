@@ -15,7 +15,9 @@ typedef struct timer {
 
 void timer_arm(timer_t *t, unsigned int delta);
 
-void timer_disarm(timer_t *t);
+
+// Return 1 if timer was NOT armed, return 0 if we managed to disarm
+int timer_disarm(timer_t *t);
 
 uint64_t clock_get(void);
 
