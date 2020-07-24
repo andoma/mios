@@ -4,7 +4,9 @@
 #include <stdint.h>
 
 #include "error.h"
+#include "gpio.h"
 
 typedef struct spi spi_t;
 
-error_t spi_rw(spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len);
+error_t spi_rw(spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len,
+               gpio_t gpio);

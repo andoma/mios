@@ -98,18 +98,15 @@ issue_command(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
   if((err = wait_ready(s)) != ERR_OK)
     return err;
 
-  gpio_set_output(s->gpio_nss, 0);
-  error_t error = spi_rw(s->bus, tx, rx, len);
+  error_t error = spi_rw(s->bus, tx, rx, len, s->gpio_nss);
   if(!error) {
     uint8_t response;
 
-    gpio_set_output(s->gpio_nss, 1);
     // too fast?
     if((err = wait_ready(s)) != ERR_OK)
       return err;
-    gpio_set_output(s->gpio_nss, 0);
 
-    error = spi_rw(s->bus, get_status, &response, 1);
+    error = spi_rw(s->bus, get_status, &response, 1, s->gpio_nss);
     if(!error) {
       error = cmdstatus_to_error[(response >> 2) & 7];
       if(error) {
@@ -117,7 +114,6 @@ issue_command(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
       }
     }
   }
-  gpio_set_output(s->gpio_nss, 1);
   return error;
 }
 
@@ -130,9 +126,7 @@ sx1280_status(sx1280_t *s)
   if((err = wait_ready(s)) != ERR_OK)
     return err;
 
-  gpio_set_output(s->gpio_nss, 0);
-  err = spi_rw(s->bus, get_status, &response, 1);
-  gpio_set_output(s->gpio_nss, 1);
+  err = spi_rw(s->bus, get_status, &response, 1, s->gpio_nss);
   if(err)
     return err;
   return response;
@@ -188,9 +182,7 @@ sx1280_tx(sx1280_t *s, const void *buffer, size_t len)
   if((err = wait_ready(s)) != ERR_OK)
     return err;
 
-  gpio_set_output(s->gpio_nss, 0);
-  err = spi_rw(s->bus, buffer, NULL, len + 2);
-  gpio_set_output(s->gpio_nss, 1);
+  err = spi_rw(s->bus, buffer, NULL, len + 2, s->gpio_nss);
   if(err)
     return err;
 
