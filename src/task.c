@@ -10,6 +10,8 @@
 #include "cpu.h"
 #include "mios.h"
 
+// #define READYQUEUE_DEBUG
+
 static struct task_queue readyqueue = TAILQ_HEAD_INITIALIZER(readyqueue);
 
 #define STACK_GUARD 0xbadc0de
@@ -30,6 +32,22 @@ task_init_cpu(sched_cpu_t *sc, const char *cpu_name)
 }
 
 
+static void
+readyqueue_insert(task_t *t, const char *whom)
+{
+#ifdef READYQUEUE_DEBUG
+  task_t *x;
+  TAILQ_FOREACH(x, &readyqueue, t_link) {
+    if(x == t) {
+      panic("%s: Inserting task %p on readyqueue but it's already there",
+            whom, t);
+    }
+  }
+#endif
+  TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+}
+
+
 void *
 task_switch(void *cur_sp)
 {
@@ -45,7 +63,7 @@ task_switch(void *cur_sp)
 
   if(curtask->t_state == TASK_STATE_RUNNING) {
     // Task should be running, re-insert in readyqueue
-    TAILQ_INSERT_TAIL(&readyqueue, curtask, t_link);
+    readyqueue_insert(curtask, "task_switch");
   }
 
   task_t *t = TAILQ_FIRST(&readyqueue);
@@ -53,18 +71,19 @@ task_switch(void *cur_sp)
     t = &cpu->sched.idle;
   } else {
     TAILQ_REMOVE(&readyqueue, t, t_link);
+    assert(t->t_state == TASK_STATE_RUNNING);
   }
 
 #if 0
-  printf("Switch from %s [sp:%p] to %s [sp:%p] s=0x%x\n",
-         curtask->t_name, curtask->t_sp,
-         t->t_name, t->t_sp,
+  printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p] s=0x%x\n",
+         curtask, curtask->t_name, curtask->t_sp,
+         t, t->t_name, t->t_sp,
          s);
 #endif
 
+  cpu->sched.current = t;
   irq_permit(s);
 
-  cpu->sched.current = t;
   cpu_fpu_enable(cpu->sched.current_fpu == t);
 
   return t->t_sp;
@@ -139,13 +158,13 @@ void
 task_wakeup(struct task_queue *waitable, int all)
 {
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-
   task_t *t;
   while((t = TAILQ_FIRST(waitable)) != NULL) {
     assert(t->t_state == TASK_STATE_SLEEPING);
     TAILQ_REMOVE(waitable, t, t_link);
     t->t_state = TASK_STATE_RUNNING;
-    TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+    if(t != task_current())
+      readyqueue_insert(t, "wakeup");
     schedule();
     if(!all)
       break;
@@ -174,7 +193,8 @@ task_sleep_timeout(void *opaque)
       TAILQ_REMOVE(ts->waitable, t, t_link);
 
     t->t_state = TASK_STATE_RUNNING;
-    TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+    if(t != task_current())
+      readyqueue_insert(t, "sleep-timo");
     schedule();
   }
   irq_permit(s);
@@ -190,6 +210,13 @@ task_sleep_sched_locked(struct task_queue *waitable, int ticks)
 
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
+
+#ifdef READYQUEUE_DEBUG
+  task_t *x;
+  TAILQ_FOREACH(x, &readyqueue, t_link) {
+    assert(x != curtask);
+  }
+#endif
 
   if(ticks) {
     ts.task = curtask;
@@ -280,7 +307,8 @@ mutex_unlock_sched_locked(mutex_t *m)
   if(t != NULL) {
     TAILQ_REMOVE(&m->waiters, t, t_link);
     t->t_state = TASK_STATE_RUNNING;
-    TAILQ_INSERT_TAIL(&readyqueue, t, t_link);
+    if(t != task_current())
+      readyqueue_insert(t, "mutex_unlock");
     schedule();
   }
 }
