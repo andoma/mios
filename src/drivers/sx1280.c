@@ -22,6 +22,8 @@ struct sx1280 {
   cond_t cond_work;
   cond_t cond_txfifo;
 
+  struct task_queue busy_waitable;
+
   uint8_t pending_irq;
   uint8_t sending;
 
@@ -82,10 +84,9 @@ static const uint8_t clear_irq[3] = {
 static error_t
 wait_ready(sx1280_t *s)
 {
-  int x = 0;
   while(gpio_get_input(s->gpio_busy)) {
-    if(++x == 1000000)
-      return ERR_NOT_READY;
+    if(task_sleep(&s->busy_waitable, HZ / 10))
+      return ERR_TIMEOUT;
   }
   return ERR_OK;
 }
@@ -95,17 +96,20 @@ issue_command(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
 {
   error_t err;
 
-  if((err = wait_ready(s)) != ERR_OK)
+  if((err = wait_ready(s)) != ERR_OK) {
+    printf("sx1280: timeout in cmd:%x\n", tx[0]);
     return err;
+  }
 
   error_t error = spi_rw(s->bus, tx, rx, len, s->gpio_nss);
   if(!error) {
     uint8_t response;
 
     // too fast?
-    if((err = wait_ready(s)) != ERR_OK)
+    if((err = wait_ready(s)) != ERR_OK) {
+      printf("sx1280: timeout in getStatus\n");
       return err;
-
+    }
     error = spi_rw(s->bus, get_status, &response, 1, s->gpio_nss);
     if(!error) {
       error = cmdstatus_to_error[(response >> 2) & 7];
@@ -223,6 +227,8 @@ sx1280_thread(void *arg)
 {
   sx1280_t *s = arg;
 
+  int q = irq_forbid(IRQ_LEVEL_IO);
+
   while(1) {
     error_t err = sx1280_reset(s);
     if(err) {
@@ -234,7 +240,6 @@ sx1280_thread(void *arg)
              sx1280_status(s));
     }
 
-    int q = irq_forbid(IRQ_LEVEL_IO);
     mutex_lock(&s->mutex);
 
     while(!err) {
@@ -249,12 +254,10 @@ sx1280_thread(void *arg)
       if(s->pending_irq) {
         s->pending_irq = 0;
         mutex_unlock(&s->mutex);
-        irq_permit(q);
 
         err = sx1280_irq_read_and_clear(s);
         if(err)
           printf("Failed to clear IRQ: %d\n", err);
-        q = irq_forbid(IRQ_LEVEL_IO);
         mutex_lock(&s->mutex);
         continue;
       }
@@ -273,7 +276,6 @@ sx1280_thread(void *arg)
         cond_signal(&s->cond_txfifo);
 
         mutex_unlock(&s->mutex);
-        irq_permit(q);
 
         pkt[0] = RADIO_WRITE_BUFFER;
         pkt[1] = 0;
@@ -282,15 +284,14 @@ sx1280_thread(void *arg)
         if(err)
           printf("Failed to send: %d\n", err);
 
-        q = irq_forbid(IRQ_LEVEL_IO);
         mutex_lock(&s->mutex);
         continue;
 
       }
     }
     mutex_unlock(&s->mutex);
-    irq_permit(q);
   }
+  irq_permit(q);
   return NULL;
 }
 
@@ -306,7 +307,12 @@ sx1280_irq(void *arg)
 }
 
 
-
+void
+sx1280_busy_irq(void *arg)
+{
+  sx1280_t *s = arg;
+  task_wakeup(&s->busy_waitable, 0);
+}
 
 
 sx1280_t *
@@ -317,6 +323,7 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   mutex_init(&s->mutex);
   cond_init(&s->cond_work);
   cond_init(&s->cond_txfifo);
+  TAILQ_INIT(&s->busy_waitable);
 
   s->bus = bus;
   s->gpio_nss = cfg->gpio_nss;
@@ -329,7 +336,9 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   gpio_set_output(s->gpio_reset, 1);
   gpio_conf_output(s->gpio_reset, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_input(s->gpio_busy, GPIO_PULL_NONE);
+
+  gpio_conf_irq(s->gpio_busy, GPIO_PULL_NONE, sx1280_busy_irq, s,
+                GPIO_BOTH_EDGES, IRQ_LEVEL_IO);
 
   gpio_conf_irq(cfg->gpio_irq, GPIO_PULL_NONE, sx1280_irq, s,
                 GPIO_RISING_EDGE, IRQ_LEVEL_IO);
