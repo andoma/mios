@@ -25,7 +25,7 @@ uart_putc(void *arg, char c)
 
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
 
-  if(!can_sleep()) {
+  if(1 || !can_sleep()) {
     // We not on user thread, busy wait
     while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
     reg_wr(u->reg_base + USART_DR, c);
