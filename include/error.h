@@ -10,5 +10,6 @@ typedef enum {
   ERR_NOT_READY             = -6,
   ERR_NO_BUFFER             = -7,
   ERR_MTU_EXCEEDED          = -8,
+  ERR_INVALID_ID            = -9,
 } error_t;
 
