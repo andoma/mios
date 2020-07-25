@@ -70,15 +70,19 @@ clock_get_irq_blocked(void)
 
 // IRQ_LEVEL_CLOCK must be blocked
 void
-timer_arm(timer_t *t, unsigned int delta)
+timer_arm_abs(timer_t *t, uint64_t expire)
 {
-
   if(t->t_expire)
     LIST_REMOVE(t, t_link);
 
-  uint64_t now = clock_get_irq_blocked();
-  t->t_expire = now + delta;
+  t->t_expire = expire;
   LIST_INSERT_HEAD(&timers, t, t_link);
+}
+
+void
+timer_arm(timer_t *t, unsigned int delta)
+{
+  timer_arm_abs(t, clock_get_irq_blocked() + delta);
 }
 
 

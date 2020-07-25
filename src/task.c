@@ -266,6 +266,55 @@ sleep(unsigned int sec)
 }
 
 
+static void
+task_sleep_timeout2(void *opaque)
+{
+  task_t *t = opaque;
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+
+  assert(t->t_state == TASK_STATE_SLEEPING);
+  t->t_state = TASK_STATE_RUNNING;
+  if(t != task_current())
+    readyqueue_insert(t, "sleep-timo2");
+  schedule();
+  irq_permit(s);
+}
+
+
+void
+sleep_until(uint64_t deadline)
+{
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+
+  task_t *const curtask = task_current();
+
+  timer_t timer;
+
+  assert(curtask->t_state == TASK_STATE_RUNNING);
+  curtask->t_state = TASK_STATE_SLEEPING;
+
+#ifdef READYQUEUE_DEBUG
+  task_t *x;
+  TAILQ_FOREACH(x, &readyqueue, t_link) {
+    assert(x != curtask);
+  }
+#endif
+
+  timer.t_cb = task_sleep_timeout2;
+  timer.t_opaque = curtask;
+  timer.t_expire = 0;
+  timer_arm_abs(&timer, deadline);
+
+  while(curtask->t_state == TASK_STATE_SLEEPING) {
+    schedule();
+    irq_permit(irq_lower());
+  }
+
+  irq_permit(s);
+  return;
+}
+
+
 void
 mutex_init(mutex_t *m)
 {
