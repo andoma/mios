@@ -1,9 +1,9 @@
+#include <unistd.h>
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "timer.h"
 #include "mios.h"
 #include "sx1280.h"
 #include "irq.h"
@@ -85,7 +85,7 @@ static error_t
 wait_ready(sx1280_t *s)
 {
   while(gpio_get_input(s->gpio_busy)) {
-    if(task_sleep(&s->busy_waitable, HZ / 10))
+    if(task_sleep(&s->busy_waitable, 100000))
       return ERR_TIMEOUT;
   }
   return ERR_OK;
@@ -146,9 +146,9 @@ sx1280_reset(sx1280_t *s)
   s->sending = 0;
 
   gpio_set_output(s->gpio_reset, 0);
-  sleephz(2);
+  usleep(20000);
   gpio_set_output(s->gpio_reset, 1);
-  sleephz(2);
+  usleep(20000);
 
   err = issue_command(s, use_dcdc, NULL, sizeof(use_dcdc));
 
@@ -233,7 +233,7 @@ sx1280_thread(void *arg)
     error_t err = sx1280_reset(s);
     if(err) {
       printf("sx1280: Failed to initialize: %d\n", err);
-      sleephz(HZ);
+      sleep(1);
       continue;
     } else {
       printf("sx1280: Initialized OK Idle status:0x%x\n",

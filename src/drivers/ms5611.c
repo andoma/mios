@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <stdlib.h>
 #include <mios.h>
 
@@ -71,12 +72,12 @@ ms5611_read(ms5611_t *m, ms5611_value_t *values)
 
   if((err = cmd(m->i2c, 0x77, 0x48)) != ERR_OK)
     return err;
-  sleephz(2);
+  usleep(10000);
   if((err = read_u24(m->i2c, 0x77, 0, &adc_pressure)) != ERR_OK)
     return err;
   if((err = cmd(m->i2c, 0x77, 0x58)) != ERR_OK)
     return err;
-  sleephz(2);
+  usleep(10000);
   if((err = read_u24(m->i2c, 0x77, 0, &adc_temperature)) != ERR_OK)
     return err;
 

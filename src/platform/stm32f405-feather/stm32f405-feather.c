@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <assert.h>
 #include <stdio.h>
 #include <io.h>
@@ -118,9 +119,9 @@ static void *
 blinker(void *arg)
 {
   while(1) {
-    sleephz(HZ / 2);
+    usleep(500000);
     gpio_set_output(BLINK_GPIO, 0); // Red LED
-    sleephz(HZ / 2);
+    usleep(500000);
     gpio_set_output(BLINK_GPIO, 1); // Red LED
   }
   return NULL;

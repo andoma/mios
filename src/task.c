@@ -201,7 +201,7 @@ task_sleep_timeout(void *opaque)
 }
 
 int
-task_sleep_sched_locked(struct task_queue *waitable, int ticks)
+task_sleep_sched_locked(struct task_queue *waitable, int us)
 {
   task_t *const curtask = task_current();
 
@@ -218,13 +218,13 @@ task_sleep_sched_locked(struct task_queue *waitable, int ticks)
   }
 #endif
 
-  if(ticks) {
+  if(us) {
     ts.task = curtask;
     ts.waitable = waitable;
     timer.t_cb = task_sleep_timeout;
     timer.t_opaque = &ts;
-    timer.t_countdown = 0;
-    timer_arm(&timer, ticks);
+    timer.t_expire = 0;
+    timer_arm(&timer, us);
   }
 
   if(waitable != NULL) {
@@ -236,7 +236,7 @@ task_sleep_sched_locked(struct task_queue *waitable, int ticks)
     irq_permit(irq_lower());
   }
 
-  if(ticks) {
+  if(us) {
     return timer_disarm(&timer);
   }
   return 0;
@@ -254,9 +254,15 @@ task_sleep(struct task_queue *waitable, int ticks)
 
 
 void
-sleephz(int ticks)
+usleep(unsigned int us)
 {
-  task_sleep(NULL, ticks);
+  task_sleep(NULL, us);
+}
+
+void
+sleep(unsigned int sec)
+{
+  task_sleep(NULL, sec * 1000000);
 }
 
 
