@@ -25,8 +25,10 @@ gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
 
+  int s = irq_forbid(IRQ_LEVEL_IO);
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 0);
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
+  irq_permit(s);
 }
 
 
@@ -40,10 +42,12 @@ gpio_conf_output(gpio_t gpio,
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
 
+  int s = irq_forbid(IRQ_LEVEL_IO);
   reg_set_bits(GPIO_OTYPER(port),  bit, 1, type);
   reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 1);
+  irq_permit(s);
 }
 
 
@@ -53,6 +57,8 @@ gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
 {
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
+
+  int s = irq_forbid(IRQ_LEVEL_IO);
 
   reg_set_bits(GPIO_OTYPER(port),  bit, 1, type);
   reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);
@@ -66,6 +72,7 @@ gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
 
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 2);
+  irq_permit(s);
 }
 
 
@@ -126,8 +133,6 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   const int icr = bit >> 2;
   const int slice = bit & 3;
 
-  reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
-
   if(edge & GPIO_FALLING_EDGE)
     reg_set_bit(EXTI_FTSR, bit);
   else
@@ -139,6 +144,10 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
     reg_clr_bit(EXTI_RTSR, bit);
 
   reg_set_bit(EXTI_IMR, bit);
+
+  int s = irq_forbid(IRQ_LEVEL_IO);
+  reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
+  irq_permit(s);
 
   int irq;
   if(bit < 5)
