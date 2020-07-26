@@ -56,7 +56,7 @@ board_setup_clocks(void)
          (0x4 << 13) | // APB2 (High speed) prescaler = 2
          (0x5 << 10)); // APB1 (Low speed)  prescaler = 4
 
-  reg_set(RCC_CR, 1 << 16); // HSEON
+  reg_set_bit(RCC_CR, 16); // HSEON
 
   while(!(reg_rd(RCC_CR) & (1 << 17))) {} // Wait for external oscillator
 
@@ -67,7 +67,7 @@ board_setup_clocks(void)
          | (0 << 16)        // PLL sys clock division (0 == /2) */
          | (7 << 24));      // PLL usb clock division =48MHz */
 
-  reg_set(RCC_CR, 1 << 24);
+  reg_set_bit(RCC_CR, 24);
 
   while(!(reg_rd(RCC_CR) & (1 << 25))) {} // Wait for pll
 

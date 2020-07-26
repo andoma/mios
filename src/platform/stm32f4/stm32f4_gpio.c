@@ -129,17 +129,16 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
 
   if(edge & GPIO_FALLING_EDGE)
-    reg_set(EXTI_FTSR, 1 << bit);
+    reg_set_bit(EXTI_FTSR, bit);
   else
-    reg_clr(EXTI_FTSR, 1 << bit);
+    reg_clr_bit(EXTI_FTSR, bit);
 
   if(edge & GPIO_RISING_EDGE)
-    reg_set(EXTI_RTSR, 1 << bit);
+    reg_set_bit(EXTI_RTSR, bit);
   else
-    reg_clr(EXTI_RTSR, 1 << bit);
+    reg_clr_bit(EXTI_RTSR, bit);
 
-  reg_set(EXTI_IMR, 1 << bit);
-
+  reg_set_bit(EXTI_IMR, bit);
 
   int irq;
   if(bit < 5)

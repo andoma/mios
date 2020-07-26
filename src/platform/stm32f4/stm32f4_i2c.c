@@ -148,9 +148,9 @@ i2c_read(stm32f4_i2c_t *i2c, int ack, uint8_t *ptr)
 {
   int x = 0;
   if(ack)
-    reg_set(i2c->base_addr + I2C_CR1, 0x400);
+    reg_set_bit(i2c->base_addr + I2C_CR1, 10);
   else
-    reg_clr(i2c->base_addr + I2C_CR1, 0x400);
+    reg_clr_bit(i2c->base_addr + I2C_CR1, 10);
 
   while(!(reg_rd(i2c->base_addr + I2C_SR1) & 0x40)) {
     x++;
@@ -235,7 +235,7 @@ stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
   }
   instance--;
 
-  reg_set(RCC_APB1ENR, 1 << (21 + instance));  // CLK ENABLE
+  reg_set_bit(RCC_APB1ENR, 21 + instance);  // CLK ENABLE
 
   usleep(10);
 

@@ -26,7 +26,7 @@ irq_71(void)
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  reg_set(RCC_APB2ENR, 1 << 5); // CLK ENABLE: USART6
+  reg_set_bit(RCC_APB2ENR, 5); // CLK ENABLE: USART6
 
   // Configure PA2 for USART6 TX (Alternative Function 8)
   gpio_conf_af(GPIO_PC(6), 8,
@@ -60,7 +60,7 @@ board_setup_clocks(void)
          (0x4 << 13) | // APB2 (High speed) prescaler = 2
          (0x5 << 10)); // APB1 (Low speed)  prescaler = 4
 
-  reg_set(RCC_CR, 1 << 16); // HSEON
+  reg_set_bit(RCC_CR, 16); // HSEON
 
   while(!(reg_rd(RCC_CR) & (1 << 17))) {} // Wait for external oscillator
 
@@ -71,7 +71,7 @@ board_setup_clocks(void)
          | (0 << 16)        // PLL sys clock division (0 == /2) */
          | (7 << 24));      // PLL usb clock division =48MHz */
 
-  reg_set(RCC_CR, 1 << 24);
+  reg_set_bit(RCC_CR, 24);
 
   while(!(reg_rd(RCC_CR) & (1 << 25))) {} // Wait for pll
 
@@ -80,7 +80,7 @@ board_setup_clocks(void)
   while((reg_rd(RCC_CFGR) & 0xc) != 0x8) {}
 
 
-  reg_set(RCC_APB2ENR, 1 << 14); // CLK ENABLE: SYSCFG
+  reg_set_bit(RCC_APB2ENR, 14); // CLK ENABLE: SYSCFG
 
   reg_set(RCC_AHB1ENR, 0x07);    // CLK ENABLE: GPIOA,B,C
 
