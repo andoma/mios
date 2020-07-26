@@ -52,6 +52,7 @@ int task_sleep(struct task_queue *waitable, int ticks);
 
 task_t *task_current(void);
 
+#define MUTEX_INITIALIZER(self) { { NULL, &(self).waiters.tqh_first}}
 
 void mutex_init(mutex_t *m);
 

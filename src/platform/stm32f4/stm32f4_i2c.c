@@ -1,3 +1,5 @@
+#include <unistd.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
 #include <io.h>
@@ -7,6 +9,10 @@
 
 #include "mios.h"
 #include "task.h"
+
+#define NAME "stm32f4_i2c"
+
+mutex_t init_lock = MUTEX_INITIALIZER(init_lock);
 
 #define I2C_BASE(x)   (0x40005400 + ((x) * 0x400))
 
@@ -84,54 +90,61 @@ irq_32(void)
 #endif
 
 
-struct i2c {
+typedef struct stm32f4_i2c {
+  struct i2c i2c;
   uint32_t base_addr;
-};
+} stm32f4_i2c_t;
 
 
 static error_t
-i2c_start(i2c_t *i2c)
+i2c_start(stm32f4_i2c_t *i2c)
 {
   int x = 0;
   reg_set(i2c->base_addr + I2C_CR1, I2C_CR1_START);
   while(!(reg_rd(i2c->base_addr + I2C_SR1) & 1)) {
     x++;
-    if(x == 1000000)
+    if(x == 1000000) {
+      printf("i2c: start timeout\n");
       return ERR_TIMEOUT;
+    }
   }
   return ERR_OK;
 }
 
 
 static error_t
-i2c_stop(i2c_t *i2c)
+i2c_stop(stm32f4_i2c_t *i2c)
 {
   int x = 0;
   reg_set(i2c->base_addr + I2C_CR1, I2C_CR1_STOP);
   while(reg_rd(i2c->base_addr + I2C_SR1) & 2) {
     x++;
-    if(x == 1000000)
+    if(x == 1000000) {
+      printf("i2c: stop timeout\n");
       return ERR_TIMEOUT;
+    }
   }
   return ERR_OK;
 }
 
 
 static error_t
-i2c_write(i2c_t *i2c, uint8_t v)
+i2c_write(stm32f4_i2c_t *i2c, uint8_t v)
 {
   int x = 0;
   reg_wr(i2c->base_addr + I2C_DR, v);
   while(!(reg_rd(i2c->base_addr + I2C_SR1) & 0x80)) {
     x++;
-    if(x == 1000000)
+    if(x == 1000000) {
+      printf("i2c: write timeout\n");
       return ERR_TIMEOUT;
+    }
   }
   return ERR_OK;
 }
 
 static error_t
-i2c_read(i2c_t *i2c, int ack, uint8_t *ptr)
+i2c_read(stm32f4_i2c_t *i2c, int ack, uint8_t *ptr)
 {
   int x = 0;
   if(ack)
@@ -141,32 +154,37 @@ i2c_read(i2c_t *i2c, int ack, uint8_t *ptr)
 
   while(!(reg_rd(i2c->base_addr + I2C_SR1) & 0x40)) {
     x++;
-    if(x == 1000000)
+    if(x == 1000000) {
+      printf("i2c: read timeout\n");
       return ERR_TIMEOUT;
+    }
   }
   *ptr = reg_rd(i2c->base_addr + I2C_DR);
   return ERR_OK;
 }
 
 static error_t
-i2c_addr(i2c_t *i2c, uint8_t addr)
+i2c_addr(stm32f4_i2c_t *i2c, uint8_t addr)
 {
   int x = 0;
   reg_wr(i2c->base_addr + I2C_DR, addr);
   while(!(reg_rd(i2c->base_addr + I2C_SR1) & 0x2)) {
     x++;
-    if(x == 1000000)
+    if(x == 1000000) {
+      printf("i2c: addr timeout\n");
       return ERR_TIMEOUT;
+    }
   }
   reg_rd(i2c->base_addr + I2C_SR2);
   return ERR_OK;
 }
 
 
-error_t
-i2c_rw(i2c_t *i2c, uint8_t addr, const uint8_t *write, size_t write_len,
+static error_t
+i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
        uint8_t *read, size_t read_len)
 {
+  stm32f4_i2c_t *i2c = (stm32f4_i2c_t *)d;
   error_t r;
 
   assert(write_len || read_len);
@@ -206,12 +224,49 @@ i2c_rw(i2c_t *i2c, uint8_t addr, const uint8_t *write, size_t write_len,
 }
 
 
-void
-i2c_init(struct i2c *i2c, uint32_t base_addr)
-{
-  i2c->base_addr = base_addr;
 
-  reg_wr(base_addr + I2C_CCR, 210);
-  reg_wr(base_addr + I2C_CR2, 42); //  | (1 << 8) | (1 << 9));
-  reg_wr(base_addr + I2C_CR1, 0x1);
+
+
+i2c_t *
+stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
+{
+  if(instance < 1 || instance > 3) {
+    panic("%s: Invalid instance %d", NAME, instance);
+  }
+  instance--;
+
+  reg_set(RCC_APB1ENR, 1 << (21 + instance));  // CLK ENABLE
+
+  usleep(10);
+
+  // If bus seems to be stuck, toggle SCL until SDA goes high again
+  gpio_conf_input(sda, GPIO_PULL_NONE);
+  gpio_conf_output(scl, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  int c = 0;
+  while(1) {
+    int d = gpio_get_input(sda);
+    if(d)
+      break;
+
+    c = !c;
+    gpio_set_output(scl, c);
+
+    for(int i = 0; i < 200; i++)
+      asm("");
+  }
+
+  stm32f4_i2c_t *d = malloc(sizeof(stm32f4_i2c_t));
+  d->i2c.rw = i2c_rw;
+  d->base_addr = I2C_BASE(instance);
+
+  // Configure PB6, PB7 for I2C (Alternative Function 4)
+  gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
+  gpio_conf_af(sda, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
+
+  reg_wr(d->base_addr + I2C_CCR, 210);
+  reg_wr(d->base_addr + I2C_CR2, 42); //  | (1 << 8) | (1 << 9));
+  reg_wr(d->base_addr + I2C_CR1, 0x1);
+
+  return &d->i2c;
 }

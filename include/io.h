@@ -5,8 +5,6 @@
 
 #include "error.h"
 
-typedef struct i2c i2c_t;
-typedef struct spi spi_t;
 
 
 typedef enum {
@@ -35,14 +33,19 @@ typedef enum {
 } gpio_edge_t;
 
 
-
 #include "io_types.h"
 
-// I2C
+typedef struct i2c {
+  error_t (*rw)(struct i2c *bus, uint8_t addr,
+                const uint8_t *write, size_t write_len,
+                uint8_t *read, size_t read_len);
+} i2c_t;
 
-error_t i2c_rw(i2c_t *bus, uint8_t addr,
-               const uint8_t *write, size_t write_len,
-               uint8_t *read, size_t read_len);
+
+
+typedef struct spi spi_t;
+
+
 
 // SPI
 

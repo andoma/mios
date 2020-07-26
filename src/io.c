@@ -4,14 +4,6 @@
 // platform specific code provides such interface.
 
 
-error_t __attribute__((weak))
-i2c_rw(i2c_t *i2c, uint8_t addr,
-       const uint8_t *write, size_t write_len,
-       uint8_t *read, size_t read_len)
-{
-  return ERR_NOT_IMPLEMENTED;
-}
-
 
 error_t __attribute__((weak))
 spi_rw(spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)

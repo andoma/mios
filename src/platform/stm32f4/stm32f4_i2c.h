@@ -1,12 +1,7 @@
 #pragma once
 
+#include "io.h"
 
-#define I2C_BASE(x)   (0x40005400 + ((x) * 0x400))
-
-struct i2c {
-  uint32_t base_addr;
-};
-
-
-void i2c_init(struct i2c *i2c, uint32_t reg_base);
+i2c_t *stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda,
+                          gpio_pull_t pull);
 

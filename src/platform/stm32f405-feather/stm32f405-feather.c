@@ -44,30 +44,6 @@ board_init_console(void)
 }
 
 
-
-
-struct i2c i2c1;
-
-
-static void __attribute__((constructor(110)))
-board_init_i2c(void)
-{
-  reg_set(RCC_APB1ENR, 1 << 21);  // CLK ENABLE: I2C1
-
-  // Configure PB6, PB7 for I2C (Alternative Function 4)
-  gpio_conf_af(GPIO_PB(6), 4,
-               GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_PB(7), 4,
-               GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  i2c_init(&i2c1, I2C_BASE(0));
-}
-
-
-
-
-
-
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {

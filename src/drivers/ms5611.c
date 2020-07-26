@@ -22,7 +22,7 @@ static error_t
 read_u16(i2c_t *i2c, uint8_t addr, uint8_t reg, uint16_t *result)
 {
   uint8_t buf[2];
-  error_t err = i2c_rw(i2c, addr, &reg, sizeof(reg), buf, sizeof(buf));
+  error_t err = i2c->rw(i2c, addr, &reg, sizeof(reg), buf, sizeof(buf));
   *result = buf[0] << 8 | buf[1];
   return err;
 }
@@ -31,7 +31,7 @@ read_u16(i2c_t *i2c, uint8_t addr, uint8_t reg, uint16_t *result)
 static error_t
 cmd(i2c_t *i2c, uint8_t addr, uint8_t reg)
 {
-  return i2c_rw(i2c, addr, &reg, sizeof(reg), NULL, 0);
+  return i2c->rw(i2c, addr, &reg, sizeof(reg), NULL, 0);
 }
 
 
@@ -39,7 +39,7 @@ static error_t
 read_u24(i2c_t *i2c, uint8_t addr, uint8_t reg, uint32_t *result)
 {
   uint8_t buf[3];
-  error_t err = i2c_rw(i2c, addr, &reg, sizeof(reg), buf, sizeof(buf));
+  error_t err = i2c->rw(i2c, addr, &reg, sizeof(reg), buf, sizeof(buf));
   *result = buf[0] << 16 | buf[1] << 8 | buf[2];
   return err;
 }
