@@ -1,13 +1,20 @@
+#include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
 #include <io.h>
 
 #include "irq.h"
 #include "stm32f4.h"
+#include "stm32f4_clk.h"
+#include "stm32f4_spi.h"
 #include "mios.h"
 #include "task.h"
 
-struct spi {
+#define NAME "stm32f4_spi"
+
+struct stm32f4_spi {
+  spi_t spi;
+
   uint32_t base_addr;
 
   mutex_t mutex;
@@ -19,18 +26,16 @@ struct spi {
   size_t pos;
 };
 
+
 #define SPI_CR1  0x00
 #define SPI_CR2  0x04
 #define SPI_SR   0x08
 #define SPI_DR   0x0c
 
-struct spi spi2;
-
-
-
-error_t
-spi_rw(spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
+static error_t
+spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
 {
+  struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
   if(len == 0)
     return ERR_OK;
   mutex_lock(&spi->mutex);
@@ -50,7 +55,7 @@ spi_rw(spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
 
 
 static void
-spi_irq(spi_t *spi)
+spi_irq(struct stm32f4_spi *spi)
 {
   uint8_t b = reg_rd(spi->base_addr + SPI_DR);
   if(spi->rx)
@@ -63,21 +68,55 @@ spi_irq(spi_t *spi)
   reg_wr(spi->base_addr + SPI_DR, spi->tx[spi->pos]);
 }
 
+static struct stm32f4_spi *spis[3];
+
+void
+irq_35(void)
+{
+  spi_irq(spis[0]);
+}
 
 void
 irq_36(void)
 {
-  spi_irq(&spi2);
+  spi_irq(spis[1]);
 }
 
-
-static void __attribute__((constructor(200)))
-init_spi(void)
+void
+irq_51(void)
 {
-  reg_set(RCC_APB1ENR, 1 << 14);  // CLK ENABLE: SPI2
+  spi_irq(spis[2]);
+}
 
-  spi_t *spi = &spi2;
-  spi->base_addr = 0x40003800;
+static const struct {
+  uint16_t base;
+  uint16_t clkid;
+  uint8_t irq;
+
+
+} spi_config[] = {
+  { 0x0130, CLK_SPI1, 35 },
+  { 0x0038, CLK_SPI2, 36 },
+  { 0x003c, CLK_SPI3, 51 },
+};
+
+
+
+// PB13, PB14, PB15
+
+spi_t *
+stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
+                   gpio_pull_t mosi)
+{
+  if(instance < 1 || instance > 3)
+    panic("%s: Invalid instance %d", NAME, instance);
+
+  instance--;
+
+  clk_enable(spi_config[instance].clkid);
+
+  struct stm32f4_spi *spi = malloc(sizeof(struct stm32f4_spi));
+  spi->base_addr = (spi_config[instance].base << 8) + 0x40000000;
   mutex_init(&spi->mutex);
   TAILQ_INIT(&spi->waitable);
 
@@ -91,14 +130,15 @@ init_spi(void)
   reg_wr(spi->base_addr + SPI_CR2,
          (1 << 6));
 
-  irq_enable(36, IRQ_LEVEL_IO);
+  spis[instance] = spi;
+  irq_enable(spi_config[instance].irq, IRQ_LEVEL_IO);
 
   // Configure PB13...PB15 SPI
-  gpio_conf_af(GPIO_PB(13), 5, // CLK
-               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
-  gpio_conf_af(GPIO_PB(14), 5, // MISO
-               GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_PB(15), 5, // MOSI
-               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-}
+  uint8_t af = 5;
+  gpio_conf_af(clk,  af, GPIO_PUSH_PULL,  GPIO_SPEED_HIGH, GPIO_PULL_UP);
+  gpio_conf_af(miso, af, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(mosi, af, GPIO_PUSH_PULL,  GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
+  spi->spi.rw = spi_rw;
+  return &spi->spi;
+}

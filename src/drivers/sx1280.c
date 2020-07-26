@@ -101,7 +101,7 @@ issue_command(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
     return err;
   }
 
-  error_t error = spi_rw(s->bus, tx, rx, len, s->gpio_nss);
+  error_t error = s->bus->rw(s->bus, tx, rx, len, s->gpio_nss);
   if(!error) {
     uint8_t response;
 
@@ -110,7 +110,7 @@ issue_command(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
       printf("sx1280: timeout in getStatus\n");
       return err;
     }
-    error = spi_rw(s->bus, get_status, &response, 1, s->gpio_nss);
+    error = s->bus->rw(s->bus, get_status, &response, 1, s->gpio_nss);
     if(!error) {
       error = cmdstatus_to_error[(response >> 2) & 7];
       if(error) {
@@ -130,7 +130,7 @@ sx1280_status(sx1280_t *s)
   if((err = wait_ready(s)) != ERR_OK)
     return err;
 
-  err = spi_rw(s->bus, get_status, &response, 1, s->gpio_nss);
+  err = s->bus->rw(s->bus, get_status, &response, 1, s->gpio_nss);
   if(err)
     return err;
   return response;
@@ -186,7 +186,7 @@ sx1280_tx(sx1280_t *s, const void *buffer, size_t len)
   if((err = wait_ready(s)) != ERR_OK)
     return err;
 
-  err = spi_rw(s->bus, buffer, NULL, len + 2, s->gpio_nss);
+  err = s->bus->rw(s->bus, buffer, NULL, len + 2, s->gpio_nss);
   if(err)
     return err;
 

@@ -3,17 +3,6 @@
 // Weak stubs for IO methods. There are overriden by the linker if
 // platform specific code provides such interface.
 
-
-
-error_t __attribute__((weak))
-spi_rw(spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
-{
-  return ERR_NOT_IMPLEMENTED;
-}
-
-
-
-
 void __attribute__((weak))
 gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
 {

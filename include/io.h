@@ -35,6 +35,8 @@ typedef enum {
 
 #include "io_types.h"
 
+// I2C
+
 typedef struct i2c {
   error_t (*rw)(struct i2c *bus, uint8_t addr,
                 const uint8_t *write, size_t write_len,
@@ -42,18 +44,14 @@ typedef struct i2c {
 } i2c_t;
 
 
-
-typedef struct spi spi_t;
-
-
-
 // SPI
 
-error_t spi_rw(spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len,
-               gpio_t nss);
+typedef struct spi {
+  error_t (*rw)(struct spi *bus, const uint8_t *tx, uint8_t *rx, size_t len,
+                gpio_t nss);
+} spi_t;
 
-
-// I2C
+// GPIO implementations provided by platform (or stubbed out)
 
 void gpio_conf_input(gpio_t gpio, gpio_pull_t pull);
 
