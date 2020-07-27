@@ -17,12 +17,13 @@ struct sx1280 {
   spi_t *bus;
   gpio_t gpio_nss;
   gpio_t gpio_busy;
-
+#ifdef DEBUG_VIA_GPIO
+  gpio_t debug;
+  gpio_t debug2;
+#endif
   mutex_t mutex;
   cond_t cond_work;
   cond_t cond_txfifo;
-
-  struct task_queue busy_waitable;
 
   uint8_t pending_irq;
   uint8_t sending;
@@ -84,8 +85,9 @@ static const uint8_t clear_irq[3] = {
 static error_t
 wait_ready(sx1280_t *s)
 {
+  const int64_t deadline = clock_get() + 100000;
   while(gpio_get_input(s->gpio_busy)) {
-    if(task_sleep(&s->busy_waitable, 100000))
+    if(clock_get() > deadline)
       return ERR_TIMEOUT;
   }
   return ERR_OK;
@@ -247,7 +249,13 @@ sx1280_thread(void *arg)
       uint16_t tx_depth = !s->sending ? s->txfifo_wrptr - s->txfifo_rdptr : 0;
 
       if(!s->pending_irq && !tx_depth) {
+#ifdef DEBUG_VIA_GPIO
+        gpio_set_output(s->debug, 1);
+#endif
         cond_wait(&s->cond_work, &s->mutex);
+#ifdef DEBUG_VIA_GPIO
+        gpio_set_output(s->debug, 0);
+#endif
         continue;
       }
 
@@ -302,16 +310,14 @@ void
 sx1280_irq(void *arg)
 {
   sx1280_t *s = arg;
+#ifdef DEBUG_VIA_GPIO
+  gpio_set_output(s->debug2, 1);
+#endif
   s->pending_irq |= 1;
   cond_signal(&s->cond_work);
-}
-
-
-void
-sx1280_busy_irq(void *arg)
-{
-  sx1280_t *s = arg;
-  task_wakeup(&s->busy_waitable, 0);
+#ifdef DEBUG_VIA_GPIO
+  gpio_set_output(s->debug2, 0);
+#endif
 }
 
 
@@ -323,12 +329,25 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   mutex_init(&s->mutex);
   cond_init(&s->cond_work);
   cond_init(&s->cond_txfifo);
-  TAILQ_INIT(&s->busy_waitable);
 
   s->bus = bus;
   s->gpio_nss = cfg->gpio_nss;
   s->gpio_busy = cfg->gpio_busy;
   s->gpio_reset = cfg->gpio_reset;
+
+#ifdef DEBUG_VIA_GPIO
+  s->debug = GPIO_PA(7);
+  s->debug2 = GPIO_PA(6);
+
+  gpio_set_output(s->debug, 0);
+  gpio_set_output(s->debug2, 0);
+
+  gpio_conf_output(s->debug, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  gpio_conf_output(s->debug2, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+#endif
 
   gpio_set_output(s->gpio_nss, 1);
   gpio_conf_output(s->gpio_nss, GPIO_PUSH_PULL,
@@ -337,8 +356,7 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   gpio_conf_output(s->gpio_reset, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
-  gpio_conf_irq(s->gpio_busy, GPIO_PULL_NONE, sx1280_busy_irq, s,
-                GPIO_BOTH_EDGES, IRQ_LEVEL_IO);
+  gpio_conf_input(s->gpio_busy, GPIO_PULL_NONE);
 
   gpio_conf_irq(cfg->gpio_irq, GPIO_PULL_NONE, sx1280_irq, s,
                 GPIO_RISING_EDGE, IRQ_LEVEL_IO);
