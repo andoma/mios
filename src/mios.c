@@ -35,7 +35,7 @@ init(void)
     init_array_begin++;
   }
 
-  task_create((void *)&main, NULL, 512, "main", TASK_FPU);
+  task_create((void *)&main, NULL, 1024, "main", TASK_FPU);
 }
 
 
