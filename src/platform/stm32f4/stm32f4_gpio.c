@@ -202,7 +202,7 @@ irq_10(void)
 }
 
 void
-irq_30(void)
+irq_23(void)
 {
   const uint32_t pr = reg_rd(EXTI_PR);
   for(int i = 5; i <= 9; i++)
@@ -211,7 +211,7 @@ irq_30(void)
 }
 
 void
-irq_47(void)
+irq_40(void)
 {
   const uint32_t pr = reg_rd(EXTI_PR);
   for(int i = 10; i <= 15; i++)
