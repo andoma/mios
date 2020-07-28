@@ -11,5 +11,6 @@ typedef enum {
   ERR_NO_BUFFER             = -7,
   ERR_MTU_EXCEEDED          = -8,
   ERR_INVALID_ID            = -9,
+  ERR_DMA_ERROR             = -10,
 } error_t;
 
