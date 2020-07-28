@@ -15,12 +15,19 @@ typedef struct {
 
 
 static size_t
-emit_str(fmtcb_t *cb, void *aux, const char *str)
+emit_str(fmtcb_t *cb, void *aux, const char *str,
+         const fmtparam_t *fp)
 {
   if(str == NULL)
     return cb(aux, "(null)", 6);
-  else
-    return cb(aux, str, strlen(str));
+
+  size_t sl = strlen(str);
+  size_t total = 0;
+  const int pad = fp->width - sl;
+  for(int i = 0; i < pad; i++) {
+    total += cb(aux, " ", 1);
+  }
+  return total + cb(aux, str, sl);
 }
 
 
@@ -66,7 +73,7 @@ emit_double(fmtcb_t *cb, void *aux, double v,
 {
   char tmp[32];
   dbl2str(tmp, sizeof(tmp), v, -1);
-  return emit_str(cb, aux, tmp);
+  return emit_str(cb, aux, tmp, fp);
 }
 
 
@@ -148,7 +155,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += cb(aux, &c, 1);
       break;
     case 's':
-      total += emit_str(cb, aux, va_arg(ap, const char *));
+      total += emit_str(cb, aux, va_arg(ap, const char *), &fp);
       break;
     case 'x':
       total += emit_x32(cb, aux, va_arg(ap, unsigned int), &fp);
@@ -163,7 +170,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += emit_double(cb, aux, va_arg(ap, double), &fp);
       break;
     case 'p':
-      total += emit_str(cb, aux, "0x");
+      total += cb(aux, "0x", 2);
       total += emit_x32(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
       break;
     }
