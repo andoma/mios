@@ -32,14 +32,14 @@ reg_set(uint32_t addr, uint32_t mask)
 static inline void
 reg_set_bit(uint32_t addr, int bit)
 {
-  volatile uint8_t *ptr = (uint8_t *)pr_bb(addr, bit);
+  volatile uint32_t *ptr = (uint32_t *)pr_bb(addr, bit);
   *ptr = 1;
 }
 
 static inline void
 reg_clr_bit(uint32_t addr, int bit)
 {
-  volatile uint8_t *ptr = (uint8_t *)pr_bb(addr, bit);
+  volatile uint32_t *ptr = (uint32_t *)pr_bb(addr, bit);
   *ptr = 0;
 }
 
