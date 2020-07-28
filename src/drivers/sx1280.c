@@ -313,7 +313,7 @@ sx1280_irq(void *arg)
 #ifdef DEBUG_VIA_GPIO
   gpio_set_output(s->debug2, 1);
 #endif
-  s->pending_irq |= 1;
+  s->pending_irq = 1;
   cond_signal(&s->cond_work);
 #ifdef DEBUG_VIA_GPIO
   gpio_set_output(s->debug2, 0);
