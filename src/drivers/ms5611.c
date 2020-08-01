@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <mios.h>
@@ -12,56 +13,92 @@
 #define MS5611_TEMP_COEFF_OF_TEMPERATURE_INDEX           6
 
 struct ms5611 {
-  i2c_t *i2c;
+  spi_t *spi;
   uint16_t coeff[8];
+  gpio_t nss;
 };
 
 
 
 static error_t
-read_u16(i2c_t *i2c, uint8_t addr, uint8_t reg, uint16_t *result)
+read_u16(ms5611_t *dev, uint8_t reg, uint16_t *result)
 {
-  uint8_t buf[2];
-  error_t err = i2c->rw(i2c, addr, &reg, sizeof(reg), buf, sizeof(buf));
-  *result = buf[0] << 8 | buf[1];
+  uint8_t tx[3] = {reg};
+  uint8_t rx[3];
+  error_t err = dev->spi->rw(dev->spi, tx, rx, 3, dev->nss);
+  *result = rx[1] << 8 | rx[2];
   return err;
+}
+
+static error_t
+cmd(ms5611_t *dev, uint8_t reg)
+{
+  return dev->spi->rw(dev->spi, &reg, NULL, 1, dev->nss);
 }
 
 
 static error_t
-cmd(i2c_t *i2c, uint8_t addr, uint8_t reg)
+read_u24(ms5611_t *dev, uint8_t reg, uint32_t *result)
 {
-  return i2c->rw(i2c, addr, &reg, sizeof(reg), NULL, 0);
-}
-
-
-static error_t
-read_u24(i2c_t *i2c, uint8_t addr, uint8_t reg, uint32_t *result)
-{
-  uint8_t buf[3];
-  error_t err = i2c->rw(i2c, addr, &reg, sizeof(reg), buf, sizeof(buf));
-  *result = buf[0] << 16 | buf[1] << 8 | buf[2];
+  uint8_t tx[4] = {reg};
+  uint8_t rx[4];
+  error_t err = dev->spi->rw(dev->spi, tx, rx, 4, dev->nss);
+  *result = rx[1] << 16 | rx[2] << 8 | rx[3];
   return err;
 }
+
+
+ms5611_t *
+ms5611_create(spi_t *bus, gpio_t nss)
+{
+  ms5611_t *m = malloc(sizeof(ms5611_t));
+  m->spi = bus;
+  m->nss = nss;
+
+  gpio_set_output(nss, 1);
+  gpio_conf_output(nss, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  return m;
+}
+
+
+int
+crc4(const uint16_t *prom)
+{
+  uint16_t rem = 0;
+  const uint8_t *d = (const uint8_t *)prom;
+  for(int i = 0; i < 16; i++) {
+    if(i != 15)
+      rem ^= d[i];
+
+    for(int j = 0; j < 8; j++) {
+      rem = (rem << 1) ^ (rem & 0x8000 ? 0x3000 : 0);
+    }
+  }
+  return (rem >> 12) == (prom[7] & 0xf);
+}
+
 
 
 
 error_t
-ms5611_create(i2c_t *bus, ms5611_t **ptr)
+ms5611_init(ms5611_t *dev)
 {
   error_t err;
-  ms5611_t *m = malloc(sizeof(ms5611_t));
-
-  m->i2c = bus;
   for(int i = 0; i < 8; i++) {
-    if((err = read_u16(m->i2c, 0x77, 0xa0 + i * 2, m->coeff + i)) != ERR_OK)
+    if((err = read_u16(dev, 0xa0 + i * 2, dev->coeff + i)) != ERR_OK)
       return err;
   }
 
-
-  *ptr = m;
+  if(!crc4(dev->coeff)) {
+    printf("ms5611: Invalid CRC\n");
+    return ERR_INVALID_ID;
+  }
+  printf("ms5611: Initialized ok\n");
   return ERR_OK;
 }
+
 
 error_t
 ms5611_read(ms5611_t *m, ms5611_value_t *values)
@@ -70,15 +107,15 @@ ms5611_read(ms5611_t *m, ms5611_value_t *values)
   uint32_t adc_pressure;
   uint32_t adc_temperature;
 
-  if((err = cmd(m->i2c, 0x77, 0x48)) != ERR_OK)
+  if((err = cmd(m, 0x48)) != ERR_OK)
     return err;
   usleep(10000);
-  if((err = read_u24(m->i2c, 0x77, 0, &adc_pressure)) != ERR_OK)
+  if((err = read_u24(m, 0, &adc_pressure)) != ERR_OK)
     return err;
-  if((err = cmd(m->i2c, 0x77, 0x58)) != ERR_OK)
+  if((err = cmd(m, 0x58)) != ERR_OK)
     return err;
   usleep(10000);
-  if((err = read_u24(m->i2c, 0x77, 0, &adc_temperature)) != ERR_OK)
+  if((err = read_u24(m, 0, &adc_temperature)) != ERR_OK)
     return err;
 
   int32_t dT, TEMP;
