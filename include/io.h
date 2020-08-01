@@ -44,6 +44,13 @@ typedef struct i2c {
 } i2c_t;
 
 
+error_t i2c_read_u8(i2c_t *i2c, uint8_t addr, uint8_t reg, uint8_t *u8);
+
+error_t i2c_write_u8(i2c_t *i2c, uint8_t addr, uint8_t reg, uint8_t u8);
+
+error_t i2c_read_bytes(i2c_t *i2c, uint8_t addr, uint8_t reg,
+                       uint8_t *u8, size_t len);
+
 // SPI
 
 typedef struct spi {
