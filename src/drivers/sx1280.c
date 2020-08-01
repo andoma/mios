@@ -390,19 +390,31 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   return s;
 }
 
+static uint16_t
+copy_wrapped(sx1280_t *s, uint16_t wrptr, const uint8_t *src, size_t len)
+{
+  for(size_t i = 0; i < len; i++)
+    s->txfifo[wrptr++ & TXFIFO_MASK] = src[i];
+
+  return wrptr;
+}
+
 
 error_t
-sx1280_send(sx1280_t *s, const void *data, size_t len, int wait)
+sx1280_send(sx1280_t *s,
+            const void *hdr, size_t hdr_len,
+            const void *payload, size_t payload_len,
+            int wait)
 {
-  const uint8_t *u8 = data;
-  if(len > 64)
+  const size_t total_len = hdr_len + payload_len;
+  if(total_len > 64)
     return ERR_MTU_EXCEEDED;
 
   mutex_lock(&s->mutex);
 
   while(1) {
     uint16_t avail = TXFIFO_SIZE - (s->txfifo_wrptr - s->txfifo_rdptr);
-    if(avail < len + 1) {
+    if(avail < total_len + 1) {
       if(!wait) {
         mutex_unlock(&s->mutex);
         return ERR_NO_BUFFER;
@@ -412,10 +424,9 @@ sx1280_send(sx1280_t *s, const void *data, size_t len, int wait)
     }
     assert(avail <= TXFIFO_SIZE);
     uint16_t wrptr = s->txfifo_wrptr;
-    s->txfifo[wrptr++ & TXFIFO_MASK] = len;
-    for(size_t i = 0; i < len; i++) {
-      s->txfifo[wrptr++ & TXFIFO_MASK] = u8[i];
-    }
+    s->txfifo[wrptr++ & TXFIFO_MASK] = total_len;
+    wrptr = copy_wrapped(s, wrptr, hdr, hdr_len);
+    wrptr = copy_wrapped(s, wrptr, payload, payload_len);
     s->txfifo_wrptr = wrptr;
     cond_signal(&s->cond_work);
     break;

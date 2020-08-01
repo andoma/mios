@@ -355,6 +355,9 @@ error_t sx1280_cfg_tx(sx1280_t *dev, int8_t output_gain,
 #endif
 
 
-error_t sx1280_send(sx1280_t *dev, const void *data, size_t len, int wait);
+error_t sx1280_send(sx1280_t *dev,
+                    const void *hdr, size_t hdr_len,
+                    const void *payload, size_t payload_len,
+                    int wait);
 
 
