@@ -474,6 +474,31 @@ printf(const char *format, ...)
   return r;
 }
 
+int
+putchar(int c)
+{
+  if(stdio_putc) {
+    stdio_putc(stdio_putc_arg, c);
+  }
+  return c;
+}
+
+
+int
+puts(const char *s)
+{
+  if(stdio_putc) {
+    while(*s) {
+      stdio_putc(stdio_putc_arg, *s);
+      s++;
+    }
+    stdio_putc(stdio_putc_arg, '\n');
+  }
+  return 0;
+}
+
+
+
 typedef struct {
   char *ptr;
   size_t size;
