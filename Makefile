@@ -14,7 +14,7 @@ SRC := ${T}/src
 #
 include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
-CFLAGS += -g3 -Os -nostdinc -Wall -fno-builtin -Werror
+CFLAGS += -g3 -Os -nostdinc -Wall -Werror
 
 CPPFLAGS += -I${T}/include -I${SRC}
 
