@@ -29,6 +29,11 @@ SRCS += ${SRC}/mios.c \
 	${SRC}/libc.c \
 	${SRC}/stdio.c \
 
+SRCS += ${SRC}/lib/math/trig.c \
+	${SRC}/lib/math/powf.c \
+	${SRC}/lib/math/sqrtf.c \
+
+
 SRCS += ${SRC}/heap_simple.c
 
 SRCS += ${SRC}/drivers/ms5611.c

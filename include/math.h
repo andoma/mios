@@ -1,9 +1,10 @@
 #pragma once
 
+#include <stdint.h>
+
 #ifdef MATH_PREFIX
 
 #define MATH_MANGLE(x) mios_##x
-
 #else
 
 #define MATH_MANGLE(x) x
@@ -32,13 +33,17 @@ MATH_MANGLE(sqrtf)(float f)
   return r;
 }
 
+#else
+
 static inline float
-MATH_MANGLE(fmaf)(float x, float y, float z)
+MATH_MANGLE(fabsf)(float x)
 {
-  float r;
-  asm("vfma.f32 %0, %1, %2, %3" : "=t"(r) : "t" (x), "t" (y), "t" (z));
-  return r;
+  union {float f; uint32_t i;} u = {x};
+  u.i &= 0x7fffffff;
+  return u.f;
 }
+
+float MATH_MANGLE(sqrtf)(float) __attribute__ ((const));
 
 #endif
 

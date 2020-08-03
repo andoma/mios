@@ -25,8 +25,3 @@ MATH_MANGLE(cosf)(float x)
   return MATH_MANGLE(sinf)(x + M_HALF_PIf);
 }
 
-float
-MATH_MANGLE(powf)(float a, float b)
-{
-  return __builtin_powf(a, b);
-}
