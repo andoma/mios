@@ -47,12 +47,6 @@ board_init_console(void)
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {
-
-  // Reset VTOR (if booting from DFU)
-  static volatile unsigned int * const VTOR  = (unsigned int *)0xe000ed08;
-  *VTOR = 0x08000000;
-
-
   reg_wr(FLASH_ACR, 0x75); // D-CACHE I-CACHE PREFETCH, 5 wait states
 
   reg_wr(RCC_CFGR,
