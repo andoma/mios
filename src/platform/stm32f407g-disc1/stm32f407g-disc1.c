@@ -1,12 +1,13 @@
 #include <assert.h>
 #include <stdio.h>
+#include <io.h>
+#include <unistd.h>
 
 #include "mios.h"
 #include "irq.h"
 #include "task.h"
 
 #include "stm32f4.h"
-#include "gpio.h"
 
 #include "uart.h"
 
@@ -99,9 +100,9 @@ blinker(void *arg)
 {
   while(1) {
     gpio_set_output(GPIO_PD(12), 1);
-    sleephz(HZ / 2);
+    usleep(250000);
     gpio_set_output(GPIO_PD(12), 0);
-    sleephz(HZ / 2);
+    usleep(250000);
   }
   return NULL;
 }
@@ -109,6 +110,6 @@ blinker(void *arg)
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
-  task_create(blinker, NULL, 256, "blinker", 0);
+  task_create(blinker, NULL, 512, "blinker", 0);
 }
 

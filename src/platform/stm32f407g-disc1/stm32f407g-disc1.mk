@@ -6,4 +6,4 @@ CPPFLAGS += -I${B}
 
 include ${SRC}/platform/stm32f4/stm32f4.mk
 
-SRCS += ${B}/board.c
+SRCS += ${B}/stm32f407g-disc1.c
