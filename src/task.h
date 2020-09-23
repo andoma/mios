@@ -17,6 +17,7 @@ typedef struct task {
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
   char t_name[16];
+  uint8_t t_prio;
   uint8_t t_state;
   uint8_t t_stack[0]  __attribute__ ((aligned (8)));
 } task_t;
@@ -44,7 +45,7 @@ void task_init_cpu(sched_cpu_t *sc, const char *cpu_name);
 #define TASK_FPU 0x1
 
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
-                    const char *name, int flags);
+                    const char *name, int flags, unsigned int prio);
 
 void task_wakeup(struct task_queue *waitable, int all);
 

@@ -386,7 +386,7 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   s->freqparams[2] = f >> 8;
   s->freqparams[3] = f;
 
-  task_create(sx1280_thread, s, 512, "sx1280", 0);
+  task_create(sx1280_thread, s, 512, "sx1280", 0, 3);
   return s;
 }
 
