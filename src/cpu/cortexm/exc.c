@@ -36,13 +36,19 @@ exc_hard_fault(void)
 void
 exc_mm_fault(void)
 {
-  panic("MM fault: 0x%x address:0x%x", *MMFSR, *MMFAR);
+  uint32_t *psp;
+  asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
+
+  panic("MM fault: 0x%x address:0x%x by 0x%x", *MMFSR, *MMFAR, psp[6]);
 }
 
 void
-exc_bus_fault(uint32_t *exc_frame)
+exc_bus_fault(void)
 {
-  panic("Bus fault: 0x%x at 0x%x by 0x%x", *BFSR, *BFAR, exc_frame[6]);
+  uint32_t *psp;
+  asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
+
+  panic("Bus fault: 0x%x at 0x%x by 0x%x", *BFSR, *BFAR, psp[6]);
 }
 
 
