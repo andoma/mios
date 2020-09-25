@@ -1,3 +1,6 @@
+//#define READYQUEUE_DEBUG
+#define NDEBUG
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -10,7 +13,6 @@
 #include "cpu.h"
 #include "mios.h"
 
-// #define READYQUEUE_DEBUG
 
 #define TASK_PRIOS 32
 #define TASK_PRIO_MASK (TASK_PRIOS - 1)
@@ -75,8 +77,10 @@ task_switch(void *cur_sp)
   } else {
     which = 31 - which;
     t = TAILQ_FIRST(&readyqueue[which]);
+#ifdef READYQUEUE_DEBUG
     if(t == NULL)
       panic("No task on queue %d", which);
+#endif
     TAILQ_REMOVE(&readyqueue[which], t, t_link);
 
     if(TAILQ_FIRST(&readyqueue[which]) == NULL) {
@@ -375,8 +379,7 @@ mutex_lock(mutex_t *m)
 static void
 mutex_unlock_sched_locked(mutex_t *m)
 {
-  task_t *const curtask = task_current();
-  assert(m->owner == curtask);
+  assert(m->owner == task_current());
   m->owner = NULL;
 
   task_t *t = TAILQ_FIRST(&m->waiters);
