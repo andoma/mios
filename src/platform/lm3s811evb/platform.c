@@ -5,5 +5,5 @@
 void *
 platform_heap_end(void)
 {
-  return (void *)0x20008000;
+  return (void *)0x20002000;
 }
