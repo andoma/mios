@@ -14,8 +14,7 @@ MATH_MANGLE(sinf)(float x)
   const float x5 = x3 * x * x;
   const float x7 = x5 * x * x;
 
-  return 0.99999660f * x - 0.16664824f * x3 + 0.00830629f * x5 - 0.00018363f * \
-x7;
+  return 0.99999660f * x - 0.16664824f * x3 + 0.00830629f * x5 - 0.00018363f * x7;
 }
 
 
