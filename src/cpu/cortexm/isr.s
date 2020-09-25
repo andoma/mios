@@ -31,7 +31,7 @@ clearbss:
         mov r0, #2  // Threaded mode
         msr control, r0
         isb
-        ldr r0, =idle_stack + 64
+        ldr r0, =idle_stack + 128
         msr psp, r0
         isb
         adr.w r0, #0xe000ed04
@@ -95,5 +95,6 @@ vectors:
         .size vectors, . - vectors
 
         .bss
-        .align 8
-        .lcomm idle_stack 64
+        .align 5
+        .global idle_stack
+        .lcomm idle_stack 128

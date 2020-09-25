@@ -18,8 +18,6 @@
 static struct task_queue readyqueue[TASK_PRIOS];
 static uint32_t active_queues;
 
-#define STACK_GUARD 0xbadc0de
-
 inline task_t *
 task_current(void)
 {
@@ -27,10 +25,11 @@ task_current(void)
 }
 
 void
-task_init_cpu(sched_cpu_t *sc, const char *cpu_name)
+task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom)
 {
   sc->current = &sc->idle;
   sc->idle.t_state = TASK_STATE_ZOMBIE;
+  sc->idle.t_sp_bottom = sp_bottom;
   snprintf(sc->idle.t_name, sizeof(sc->idle.t_name),
            "idle_%s", cpu_name);
 }
@@ -62,10 +61,6 @@ task_switch(void *cur_sp)
   task_t *const curtask = task_current();
   curtask->t_sp = cur_sp;
 
-  if(cur_sp < (void *)curtask->t_stack) {
-    panic("Stack overflow");
-  }
-
   int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(curtask->t_state == TASK_STATE_RUNNING) {
@@ -91,15 +86,16 @@ task_switch(void *cur_sp)
   }
 
 #if 0
-  printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p] s=0x%x\n",
+  printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p bot:%p] s=0x%x\n",
          curtask, curtask->t_name, curtask->t_sp,
-         t, t->t_name, t->t_sp,
+         t, t->t_name, t->t_sp, t->t_sp_bottom,
          s);
 #endif
 
   cpu->sched.current = t;
   irq_permit(s);
 
+  cpu_stack_redzone(t);
   cpu_fpu_enable(cpu->sched.current_fpu == t);
 
   return t->t_sp;
@@ -144,25 +140,27 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
     fpu_ctx_size += FPU_CTX_SIZE;
   }
 
-  task_t *t = malloc(sizeof(task_t) + stack_size + fpu_ctx_size);
+  void *sp_bottom = memalign(stack_size + fpu_ctx_size + sizeof(task_t),
+                             CPU_STACK_ALIGNMENT);
+  void *sp = sp_bottom + stack_size + fpu_ctx_size;
+  task_t *t = sp;
   strlcpy(t->t_name, name, sizeof(t->t_name));
-
-  uint32_t *stack_bottom = (void *)t->t_stack;
-  memset(stack_bottom, 0xbb, stack_size);
-  *stack_bottom = STACK_GUARD;
 
   t->t_state = 0;
   t->t_prio = prio;
 
   if(flags & TASK_FPU) {
-    t->t_fpuctx = (void *)t->t_stack + stack_size;
+    t->t_fpuctx = sp_bottom + stack_size;
     cpu_fpu_ctx_init(t->t_fpuctx);
   } else {
     t->t_fpuctx = NULL;
   }
-  t->t_sp = cpu_stack_init((void *)t->t_stack + stack_size, entry, arg,
-                           task_end);
-
+  t->t_sp = cpu_stack_init(sp, entry, arg, task_end);
+  t->t_sp_bottom = sp_bottom;
+#if 0
+  printf("Created new task sp_bottom:%p sp:%p t:%p FPU:%p\n",
+         sp_bottom, sp, t, t->t_fpuctx);
+#endif
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_link);
   active_queues |= 1 << t->t_prio;

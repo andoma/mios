@@ -12,14 +12,30 @@ TAILQ_HEAD(task_queue, task);
 #define TASK_STATE_SLEEPING 1
 #define TASK_STATE_ZOMBIE   2
 
+
+/*
+ * Per task memory block
+ *
+ * ----------------- <- sp_bottom
+ * | REDZONE       |
+ * -----------------
+ * | Normal stack  |
+ * ----------------- <- initial sp points here
+ * | FPU save area | (Optional)
+ * -----------------
+ * | struct task   |
+ * -----------------
+ *
+ */
+
 typedef struct task {
   TAILQ_ENTRY(task) t_link;
+  void *t_sp_bottom;
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
-  char t_name[16];
+  char t_name[14];
   uint8_t t_prio;
   uint8_t t_state;
-  uint8_t t_stack[0]  __attribute__ ((aligned (8)));
 } task_t;
 
 typedef struct sched_cpu {
@@ -40,7 +56,7 @@ typedef struct cond {
   struct task_queue waiters;
 } cond_t;
 
-void task_init_cpu(sched_cpu_t *sc, const char *cpu_name);
+void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 
 #define TASK_FPU 0x1
 

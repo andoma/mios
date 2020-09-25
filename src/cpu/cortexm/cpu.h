@@ -6,6 +6,9 @@
 
 #define FPU_CTX_SIZE (33 * 4) // s0 ... s31 + FPSCR
 
+#define CPU_STACK_ALIGNMENT 32
+#define CPU_STACK_REDZONE_SIZE 32
+
 #define MIN_STACK_SIZE 256
 
 void *cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
@@ -29,7 +32,14 @@ cpu_fpu_enable(int on)
 {
   static volatile unsigned int * const CPACR = (unsigned int *)0xe000ed88;
   *CPACR = on ? 0xf << 20 : 0;
-  asm("isb");
+}
+
+
+static inline void
+cpu_stack_redzone(task_t *t)
+{
+  static volatile unsigned int * const MPU_RBAR = (unsigned int *)0xe000ed9c;
+  *MPU_RBAR = (intptr_t)t->t_sp_bottom | 0x17;
 }
 
 void cpu_fpu_ctx_init(int *ctx);
