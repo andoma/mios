@@ -12,15 +12,18 @@
 #define TXFIFO_SIZE 1024 // Must be power of 2
 #define TXFIFO_MASK (TXFIFO_SIZE - 1)
 
+// #define DEBUG_VIA_GPIO
+
 
 struct sx1280 {
   spi_t *bus;
   gpio_t gpio_nss;
   gpio_t gpio_busy;
+
 #ifdef DEBUG_VIA_GPIO
-  gpio_t debug;
-  gpio_t debug2;
+  gpio_t gpio_debug;
 #endif
+
   mutex_t mutex;
   cond_t cond_work;
   cond_t cond_txfifo;
@@ -199,8 +202,12 @@ sx1280_tx(sx1280_t *s, const void *buffer, size_t len)
   };
 
   err = issue_command(s, txcmd, NULL, sizeof(txcmd));
-  if(!err)
+  if(!err) {
     s->sending = 1;
+#ifdef DEBUG_VIA_GPIO
+    gpio_set_output(s->gpio_debug, 1);
+#endif
+  }
   return err;
 }
 
@@ -217,6 +224,9 @@ sx1280_irq_read_and_clear(sx1280_t *s)
 
   if(rx[3] & 1) {
     s->sending = 0;
+#ifdef DEBUG_VIA_GPIO
+    gpio_set_output(s->gpio_debug, 0);
+#endif
   }
 
   return issue_command(s, clear_irq, NULL, sizeof(clear_irq));
@@ -249,13 +259,7 @@ sx1280_thread(void *arg)
       uint16_t tx_depth = !s->sending ? s->txfifo_wrptr - s->txfifo_rdptr : 0;
 
       if(!s->pending_irq && !tx_depth) {
-#ifdef DEBUG_VIA_GPIO
-        gpio_set_output(s->debug, 1);
-#endif
         cond_wait(&s->cond_work, &s->mutex);
-#ifdef DEBUG_VIA_GPIO
-        gpio_set_output(s->debug, 0);
-#endif
         continue;
       }
 
@@ -310,14 +314,8 @@ void
 sx1280_irq(void *arg)
 {
   sx1280_t *s = arg;
-#ifdef DEBUG_VIA_GPIO
-  gpio_set_output(s->debug2, 1);
-#endif
   s->pending_irq = 1;
   cond_signal(&s->cond_work);
-#ifdef DEBUG_VIA_GPIO
-  gpio_set_output(s->debug2, 0);
-#endif
 }
 
 
@@ -336,16 +334,9 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   s->gpio_reset = cfg->gpio_reset;
 
 #ifdef DEBUG_VIA_GPIO
-  s->debug = GPIO_PA(7);
-  s->debug2 = GPIO_PA(6);
-
-  gpio_set_output(s->debug, 0);
-  gpio_set_output(s->debug2, 0);
-
-  gpio_conf_output(s->debug, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  gpio_conf_output(s->debug2, GPIO_PUSH_PULL,
+  s->gpio_debug = GPIO_PA(6);
+  gpio_set_output(s->gpio_debug, 0);
+  gpio_conf_output(s->gpio_debug, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 #endif
 
