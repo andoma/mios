@@ -335,29 +335,7 @@ typedef struct sx1280 sx1280_t;
 
 sx1280_t *sx1280_create(spi_t *bus, const sx1280_config_t *config);
 
-#if 0
-error_t sx1280_cfg_flrc(sx1280_t *dev,
-                        RadioFlrcBitrates_t br,
-                        RadioFlrcCodingRates_t cr,
-                        RadioModShapings_t ms,
-                        RadioPreambleLengths_t pl,
-                        RadioFlrcSyncWordLengths_t swl,
-                        RadioSyncWordRxMatchs_t rxm,
-                        RadioPacketLengthModes_t lm,
-                        uint8_t buffer_size,
-                        RadioCrcTypes_t crctype,
-                        RadioWhiteningModes_t w);
-
-error_t sx1280_cfg_freq(sx1280_t *dev, uint32_t frequency);
-
-error_t sx1280_cfg_tx(sx1280_t *dev, int8_t output_gain,
-                      RadioRampTimes_t rt);
-#endif
-
-
 error_t sx1280_send(sx1280_t *dev,
                     const void *hdr, size_t hdr_len,
                     const void *payload, size_t payload_len,
                     int wait);
-
-

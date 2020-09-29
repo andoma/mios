@@ -9,10 +9,10 @@
 #include "irq.h"
 #include "task.h"
 
-#define TXFIFO_SIZE 1024 // Must be power of 2
-#define TXFIFO_MASK (TXFIFO_SIZE - 1)
+#define SX1280_TXFIFO_SIZE 256 // Must be power of 2
+#define SX1280_TXFIFO_MASK (SX1280_TXFIFO_SIZE - 1)
 
-// #define DEBUG_VIA_GPIO
+// #define SX1280_GPIO_DEBUG
 
 
 struct sx1280 {
@@ -20,7 +20,7 @@ struct sx1280 {
   gpio_t gpio_nss;
   gpio_t gpio_busy;
 
-#ifdef DEBUG_VIA_GPIO
+#ifdef SX1280_GPIO_DEBUG
   gpio_t gpio_debug;
 #endif
 
@@ -34,7 +34,7 @@ struct sx1280 {
   uint16_t txfifo_wrptr;
   uint16_t txfifo_rdptr;
 
-  uint8_t txfifo[TXFIFO_SIZE];
+  uint8_t txfifo[SX1280_TXFIFO_SIZE];
 
   gpio_t gpio_reset;
 
@@ -44,7 +44,7 @@ struct sx1280 {
   uint8_t txparams[3];
 };
 
-
+#if 0
 static const signed int cmdstatus_to_error[8] = {
   ERR_OPERATION_FAILED,
   ERR_OK,
@@ -55,6 +55,7 @@ static const signed int cmdstatus_to_error[8] = {
   ERR_OK,
   ERR_OPERATION_FAILED
 };
+#endif
 
 static const uint8_t use_dcdc[2] = {
   RADIO_SET_REGULATORMODE, USE_DCDC
@@ -96,35 +97,20 @@ wait_ready(sx1280_t *s)
   return ERR_OK;
 }
 
+
 static error_t
-issue_command(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
+sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
 {
   error_t err;
 
   if((err = wait_ready(s)) != ERR_OK) {
-    printf("sx1280: timeout in cmd:%x\n", tx[0]);
+    printf("sx1280: timeout cmd:%x\n", tx[0]);
     return err;
   }
 
-  error_t error = s->bus->rw(s->bus, tx, rx, len, s->gpio_nss);
-  if(!error) {
-    uint8_t response;
-
-    // too fast?
-    if((err = wait_ready(s)) != ERR_OK) {
-      printf("sx1280: timeout in getStatus\n");
-      return err;
-    }
-    error = s->bus->rw(s->bus, get_status, &response, 1, s->gpio_nss);
-    if(!error) {
-      error = cmdstatus_to_error[(response >> 2) & 7];
-      if(error) {
-        printf("sx1280: cmd:0x%x err:0x%x\n", tx[0], response);
-      }
-    }
-  }
-  return error;
+  return s->bus->rw(s->bus, tx, rx, len, s->gpio_nss);
 }
+
 
 static int
 sx1280_status(sx1280_t *s)
@@ -155,25 +141,25 @@ sx1280_reset(sx1280_t *s)
   gpio_set_output(s->gpio_reset, 1);
   usleep(20000);
 
-  err = issue_command(s, use_dcdc, NULL, sizeof(use_dcdc));
+  err = sx1280_cmd(s, use_dcdc, NULL, sizeof(use_dcdc));
 
   if(!err)
-    err = issue_command(s, init_baseaddr, NULL, sizeof(init_baseaddr));
+    err = sx1280_cmd(s, init_baseaddr, NULL, sizeof(init_baseaddr));
 
   if(!err)
-    err = issue_command(s, init_irq, NULL, sizeof(init_irq));
+    err = sx1280_cmd(s, init_irq, NULL, sizeof(init_irq));
 
   if(!err)
-    err = issue_command(s, set_flrc, NULL, sizeof(set_flrc));
+    err = sx1280_cmd(s, set_flrc, NULL, sizeof(set_flrc));
 
   if(!err)
-    err = issue_command(s, s->modparams, NULL, sizeof(s->modparams));
+    err = sx1280_cmd(s, s->modparams, NULL, sizeof(s->modparams));
 
   if(!err)
-    err = issue_command(s, s->freqparams, NULL, sizeof(s->freqparams));
+    err = sx1280_cmd(s, s->freqparams, NULL, sizeof(s->freqparams));
 
   if(!err)
-    err = issue_command(s, s->txparams, NULL, sizeof(s->txparams));
+    err = sx1280_cmd(s, s->txparams, NULL, sizeof(s->txparams));
 
   return err;
 }
@@ -184,7 +170,7 @@ sx1280_tx(sx1280_t *s, const void *buffer, size_t len)
 {
   error_t err;
   s->pktparams[5] = len;
-  err = issue_command(s, s->pktparams, NULL, sizeof(s->pktparams));
+  err = sx1280_cmd(s, s->pktparams, NULL, sizeof(s->pktparams));
   if(err)
     return err;
 
@@ -201,10 +187,10 @@ sx1280_tx(sx1280_t *s, const void *buffer, size_t len)
     RADIO_SET_TX, ts, timeout >> 8, timeout
   };
 
-  err = issue_command(s, txcmd, NULL, sizeof(txcmd));
+  err = sx1280_cmd(s, txcmd, NULL, sizeof(txcmd));
   if(!err) {
     s->sending = 1;
-#ifdef DEBUG_VIA_GPIO
+#ifdef SX1280_GPIO_DEBUG
     gpio_set_output(s->gpio_debug, 1);
 #endif
   }
@@ -218,18 +204,18 @@ sx1280_irq_read_and_clear(sx1280_t *s)
   uint8_t tx[4] = { RADIO_GET_IRQSTATUS };
   uint8_t rx[4];
 
-  error_t err = issue_command(s, tx, rx, sizeof(tx));
+  error_t err = sx1280_cmd(s, tx, rx, sizeof(tx));
   if(err)
     return err;
 
   if(rx[3] & 1) {
     s->sending = 0;
-#ifdef DEBUG_VIA_GPIO
+#ifdef SX1280_GPIO_DEBUG
     gpio_set_output(s->gpio_debug, 0);
 #endif
   }
 
-  return issue_command(s, clear_irq, NULL, sizeof(clear_irq));
+  return sx1280_cmd(s, clear_irq, NULL, sizeof(clear_irq));
 }
 
 
@@ -278,11 +264,11 @@ sx1280_thread(void *arg)
         assert(tx_depth > 1);
         uint8_t pkt[66];
         uint16_t rdptr = s->txfifo_rdptr;
-        uint8_t len = s->txfifo[rdptr++ & TXFIFO_MASK];
+        uint8_t len = s->txfifo[rdptr++ & SX1280_TXFIFO_MASK];
         assert(len <= ((s->txfifo_wrptr - rdptr) & 0xffff));
 
         for(size_t i = 0; i < len; i++) {
-          pkt[2 + i] = s->txfifo[rdptr++ & TXFIFO_MASK];
+          pkt[2 + i] = s->txfifo[rdptr++ & SX1280_TXFIFO_MASK];
         }
         s->txfifo_rdptr = rdptr;
         cond_signal(&s->cond_txfifo);
@@ -333,8 +319,8 @@ sx1280_create(spi_t *bus, const sx1280_config_t *cfg)
   s->gpio_busy = cfg->gpio_busy;
   s->gpio_reset = cfg->gpio_reset;
 
-#ifdef DEBUG_VIA_GPIO
-  s->gpio_debug = GPIO_PA(6);
+#ifdef SX1280_GPIO_DEBUG
+  s->gpio_debug = SX1280_GPIO_DEBUG; // GPIO_PA(6);
   gpio_set_output(s->gpio_debug, 0);
   gpio_conf_output(s->gpio_debug, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
@@ -385,7 +371,7 @@ static uint16_t
 copy_wrapped(sx1280_t *s, uint16_t wrptr, const uint8_t *src, size_t len)
 {
   for(size_t i = 0; i < len; i++)
-    s->txfifo[wrptr++ & TXFIFO_MASK] = src[i];
+    s->txfifo[wrptr++ & SX1280_TXFIFO_MASK] = src[i];
 
   return wrptr;
 }
@@ -404,7 +390,7 @@ sx1280_send(sx1280_t *s,
   mutex_lock(&s->mutex);
 
   while(1) {
-    uint16_t avail = TXFIFO_SIZE - (s->txfifo_wrptr - s->txfifo_rdptr);
+    uint16_t avail = SX1280_TXFIFO_SIZE - (s->txfifo_wrptr - s->txfifo_rdptr);
     if(avail < total_len + 1) {
       if(!wait) {
         mutex_unlock(&s->mutex);
@@ -413,9 +399,9 @@ sx1280_send(sx1280_t *s,
       cond_wait(&s->cond_txfifo, &s->mutex);
       continue;
     }
-    assert(avail <= TXFIFO_SIZE);
+    assert(avail <= SX1280_TXFIFO_SIZE);
     uint16_t wrptr = s->txfifo_wrptr;
-    s->txfifo[wrptr++ & TXFIFO_MASK] = total_len;
+    s->txfifo[wrptr++ & SX1280_TXFIFO_MASK] = total_len;
     wrptr = copy_wrapped(s, wrptr, hdr, hdr_len);
     wrptr = copy_wrapped(s, wrptr, payload, payload_len);
     s->txfifo_wrptr = wrptr;
