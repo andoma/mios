@@ -228,13 +228,10 @@ heap_free(void *ptr)
     assert(p < hb);
     heap_merge_next(p);
   }
-
 }
 
-
-
-void *
-malloc(size_t size)
+static void *
+malloc0(size_t size)
 {
   int s = irq_forbid(IRQ_LEVEL_SWITCH);
   void *x = heap_alloc(main_heap, size, 0);
@@ -245,16 +242,22 @@ malloc(size_t size)
 }
 
 
+
+
+void *
+malloc(size_t size)
+{
+  return malloc0(size);
+}
+
 void *
 calloc(size_t nmemb, size_t size)
 {
   size *= nmemb;
-  void *x = malloc(size);
-  if(x)
-    memset(x, 0, size);
+  void *x = malloc0(size);
+  memset(x, 0, size);
   return x;
 }
-
 
 void
 free(void *ptr)
