@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "timer.h"
-
+#include "mios.h"
 #include "clk_config.h"
 #include "sys.h"
 #include "irq.h"
@@ -21,10 +21,11 @@ static struct timer_list timers;
 
 static uint64_t clock;
 
+
 void
 exc_systick(void)
 {
-  if(*SYST_CSR & 0x10000) {
+  if(likely(*SYST_CSR & 0x10000)) {
     clock += 1000000 / HZ;
   }
 
