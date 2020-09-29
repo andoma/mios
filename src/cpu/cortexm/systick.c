@@ -10,17 +10,15 @@
 #define TICKS_PER_US (SYSTICK_RVR / 1000000)
 #define TICKS_PER_HZ (SYSTICK_RVR / HZ)
 
-static volatile unsigned int * const SYST_CSR =   (unsigned int *)0xe000e010;
-static volatile unsigned int * const SYST_RVR =   (unsigned int *)0xe000e014;
-static volatile unsigned int * const SYST_VAL =   (unsigned int *)0xe000e018;
-//static volatile unsigned int * const SYST_CALIB = (unsigned int *)0xe000e01c;
+static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
+static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
+static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
 
 LIST_HEAD(timer_list, timer);
 
 static struct timer_list timers;
 
 static uint64_t clock;
-
 
 void
 exc_systick(void)
@@ -90,8 +88,15 @@ timer_disarm(timer_t *t)
 }
 
 
+uint64_t
+clock_get(void)
+{
+  int s = irq_forbid(IRQ_LEVEL_CLOCK);
+  uint64_t r = clock_get_irq_blocked();
+  irq_permit(s);
+  return r;
+}
 
-//static volatile unsigned int * const SYST_SHPR3 = (unsigned int *)0xe000ed20;
 
 static void __attribute__((constructor(130)))
 timer_init(void)
@@ -102,12 +107,3 @@ timer_init(void)
 }
 
 
-
-uint64_t
-clock_get(void)
-{
-  int s = irq_forbid(IRQ_LEVEL_CLOCK);
-  uint64_t r = clock_get_irq_blocked();
-  irq_permit(s);
-  return r;
-}
