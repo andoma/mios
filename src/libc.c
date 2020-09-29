@@ -73,6 +73,16 @@ strlen(const char *s)
   return r;
 }
 
+int
+strcmp(const char *s1, const char *s2)
+{
+  while(*s1 && (*s1 == *s2)) {
+    s1++;
+    s2++;
+  }
+  return *(const unsigned char *)s1 - *(const unsigned char *)s2;
+}
+
 size_t
 strlcpy(char * restrict dst, const char * restrict src, size_t siz)
 {
