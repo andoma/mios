@@ -17,7 +17,7 @@
 
 #ifdef __ARM_FP
 
-static inline float
+static inline float __attribute__((always_inline))
 MATH_MANGLE(fabsf)(float f)
 {
   float r;
@@ -25,7 +25,7 @@ MATH_MANGLE(fabsf)(float f)
   return r;
 }
 
-static inline float
+static inline float __attribute__((always_inline))
 MATH_MANGLE(sqrtf)(float f)
 {
   float r;

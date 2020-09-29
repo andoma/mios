@@ -1,6 +1,6 @@
 #pragma once
 
-inline void
+inline void  __attribute__((always_inline))
 schedule(void)
 {
   volatile unsigned int * const ICSR = (unsigned int *)0xe000ed04;

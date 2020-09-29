@@ -16,13 +16,13 @@
 
 #define IRQ_LEVEL_TO_PRI(x) ((x) << IRQ_PRI_LEVEL_SHIFT)
 
-inline void
+inline void  __attribute__((always_inline))
 irq_off(void)
 {
   asm volatile ("cpsid i\n\t");
 }
 
-inline unsigned int
+inline unsigned int  __attribute__((always_inline))
 irq_forbid(unsigned int level)
 {
   unsigned int old;
@@ -31,14 +31,14 @@ irq_forbid(unsigned int level)
   return old;
 }
 
-inline void
+inline void  __attribute__((always_inline))
 irq_permit(unsigned int pri)
 {
   asm volatile ("msr basepri, %0\n\t" : : "r" (pri));
 }
 
 
-inline unsigned int
+inline unsigned int  __attribute__((always_inline))
 irq_lower(void)
 {
   unsigned int old;
@@ -52,7 +52,7 @@ void irq_enable(int irq, int level);
 
 void irq_disable(int irq);
 
-inline void
+inline void  __attribute__((always_inline))
 irq_ack(int irq)
 {
   volatile unsigned int * const NVIC_ICPR = (unsigned int *)0xe000e280;
@@ -60,7 +60,7 @@ irq_ack(int irq)
 }
 
 
-static inline int
+static inline int  __attribute__((always_inline))
 can_sleep(void)
 {
   unsigned int control;
