@@ -2,19 +2,14 @@
 #include "irq.h"
 #include "task.h"
 #include "mios.h"
+#include "cli.h"
 
 
 int  __attribute__((weak))
 main(void)
 {
   printf("Welcome to Mios default main()\n");
-  printf("Echo console> ");
-  while(1) {
-    int c = getchar();
-    if(c < 0)
-      break;
-    printf("%c", c);
-  }
+  cli_console();
   printf("No console input\n");
   return 0;
 }
@@ -23,11 +18,11 @@ main(void)
 void
 init(void)
 {
-  extern unsigned long _init_array;
-  extern unsigned long _etext;
+  extern unsigned long _init_array_begin;
+  extern unsigned long _init_array_end;
 
-  void **init_array_begin = (void *)&_init_array;
-  void **init_array_end = (void *)&_etext;
+  void **init_array_begin = (void *)&_init_array_begin;
+  void **init_array_end = (void *)&_init_array_end;
 
   while(init_array_begin != init_array_end) {
     void (*init)(void) = *init_array_begin;

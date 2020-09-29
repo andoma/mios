@@ -30,6 +30,7 @@ SRCS += ${SRC}/mios.c \
 	${SRC}/task.c \
 	${SRC}/libc.c \
 	${SRC}/stdio.c \
+	${SRC}/cli.c \
 
 SRCS += ${SRC}/lib/math/trig.c \
 	${SRC}/lib/math/powf.c \
