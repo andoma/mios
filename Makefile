@@ -3,6 +3,8 @@ PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
 
+OPTLEVEL ?= 2
+
 T := $(shell realpath --relative-to ${CURDIR} $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 GLOBALDEPS += ${T}/Makefile
@@ -14,7 +16,7 @@ SRC := ${T}/src
 #
 include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
-CFLAGS += -g3 -Os -nostdinc -Wall -Werror
+CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror
 
 CPPFLAGS += -I${T}/include -I${SRC}
 
