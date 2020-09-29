@@ -457,6 +457,24 @@ struct {								\
 		swap_tmp->field.le_prev = &LIST_FIRST((head2));		\
 } while (0)
 
+#define LIST_INSERT_SORTED(head, elm, field, cmpfunc) do {	\
+        if(LIST_EMPTY(head)) {					\
+           LIST_INSERT_HEAD(head, elm, field);			\
+        } else {						\
+           typeof(elm) _tmp;					\
+           LIST_FOREACH(_tmp,head,field) {			\
+              if(cmpfunc(elm,_tmp) <= 0) {			\
+                LIST_INSERT_BEFORE(_tmp,elm,field);		\
+                break;						\
+              }							\
+              if(!LIST_NEXT(_tmp,field)) {			\
+                 LIST_INSERT_AFTER(_tmp,elm,field);		\
+                 break;						\
+              }							\
+           }							\
+        }							\
+} while(0)
+
 /*
  * Tail queue declarations.
  */
