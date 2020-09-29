@@ -59,7 +59,7 @@ clock_get_irq_blocked(void)
 
     c += (1000000 / HZ) - remain;
 
-    if(*SYST_CSR & 0x10000) {
+    if(unlikely(*SYST_CSR & 0x10000)) {
       clock += 1000000 / HZ;
       continue;
     }
