@@ -245,6 +245,17 @@ malloc(size_t size)
 }
 
 
+void *
+calloc(size_t nmemb, size_t size)
+{
+  size *= nmemb;
+  void *x = malloc(size);
+  if(x)
+    memset(x, 0, size);
+  return x;
+}
+
+
 void
 free(void *ptr)
 {
