@@ -33,6 +33,7 @@ typedef struct task {
   void *t_sp_bottom;
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
+  SLIST_ENTRY(task) t_global_link;
   char t_name[14];
   uint8_t t_prio;
   uint8_t t_state;

@@ -13,13 +13,17 @@
 #include "irq.h"
 #include "cpu.h"
 #include "mios.h"
-
+#include "cli.h"
 
 #define TASK_PRIOS 32
 #define TASK_PRIO_MASK (TASK_PRIOS - 1)
 
+SLIST_HEAD(task_slist, task);
+
 static struct task_queue readyqueue[TASK_PRIOS];
 static uint32_t active_queues;
+static struct task_slist alltasks;
+
 
 inline task_t *
 task_current(void)
@@ -169,6 +173,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_link);
   active_queues |= 1 << t->t_prio;
+  SLIST_INSERT_HEAD(&alltasks, t, t_global_link);
   irq_permit(s);
 
   schedule();
@@ -490,3 +495,20 @@ task_init(void)
   for(int i = 0; i < TASK_PRIOS; i++)
     TAILQ_INIT(&readyqueue[i]);
 }
+
+
+
+static int
+cmd_ps(cli_t *cli, int argc, char **argv)
+{
+  task_t *t;
+  cli_printf(cli, " %14s %10s Pri S\n", "Name", "Stack");
+  SLIST_FOREACH(t, &alltasks, t_global_link) {
+    cli_printf(cli, " %14s %p %3d %c\n", t->t_name, t->t_sp_bottom,
+               t->t_prio,
+               "RSZ"[t->t_state]);
+  }
+  return 0;
+}
+
+CLI_CMD_DEF("ps", cmd_ps);
