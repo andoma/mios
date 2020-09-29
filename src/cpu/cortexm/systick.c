@@ -77,12 +77,6 @@ timer_arm_abs(timer_t *t, uint64_t expire)
   LIST_INSERT_SORTED(&timers, t, t_link, timer_cmp);
 }
 
-void
-timer_arm(timer_t *t, unsigned int delta)
-{
-  timer_arm_abs(t, clock_get_irq_blocked() + delta);
-}
-
 
 // IRQ_LEVEL_CLOCK must be blocked
 int
