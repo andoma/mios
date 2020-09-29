@@ -38,6 +38,7 @@ void *
 cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
                void (*thread_exit)(void))
 {
+  stack = (uint32_t *)(((intptr_t)stack) & ~7);
   *--stack = 0x21000000;  // PSR
   *--stack = (uint32_t) entry;
   *--stack = (uint32_t) thread_exit;
