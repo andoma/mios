@@ -10,3 +10,4 @@ void sleep_until(uint64_t deadline);
 
 uint64_t clock_get(void);
 
+uint64_t clock_get_irq_blocked(void);

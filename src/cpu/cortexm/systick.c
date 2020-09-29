@@ -48,7 +48,7 @@ exc_systick(void)
 }
 
 
-static uint64_t
+uint64_t
 clock_get_irq_blocked(void)
 {
   while(1) {

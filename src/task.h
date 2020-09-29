@@ -85,3 +85,5 @@ void cond_signal(cond_t *c);
 void cond_broadcast(cond_t *c);
 
 void cond_wait(cond_t *c, mutex_t *m);
+
+int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline);
