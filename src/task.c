@@ -295,10 +295,15 @@ int
 task_sleep(struct task_queue *waitable, int useconds)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  const int64_t deadline = clock_get_irq_blocked() + useconds;
-  const int r = task_sleep_abs_sched_locked(waitable, deadline);
+  if(useconds) {
+    const int64_t deadline = clock_get_irq_blocked() + useconds;
+    const int r = task_sleep_abs_sched_locked(waitable, deadline);
+    irq_permit(s);
+    return r;
+  }
+  task_sleep_sched_locked(waitable);
   irq_permit(s);
-  return r;
+  return 0;
 }
 
 
