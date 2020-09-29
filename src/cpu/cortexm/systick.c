@@ -30,18 +30,11 @@ exc_systick(void)
   }
 
   const uint64_t now = clock;
-  struct timer_list pending;
-  LIST_INIT(&pending);
-  timer_t *t, *n;
-  for(t = LIST_FIRST(&timers); t != NULL; t = n) {
-    n = LIST_NEXT(t, t_link);
-    if(t->t_expire < now) {
-      LIST_REMOVE(t, t_link);
-      LIST_INSERT_HEAD(&pending, t, t_link);
-    }
-  }
 
-  while((t = LIST_FIRST(&pending)) != NULL) {
+  while(1) {
+    timer_t *t = LIST_FIRST(&timers);
+    if(t == NULL || t->t_expire > now)
+      break;
     LIST_REMOVE(t, t_link);
     t->t_expire = 0;
     t->t_cb(t->t_opaque);
@@ -67,7 +60,11 @@ clock_get_irq_blocked(void)
   }
 }
 
-
+static int
+timer_cmp(const timer_t *a, const timer_t *b)
+{
+  return a->t_expire > b->t_expire;
+}
 
 // IRQ_LEVEL_CLOCK must be blocked
 void
@@ -77,7 +74,7 @@ timer_arm_abs(timer_t *t, uint64_t expire)
     LIST_REMOVE(t, t_link);
 
   t->t_expire = expire;
-  LIST_INSERT_HEAD(&timers, t, t_link);
+  LIST_INSERT_SORTED(&timers, t, t_link, timer_cmp);
 }
 
 void
