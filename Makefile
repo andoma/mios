@@ -35,6 +35,7 @@ SRCS += ${SRC}/mios.c \
 SRCS += ${SRC}/lib/math/trig.c \
 	${SRC}/lib/math/powf.c \
 	${SRC}/lib/math/sqrtf.c \
+	${SRC}/lib/math/math_diag.c \
 
 
 SRCS += ${SRC}/heap_simple.c
