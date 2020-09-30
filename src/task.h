@@ -6,6 +6,8 @@
 
 #include "timer.h"
 
+#define TASK_ACCOUNTING
+
 TAILQ_HEAD(task_queue, task);
 
 #define TASK_STATE_RUNNING  0
@@ -33,6 +35,15 @@ typedef struct task {
   void *t_sp_bottom;
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
+
+#ifdef TASK_ACCOUNTING
+  uint32_t t_cycle_enter;
+  uint32_t t_cycle_acc;
+  uint32_t t_load;
+  uint32_t t_ctx_switches_acc;
+  uint32_t t_ctx_switches;
+#endif
+
   SLIST_ENTRY(task) t_global_link;
   char t_name[14];
   uint8_t t_prio;

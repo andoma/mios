@@ -68,6 +68,10 @@ task_switch(void *cur_sp)
   task_t *const curtask = task_current();
   curtask->t_sp = cur_sp;
 
+#ifdef TASK_ACCOUNTING
+  curtask->t_cycle_acc += cpu_cycle_counter() - curtask->t_cycle_enter;
+#endif
+
   int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(curtask->t_state == TASK_STATE_RUNNING) {
@@ -103,6 +107,11 @@ task_switch(void *cur_sp)
 
   cpu->sched.current = t;
   irq_permit(s);
+
+#ifdef TASK_ACCOUNTING
+  t->t_cycle_enter = cpu_cycle_counter();
+  t->t_ctx_switches_acc++;
+#endif
 
   cpu_stack_redzone(t);
   cpu_fpu_enable(cpu->sched.current_fpu == t);
@@ -157,6 +166,13 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   t->t_state = 0;
   t->t_prio = prio;
+
+#ifdef TASK_ACCOUNTING
+  t->t_cycle_acc = 0;
+  t->t_load = 0;
+  t->t_ctx_switches = 0;
+  t->t_ctx_switches_acc = 0;
+#endif
 
   if(flags & TASK_FPU) {
     t->t_fpuctx = sp_bottom + stack_size;
@@ -498,15 +514,62 @@ task_init(void)
 
 
 
+#ifdef TASK_ACCOUNTING
+
+static void *
+accounting_thread(void *arg)
+{
+  int64_t ts = clock_get();
+
+  uint32_t prev_cc = cpu_cycle_counter();
+
+  while(1) {
+    ts += 1000000;
+    task_sleep_until(ts);
+    uint32_t cc = cpu_cycle_counter();
+    uint32_t cc_delta = (cc - prev_cc) / 10000;
+    prev_cc = cc;
+
+    int s = irq_forbid(IRQ_LEVEL_SWITCH);
+    task_t *t;
+    SLIST_FOREACH(t, &alltasks, t_global_link) {
+      t->t_load = t->t_cycle_acc / cc_delta;
+      t->t_cycle_acc = 0;
+      t->t_ctx_switches = t->t_ctx_switches_acc;
+      t->t_ctx_switches_acc = 0;
+    }
+    irq_permit(s);
+  }
+  return NULL;
+}
+
+static void __attribute__((constructor(900)))
+accounting_init(void)
+{
+  task_create(accounting_thread, NULL, 256, "accounting", 0, 0);
+}
+
+#endif
+
 static int
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  task_t *t;
-  cli_printf(cli, " %14s %10s Pri S\n", "Name", "Stack");
+  task_t *t;     //
+  cli_printf(cli, " Name           Stack      Pri S CtxSwch Load\n");
   SLIST_FOREACH(t, &alltasks, t_global_link) {
-    cli_printf(cli, " %14s %p %3d %c\n", t->t_name, t->t_sp_bottom,
+    cli_printf(cli, " %14s %p %3d %c "
+#ifdef TASK_ACCOUNTING
+               "%6d %3d.%d%%"
+#endif
+               "\n", t->t_name, t->t_sp_bottom,
                t->t_prio,
-               "RSZ"[t->t_state]);
+               "RSZ"[t->t_state]
+#ifdef TASK_ACCOUNTING
+               ,t->t_ctx_switches,
+               t->t_load / 100,
+               t->t_load % 100
+#endif
+               );
   }
   return 0;
 }

@@ -43,3 +43,13 @@ cpu_stack_redzone(task_t *t)
 }
 
 void cpu_fpu_ctx_init(int *ctx);
+
+
+#ifdef TASK_ACCOUNTING
+static inline uint32_t
+cpu_cycle_counter(void)
+{
+  volatile unsigned int *DWT_CYCCNT   = (volatile unsigned int *)0xE0001004;
+  return *DWT_CYCCNT;
+}
+#endif
