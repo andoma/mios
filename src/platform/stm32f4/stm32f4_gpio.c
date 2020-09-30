@@ -105,7 +105,7 @@ typedef struct {
 } gpio_irq_t;
 
 static gpio_irq_t gpio_irqs[16];
-
+static uint8_t gpio_irq_level[7];
 
 #define SYSCFG_EXTICR(x) (0x40013808 + (4 * x))
 
@@ -145,24 +145,33 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
 
   reg_set_bit(EXTI_IMR, bit);
 
-  int s = irq_forbid(IRQ_LEVEL_IO);
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
   reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
   irq_permit(s);
 
   int irq;
-  if(bit < 5)
+  int group;
+  if(bit < 5) {
     irq = bit + 6;
-  else if(bit < 10)
+    group = bit;
+  } else if(bit < 10) {
     irq = 30;
-  else
+    group = 5;
+  } else {
     irq = 47;
+    group = 6;
+  }
 
-  // XXX: Need conflict checking for different levels on shared IRQ lines
+  if(gpio_irq_level[group] && gpio_irq_level[group] != level) {
+    panic("IRQ level conflict for group %d", group);
+  }
+
+  gpio_irq_level[group] = level;
   irq_enable(irq, level);
 }
 
 
-static void
+static void __attribute__((noinline))
 gpio_irq(int line)
 {
   reg_wr(EXTI_PR, 1 << line);
