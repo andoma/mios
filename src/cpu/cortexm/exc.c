@@ -73,6 +73,11 @@ void
 exc_usage_fault(void)
 {
   uint16_t ufsr = *UFSR;
+  if(ufsr & 0x2) {
+    void *psp;
+    asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
+    panic("Invalid use of EPSR, PSP:%p ", psp);
+  }
 #ifdef __ARM_FP
   if(ufsr & 0x8) {
     // NOCP (ie, tried to use FPU)
