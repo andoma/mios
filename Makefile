@@ -16,7 +16,7 @@ SRC := ${T}/src
 #
 include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
-CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror
+CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
 CPPFLAGS += -I${T}/include -I${SRC}
 
@@ -41,8 +41,10 @@ SRCS += ${SRC}/lib/math/trig.c \
 SRCS += ${SRC}/heap_simple.c
 
 SRCS += ${SRC}/drivers/ms5611.c
-SRCS += ${SRC}/drivers/sx1280.c
 SRCS += ${SRC}/drivers/mpu9250.c
+
+SRCS += ${SRC}/drivers/sx1280/sx1280.c \
+	${SRC}/drivers/sx1280/sx1280_mios.c
 
 OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}
