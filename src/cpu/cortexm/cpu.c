@@ -6,6 +6,8 @@ cpu_t cpu0 = {
   .name = "cpu0",
 };
 
+static volatile unsigned int * const ACTLR = (unsigned int *)0xe000e008;
+
 static volatile unsigned int * const SHCSR = (unsigned int *)0xe000ed24;
 
 static volatile unsigned int * const FPCCR = (unsigned int *)0xe000ef34;
@@ -23,6 +25,12 @@ volatile unsigned int *SCB_DEMCR    = (volatile unsigned int *)0xE000EDFC;
 static void __attribute__((constructor(150)))
 cpu_init(void)
 {
+  if(0) {
+    // Enable this to disable instruction folding, write buffer and
+    // interrupt of multi-cycle instructions
+    // This can help generate more precise busfauls
+    *ACTLR |= 7;
+  }
   extern void *idle_stack;
   task_init_cpu(&cpu0.sched, cpu0.name, &idle_stack);
 
