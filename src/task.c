@@ -160,8 +160,8 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   void *sp_bottom = memalign(stack_size + fpu_ctx_size + sizeof(task_t),
                              CPU_STACK_ALIGNMENT);
-  void *sp = sp_bottom + stack_size + fpu_ctx_size;
-  task_t *t = sp;
+  void *sp = sp_bottom + stack_size;
+  task_t *t = sp + fpu_ctx_size;
   strlcpy(t->t_name, name, sizeof(t->t_name));
 
   t->t_state = 0;
