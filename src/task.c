@@ -555,15 +555,16 @@ static int
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
   task_t *t;     //
-  cli_printf(cli, " Name           Stack      Pri S CtxSwch Load\n");
+  cli_printf(cli, " Name           Stack      Pri St CtxSwch Load\n");
   SLIST_FOREACH(t, &alltasks, t_global_link) {
-    cli_printf(cli, " %14s %p %3d %c "
+    cli_printf(cli, " %14s %p %3d %c%c "
 #ifdef TASK_ACCOUNTING
                "%6d %3d.%d%%"
 #endif
                "\n", t->t_name, t->t_sp_bottom,
                t->t_prio,
-               "RSZ"[t->t_state]
+               "RSZ"[t->t_state],
+               t->t_fpuctx ? 'F' : ' '
 #ifdef TASK_ACCOUNTING
                ,t->t_ctx_switches,
                t->t_load / 100,
