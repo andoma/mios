@@ -430,14 +430,34 @@ mutex_lock_sched_locked(mutex_t *m)
 {
   task_t *const curtask = task_current();
 
-  if(m->owner != NULL) {
+  while(m->owner != NULL) {
     assert(m->owner != curtask);
-    curtask->t_state = TASK_STATE_SLEEPING;
-    TAILQ_INSERT_TAIL(&m->waiters, curtask, t_link);
-    while(m->owner != NULL) {
-      schedule();
-      irq_permit(irq_lower());
+
+#ifdef TASK_DEBUG
+    if(task_is_on_readyqueue(curtask)) {
+      panic("%s: Task %p is on readyqueue",
+            __FUNCTION__, curtask);
     }
+
+    if(task_is_on_queue(curtask, &m->waiters)) {
+      panic("%s: Task %p is already on wait queue",
+            __FUNCTION__, curtask);
+    }
+
+    if(task_trace) {
+      printf("Task %p:%s waiting owner %p:%s\n",
+             curtask, curtask->t_name,
+             m->owner, m->owner->t_name);
+    }
+#endif
+
+    if(curtask->t_state != TASK_STATE_SLEEPING) {
+      curtask->t_state = TASK_STATE_SLEEPING;
+      TAILQ_INSERT_TAIL(&m->waiters, curtask, t_link);
+    }
+
+    schedule();
+    irq_permit(irq_lower());
   }
   m->owner = curtask;
 }
