@@ -8,6 +8,7 @@
 
 #include "clk_config.h"
 
+static void monitor(uart_t *u);
 
 #define USART_SR   0x00
 #define USART_DR   0x04
@@ -82,6 +83,13 @@ uart_irq(uart_t *u)
 
   if(sr & (1 << 5)) {
     const uint8_t c = reg_rd(u->reg_base + USART_DR);
+    if(c == 5) {
+      extern int task_trace;
+      task_trace = 1;
+    }
+    if(c == 4) {
+      monitor(u);
+    }
     u->rx_fifo[u->rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
     u->rx_fifo_wrptr++;
     task_wakeup(&u->wait_rx, 1);
@@ -116,3 +124,155 @@ uart_init(uart_t *u, int reg_base, int baudrate)
 }
 
 
+
+static void __attribute__((noinline))
+mon_putch(uart_t *u, char c)
+{
+  while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+  reg_wr(u->reg_base + USART_DR, c);
+}
+
+static void __attribute__((noinline))
+mon_putu4(uart_t *u, uint8_t c)
+{
+  c &= 0xf;
+  if(c < 10)
+    mon_putch(u, c + '0');
+  else
+    mon_putch(u, c + 'a' - 10);
+}
+
+static void __attribute__((noinline))
+mon_putu8(uart_t *u, uint8_t c)
+{
+  mon_putu4(u, c >> 4);
+  mon_putu4(u, c);
+}
+
+static void __attribute__((noinline))
+mon_putu32(uart_t *u, uint32_t u32)
+{
+  mon_putu8(u, u32 >> 24);
+  mon_putu8(u, u32 >> 16);
+  mon_putu8(u, u32 >> 8);
+  mon_putu8(u, u32);
+}
+
+static void __attribute__((noinline))
+mon_putstr(uart_t *u, const char *s)
+{
+  for(; *s; s++) {
+    mon_putch(u, *s);
+  }
+}
+
+static char __attribute__((noinline))
+mon_getch(uart_t *u)
+{
+  while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {}
+  char c = reg_rd(u->reg_base + USART_DR);
+  mon_putch(u, c);
+  return c;
+}
+
+
+static char  __attribute__((noinline))
+mon_getu32(uart_t *u, uint32_t *p)
+{
+  uint32_t u32 = 0;
+  char c = 0;
+  do {
+    c = mon_getch(u);
+  } while(c ==' ');
+
+  while(1) {
+    switch(c) {
+    case '0' ... '9':
+      u32 = (u32 << 4) | (c - '0');
+      break;
+    case 'a' ... 'f':
+      u32 = (u32 << 4) | (c - 'a' + 10);
+      break;
+    case 'A' ... 'F':
+      u32 = (u32 << 4) | (c - 'A' + 10);
+      break;
+    default:
+      *p = u32;
+      return c;
+    }
+    c = mon_getch(u);
+  }
+
+}
+
+static void
+print_word(uart_t *u, uint32_t addr)
+{
+
+  mon_putu32(u, addr);
+  mon_putstr(u, ": ");
+  uint32_t v = *(uint32_t *)(intptr_t)addr;
+  mon_putu32(u, v);
+}
+
+
+static void
+print_basepri(uart_t *u)
+{
+  unsigned int basepri;
+  asm volatile ("mrs %0, basepri\n\t" : "=r" (basepri));
+  mon_putu32(u, basepri);
+}
+
+static void
+print_task(uart_t *u, task_t *t)
+{
+  mon_putstr(u, "TASK @ ");
+  mon_putu32(u, (uint32_t)t);
+  mon_putstr(u, " Name: ");
+  mon_putstr(u, t->t_name);
+  mon_putstr(u, " State: ");
+  mon_putch(u, "RSZ"[t->t_state]);
+}
+
+static void
+monitor(uart_t *u)
+{
+  irq_off();
+  mon_putstr(u, "*** BREAK MONITOR\n# ");
+
+  uint32_t addr = 0;
+  char cmd = 0;
+
+  while(1) {
+    char c = mon_getch(u);
+  reswitch:
+    switch(c) {
+    case 'x':
+    case 't':
+      cmd = c;
+      c = mon_getu32(u, &addr);
+      goto reswitch;
+    case 'i':
+      cmd = c;
+      break;
+
+    case 10:
+    case 13:
+      switch(cmd) {
+      case 'x':
+        print_word(u, addr);
+        addr += 4;
+        break;
+      case 't':
+        print_task(u, (void *)addr);
+        break;
+      case 'i':
+        print_basepri(u);
+        break;
+      }
+      mon_putstr(u, "\n# ");
+    }
+  }
+
+}
