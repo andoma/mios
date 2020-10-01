@@ -16,6 +16,8 @@ SRC := ${T}/src
 #
 include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
+CFLAGS += -Wframe-larger-than=128
+
 CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
 CPPFLAGS += -I${T}/include -I${SRC}
