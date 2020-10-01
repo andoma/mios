@@ -1,5 +1,9 @@
-//#define READYQUEUE_DEBUG
+#define TASK_DEBUG
+
+
+#ifndef TASK_DEBUG
 #define NDEBUG
+#endif
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,6 +23,9 @@
 #define TASK_PRIO_MASK (TASK_PRIOS - 1)
 
 SLIST_HEAD(task_slist, task);
+
+int task_trace;
+
 
 static struct task_queue readyqueue[TASK_PRIOS];
 static uint32_t active_queues;
@@ -41,19 +48,39 @@ task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom)
            "idle_%s", cpu_name);
 }
 
+#ifdef TASK_DEBUG
+
+static int
+task_is_on_queue(task_t *t, struct task_queue *q)
+{
+  task_t *x;
+  TAILQ_FOREACH(x, q, t_link) {
+    if(x == t) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+
+static int
+task_is_on_readyqueue(task_t *t)
+{
+  for(int i = 0; i < TASK_PRIOS; i++) {
+    if(task_is_on_queue(t, &readyqueue[i]))
+      return 1;
+  }
+  return 0;
+}
+#endif
 
 static void
 readyqueue_insert(task_t *t, const char *whom)
 {
-#ifdef READYQUEUE_DEBUG
-  for(int i = 0; i < TASK_PRIOS; i++) {
-    task_t *x;
-    TAILQ_FOREACH(x, &readyqueue[i], t_link) {
-      if(x == t) {
-        panic("%s: Inserting task %p on readyqueue but it's already there",
-              whom, t);
-      }
-    }
+#ifdef TASK_DEBUG
+  if(task_is_on_readyqueue(t)) {
+    panic("%s: Inserting task %p on readyqueue but it's already there",
+          whom, t);
   }
 #endif
   TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_link);
@@ -86,7 +113,7 @@ task_switch(void *cur_sp)
   } else {
     which = 31 - which;
     t = TAILQ_FIRST(&readyqueue[which]);
-#ifdef READYQUEUE_DEBUG
+#ifdef TASK_DEBUG
     if(t == NULL)
       panic("No task on queue %d", which);
 #endif
@@ -98,11 +125,14 @@ task_switch(void *cur_sp)
     assert(t->t_state == TASK_STATE_RUNNING);
   }
 
-#if 0
-  printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p bot:%p] s=0x%x\n",
-         curtask, curtask->t_name, curtask->t_sp,
-         t, t->t_name, t->t_sp, t->t_sp_bottom,
-         s);
+#ifdef TASK_DEBUG
+  if(task_trace) {
+    uint32_t *sp = t->t_sp;
+    printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p PC:%x]\n",
+           curtask, curtask->t_name, curtask->t_sp,
+           t, t->t_name, t->t_sp, sp[14]);
+
+  }
 #endif
 
   cpu->sched.current = t;
@@ -255,12 +285,10 @@ task_sleep_abs_sched_locked(struct task_queue *waitable, int64_t deadline)
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
-#ifdef READYQUEUE_DEBUG
-  for(int i = 0; i < TASK_PRIOS; i++) {
-    task_t *x;
-    TAILQ_FOREACH(x, &readyqueue[i], t_link) {
-      assert(x != curtask);
-    }
+#ifdef TASK_DEBUG
+  if(task_is_on_readyqueue(curtask)) {
+    panic("%s: Task %p is on readyqueue",
+          __FUNCTION__, curtask);
   }
 #endif
 
@@ -292,12 +320,10 @@ task_sleep_sched_locked(struct task_queue *waitable)
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
-#ifdef READYQUEUE_DEBUG
-  for(int i = 0; i < TASK_PRIOS; i++) {
-    task_t *x;
-    TAILQ_FOREACH(x, &readyqueue[i], t_link) {
-      assert(x != curtask);
-    }
+#ifdef TASK_DEBUG
+  if(task_is_on_readyqueue(curtask)) {
+    panic("%s: Task %p is on readyqueue",
+          __FUNCTION__, curtask);
   }
 #endif
 
@@ -352,15 +378,6 @@ task_sleep_until(uint64_t deadline)
 
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
-
-#ifdef READYQUEUE_DEBUG
-  for(int i = 0; i < TASK_PRIOS; i++) {
-    task_t *x;
-    TAILQ_FOREACH(x, &readyqueue[i], t_link) {
-      assert(x != curtask);
-    }
-  }
-#endif
 
   timer.t_cb = task_sleep_timeout2;
   timer.t_opaque = curtask;
