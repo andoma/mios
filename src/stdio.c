@@ -14,7 +14,7 @@ typedef struct {
 } fmtparam_t;
 
 
-static size_t
+static size_t __attribute__((noinline))
 emit_str(fmtcb_t *cb, void *aux, const char *str,
          const fmtparam_t *fp)
 {
@@ -31,7 +31,7 @@ emit_str(fmtcb_t *cb, void *aux, const char *str,
 }
 
 
-static size_t
+static size_t  __attribute__((noinline))
 emit_u32(fmtcb_t *cb, void *aux, unsigned int x,
          const fmtparam_t *fp, int neg)
 {
@@ -56,7 +56,7 @@ emit_u32(fmtcb_t *cb, void *aux, unsigned int x,
 }
 
 
-static size_t
+static size_t  __attribute__((noinline))
 emit_s32(fmtcb_t *cb, void *aux, int x,
          const fmtparam_t *fp)
 {
@@ -67,7 +67,7 @@ emit_s32(fmtcb_t *cb, void *aux, int x,
 }
 
 
-static size_t
+static size_t  __attribute__((noinline))
 emit_double(fmtcb_t *cb, void *aux, double v,
            const fmtparam_t *fp)
 {
@@ -77,7 +77,7 @@ emit_double(fmtcb_t *cb, void *aux, double v,
 }
 
 
-static size_t
+static size_t  __attribute__((noinline))
 emit_x32(fmtcb_t *cb, void *aux, unsigned int x,
          const fmtparam_t *fp)
 {
@@ -102,7 +102,7 @@ emit_x32(fmtcb_t *cb, void *aux, unsigned int x,
 }
 
 
-static int
+static int  __attribute__((noinline))
 parse_dec(const char **fmt, int defval)
 {
   int c = **fmt;
