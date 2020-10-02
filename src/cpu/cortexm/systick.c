@@ -45,7 +45,7 @@ clock_get_irq_blocked(void)
 {
   while(1) {
     uint32_t v = *SYST_VAL;
-    uint32_t remain = (1000000 / HZ) * v / TICKS_PER_HZ;
+    uint32_t remain = v / TICKS_PER_US;
     uint64_t c = clock;
 
     c += (1000000 / HZ) - remain;
