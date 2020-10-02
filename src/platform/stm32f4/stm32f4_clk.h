@@ -12,6 +12,19 @@
 #define CLK_SPI2 CLK_ID(CLK_APB1, 14)
 #define CLK_SPI3 CLK_ID(CLK_APB1, 15)
 
+
+#define CLK_TIM2  CLK_ID(CLK_APB1, 0)
+#define CLK_TIM3  CLK_ID(CLK_APB1, 1)
+#define CLK_TIM4  CLK_ID(CLK_APB1, 2)
+#define CLK_TIM5  CLK_ID(CLK_APB1, 3)
+#define CLK_TIM6  CLK_ID(CLK_APB1, 4)
+#define CLK_TIM7  CLK_ID(CLK_APB1, 5)
+#define CLK_TIM12 CLK_ID(CLK_APB1, 6)
+#define CLK_TIM13 CLK_ID(CLK_APB1, 7)
+#define CLK_TIM14 CLK_ID(CLK_APB1, 8)
+
+
+
 static inline void
 clk_enable(uint16_t id)
 {
