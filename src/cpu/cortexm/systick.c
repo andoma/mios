@@ -5,6 +5,7 @@
 #include "clk_config.h"
 #include "sys.h"
 #include "irq.h"
+#include "systick.h"
 
 #define HZ 100
 #define TICKS_PER_US (SYSTICK_RVR / 1000000)
@@ -13,8 +14,6 @@
 static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
 static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
 static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
-
-LIST_HEAD(timer_list, timer);
 
 static struct timer_list timers;
 
@@ -66,12 +65,17 @@ timer_cmp(const timer_t *a, const timer_t *b)
 
 // IRQ_LEVEL_CLOCK must be blocked
 void
-timer_arm_abs(timer_t *t, uint64_t expire)
+timer_arm_abs(timer_t *t, uint64_t expire, int flags)
 {
   if(t->t_expire)
     LIST_REMOVE(t, t_link);
 
   t->t_expire = expire;
+
+#ifdef HAVE_HRTIMER
+  if(flags & TIMER_HIGHRES && !hrtimer_arm(t, expire))
+    return;
+#endif
   LIST_INSERT_SORTED(&timers, t, t_link, timer_cmp);
 }
 

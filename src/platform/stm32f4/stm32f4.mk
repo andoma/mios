@@ -5,6 +5,8 @@ CPPFLAGS += -I${P}
 
 CFLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 
+CPPFLAGS += -DHAVE_HRTIMER
+
 LDSCRIPT = ${P}/stm32f4.ld
 
 include ${SRC}/cpu/cortexm/cortexm.mk
@@ -16,3 +18,4 @@ SRCS += ${P}/platform.c \
 	${P}/stm32f4_i2c.c \
 	${P}/stm32f4_spi.c \
 	${P}/stm32f4_dma.c \
+	${P}/stm32f4_tim.c \
