@@ -12,6 +12,8 @@
 #include "stm32f4_tim.h"
 #include "stm32f4_clk.h"
 
+#include "mios.h"
+#include "cli.h"
 
 /************************************************************
  * TIM7 acts as high resolution system timer
@@ -20,22 +22,59 @@
 
 static struct timer_list hr_timers;
 
+// #define HRTIMER_TRACE 16
+
+#ifdef HRTIMER_TRACE
+
+#define HRTIMER_TRACE_FIRE 1
+#define HRTIMER_TRACE_ARM  2
+#define HRTIMER_TRACE_IRQ  3
+
+typedef struct {
+  uint64_t when;
+  timer_t *t;
+  uint16_t arr;
+  uint8_t op;
+} hrtimer_trace_t;
+
+static int traceptr;
+static hrtimer_trace_t tracebuf[HRTIMER_TRACE];
+
+static void
+hrtimer_trace_add(uint64_t when, timer_t *t,
+                  uint16_t arr, uint8_t op)
+{
+  int idx = traceptr & (HRTIMER_TRACE - 1);
+  tracebuf[idx].when = when;
+  tracebuf[idx].t    = t;
+  tracebuf[idx].arr  = arr;
+  tracebuf[idx].op   = op;
+  traceptr++;
+}
+
+#endif
+
 static void
 hrtimer_rearm(timer_t *t, int64_t now)
 {
+  irq_ensure(IRQ_LEVEL_CLOCK);
   const int64_t delta = t->t_expire - now;
-
-  reg_wr(TIM7_BASE + TIMx_CR1, 0x8);
+  reg_wr(TIM7_BASE + TIMx_CR1, 0x0);
   uint32_t arr;
-  if(delta < 1) {
-    arr = 1;
+  if(delta < 11) {
+    arr = 11;
   } else if(delta > 655350) {
     arr = 655350;
   } else {
     arr = delta;
   }
 
-  reg_wr(TIM7_BASE + TIMx_ARR, ((9 + arr) / 10) - 1);
+  arr = ((9 + arr) / 10) - 1;
+#ifdef HRTIMER_TRACE
+  hrtimer_trace_add(now, t, arr, HRTIMER_TRACE_ARM);
+#endif
+  reg_wr(TIM7_BASE + TIMx_CNT, 0xffff);
+  reg_wr(TIM7_BASE + TIMx_ARR, arr);
   reg_wr(TIM7_BASE + TIMx_CR1, 0x9);
 }
 
@@ -44,7 +83,11 @@ void
 irq_55(void)
 {
   reg_wr(TIM7_BASE + TIMx_SR, 0x0);
+
   const int64_t now = clock_get_irq_blocked();
+#ifdef HRTIMER_TRACE
+  hrtimer_trace_add(now, NULL, 0, HRTIMER_TRACE_IRQ);
+#endif
 
   while(1) {
     timer_t *t = LIST_FIRST(&hr_timers);
@@ -55,6 +98,17 @@ irq_55(void)
       hrtimer_rearm(t, now);
       return;
     }
+
+#ifdef HRTIMER_TRACE
+    hrtimer_trace_add(now, t, 0, HRTIMER_TRACE_FIRE);
+
+    int64_t miss = now - t->t_expire;
+    if(miss > 500) {
+      panic("Timer %p \"%s\"  missed with %d",
+            t, t->t_name, (int)miss);
+    }
+#endif
+
     LIST_REMOVE(t, t_link);
     t->t_expire = 0;
     t->t_cb(t->t_opaque);
@@ -91,91 +145,52 @@ hrtimer_init(void)
 }
 
 
-#if 0
-
-#include "cli.h"
 
 
 static int
-cmd_sleep(cli_t *cli, int argc, char **argv)
+cmd_hrt(cli_t *cli, int argc, char **argv)
 {
-  int64_t p = clock_get();
-  int64_t t = p + 323456;
-  sleep_until_hr(t);
-  int64_t a = clock_get();
-
-  printf("Slept for %dus   TARGET:%d\n", (int)(a - p), (int)t);
-  return 0;
-}
-
-
-CLI_CMD_DEF("sleep", cmd_sleep);
-
-
-
-#include <io.h>
-
-static int
-cmd_pulsar(cli_t *cli, int argc, char **argv)
-{
-
-  int64_t c = clock_get();
-
-  gpio_t pin = GPIO_PA(6);
-  gpio_conf_output(pin, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  while(1) {
-    c += 250;
-    while(clock_get() < c) {
-    }
-    gpio_set_output(pin, 1);
-    c += 250;
-    while(clock_get() < c) {
-    }
-    gpio_set_output(pin, 0);
-  }
-  return 0;
-}
-
-
-CLI_CMD_DEF("pulsar", cmd_pulsar);
-
-
-static gpio_t mt_pin;
-int mt_pin_val;
-static timer_t mt[50];
-
-static void
-mt_cb(void *x)
-{
-  mt_pin_val = !mt_pin_val;
-  gpio_set_output(mt_pin, mt_pin_val);
-}
-
-
-static int
-cmd_mt(cli_t *cli, int argc, char **argv)
-{
-  int64_t ts = clock_get() + 100000;
-
-  mt_pin = GPIO_PA(6);
-  gpio_conf_output(mt_pin, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  mt_pin_val = !mt_pin_val;
-  gpio_set_output(mt_pin, mt_pin_val);
-
+  int64_t now = clock_get_irq_blocked();
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
-  for(int i = 0; i < 50; i++) {
-    mt[i].t_cb = mt_cb;
-    timer_arm_abs(&mt[i], ts - i * 100, TIMER_HIGHRES);
-  }
-  irq_permit(q);
 
+#ifdef HRTIMER_TRACE
+  printf("%d trace events in total\n", traceptr);
+
+  for(int i = 0; i < HRTIMER_TRACE; i++) {
+    int idx = (traceptr + i) & (HRTIMER_TRACE - 1);
+    hrtimer_trace_t *ht = &tracebuf[idx];
+    switch(ht->op) {
+    default:
+      continue;
+    case HRTIMER_TRACE_FIRE:
+      printf("FIRE\t\t");
+      break;
+    case HRTIMER_TRACE_ARM:
+      printf("ARM\t%d\t", ht->arr);
+      break;
+    case HRTIMER_TRACE_IRQ:
+      printf("IRQ\t\t%15d %15d\n", (int)ht->when, (int)(now - ht->when));
+      continue;
+    }
+    printf("%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
+           ht->t);
+  }
+#endif
+
+  const timer_t *t;
+  LIST_FOREACH(t, &hr_timers, t_link) {
+    printf("%p %p %p %15d %15d %s\n",
+           t, t->t_cb, t->t_opaque,
+           (int)t->t_expire,
+           (int)(t->t_expire - now),
+           t->t_name);
+  }
+
+  irq_permit(q);
   return 0;
 }
 
 
-CLI_CMD_DEF("mt", cmd_mt);
-#endif
+CLI_CMD_DEF("hrt", cmd_hrt);
+
+
