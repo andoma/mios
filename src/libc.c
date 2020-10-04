@@ -102,3 +102,25 @@ strlcpy(char * restrict dst, const char * restrict src, size_t siz)
 
   return (src - s0) + strlen(src);
 }
+
+int
+atoi(const char *s)
+{
+  int m = 1;
+  int r = 0;
+  while(*s && *s <= 32)
+    s++;
+
+  if(!*s)
+    return 0;
+
+  if(*s == '-') {
+    m = -1;
+    s++;
+  }
+  while(*s >= '0' && *s <= '9') {
+    r = r * 10 + *s - '0';
+    s++;
+  }
+  return r * m;
+}
