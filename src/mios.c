@@ -46,8 +46,9 @@ panic(const char *fmt, ...)
   vprintf(fmt, ap);
   va_end(ap);
   printf("\n");
-  while(1) {
-  }
+  cli_console();
+  printf("Halted\n");
+  while(1) {}
 }
 
 
