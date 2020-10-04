@@ -238,7 +238,7 @@ print_task(uart_t *u, task_t *t)
 static void
 monitor(uart_t *u)
 {
-  irq_off();
+  irq_forbid(IRQ_LEVEL_ALL);
   mon_putstr(u, "*** BREAK MONITOR\n# ");
 
   uint32_t addr = 0;

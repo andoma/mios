@@ -1,5 +1,7 @@
 #pragma once
 
+#define IRQ_LEVEL_ALL      1
+
 #define IRQ_LEVEL_SCHED    2
 
 #define IRQ_LEVEL_CONSOLE  3
@@ -16,11 +18,31 @@
 
 #define IRQ_LEVEL_TO_PRI(x) ((x) << IRQ_PRI_LEVEL_SHIFT)
 
+#include "mios.h"
+
 inline void  __attribute__((always_inline))
-irq_off(void)
+irq_ensure0(unsigned int level, const char *file, int line)
 {
-  asm volatile ("cpsid i\n\t");
+  unsigned int control;
+  asm volatile ("mrs %0, control\n\t" : "=r" (control));
+
+  if(!(control & 2))
+    return;
+
+  const unsigned int pri = IRQ_LEVEL_TO_PRI(level);
+  unsigned int basepri;
+  asm volatile ("mrs %0, basepri\n\t" : "=r" (basepri));
+
+
+  if(!basepri || basepri > pri) {
+    panic("Insuficient IRQ blocking at %s:%d level:%d basepri:0x%x control:0x%x\n",
+          file, line, level, basepri, control);
+  }
 }
+
+
+#define irq_ensure(l) irq_ensure0(l, __FILE__, __LINE__)
+
 
 inline unsigned int  __attribute__((always_inline))
 irq_forbid(unsigned int level)
