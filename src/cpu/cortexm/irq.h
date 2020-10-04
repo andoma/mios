@@ -63,8 +63,11 @@ irq_ack(int irq)
 static inline int  __attribute__((always_inline))
 can_sleep(void)
 {
+  unsigned int basepri;
+  asm volatile ("mrs %0, basepri\n\t" : "=r" (basepri));
+
   unsigned int control;
   asm volatile ("mrs %0, control\n\t" : "=r" (control));
-  return !!(control & 0x2);
+  return !!(control & 0x2) && basepri == 0;
 }
 
