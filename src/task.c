@@ -298,6 +298,7 @@ task_sleep_abs_sched_locked(struct task_queue *waitable,
   timer.t_cb = task_sleep_timeout;
   timer.t_opaque = &ts;
   timer.t_expire = 0;
+  timer.t_name = curtask->t_name;
   timer_arm_abs(&timer, deadline, flags);
 
   if(waitable != NULL) {
@@ -383,6 +384,7 @@ task_sleep_until(uint64_t deadline, int flags)
   timer.t_cb = task_sleep_timeout2;
   timer.t_opaque = curtask;
   timer.t_expire = 0;
+  timer.t_name = curtask->t_name;
   timer_arm_abs(&timer, deadline, flags);
 
   while(curtask->t_state == TASK_STATE_SLEEPING) {

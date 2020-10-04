@@ -10,6 +10,7 @@ typedef struct timer {
   void (*t_cb)(void *opaque);
   void *t_opaque;
   uint64_t t_expire;
+  const char *t_name;
 } timer_t;
 
 #define TIMER_HIGHRES 0x1
