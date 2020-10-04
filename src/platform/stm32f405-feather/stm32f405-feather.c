@@ -85,9 +85,66 @@ board_setup_clocks(void)
 }
 
 
+
+#include "cpu.h"
+
+static inline void __attribute__((always_inline))
+cyclewait(uint32_t ref, uint32_t t)
+{
+  while(cpu_cycle_counter() - ref < t) {
+  }
+}
+
+
+void
+neopix(uint8_t r, uint8_t g, uint8_t b)
+{
+  int word = (g << 24) | (r << 16) | (b << 8);
+
+  gpio_t pin = GPIO_PC(0);
+  gpio_set_output(pin, 0);
+  gpio_conf_output(pin, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  usleep_hr(50);
+
+  int q = irq_forbid(IRQ_LEVEL_ALL);
+  uint32_t ref = cpu_cycle_counter();
+  uint32_t t0 = 0;
+
+  for(int j = 0; j < 24; j++, word <<= 1) {
+
+    cyclewait(ref, t0);
+    gpio_set_output(pin, 1);
+
+    int o = word < 0 ? 134 : 67;
+    cyclewait(ref, t0 + o);
+    gpio_set_output(pin, 0);
+    t0 += 201;
+  }
+  irq_permit(q);
+}
+
+#include "cli.h"
+#include <stdlib.h>
+
+static int
+cmd_neopix(cli_t *c, int argc, char **argv)
+{
+  if(argc < 4)
+    return -1;
+  neopix(atoi(argv[1]),atoi(argv[2]),atoi(argv[3]));
+  return 0;
+}
+
+CLI_CMD_DEF("neopix", cmd_neopix);
+
+
 static void *
 blinker(void *arg)
 {
+  neopix(0,0,10);
+
   while(1) {
     usleep(500000);
     gpio_set_output(BLINK_GPIO, 0); // Red LED
