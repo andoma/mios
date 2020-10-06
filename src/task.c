@@ -610,7 +610,7 @@ accounting_init(void)
 static int
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  task_t *t;     //
+  task_t *t;
   cli_printf(cli, " Name           Stack      Pri St CtxSwch Load\n");
   SLIST_FOREACH(t, &alltasks, t_global_link) {
     cli_printf(cli, " %14s %p %3d %c%c "
