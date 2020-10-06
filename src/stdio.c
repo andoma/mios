@@ -9,9 +9,22 @@ static int dbl2str(char *buf, size_t bufsize, double realvalue, int precision);
 typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
 
 typedef struct {
-  int width;
-  char lz;
+  int16_t width;
+  unsigned char lz:1;
+  unsigned char la:1;
 } fmtparam_t;
+
+
+static size_t
+emit_repeated_char(fmtcb_t *cb, void *aux, ssize_t len, char c)
+{
+  if(len < 0)
+    return 0;
+  for(int i = 0; i < len; i++) {
+    cb(aux, &c, 1);
+  }
+  return len;
+}
 
 
 static size_t __attribute__((noinline))
@@ -24,10 +37,16 @@ emit_str(fmtcb_t *cb, void *aux, const char *str,
   size_t sl = strlen(str);
   size_t total = 0;
   const int pad = fp->width - sl;
-  for(int i = 0; i < pad; i++) {
-    total += cb(aux, " ", 1);
-  }
-  return total + cb(aux, str, sl);
+
+  if(!fp->la)
+    total += emit_repeated_char(cb, aux, pad, ' ');
+
+  total += cb(aux, str, sl);
+
+  if(fp->la)
+    total += emit_repeated_char(cb, aux, pad, ' ');
+
+  return total;
 }
 
 
@@ -47,12 +66,18 @@ emit_u32(fmtcb_t *cb, void *aux, unsigned int x,
   size_t total = 0;
 
   const int pad = fp->width - (digits + neg);
-  for(int i = 0; i < pad; i++) {
-    total += cb(aux, fp->lz ? "0" : " ", 1);
-  }
+  if(!fp->la)
+    total += emit_repeated_char(cb, aux, pad,
+                                fp->lz ? '0' : ' ');
+
   if(neg)
     total += cb(aux, "-", 1);
-  return cb(aux, buf + 10 - digits, digits) + total;
+  total += cb(aux, buf + 10 - digits, digits);
+
+  if(fp->la)
+    total += emit_repeated_char(cb, aux, pad, ' ');
+
+  return total;
 }
 
 
@@ -135,12 +160,15 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += cb(aux, s, fmt - s - 1);
 
     fmtparam_t fp;
+    fp.lz = 0;
+    fp.la = 0;
 
     if(*fmt == '0') {
       fp.lz = 1;
       fmt++;
-    } else {
-      fp.lz = 0;
+    } else if(*fmt == '-') {
+      fp.la = 1;
+      fmt++;
     }
 
     fp.width = parse_dec(&fmt, -1);
