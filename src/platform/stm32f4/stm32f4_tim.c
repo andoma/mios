@@ -17,7 +17,7 @@
 
 /************************************************************
  * TIM7 acts as high resolution system timer
- * We offer 10us precision
+ * We offer 1µs precision
  ***********************************************************/
 
 static struct timer_list hr_timers;
@@ -61,15 +61,14 @@ hrtimer_rearm(timer_t *t, int64_t now)
   const int64_t delta = t->t_expire - now;
   reg_wr(TIM7_BASE + TIMx_CR1, 0x0);
   uint32_t arr;
-  if(delta < 11) {
-    arr = 11;
-  } else if(delta > 655350) {
-    arr = 655350;
+  if(delta < 2) {
+    arr = 2;
+  } else if(delta > 65535) {
+    arr = 65535;
   } else {
     arr = delta;
   }
 
-  arr = ((9 + arr) / 10) - 1;
 #ifdef HRTIMER_TRACE
   hrtimer_trace_add(now, t, arr, HRTIMER_TRACE_ARM);
 #endif
@@ -138,8 +137,7 @@ hrtimer_init(void)
 {
   clk_enable(CLK_TIM7);
   irq_enable(55, IRQ_LEVEL_CLOCK);
-  // Configure prescaler for 10us precision
-  reg_wr(TIM7_BASE + TIMx_PSC, TIMERCLOCK / 100000 - 1);
+  reg_wr(TIM7_BASE + TIMx_PSC, TIMERCLOCK / 1000000 - 1);
   reg_wr(TIM7_BASE + TIMx_DIER, 0x1);
   reg_wr(TIM7_BASE + TIMx_CR1, 0x8);
 }
