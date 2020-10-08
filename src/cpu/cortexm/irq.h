@@ -1,6 +1,7 @@
 #pragma once
 
 #define IRQ_LEVEL_ALL      1
+#define IRQ_LEVEL_HIGH     1
 
 #define IRQ_LEVEL_SCHED    2
 
