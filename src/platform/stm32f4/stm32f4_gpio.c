@@ -155,7 +155,7 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
     irq = bit + 6;
     group = bit;
   } else if(bit < 10) {
-    irq = 30;
+    irq = 23;
     group = 5;
   } else {
     irq = 47;
