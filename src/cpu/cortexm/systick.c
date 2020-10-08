@@ -130,7 +130,7 @@ systick_timepulse(void)
 static void __attribute__((constructor(130)))
 timer_init(void)
 {
-  *SYST_RVR = TICKS_PER_HZ - 1;
+  *SYST_RVR = TICKS_PER_HZ;
   *SYST_VAL = 0;
   *SYST_CSR = 7;
 }
