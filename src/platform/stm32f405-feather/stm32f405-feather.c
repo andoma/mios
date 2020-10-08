@@ -96,17 +96,21 @@ cyclewait(uint32_t ref, uint32_t t)
 }
 
 
+#define NEOPIX_PIN GPIO_PC(0)
+
+static void
+neopix_init(void)
+{
+  gpio_set_output(NEOPIX_PIN, 0);
+  gpio_conf_output(NEOPIX_PIN, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+}
+
 void
 neopix(uint8_t r, uint8_t g, uint8_t b)
 {
   int word = (g << 24) | (r << 16) | (b << 8);
-
-  gpio_t pin = GPIO_PC(0);
-  gpio_set_output(pin, 0);
-  gpio_conf_output(pin, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  usleep_hr(50);
+  gpio_t pin = NEOPIX_PIN;
 
   int q = irq_forbid(IRQ_LEVEL_ALL);
   uint32_t ref = cpu_cycle_counter();
@@ -143,6 +147,8 @@ CLI_CMD_DEF("neopix", cmd_neopix);
 static void *
 blinker(void *arg)
 {
+  neopix_init();
+  usleep(20);
   neopix(0,0,10);
 
   while(1) {
