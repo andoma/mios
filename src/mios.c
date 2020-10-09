@@ -35,10 +35,17 @@ init(void)
 
 
 
+void  __attribute__((weak))
+platform_panic(void)
+{
+}
+
+
 void
 panic(const char *fmt, ...)
 {
   irq_forbid(IRQ_LEVEL_ALL);
+  platform_panic();
   task_t *t = task_current();
   printf("\n\nPANIC in %s: ", t ? t->t_name : "<notask>");
   va_list ap;
