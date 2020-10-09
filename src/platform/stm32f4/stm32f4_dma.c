@@ -81,7 +81,7 @@ stm32f4_dma_wait(stm32f4_dma_instance_t instance)
   while(1) {
     const uint8_t bits = isrresult[instance];
     if(bits == 0) {
-      if(task_sleep(&waitq[instance], 100000)) {
+      if(task_sleep_delta(&waitq[instance], 100000, 0)) {
         return ERR_TIMEOUT;
       }
       continue;

@@ -340,20 +340,36 @@ task_sleep_sched_locked(struct task_queue *waitable)
 }
 
 
-int
-task_sleep(struct task_queue *waitable, int useconds)
+
+
+void
+task_sleep(struct task_queue *waitable)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  if(useconds) {
-    const int64_t deadline = clock_get_irq_blocked() + useconds;
-    const int r = task_sleep_abs_sched_locked(waitable, deadline, 0);
-    irq_permit(s);
-    return r;
-  }
   task_sleep_sched_locked(waitable);
   irq_permit(s);
-  return 0;
 }
+
+
+int
+task_sleep_delta(struct task_queue *waitable, int useconds, int flags)
+{
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+  const int64_t deadline = clock_get_irq_blocked() + useconds;
+  const int r = task_sleep_abs_sched_locked(waitable, deadline, flags);
+  irq_permit(s);
+  return r;
+}
+
+int
+task_sleep_deadline(struct task_queue *waitable, int64_t deadline, int flags)
+{
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+  const int r = task_sleep_abs_sched_locked(waitable, deadline, flags);
+  irq_permit(s);
+  return r;
+}
+
 
 
 static void

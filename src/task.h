@@ -77,7 +77,14 @@ task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
 void task_wakeup(struct task_queue *waitable, int all);
 
-int task_sleep(struct task_queue *waitable, int useconds);
+void task_sleep(struct task_queue *waitable);
+
+int task_sleep_deadline(struct task_queue *waitable, int64_t deadline, int flags)
+  __attribute__((warn_unused_result));
+
+int task_sleep_delta(struct task_queue *waitable, int useconds, int flags)
+  __attribute__((warn_unused_result));
+
 
 task_t *task_current(void);
 
@@ -98,4 +105,6 @@ void cond_broadcast(cond_t *c);
 
 void cond_wait(cond_t *c, mutex_t *m);
 
-int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags);
+int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
+  __attribute__((warn_unused_result));
+

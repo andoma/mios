@@ -40,7 +40,7 @@ uart_putc(void *arg, char c)
     if(avail)
       break;
     assert(u->tx_busy);
-    task_sleep(&u->wait_tx, 0);
+    task_sleep(&u->wait_tx);
   }
 
   if(!u->tx_busy) {
@@ -71,7 +71,7 @@ uart_getc(void *arg)
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
 
   while(u->rx_fifo_wrptr == u->rx_fifo_rdptr)
-    task_sleep(&u->wait_rx, 0);
+    task_sleep(&u->wait_rx);
 
   char c = u->rx_fifo[u->rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
   u->rx_fifo_rdptr++;

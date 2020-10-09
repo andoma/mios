@@ -311,7 +311,7 @@ mpu9250_read_fifo(mpu9250_t *dev, uint8_t *output)
       return cnt;
     }
     if(cnt == 0) {
-      if(task_sleep(&dev->wait, 100000)) {
+      if(task_sleep_delta(&dev->wait, 100000, 0)) {
         irq_permit(s);
         return ERR_TIMEOUT;
       }
