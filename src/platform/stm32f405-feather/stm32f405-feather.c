@@ -12,7 +12,9 @@
 
 #include "uart.h"
 
-#define BLINK_GPIO GPIO_PC(1) // Red led close to USB connection
+#define NEOPIX_GPIO GPIO_PC(0)
+#define PANIC_GPIO  GPIO_PA(4)
+#define BLINK_GPIO  GPIO_PC(1) // Red led close to USB connection
 
 static uart_t console;
 
@@ -96,13 +98,12 @@ cyclewait(uint32_t ref, uint32_t t)
 }
 
 
-#define NEOPIX_PIN GPIO_PC(0)
 
 static void
 neopix_init(void)
 {
-  gpio_set_output(NEOPIX_PIN, 0);
-  gpio_conf_output(NEOPIX_PIN, GPIO_PUSH_PULL,
+  gpio_set_output(NEOPIX_GPIO, 0);
+  gpio_conf_output(NEOPIX_GPIO, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 }
 
@@ -110,7 +111,7 @@ void
 neopix(uint8_t r, uint8_t g, uint8_t b)
 {
   int word = (g << 24) | (r << 16) | (b << 8);
-  gpio_t pin = NEOPIX_PIN;
+  const gpio_t pin = NEOPIX_GPIO;
 
   int q = irq_forbid(IRQ_LEVEL_ALL);
   uint32_t ref = cpu_cycle_counter();
@@ -163,6 +164,20 @@ blinker(void *arg)
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
+  gpio_set_output(PANIC_GPIO, 0);
+  gpio_conf_output(PANIC_GPIO, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
   task_create(blinker, NULL, 512, "blinker", 0, 0);
+
+
 }
 
+
+
+void
+platform_panic(void)
+{
+  gpio_set_output(PANIC_GPIO, 1);
+  neopix(10,0,10);
+}
