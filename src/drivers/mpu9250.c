@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <malloc.h>
 
 #include "mios.h"
 #include "task.h"
@@ -9,6 +10,8 @@
 
 #include "mpu9250.h"
 #include "mpu9250_reg.h"
+
+#define FIFO_ITEM_SIZE  (12 + 8)
 
 struct mpu9250 {
   struct i2c aux;
@@ -21,42 +24,41 @@ struct mpu9250 {
   float msx;
   float msy;
   float msz;
+  uint8_t buf[1 + FIFO_ITEM_SIZE];
 };
 
 
 int
 read_u8(mpu9250_t *dev, uint8_t reg)
 {
-  uint8_t tx[2] = {0x80 | reg, 0};
-  uint8_t rx[2];
-  error_t err = dev->spi->rw(dev->spi, tx, rx, sizeof(rx), dev->nss);
-  return err ?: rx[1];
+  dev->buf[0] = 0x80 | reg;
+  dev->buf[1] = 0;
+  error_t err = dev->spi->rw(dev->spi, dev->buf, dev->buf, 2, dev->nss);
+  return err ?: dev->buf[1];
 }
 
 
 int
 read_u16(mpu9250_t *dev, uint8_t reg)
 {
-  uint8_t tx[3] = {0x80 | reg, 0, 0};
-  uint8_t rx[3];
-  error_t err = dev->spi->rw(dev->spi, tx, rx, sizeof(rx), dev->nss);
-  return err ?: rx[1] << 8 | rx[2];
+  dev->buf[0] = 0x80 | reg;
+  dev->buf[1] = 0;
+  dev->buf[2] = 0;
+  error_t err = dev->spi->rw(dev->spi, dev->buf, dev->buf, 3, dev->nss);
+  return err ?: dev->buf[1] << 8 | dev->buf[2];
 }
 
 
 error_t
 read_block(mpu9250_t *dev, uint8_t reg, uint8_t *buf, size_t len)
 {
-  uint8_t tx[len + 1];
-  uint8_t rx[len + 1];
+  dev->buf[0] = 0x80 | reg;
+  memset(dev->buf + 1, 0, len);
 
-  tx[0] = 0x80 | reg;
-  memset(tx + 1, 0, len);
-
-  error_t err = dev->spi->rw(dev->spi, tx, rx, len + 1, dev->nss);
+  error_t err = dev->spi->rw(dev->spi, dev->buf, dev->buf, len + 1, dev->nss);
   if(err)
     return err;
-  memcpy(buf, rx + 1, len);
+  memcpy(buf, dev->buf + 1, len);
   return ERR_OK;
 }
 
@@ -64,8 +66,9 @@ read_block(mpu9250_t *dev, uint8_t reg, uint8_t *buf, size_t len)
 error_t
 write_u8(mpu9250_t *dev, uint8_t reg, uint8_t value)
 {
-  uint8_t tx[2] = {reg, value};
-  return dev->spi->rw(dev->spi, tx, NULL, sizeof(tx), dev->nss);
+  dev->buf[0] = reg;
+  dev->buf[1] = value;
+  return dev->spi->rw(dev->spi, dev->buf, NULL, 2, dev->nss);
 }
 
 
@@ -148,7 +151,7 @@ aux_i2c(struct i2c *i2c, uint8_t addr,
 mpu9250_t *
 mpu9250_create(spi_t *bus, gpio_t nss, gpio_t irq)
 {
-  mpu9250_t *dev = malloc(sizeof(mpu9250_t));
+  mpu9250_t *dev = xalloc(sizeof(mpu9250_t), 0, MEM_TYPE_DMA);
   dev->aux.rw = aux_i2c;
   dev->pending_irq = 0;
   TAILQ_INIT(&dev->wait);
@@ -297,7 +300,6 @@ mpu9250_reset(mpu9250_t *dev)
   return ERR_OK;
 }
 
-const size_t fifo_item_size = 12 + 8;
 
 
 static error_t
@@ -320,7 +322,7 @@ mpu9250_read_fifo(mpu9250_t *dev, uint8_t *output)
       continue;
     }
 
-    error_t err = read_block(dev, MPU9250_FIFO_R_W, output, fifo_item_size);
+    error_t err = read_block(dev, MPU9250_FIFO_R_W, output, FIFO_ITEM_SIZE);
     irq_permit(s);
     return err;
   }
@@ -334,7 +336,7 @@ mpu9250_calibrate(mpu9250_t *dev)
 {
   error_t err;
 
-  uint8_t buf[fifo_item_size];
+  uint8_t buf[FIFO_ITEM_SIZE];
 
   int32_t agx = 0;
   int32_t agy = 0;
@@ -381,7 +383,7 @@ error_t
 mpu9250_read(mpu9250_t *dev, mpu9250_values_t *v)
 {
   error_t err;
-  uint8_t buf[fifo_item_size];
+  uint8_t buf[FIFO_ITEM_SIZE];
 
   if((err = mpu9250_read_fifo(dev, buf)))
     return err;
