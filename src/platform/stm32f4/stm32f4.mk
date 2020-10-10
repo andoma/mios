@@ -11,9 +11,8 @@ LDSCRIPT = ${P}/stm32f4.ld
 
 include ${SRC}/cpu/cortexm/cortexm.mk
 
-SRCS += ${P}/platform.c \
-	${P}/uart.c \
-	${P}/console.c \
+SRCS += ${P}/uart.c \
+	${P}/stm32f4.c \
 	${P}/stm32f4_gpio.c \
 	${P}/stm32f4_i2c.c \
 	${P}/stm32f4_spi.c \

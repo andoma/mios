@@ -6,6 +6,6 @@ CPPFLAGS += -I${P}
 
 include ${SRC}/cpu/cortexm/cortexm.mk
 
-SRCS += ${P}/platform.c \
+SRCS += ${P}/lm3s811evb.c \
 	${P}/console.c \
 

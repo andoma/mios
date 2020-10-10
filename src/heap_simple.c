@@ -6,14 +6,14 @@
 #include <string.h>
 #include <mios.h>
 
-#include <irq.h>
-
-#include "heap.h"
-#include "platform/platform.h"
-
+#include "cli.h"
+#include "task.h"
 
 #define ALIGN(a, b) (((a) + (b) - 1) & ~((b) - 1))
 
+static mutex_t heap_mutex = MUTEX_INITIALIZER(heap_mutex);
+
+SLIST_HEAD(heap_header_slist, heap_header);
 
 typedef struct heap_block {
   struct heap_block *next;
@@ -21,7 +21,14 @@ typedef struct heap_block {
   uint32_t free : 1;
 } heap_block_t;
 
-static heap_block_t *main_heap;
+
+static struct heap_header_slist heaps;
+
+typedef struct heap_header {
+  heap_block_t *blocks;
+  SLIST_ENTRY(heap_header) link;
+  int type;
+} heap_header_t;
 
 
 static inline heap_block_t *
@@ -43,15 +50,15 @@ hb_size(const heap_block_t *hb)
   return (void *)hb->next - (void *)hb;
 }
 
-//static void malloc_tests(void);
-//static void malloc_tests2(void);
 
-static heap_block_t *
-heap_create(void *start, void *end)
+void
+heap_add_mem(long start, long end, int type)
 {
-  heap_block_t *hb = (void *)ALIGN((intptr_t)start, sizeof(heap_block_t));
+  heap_header_t *hh = (void *)start;
 
-  heap_block_t *sentinel = (void *)ALIGN((intptr_t)end - sizeof(heap_block_t),
+  heap_block_t *hb = (void *)ALIGN((intptr_t)(hh + 1), sizeof(heap_block_t));
+
+  heap_block_t *sentinel = (void *)ALIGN(end - sizeof(heap_block_t),
                                          sizeof(heap_block_t));
 
   hb->next = sentinel;
@@ -62,8 +69,16 @@ heap_create(void *start, void *end)
   hb_set_prev(sentinel, hb);
   sentinel->free = 0;
 
-  return hb;
+  hh->blocks = hb;
+  hh->type = type;
+  mutex_lock(&heap_mutex);
+  SLIST_INSERT_HEAD(&heaps, hh, link);
+  mutex_unlock(&heap_mutex);
+
+  printf("Memory 0x%x - 0x%x (%d kB) type 0x%x\n", (int)start, (int)end,
+         (int)(end - start) / 1024, type);
 }
+
 
 
 
@@ -94,7 +109,7 @@ verify_heap(heap_block_t *hb)
 
 
 
-
+#if 0
 static void
 heap_dump0(heap_block_t *hb)
 {
@@ -115,27 +130,44 @@ heap_dump0(heap_block_t *hb)
          hb_get_prev(hb),
          hb_get_prev(hb) == prev ? "OK" : "BAD PREVLINK");
 }
+#endif
 
 
-void
-heap_dump(void)
+
+
+static int
+cmd_mem(cli_t *cli, int argc, char **argv)
 {
-  heap_dump0(main_heap);
+  mutex_lock(&heap_mutex);
+
+  heap_header_t *hh;
+  SLIST_FOREACH(hh, &heaps, link) {
+    cli_printf(cli, "Heap at %p type 0x%x\n", hh, hh->type);
+    heap_block_t *hb = hh->blocks;
+    size_t use = 0;
+    size_t avail = 0;
+    while(hb->next) {
+      cli_printf(cli, "\t%s @ %p size:0x%08x\n",
+                 hb->free ? "free" : "used",
+                 hb, hb_size(hb));
+      if(hb->free)
+        avail += hb_size(hb);
+      else
+        use += hb_size(hb);
+      hb = hb->next;
+    }
+    cli_printf(cli, "\t%d bytes used, %d bytes free\n\n",
+               use, avail);
+  }
+  mutex_unlock(&heap_mutex);
+  return 0;
 }
 
-static void  __attribute__((constructor(120)))
-heap_init(void)
-{
-  extern unsigned long _edata;
-  extern unsigned long _ebss;
-  void *heap_start = (void *)&_ebss;
-  void *heap_end =   platform_heap_end();
+CLI_CMD_DEF("mem", cmd_mem);
 
-  printf("\n\n\nRAM Layout edata:%p, ebss:%p, eheap:%p\n",
-         &_edata, &_ebss, heap_end);
 
-  main_heap = heap_create(heap_start, heap_end);
-}
+
+
 
 
 static void *
@@ -230,12 +262,30 @@ heap_free(void *ptr)
   }
 }
 
-static void *
-malloc0(size_t size)
+
+static heap_block_t *
+heap_find(int type)
 {
-  int s = irq_forbid(IRQ_LEVEL_SWITCH);
-  void *x = heap_alloc(main_heap, size, 0);
-  irq_permit(s);
+  heap_header_t *hh;
+  SLIST_FOREACH(hh, &heaps, link) {
+    if(type == 0 || type == hh->type) {
+      return hh->blocks;
+    }
+  }
+  return NULL;
+}
+
+
+
+
+
+static void *
+malloc0(size_t size, size_t align, int type)
+{
+  mutex_lock(&heap_mutex);
+  heap_block_t *hb = heap_find(type);
+  void *x = hb ? heap_alloc(hb, size, align) : NULL;
+  mutex_unlock(&heap_mutex);
   if(x == NULL)
     panic("Out of memory");
   return x;
@@ -247,14 +297,14 @@ malloc0(size_t size)
 void *
 malloc(size_t size)
 {
-  return malloc0(size);
+  return malloc0(size, 0, 0);
 }
 
 void *
 calloc(size_t nmemb, size_t size)
 {
   size *= nmemb;
-  void *x = malloc0(size);
+  void *x = malloc0(size, 0, 0);
   memset(x, 0, size);
   return x;
 }
@@ -262,21 +312,22 @@ calloc(size_t nmemb, size_t size)
 void
 free(void *ptr)
 {
-  int s = irq_forbid(IRQ_LEVEL_SWITCH);
+  mutex_lock(&heap_mutex);
   heap_free(ptr);
-  irq_permit(s);
+  mutex_unlock(&heap_mutex);
 }
 
 
 void *
 memalign(size_t size, size_t alignment)
 {
-  int s = irq_forbid(IRQ_LEVEL_SWITCH);
-  void *x = heap_alloc(main_heap, size, alignment);
-  irq_permit(s);
-  if(x == NULL)
-    panic("Out of memory");
-  return x;
+  return malloc0(size, alignment, 0);
+}
+
+void *
+xalloc(size_t size, size_t alignment, int type)
+{
+  return malloc0(size, alignment, type);
 }
 
 

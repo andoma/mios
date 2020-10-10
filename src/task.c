@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <malloc.h>
 
 #include "task.h"
 #include "sys.h"
@@ -188,8 +189,10 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
     fpu_ctx_size += FPU_CTX_SIZE;
   }
 
-  void *sp_bottom = memalign(stack_size + fpu_ctx_size + sizeof(task_t),
-                             CPU_STACK_ALIGNMENT);
+  void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(task_t),
+                           CPU_STACK_ALIGNMENT,
+                           flags & TASK_DMA_STACK ? MEM_TYPE_DMA : 0);
+
   void *sp = sp_bottom + stack_size;
   task_t *t = sp + fpu_ctx_size;
   strlcpy(t->t_name, name, sizeof(t->t_name));
