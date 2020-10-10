@@ -32,7 +32,7 @@ uart_getc(void *arg)
     uint8_t avail = rx_fifo_wrptr - rx_fifo_rdptr;
     if(avail)
       break;
-    task_sleep(&uart_rx, 0);
+    task_sleep(&uart_rx);
   }
 
   char c = rx_fifo[rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
