@@ -45,7 +45,8 @@ typedef struct task {
 #endif
 
   SLIST_ENTRY(task) t_global_link;
-  char t_name[14];
+  char t_name[13];
+  uint8_t t_flags;
   uint8_t t_prio;
   uint8_t t_state;
 } task_t;
@@ -72,6 +73,7 @@ void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 
 #define TASK_FPU       0x1
 #define TASK_DMA_STACK 0x2
+#define TASK_DETACHED  0x4
 
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                     const char *name, int flags, unsigned int prio);

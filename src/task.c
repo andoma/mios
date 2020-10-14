@@ -32,6 +32,10 @@ static struct task_queue readyqueue[TASK_PRIOS];
 static uint32_t active_queues;
 static struct task_slist alltasks;
 
+static mutex_t alltasks_mutex = MUTEX_INITIALIZER(alltasks_mutex);
+static cond_t task_mgmt_cond = COND_INITIALIZER(task_mgmt_cond);
+
+static struct task_queue join_wait = { NULL, &join_wait.tqh_first};
 
 inline task_t *
 task_current(void)
@@ -164,13 +168,48 @@ task_end(void)
     cpu_fpu_enable(0);
   }
 
+  curtask->t_state = TASK_STATE_ZOMBIE;
+
+  if(curtask->t_flags & TASK_DETACHED) {
+    cond_signal(&task_mgmt_cond);
+  } else {
+    task_wakeup(&join_wait, 1);
+  }
   irq_permit(s);
 
-  curtask->t_state = TASK_STATE_ZOMBIE;
   schedule();
   irq_lower();
   while(1) {
   }
+}
+
+
+static void
+task_destroy(task_t *t)
+{
+  SLIST_REMOVE(&alltasks, t, task, t_global_link);
+  free(t);
+}
+
+void *
+task_join(task_t *t)
+{
+  printf("Waiting for %s to exit flags=%x\n",
+         t->t_name, t->t_flags);
+  int s = irq_forbid(IRQ_LEVEL_SWITCH);
+
+  assert((t->t_flags & TASK_DETACHED) == 0);
+
+  while(t->t_state != TASK_STATE_ZOMBIE)
+    task_sleep(&join_wait);
+
+  irq_permit(s);
+
+  mutex_lock(&alltasks_mutex);
+  task_destroy(t);
+  mutex_unlock(&alltasks_mutex);
+
+  return NULL;
 }
 
 
@@ -199,6 +238,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   t->t_state = 0;
   t->t_prio = prio;
+  t->t_flags = flags;
 
 #ifdef TASK_ACCOUNTING
   t->t_cycle_acc = 0;
@@ -222,8 +262,11 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_link);
   active_queues |= 1 << t->t_prio;
-  SLIST_INSERT_HEAD(&alltasks, t, t_global_link);
   irq_permit(s);
+
+  mutex_lock(&alltasks_mutex);
+  SLIST_INSERT_HEAD(&alltasks, t, t_global_link);
+  mutex_unlock(&alltasks_mutex);
 
   schedule();
   return t;
@@ -581,37 +624,56 @@ cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
 
 
 static void __attribute__((constructor(101)))
-task_init(void)
+task_init_early(void)
 {
   for(int i = 0; i < TASK_PRIOS; i++)
     TAILQ_INIT(&readyqueue[i]);
 }
 
 
-
-#ifdef TASK_ACCOUNTING
-
 static void *
-accounting_thread(void *arg)
+task_mgmt_thread(void *arg)
 {
+#ifdef TASK_ACCOUNTING
   int64_t ts = clock_get();
-
   uint32_t prev_cc = cpu_cycle_counter();
+#endif
+
+  mutex_lock(&alltasks_mutex);
 
   while(1) {
+
+
+#ifdef TASK_ACCOUNTING
     ts += 1000000;
-    task_sleep_until(ts, 0);
+    int do_accounting =
+      cond_wait_timeout(&task_mgmt_cond, &alltasks_mutex, ts, 0);
     uint32_t cc = cpu_cycle_counter();
     uint32_t cc_delta = (cc - prev_cc) / 10000;
     prev_cc = cc;
+#else
+    int do_accounting = 0;
+    cond_wait(&task_mgmt_cond, &alltasks_mutex);
+#endif
 
     int s = irq_forbid(IRQ_LEVEL_SWITCH);
-    task_t *t;
-    SLIST_FOREACH(t, &alltasks, t_global_link) {
-      t->t_load = t->t_cycle_acc / cc_delta;
-      t->t_cycle_acc = 0;
-      t->t_ctx_switches = t->t_ctx_switches_acc;
-      t->t_ctx_switches_acc = 0;
+    task_t *t, *n;
+    for(t = SLIST_FIRST(&alltasks); t != NULL; t = n) {
+      n = SLIST_NEXT(t, t_global_link);
+
+      if(t->t_state == TASK_STATE_ZOMBIE && t->t_flags & TASK_DETACHED) {
+        task_destroy(t);
+        continue;
+      }
+
+#ifdef TASK_ACCOUNTING
+      if(do_accounting) {
+        t->t_load = t->t_cycle_acc / cc_delta;
+        t->t_cycle_acc = 0;
+        t->t_ctx_switches = t->t_ctx_switches_acc;
+        t->t_ctx_switches_acc = 0;
+      }
+#endif
     }
     irq_permit(s);
   }
@@ -619,27 +681,28 @@ accounting_thread(void *arg)
 }
 
 static void __attribute__((constructor(900)))
-accounting_init(void)
+task_init_late(void)
 {
-  task_create(accounting_thread, NULL, 256, "accounting", 0, 0);
+  task_create(task_mgmt_thread, NULL, 256, "taskmgmt", 0, 0);
 }
 
-#endif
+
 
 static int
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
   task_t *t;
-  cli_printf(cli, " Name           Stack      Pri St CtxSwch Load\n");
+  cli_printf(cli, " Name           Stack      Pri Sta CtxSwch Load\n");
   SLIST_FOREACH(t, &alltasks, t_global_link) {
-    cli_printf(cli, " %14s %p %3d %c%c "
+    cli_printf(cli, " %14s %p %3d %c%c%c "
 #ifdef TASK_ACCOUNTING
                "%6d %3d.%d%%"
 #endif
                "\n", t->t_name, t->t_sp_bottom,
                t->t_prio,
                "RSZ"[t->t_state],
-               t->t_fpuctx ? 'F' : ' '
+               t->t_fpuctx ? 'F' : ' ',
+               (t->t_flags & TASK_DETACHED) ? 'd' : ' '
 #ifdef TASK_ACCOUNTING
                ,t->t_ctx_switches,
                t->t_load / 100,
