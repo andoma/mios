@@ -102,6 +102,8 @@ void mutex_unlock(mutex_t *m);
 
 void cond_init(cond_t *c);
 
+#define COND_INITIALIZER(self) { { NULL, &(self).waiters.tqh_first}}
+
 void cond_signal(cond_t *c);
 
 void cond_broadcast(cond_t *c);
