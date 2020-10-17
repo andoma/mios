@@ -326,24 +326,17 @@ task_insert_wait_list(task_waitable_t *waitable, task_t *t)
 
 
 
-typedef struct task_sleep {
-  task_t *task;
-  task_waitable_t *waitable;
-} task_sleep_t;
-
 
 static void
-task_sleep_timeout(void *opaque)
+task_sleep_abs_sched_locked_timeout(void *opaque)
 {
-  const task_sleep_t *ts = opaque;
-  task_t *t = ts->task;
+  task_t *t = opaque;
 
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(t->t_state == TASK_STATE_SLEEPING) {
 
-    if(ts->waitable != NULL)
-      LIST_REMOVE(t, t_wait_link);
+    LIST_REMOVE(t, t_wait_link);
 
     t->t_state = TASK_STATE_RUNNING;
     if(t != task_current())
@@ -361,7 +354,6 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
   task_t *const curtask = task_current();
 
   timer_t timer;
-  task_sleep_t ts;
 
   assert(waitable != NULL);
   assert(curtask->t_state == TASK_STATE_RUNNING);
@@ -374,10 +366,8 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
   }
 #endif
 
-  ts.task = curtask;
-  ts.waitable = waitable;
-  timer.t_cb = task_sleep_timeout;
-  timer.t_opaque = &ts;
+  timer.t_cb = task_sleep_abs_sched_locked_timeout;
+  timer.t_opaque = curtask;
   timer.t_expire = 0;
   timer.t_name = curtask->t_name;
   timer_arm_abs(&timer, deadline, flags);
@@ -451,7 +441,7 @@ task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
 
 
 static void
-task_sleep_timeout2(void *opaque)
+task_sleep_until_timeout(void *opaque)
 {
   task_t *t = opaque;
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
@@ -475,7 +465,7 @@ task_sleep_until(uint64_t deadline, int flags)
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
-  timer.t_cb = task_sleep_timeout2;
+  timer.t_cb = task_sleep_until_timeout;
   timer.t_opaque = curtask;
   timer.t_expire = 0;
   timer.t_name = curtask->t_name;
