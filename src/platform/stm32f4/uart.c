@@ -125,6 +125,6 @@ uart_init(uart_t *u, int reg_base, int baudrate)
   reg_wr(u->reg_base + USART_CR1, (1 << 13)); // ENABLE
   reg_wr(u->reg_base + USART_BBR, bbr);
   reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
-  TAILQ_INIT(&u->wait_rx);
-  TAILQ_INIT(&u->wait_tx);
+  task_waitable_init(&u->wait_rx);
+  task_waitable_init(&u->wait_tx);
 }

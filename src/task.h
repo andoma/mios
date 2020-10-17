@@ -8,7 +8,7 @@
 
 #define TASK_ACCOUNTING
 
-TAILQ_HEAD(task_queue, task);
+LIST_HEAD(task_list, task);
 
 #define TASK_STATE_RUNNING  0
 #define TASK_STATE_SLEEPING 1
@@ -31,7 +31,11 @@ TAILQ_HEAD(task_queue, task);
  */
 
 typedef struct task {
-  TAILQ_ENTRY(task) t_link;
+  union {
+    TAILQ_ENTRY(task) t_ready_link;
+    LIST_ENTRY(task) t_wait_link;
+  };
+
   void *t_sp_bottom;
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
@@ -61,13 +65,15 @@ typedef struct sched_cpu {
 
 
 typedef struct mutex {
-  struct task_queue waiters;
+  struct task_list waiters;
   struct task *owner;
 } mutex_t;
 
-typedef struct cond {
-  struct task_queue waiters;
-} cond_t;
+typedef struct task_list task_waitable_t;
+
+typedef struct task_list cond_t;
+
+#define task_waitable_init(t) LIST_INIT(t)
 
 void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 
@@ -78,31 +84,35 @@ void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                     const char *name, int flags, unsigned int prio);
 
-void task_wakeup(struct task_queue *waitable, int all);
+void task_wakeup(task_waitable_t *waitable, int all);
 
-void task_sleep(struct task_queue *waitable);
+void task_sleep(task_waitable_t *waitable);
 
-int task_sleep_deadline(struct task_queue *waitable, int64_t deadline, int flags)
+int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
   __attribute__((warn_unused_result));
 
-int task_sleep_delta(struct task_queue *waitable, int useconds, int flags)
+int task_sleep_delta(task_waitable_t *waitable, int useconds, int flags)
   __attribute__((warn_unused_result));
 
 
 task_t *task_current(void);
 
-#define MUTEX_INITIALIZER(self) { { NULL, &(self).waiters.tqh_first}}
+#define MUTEX_INITIALIZER {}
 
-void mutex_init(mutex_t *m);
+inline void  __attribute__((always_inline)) mutex_init(mutex_t *m)
+{
+  LIST_INIT(&m->waiters);
+  m->owner = NULL;
+}
 
 void mutex_lock(mutex_t *m);
 
 void mutex_unlock(mutex_t *m);
 
 
-void cond_init(cond_t *c);
+#define COND_INITIALIZER {}
 
-#define COND_INITIALIZER(self) { { NULL, &(self).waiters.tqh_first}}
+#define cond_init(c) LIST_INIT(c)
 
 void cond_signal(cond_t *c);
 

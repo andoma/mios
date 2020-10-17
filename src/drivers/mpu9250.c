@@ -16,7 +16,7 @@
 struct mpu9250 {
   struct i2c aux;
   spi_t *spi;
-  struct task_queue wait;
+  task_waitable_t waitable;
   int pending_irq;
   gpio_t nss;
   float gs;
@@ -77,7 +77,7 @@ mpu9250_irq(void *arg)
 {
   mpu9250_t *dev = arg;
   dev->pending_irq = 1;
-  task_wakeup(&dev->wait, 0);
+  task_wakeup(&dev->waitable, 0);
 }
 
 
@@ -154,7 +154,7 @@ mpu9250_create(spi_t *bus, gpio_t nss, gpio_t irq)
   mpu9250_t *dev = xalloc(sizeof(mpu9250_t), 0, MEM_TYPE_DMA);
   dev->aux.rw = aux_i2c;
   dev->pending_irq = 0;
-  TAILQ_INIT(&dev->wait);
+  task_waitable_init(&dev->waitable);
   dev->spi = bus;
   dev->nss = nss;
 
@@ -313,7 +313,7 @@ mpu9250_read_fifo(mpu9250_t *dev, uint8_t *output)
       return cnt;
     }
     if(cnt == 0) {
-      if(task_sleep_delta(&dev->wait, 100000, 0)) {
+      if(task_sleep_delta(&dev->waitable, 100000, 0)) {
         irq_permit(s);
         return ERR_TIMEOUT;
       }

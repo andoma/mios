@@ -12,8 +12,6 @@
 
 #define NAME "stm32f4_i2c"
 
-mutex_t init_lock = MUTEX_INITIALIZER(init_lock);
-
 #define I2C_BASE(x)   (0x40005400 + ((x) * 0x400))
 
 #define I2C_CR1 0x00

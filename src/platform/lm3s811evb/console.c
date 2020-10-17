@@ -7,7 +7,7 @@ static volatile unsigned int * const UART_DR    = (unsigned int *)0x4000c000;
 static volatile unsigned int * const UART_IMSC  = (unsigned int *)0x4000c038;
 //static volatile unsigned int * const UART_RIS   = (unsigned int *)0x4000c03c;
 
-static struct task_queue uart_rx = TAILQ_HEAD_INITIALIZER(uart_rx);
+static task_waitable_t uart_rx;
 
 static uint8_t rx_fifo_rdptr;
 static uint8_t rx_fifo_wrptr;

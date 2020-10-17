@@ -25,13 +25,12 @@ static const uint8_t irqmap[16] = {
 
 static uint8_t isrresult[16];
 
-static struct task_queue waitq[16];
+static task_waitable_t waitq[16];
 
 
 static int
 stm32f4_dma_alloc_instance(int instance)
 {
-  TAILQ_INIT(&waitq[instance]);
   isrresult[instance] = 0;
   irq_enable(irqmap[instance], IRQ_LEVEL_DMA);
   return instance;

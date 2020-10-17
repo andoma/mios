@@ -24,6 +24,7 @@
 #define TASK_PRIO_MASK (TASK_PRIOS - 1)
 
 SLIST_HEAD(task_slist, task);
+TAILQ_HEAD(task_queue, task);
 
 int task_trace;
 
@@ -32,10 +33,10 @@ static struct task_queue readyqueue[TASK_PRIOS];
 static uint32_t active_queues;
 static struct task_slist alltasks;
 
-static mutex_t alltasks_mutex = MUTEX_INITIALIZER(alltasks_mutex);
-static cond_t task_mgmt_cond = COND_INITIALIZER(task_mgmt_cond);
+static mutex_t alltasks_mutex = MUTEX_INITIALIZER;
+static cond_t task_mgmt_cond = COND_INITIALIZER;
 
-static struct task_queue join_wait = { NULL, &join_wait.tqh_first};
+static task_waitable_t join_wait;
 
 inline task_t *
 task_current(void)
@@ -59,7 +60,20 @@ static int
 task_is_on_queue(task_t *t, struct task_queue *q)
 {
   task_t *x;
-  TAILQ_FOREACH(x, q, t_link) {
+  TAILQ_FOREACH(x, q, t_ready_link) {
+    if(x == t) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+
+static int
+task_is_on_list(task_t *t, struct task_list *l)
+{
+  task_t *x;
+  LIST_FOREACH(x, l, t_wait_link) {
     if(x == t) {
       return 1;
     }
@@ -88,7 +102,7 @@ readyqueue_insert(task_t *t, const char *whom)
           whom, t);
   }
 #endif
-  TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_link);
+  TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_ready_link);
   active_queues |= 1 << t->t_prio;
 }
 
@@ -122,7 +136,7 @@ task_switch(void *cur_sp)
     if(t == NULL)
       panic("No task on queue %d", which);
 #endif
-    TAILQ_REMOVE(&readyqueue[which], t, t_link);
+    TAILQ_REMOVE(&readyqueue[which], t, t_ready_link);
 
     if(TAILQ_FIRST(&readyqueue[which]) == NULL) {
       active_queues &= ~(1 << t->t_prio);
@@ -258,7 +272,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
          sp_bottom, sp, t, t->t_fpuctx);
 #endif
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-  TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_link);
+  TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_ready_link);
   active_queues |= 1 << t->t_prio;
   irq_permit(s);
 
@@ -272,13 +286,13 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
 
 void
-task_wakeup(struct task_queue *waitable, int all)
+task_wakeup(task_waitable_t *waitable, int all)
 {
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   task_t *t;
-  while((t = TAILQ_FIRST(waitable)) != NULL) {
+  while((t = LIST_FIRST(waitable)) != NULL) {
     assert(t->t_state == TASK_STATE_SLEEPING);
-    TAILQ_REMOVE(waitable, t, t_link);
+    LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
     if(t != task_current())
       readyqueue_insert(t, "wakeup");
@@ -289,10 +303,32 @@ task_wakeup(struct task_queue *waitable, int all)
   irq_permit(s);
 }
 
+static int
+task_prio_cmp(const task_t *a, const task_t *b)
+{
+  // Higher prio value -> earlier in list
+  // Maintain insert order for equal priorities
+  return a->t_prio <= b->t_prio;
+}
+
+
+
+static void __attribute__((noinline))
+task_insert_wait_list(task_waitable_t *waitable, task_t *t)
+{
+  LIST_INSERT_SORTED(waitable, t, t_wait_link, task_prio_cmp);
+}
+
+
+
+
+
+
+
 
 typedef struct task_sleep {
   task_t *task;
-  struct task_queue *waitable;
+  task_waitable_t *waitable;
 } task_sleep_t;
 
 
@@ -307,7 +343,7 @@ task_sleep_timeout(void *opaque)
   if(t->t_state == TASK_STATE_SLEEPING) {
 
     if(ts->waitable != NULL)
-      TAILQ_REMOVE(ts->waitable, t, t_link);
+      LIST_REMOVE(t, t_wait_link);
 
     t->t_state = TASK_STATE_RUNNING;
     if(t != task_current())
@@ -319,7 +355,7 @@ task_sleep_timeout(void *opaque)
 
 
 static int
-task_sleep_abs_sched_locked(struct task_queue *waitable,
+task_sleep_abs_sched_locked(task_waitable_t *waitable,
                             int64_t deadline, int flags)
 {
   task_t *const curtask = task_current();
@@ -327,6 +363,7 @@ task_sleep_abs_sched_locked(struct task_queue *waitable,
   timer_t timer;
   task_sleep_t ts;
 
+  assert(waitable != NULL);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
@@ -345,9 +382,7 @@ task_sleep_abs_sched_locked(struct task_queue *waitable,
   timer.t_name = curtask->t_name;
   timer_arm_abs(&timer, deadline, flags);
 
-  if(waitable != NULL) {
-    TAILQ_INSERT_TAIL(waitable, curtask, t_link);
-  }
+  task_insert_wait_list(waitable, curtask);
 
   while(curtask->t_state == TASK_STATE_SLEEPING) {
     schedule();
@@ -359,10 +394,11 @@ task_sleep_abs_sched_locked(struct task_queue *waitable,
 
 
 static void
-task_sleep_sched_locked(struct task_queue *waitable)
+task_sleep_sched_locked(task_waitable_t *waitable)
 {
   task_t *const curtask = task_current();
 
+  assert(waitable != NULL);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
@@ -373,9 +409,7 @@ task_sleep_sched_locked(struct task_queue *waitable)
   }
 #endif
 
-  if(waitable != NULL) {
-    TAILQ_INSERT_TAIL(waitable, curtask, t_link);
-  }
+  task_insert_wait_list(waitable, curtask);
 
   while(curtask->t_state == TASK_STATE_SLEEPING) {
     schedule();
@@ -387,7 +421,7 @@ task_sleep_sched_locked(struct task_queue *waitable)
 
 
 void
-task_sleep(struct task_queue *waitable)
+task_sleep(task_waitable_t *waitable)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   task_sleep_sched_locked(waitable);
@@ -396,7 +430,7 @@ task_sleep(struct task_queue *waitable)
 
 
 int
-task_sleep_delta(struct task_queue *waitable, int useconds, int flags)
+task_sleep_delta(task_waitable_t *waitable, int useconds, int flags)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   const int64_t deadline = clock_get_irq_blocked() + useconds;
@@ -406,7 +440,7 @@ task_sleep_delta(struct task_queue *waitable, int useconds, int flags)
 }
 
 int
-task_sleep_deadline(struct task_queue *waitable, int64_t deadline, int flags)
+task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   const int r = task_sleep_abs_sched_locked(waitable, deadline, flags);
@@ -495,15 +529,6 @@ sleep(unsigned int sec)
 }
 
 
-void
-mutex_init(mutex_t *m)
-{
-  TAILQ_INIT(&m->waiters);
-  m->owner = NULL;
-}
-
-
-
 static void
 mutex_lock_sched_locked(mutex_t *m)
 {
@@ -518,7 +543,7 @@ mutex_lock_sched_locked(mutex_t *m)
             __FUNCTION__, curtask);
     }
 
-    if(task_is_on_queue(curtask, &m->waiters)) {
+    if(task_is_on_list(curtask, &m->waiters)) {
       panic("%s: Task %p is already on wait queue",
             __FUNCTION__, curtask);
     }
@@ -532,7 +557,7 @@ mutex_lock_sched_locked(mutex_t *m)
 
     if(curtask->t_state != TASK_STATE_SLEEPING) {
       curtask->t_state = TASK_STATE_SLEEPING;
-      TAILQ_INSERT_TAIL(&m->waiters, curtask, t_link);
+      task_insert_wait_list(&m->waiters, curtask);
     }
 
     schedule();
@@ -557,9 +582,9 @@ mutex_unlock_sched_locked(mutex_t *m)
   assert(m->owner == task_current());
   m->owner = NULL;
 
-  task_t *t = TAILQ_FIRST(&m->waiters);
+  task_t *t = LIST_FIRST(&m->waiters);
   if(t != NULL) {
-    TAILQ_REMOVE(&m->waiters, t, t_link);
+    LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
     if(t != task_current())
       readyqueue_insert(t, "mutex_unlock");
@@ -578,23 +603,16 @@ mutex_unlock(mutex_t *m)
 
 
 void
-cond_init(cond_t *c)
-{
-  TAILQ_INIT(&c->waiters);
-}
-
-
-void
 cond_signal(cond_t *c)
 {
-  task_wakeup(&c->waiters, 0);
+  task_wakeup(c, 0);
 }
 
 
 void
 cond_broadcast(cond_t *c)
 {
-  task_wakeup(&c->waiters, 1);
+  task_wakeup(c, 1);
 }
 
 
@@ -603,7 +621,7 @@ cond_wait(cond_t *c, mutex_t *m)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);
-  task_sleep_sched_locked(&c->waiters);
+  task_sleep_sched_locked(c);
   mutex_lock_sched_locked(m);
   irq_permit(s);
 }
@@ -614,7 +632,7 @@ cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);
-  int r = task_sleep_abs_sched_locked(&c->waiters, deadline, flags);
+  int r = task_sleep_abs_sched_locked(c, deadline, flags);
   mutex_lock_sched_locked(m);
   irq_permit(s);
   return r;

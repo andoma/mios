@@ -10,8 +10,8 @@ typedef struct {
 
   uint32_t reg_base;
 
-  struct task_queue wait_rx;
-  struct task_queue wait_tx;
+  task_waitable_t wait_rx;
+  task_waitable_t wait_tx;
 
   uint8_t rx_fifo_rdptr;
   uint8_t rx_fifo_wrptr;

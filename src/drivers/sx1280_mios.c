@@ -30,7 +30,7 @@ typedef struct sx1280_mios {
   spi_t *bus;
 
 #ifdef BUSY_IRQ
-  struct task_queue busyq;
+  task_waitable_t busy_waitable;
   uint8_t busy;
 #endif
 
@@ -57,7 +57,7 @@ wait_ready(sx1280_mios_t *sm)
   int s = irq_forbid(IRQ_LEVEL_IO);
   const int64_t deadline = clock_get_irq_blocked() + 50000;
   while(sm->busy) {
-    if(task_sleep_deadline(&sm->busyq, deadline, 0)) {
+    if(task_sleep_deadline(&sm->busy_waitable, deadline, 0)) {
       irq_permit(s);
       return ERR_TIMEOUT;
     }
@@ -149,7 +149,7 @@ sx1280_busy_irq(void *arg)
   sx1280_mios_t *sm = arg;
   sm->busy = gpio_get_input(sm->gpio_busy);
   if(!sm->busy) // Wakeup on falling edge only
-    task_wakeup(&sm->busyq, 1);
+    task_wakeup(&sm->busy_waitable, 1);
 }
 #endif
 
@@ -175,7 +175,7 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t busy, gpio_t irq, gpio_t reset,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
 #ifdef BUSY_IRQ
-  TAILQ_INIT(&sm->busyq);
+  task_waitable_init(&sm->busy_waitable);
   gpio_conf_irq(sm->gpio_busy, GPIO_PULL_NONE, sx1280_busy_irq, sm,
                 GPIO_BOTH_EDGES, IRQ_LEVEL_IO);
   sm->busy = gpio_get_input(sm->gpio_busy);
