@@ -194,8 +194,6 @@ task_destroy(task_t *t)
 void *
 task_join(task_t *t)
 {
-  printf("Waiting for %s to exit flags=%x\n",
-         t->t_name, t->t_flags);
   int s = irq_forbid(IRQ_LEVEL_SWITCH);
 
   assert((t->t_flags & TASK_DETACHED) == 0);
