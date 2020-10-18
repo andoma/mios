@@ -520,10 +520,8 @@ sleep(unsigned int sec)
 
 
 static void
-mutex_lock_sched_locked(mutex_t *m)
+mutex_lock_sched_locked(mutex_t *m, task_t *curtask)
 {
-  task_t *const curtask = task_current();
-
   while(m->owner != NULL) {
     assert(m->owner != curtask);
 
@@ -560,8 +558,13 @@ mutex_lock_sched_locked(mutex_t *m)
 void
 mutex_lock(mutex_t *m)
 {
+  task_t *const curtask = task_current();
+
+  if(cpu_mutex_lock_fast(m, curtask))
+    return;
+
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  mutex_lock_sched_locked(m);
+  mutex_lock_sched_locked(m, curtask);
   irq_permit(s);
 }
 
@@ -612,7 +615,7 @@ cond_wait(cond_t *c, mutex_t *m)
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);
   task_sleep_sched_locked(c);
-  mutex_lock_sched_locked(m);
+  mutex_lock_sched_locked(m, task_current());
   irq_permit(s);
 }
 
@@ -623,7 +626,7 @@ cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);
   int r = task_sleep_abs_sched_locked(c, deadline, flags);
-  mutex_lock_sched_locked(m);
+  mutex_lock_sched_locked(m, task_current());
   irq_permit(s);
   return r;
 }

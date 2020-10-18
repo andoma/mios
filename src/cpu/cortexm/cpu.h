@@ -53,3 +53,21 @@ cpu_cycle_counter(void)
   return *DWT_CYCCNT;
 }
 #endif
+
+
+// Return 1 if lock was acquired
+static inline int
+cpu_mutex_lock_fast(mutex_t *m, task_t *curtask)
+{
+  task_t *cur;
+  int status;
+  asm volatile("ldrex %0, [%2]\n"
+               "mov %1, #1\n"
+               "teq %0, #0\n"
+               "it eq\n"
+               "strexeq %1, %3, [%2]\n"
+               : "=&r"(cur), "=&r"(status)
+               : "r"(m), "r"(curtask)
+               : "cc", "memory");
+  return !status;
+}

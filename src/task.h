@@ -65,8 +65,8 @@ typedef struct sched_cpu {
 
 
 typedef struct mutex {
-  struct task_list waiters;
   struct task *owner;
+  struct task_list waiters;
 } mutex_t;
 
 typedef struct task_list task_waitable_t;
