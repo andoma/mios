@@ -569,6 +569,7 @@ mutex_lock(mutex_t *m)
 }
 
 
+
 static void
 mutex_unlock_sched_locked(mutex_t *m)
 {
@@ -577,10 +578,10 @@ mutex_unlock_sched_locked(mutex_t *m)
 
   task_t *t = LIST_FIRST(&m->waiters);
   if(t != NULL) {
+    assert(t != task_current());
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
-    if(t != task_current())
-      readyqueue_insert(t, "mutex_unlock");
+    readyqueue_insert(t, "mutex_unlock");
     schedule();
   }
 }
