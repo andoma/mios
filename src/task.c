@@ -640,7 +640,7 @@ task_init_early(void)
 }
 
 
-static void *
+static void __attribute__((noreturn))
 task_mgmt_thread(void *arg)
 {
 #ifdef TASK_ACCOUNTING
@@ -686,13 +686,12 @@ task_mgmt_thread(void *arg)
     }
     irq_permit(s);
   }
-  return NULL;
 }
 
 static void __attribute__((constructor(900)))
 task_init_late(void)
 {
-  task_create(task_mgmt_thread, NULL, 256, "taskmgmt", 0, 0);
+  task_create((void *)task_mgmt_thread, NULL, 256, "taskmgmt", 0, 0);
 }
 
 
