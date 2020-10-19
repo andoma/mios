@@ -122,13 +122,21 @@ sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
 sx1280_err_t
 sx1280_reset(sx1280_t *s)
 {
+  uint8_t status = RADIO_GET_STATUS;
+
   sx1280_mios_t *sm = (sx1280_mios_t *)s;
 
   gpio_set_output(sm->gpio_reset, 0);
-  usleep(20000);
+  usleep_hr(2000);
+  sm->bus->lock(sm->bus, 1);
   gpio_set_output(sm->gpio_reset, 1);
-  usleep(20000);
-  return 0;
+
+  sx1280_err_t err = wait_ready(sm);
+  if(!err)
+    err = sm->bus->rw_locked(sm->bus, &status, &status, 1, sm->gpio_nss);
+
+  sm->bus->lock(sm->bus, 0);
+  return err;
 }
 
 
