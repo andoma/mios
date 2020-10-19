@@ -56,6 +56,10 @@ error_t i2c_read_bytes(i2c_t *i2c, uint8_t addr, uint8_t reg,
 typedef struct spi {
   error_t (*rw)(struct spi *bus, const uint8_t *tx, uint8_t *rx, size_t len,
                 gpio_t nss);
+  error_t (*rw_locked)(struct spi *bus, const uint8_t *tx, uint8_t *rx,
+                       size_t len, gpio_t nss);
+  void (*lock)(struct spi *bus, int acquire);
+
 } spi_t;
 
 // GPIO implementations provided by platform (or stubbed out)

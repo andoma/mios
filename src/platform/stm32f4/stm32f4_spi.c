@@ -49,15 +49,14 @@ spi_dma(struct stm32f4_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len)
 }
 
 
-
 static error_t
-spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
+spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
+              gpio_t nss)
 {
   struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
   if(len == 0)
     return ERR_OK;
 
-  mutex_lock(&spi->mutex);
   gpio_set_output(nss, 0);
 
   int s = irq_forbid(IRQ_LEVEL_DMA);
@@ -65,8 +64,30 @@ spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
   irq_permit(s);
 
   gpio_set_output(nss, 1);
-  mutex_unlock(&spi->mutex);
   return ERR_OK;
+}
+
+
+static error_t
+spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
+{
+  struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
+
+  mutex_lock(&spi->mutex);
+  error_t err = spi_rw_locked(&spi->spi, tx, rx, len, nss);
+  mutex_unlock(&spi->mutex);
+  return err;
+}
+
+
+static void
+spi_lock(spi_t *dev, int acquire)
+{
+  struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
+  if(acquire)
+    mutex_lock(&spi->mutex);
+  else
+    mutex_unlock(&spi->mutex);
 }
 
 
@@ -115,5 +136,7 @@ stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
   gpio_conf_af(mosi, af, GPIO_PUSH_PULL,  GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
   spi->spi.rw = spi_rw;
+  spi->spi.rw_locked = spi_rw_locked;
+  spi->spi.lock = spi_lock;
   return &spi->spi;
 }
