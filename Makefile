@@ -33,6 +33,7 @@ SRCS += ${SRC}/mios.c \
 	${SRC}/libc.c \
 	${SRC}/stdio.c \
 	${SRC}/cli.c \
+	${SRC}/monitor.c \
 
 SRCS += ${SRC}/lib/math/trig.c \
 	${SRC}/lib/math/powf.c \
