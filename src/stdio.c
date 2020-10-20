@@ -72,7 +72,38 @@ emit_u32(fmtcb_t *cb, void *aux, unsigned int x,
 
   if(neg)
     total += cb(aux, "-", 1);
-  total += cb(aux, buf + 10 - digits, digits);
+  total += cb(aux, buf + sizeof(buf) - digits, digits);
+
+  if(fp->la)
+    total += emit_repeated_char(cb, aux, pad, ' ');
+
+  return total;
+}
+
+
+static size_t  __attribute__((noinline))
+emit_u64(fmtcb_t *cb, void *aux, uint64_t x,
+         const fmtparam_t *fp, int neg)
+{
+  char buf[20];
+  int digits = 1;
+  for(int i = 0; i < 20; i++, x /= 10) {
+    const unsigned int d = x % 10;
+    buf[19 - i] = '0' + d;
+    if(d)
+      digits = i + 1;
+  }
+
+  size_t total = 0;
+
+  const int pad = fp->width - (digits + neg);
+  if(!fp->la)
+    total += emit_repeated_char(cb, aux, pad,
+                                fp->lz ? '0' : ' ');
+
+  if(neg)
+    total += cb(aux, "-", 1);
+  total += cb(aux, buf + sizeof(buf) - digits, digits);
 
   if(fp->la)
     total += emit_repeated_char(cb, aux, pad, ' ');
@@ -89,6 +120,17 @@ emit_s32(fmtcb_t *cb, void *aux, int x,
     return emit_u32(cb, aux, -x, fp, 1);
   else
     return emit_u32(cb, aux, x, fp, 0);
+}
+
+
+static size_t  __attribute__((noinline))
+emit_s64(fmtcb_t *cb, void *aux, int64_t x,
+         const fmtparam_t *fp)
+{
+  if(x < 0)
+    return emit_u64(cb, aux, -x, fp, 1);
+  else
+    return emit_u64(cb, aux, x, fp, 0);
 }
 
 
@@ -173,6 +215,10 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     fp.width = parse_dec(&fmt, -1);
 
+    const int ll = fmt[0] == 'l' && fmt[1] == 'l';
+    if(ll)
+      fmt += 2;
+
     c = *fmt++;
     switch(c) {
     case '%':
@@ -189,10 +235,16 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += emit_x32(cb, aux, va_arg(ap, unsigned int), &fp);
       break;
     case 'd':
-      total += emit_s32(cb, aux, va_arg(ap, unsigned int), &fp);
+      if(ll)
+        total += emit_s64(cb, aux, va_arg(ap, uint64_t), &fp);
+      else
+        total += emit_s32(cb, aux, va_arg(ap, unsigned int), &fp);
       break;
     case 'u':
-      total += emit_u32(cb, aux, va_arg(ap, unsigned int), &fp, 0);
+      if(ll)
+        total += emit_u64(cb, aux, va_arg(ap, uint64_t), &fp, 0);
+      else
+        total += emit_u32(cb, aux, va_arg(ap, unsigned int), &fp, 0);
       break;
     case 'f':
       total += emit_double(cb, aux, va_arg(ap, double), &fp);
