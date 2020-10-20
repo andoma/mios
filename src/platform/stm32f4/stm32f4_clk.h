@@ -3,6 +3,7 @@
 #include <stm32f4.h>
 
 #define CLK_AHB1 0x30
+#define CLK_AHB2 0x34
 #define CLK_APB1 0x40
 #define CLK_APB2 0x44
 
@@ -26,7 +27,7 @@
 #define CLK_TIM14 CLK_ID(CLK_APB1, 8)
 
 #define CLK_CCMDATARAMEN CLK_ID(CLK_AHB1, 20)
-
+#define CLK_RNG          CLK_ID(CLK_AHB2, 6)
 
 
 static inline void

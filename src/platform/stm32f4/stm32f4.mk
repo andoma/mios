@@ -18,3 +18,4 @@ SRCS += ${P}/uart.c \
 	${P}/stm32f4_spi.c \
 	${P}/stm32f4_dma.c \
 	${P}/stm32f4_tim.c \
+	${P}/stm32f4_rnd.c \

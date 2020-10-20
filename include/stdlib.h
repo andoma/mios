@@ -11,3 +11,7 @@ void free(void *ptr);
 void *memalign(size_t size, size_t alignment) __attribute__((malloc,warn_unused_result));
 
 int atoi(const char *s);
+
+#define RAND_MAX 0x7fffffff
+
+int rand(void);

@@ -14,3 +14,4 @@ SRCS += ${C}/isr.s \
 	${C}/exc.c \
 	${C}/cpu.c \
 	${C}/systick.c \
+	${C}/rnd.c \
