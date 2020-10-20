@@ -18,7 +18,6 @@ SECTIONS {
                 *(.text.*)
                 *(.rodata)              /* read only data */
                 *(.rodata*)
-
                 . = ALIGN(4);
                 _init_array_begin = .;
                 *(.init_array)
@@ -30,8 +29,15 @@ SECTIONS {
                 *(clicmd)
                 _clicmd_array_end = .;
                 . = ALIGN(4);
-                _etext = .;             /* _etext is end of program code */
         } >FLASH                        /* this section is code, hence gos to FLASH */
+
+.ARM.exidx :
+{
+    *(.ARM.exidx*)
+    *(.gnu.linkonce.armexidx.*)
+    _etext = .;             /* _etext is end of program code */
+} > FLASH
+
 
         .data : AT ( _etext ) {         /* AT specifies the LMA (load memory address) */ 
                 . = ALIGN(4);           /* also, this section is for initialized
