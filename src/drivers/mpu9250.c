@@ -154,7 +154,7 @@ mpu9250_create(spi_t *bus, gpio_t nss, gpio_t irq)
   mpu9250_t *dev = xalloc(sizeof(mpu9250_t), 0, MEM_TYPE_DMA);
   dev->aux.rw = aux_i2c;
   dev->pending_irq = 0;
-  task_waitable_init(&dev->waitable);
+  task_waitable_init(&dev->waitable, "mpu9250");
   dev->spi = bus;
   dev->nss = nss;
 

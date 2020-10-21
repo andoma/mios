@@ -115,7 +115,7 @@ stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
 
   struct stm32f4_spi *spi = malloc(sizeof(struct stm32f4_spi));
   spi->base_addr = (spi_config[instance].base << 8) + 0x40000000;
-  mutex_init(&spi->mutex);
+  mutex_init(&spi->mutex, "spi");
 
   reg_wr(spi->base_addr + SPI_CR1,
          (1 << 9) |

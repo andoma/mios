@@ -183,7 +183,7 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t busy, gpio_t irq, gpio_t reset,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
 #ifdef BUSY_IRQ
-  task_waitable_init(&sm->busy_waitable);
+  task_waitable_init(&sm->busy_waitable, "sx1280busy");
   gpio_conf_irq(sm->gpio_busy, GPIO_PULL_NONE, sx1280_busy_irq, sm,
                 GPIO_BOTH_EDGES, IRQ_LEVEL_IO);
   sm->busy = gpio_get_input(sm->gpio_busy);
@@ -205,9 +205,9 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t busy, gpio_t irq, gpio_t reset,
   gpio_conf_output(sm->gpio_dbg2, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
-  mutex_init(&sm->s.mutex);
-  cond_init(&sm->s.cond_work);
-  cond_init(&sm->s.cond_txfifo);
+  mutex_init(&sm->s.mutex, "sx1280");
+  cond_init(&sm->s.cond_work, "sx1280work");
+  cond_init(&sm->s.cond_txfifo, "sx1280txfifo");
 
   SLIST_INSERT_HEAD(&sx1280s, sm, global_link);
 

@@ -33,8 +33,8 @@ static struct task_queue readyqueue[TASK_PRIOS];
 static uint32_t active_queues;
 static struct task_slist alltasks;
 
-static mutex_t alltasks_mutex = MUTEX_INITIALIZER;
-static cond_t task_mgmt_cond = COND_INITIALIZER;
+static mutex_t alltasks_mutex = MUTEX_INITIALIZER("alltasks");
+static cond_t task_mgmt_cond = COND_INITIALIZER("taskmgmt");
 
 static task_waitable_t join_wait;
 
@@ -290,7 +290,7 @@ task_wakeup(task_waitable_t *waitable, int all)
 {
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   task_t *t;
-  while((t = LIST_FIRST(waitable)) != NULL) {
+  while((t = LIST_FIRST(&waitable->list)) != NULL) {
     assert(t->t_state == TASK_STATE_SLEEPING);
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
@@ -316,7 +316,7 @@ task_prio_cmp(const task_t *a, const task_t *b)
 static void __attribute__((noinline))
 task_insert_wait_list(task_waitable_t *waitable, task_t *t)
 {
-  LIST_INSERT_SORTED(waitable, t, t_wait_link, task_prio_cmp);
+  LIST_INSERT_SORTED(&waitable->list, t, t_wait_link, task_prio_cmp);
 }
 
 
@@ -359,6 +359,10 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
+#ifdef TASK_WCHAN
+  curtask->t_wchan = waitable->name ?: __FUNCTION__;
+#endif
+
 #ifdef TASK_DEBUG
   if(task_is_on_readyqueue(curtask)) {
     panic("%s: Task %p is on readyqueue",
@@ -391,6 +395,9 @@ task_sleep_sched_locked(task_waitable_t *waitable)
   assert(waitable != NULL);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
+#ifdef TASK_WCHAN
+  curtask->t_wchan = waitable->name ?: __FUNCTION__;
+#endif
 
 #ifdef TASK_DEBUG
   if(task_is_on_readyqueue(curtask)) {
@@ -456,7 +463,7 @@ task_sleep_until_timeout(void *opaque)
 
 
 static void
-task_sleep_until(uint64_t deadline, int flags)
+task_sleep_until(uint64_t deadline, int flags, const char *wchan)
 {
   task_t *const curtask = task_current();
 
@@ -464,6 +471,9 @@ task_sleep_until(uint64_t deadline, int flags)
 
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
+#ifdef TASK_WCHAN
+  curtask->t_wchan = wchan;
+#endif
 
   timer.t_cb = task_sleep_until_timeout;
   timer.t_opaque = curtask;
@@ -482,7 +492,7 @@ void
 sleep_until(uint64_t deadline)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(deadline, 0);
+  task_sleep_until(deadline, 0, "sleep_until");
   irq_permit(s);
 }
 
@@ -490,7 +500,7 @@ void
 sleep_until_hr(uint64_t deadline)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(deadline, TIMER_HIGHRES);
+  task_sleep_until(deadline, TIMER_HIGHRES, "sleep_until_hr");
   irq_permit(s);
 }
 
@@ -499,7 +509,7 @@ void
 usleep(unsigned int useconds)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(clock_get_irq_blocked() + useconds, 0);
+  task_sleep_until(clock_get_irq_blocked() + useconds, 0, "usleep");
   irq_permit(s);
 }
 
@@ -507,7 +517,8 @@ void
 usleep_hr(unsigned int useconds)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(clock_get_irq_blocked() + useconds, TIMER_HIGHRES);
+  task_sleep_until(clock_get_irq_blocked() + useconds, TIMER_HIGHRES,
+                   "usleep_hr");
   irq_permit(s);
 }
 
@@ -531,7 +542,7 @@ mutex_lock_sched_locked(mutex_t *m, task_t *curtask)
             __FUNCTION__, curtask);
     }
 
-    if(task_is_on_list(curtask, &m->waiters)) {
+    if(task_is_on_list(curtask, &m->waiters.list)) {
       panic("%s: Task %p is already on wait queue",
             __FUNCTION__, curtask);
     }
@@ -576,7 +587,7 @@ mutex_unlock_sched_locked(mutex_t *m)
   assert(m->owner == task_current());
   m->owner = NULL;
 
-  task_t *t = LIST_FIRST(&m->waiters);
+  task_t *t = LIST_FIRST(&m->waiters.list);
   if(t != NULL) {
     assert(t != task_current());
     LIST_REMOVE(t, t_wait_link);
@@ -701,13 +712,17 @@ static int
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
   task_t *t;
-  cli_printf(cli, " Name           Stack      Pri Sta CtxSwch Load\n");
+  cli_printf(cli, " Name           Stack      Sp         Pri Sta CtxSwch Load\n");
   SLIST_FOREACH(t, &alltasks, t_global_link) {
-    cli_printf(cli, " %14s %p %3d %c%c%c "
+    cli_printf(cli, " %-14s %p %p %3d %c%c%c "
 #ifdef TASK_ACCOUNTING
-               "%6d %3d.%d%%"
+               "%-6d %3d.%-2d "
 #endif
-               "\n", t->t_name, t->t_sp_bottom,
+#ifdef TASK_WCHAN
+               "%s"
+#endif
+               "\n",
+               t->t_name, t->t_sp_bottom, t->t_sp,
                t->t_prio,
                "RSZ"[t->t_state],
                t->t_fpuctx ? 'F' : ' ',
@@ -716,6 +731,9 @@ cmd_ps(cli_t *cli, int argc, char **argv)
                ,t->t_ctx_switches,
                t->t_load / 100,
                t->t_load % 100
+#endif
+#ifdef TASK_WCHAN
+               ,t->t_state == TASK_STATE_SLEEPING ? t->t_wchan : ""
 #endif
                );
   }

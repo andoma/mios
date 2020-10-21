@@ -11,7 +11,7 @@
 
 #define ALIGN(a, b) (((a) + (b) - 1) & ~((b) - 1))
 
-static mutex_t heap_mutex = MUTEX_INITIALIZER;
+static mutex_t heap_mutex = MUTEX_INITIALIZER("heap");
 
 SLIST_HEAD(heap_header_slist, heap_header);
 

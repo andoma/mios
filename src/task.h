@@ -40,6 +40,10 @@ typedef struct task {
   void *t_sp;
   void *t_fpuctx; // If NULL, task is not allowed to use FPU
 
+#ifdef TASK_WCHAN
+  const char *t_wchan; // Valid when state == SLEEPING
+#endif
+
 #ifdef TASK_ACCOUNTING
   uint32_t t_cycle_enter;
   uint32_t t_cycle_acc;
@@ -64,16 +68,29 @@ typedef struct sched_cpu {
 } sched_cpu_t;
 
 
+
+typedef struct {
+  struct task_list list;
+#ifdef TASK_WCHAN
+  const char *name;
+#endif
+} task_waitable_t;
+
 typedef struct mutex {
   struct task *owner;
-  struct task_list waiters;
+  task_waitable_t waiters;
 } mutex_t;
 
-typedef struct task_list task_waitable_t;
+typedef task_waitable_t cond_t;
 
-typedef struct task_list cond_t;
+#ifdef TASK_WCHAN
+#define task_waitable_init(t, n) do { LIST_INIT(&(t)->list); (t)->name = n; } while(0)
 
-#define task_waitable_init(t) LIST_INIT(t)
+#else
+#define task_waitable_init(t, n) LIST_INIT(&(t)->list)
+
+#endif
+
 
 void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 
@@ -97,11 +114,20 @@ int task_sleep_delta(task_waitable_t *waitable, int useconds, int flags)
 
 task_t *task_current(void);
 
-#define MUTEX_INITIALIZER {}
+#ifdef TASK_WCHAN
+#define MUTEX_INITIALIZER(n) { .waiters = {.name = (n)}}
+#else
+#define MUTEX_INITIALIZER(n) {}
+#endif
 
-inline void  __attribute__((always_inline)) mutex_init(mutex_t *m)
+
+inline void  __attribute__((always_inline))
+mutex_init(mutex_t *m, const char *name)
 {
-  LIST_INIT(&m->waiters);
+  LIST_INIT(&m->waiters.list);
+#ifdef TASK_WCHAN
+  m->waiters.name = name;
+#endif
   m->owner = NULL;
 }
 
@@ -110,9 +136,20 @@ void mutex_lock(mutex_t *m);
 void mutex_unlock(mutex_t *m);
 
 
-#define COND_INITIALIZER {}
+#ifdef TASK_WCHAN
+#define COND_INITIALIZER(n) {.name = (n)}
+#else
+#define COND_INITIALIZER(n) {}
+#endif
 
-#define cond_init(c) LIST_INIT(c)
+inline void  __attribute__((always_inline))
+cond_init(cond_t *c, const char *name)
+{
+  LIST_INIT(&c->list);
+#ifdef TASK_WCHAN
+  c->name = name;
+#endif
+}
 
 void cond_signal(cond_t *c);
 
