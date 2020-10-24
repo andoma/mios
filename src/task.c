@@ -202,7 +202,7 @@ static void
 task_destroy(task_t *t)
 {
   SLIST_REMOVE(&alltasks, t, task, t_global_link);
-  free(t);
+  free(t->t_sp_bottom);
 }
 
 void *
