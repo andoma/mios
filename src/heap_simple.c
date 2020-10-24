@@ -287,7 +287,7 @@ malloc0(size_t size, size_t align, int type)
   void *x = hb ? heap_alloc(hb, size, align) : NULL;
   mutex_unlock(&heap_mutex);
   if(x == NULL)
-    panic("Out of memory");
+    panic("Out of memory (s=%d a=%d t=%d)", size, align, type);
   return x;
 }
 
