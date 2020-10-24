@@ -194,7 +194,8 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
   char c;
   size_t total = 0;
 
-  while((c = *fmt++) != 0) {
+  while((c = *fmt) != 0) {
+    fmt++;
     if(c != '%')
       continue;
 
