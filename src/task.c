@@ -584,16 +584,18 @@ mutex_lock(mutex_t *m)
 static void
 mutex_unlock_sched_locked(mutex_t *m)
 {
-  assert(m->owner == task_current());
+  task_t *cur = task_current();
+  assert(m->owner == cur);
   m->owner = NULL;
 
   task_t *t = LIST_FIRST(&m->waiters.list);
   if(t != NULL) {
-    assert(t != task_current());
+    assert(t != cur);
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
     readyqueue_insert(t, "mutex_unlock");
-    schedule();
+    if(t->t_prio >= cur->t_prio)
+      schedule();
   }
 }
 
