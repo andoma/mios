@@ -3,10 +3,9 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
 
 static int dbl2str(char *buf, size_t bufsize, double realvalue, int precision);
-
-typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
 
 typedef struct {
   int16_t width;
@@ -187,7 +186,7 @@ parse_dec(const char **fmt, int defval)
   }
 }
 
-static size_t
+size_t
 fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 {
   const char *s = fmt;

@@ -15,3 +15,6 @@ void init_printf(void *arg, void (*cb)(void *arg, char c));
 
 void init_getchar(void *arg, int (*cb)(void *arg));
 
+typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
+
+size_t fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap);
