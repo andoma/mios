@@ -40,6 +40,7 @@ SRCS += ${SRC}/lib/math/trig.c \
 	${SRC}/lib/math/sqrtf.c \
 	${SRC}/lib/math/math_diag.c \
 
+SRCS +=	${SRC}/net/pcs/pcs.c
 
 SRCS += ${SRC}/heap_simple.c
 

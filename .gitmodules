@@ -1,3 +1,6 @@
 [submodule "src/drivers/sx1280"]
 	path = src/drivers/sx1280
 	url = git@github.com:andoma/sx1280
+[submodule "src/net/pcs"]
+	path = src/net/pcs
+	url = git@github.com:andoma/pcs
