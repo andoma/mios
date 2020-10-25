@@ -269,10 +269,10 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
   sx1280_mios_t *sm;
   SLIST_FOREACH(sm, &sx1280s, global_link) {
     sx1280_t *s = &sm->s;
-    printf(" Link: %s\n",
+    cli_printf(cli, " Link: %s\n",
            s->link_status == SX1280_LINK_UP ? "Up" :
            s->link_status == SX1280_LINK_SYNCHRONIZING ? "Sync" : "Down");
-    printf(" RxPackets: %-10d RxBytes: %-10d\n"
+    cli_printf(cli, " RxPackets: %-10d RxBytes: %-10d\n"
            " RxErrors:  %-10d RSSI: %d dBm\n"
            " TxPackets: %-10d TxBytes: %-10d\n",
            s->rx_packets,

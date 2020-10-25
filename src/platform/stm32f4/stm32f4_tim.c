@@ -152,7 +152,7 @@ cmd_hrt(cli_t *cli, int argc, char **argv)
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
 
 #ifdef HRTIMER_TRACE
-  printf("%d trace events in total\n", traceptr);
+  cli_printf(cli, "%d trace events in total\n", traceptr);
 
   for(int i = 0; i < HRTIMER_TRACE; i++) {
     int idx = (traceptr + i) & (HRTIMER_TRACE - 1);
@@ -161,27 +161,28 @@ cmd_hrt(cli_t *cli, int argc, char **argv)
     default:
       continue;
     case HRTIMER_TRACE_FIRE:
-      printf("FIRE\t\t");
+      cli_printf(cli, "FIRE\t\t");
       break;
     case HRTIMER_TRACE_ARM:
-      printf("ARM\t%d\t", ht->arr);
+      cli_printf(cli, "ARM\t%d\t", ht->arr);
       break;
     case HRTIMER_TRACE_IRQ:
-      printf("IRQ\t\t%15d %15d\n", (int)ht->when, (int)(now - ht->when));
+      cli_printf(cli, "IRQ\t\t%15d %15d\n",
+                 (int)ht->when, (int)(now - ht->when));
       continue;
     }
-    printf("%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
-           ht->t);
+    cli_printf(cli, "%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
+               ht->t);
   }
 #endif
 
   const timer_t *t;
   LIST_FOREACH(t, &hr_timers, t_link) {
-    printf("%p %p %p %15d %15d %s\n",
-           t, t->t_cb, t->t_opaque,
-           (int)t->t_expire,
-           (int)(t->t_expire - now),
-           t->t_name);
+    cli_printf(cli, "%p %p %p %15d %15d %s\n",
+               t, t->t_cb, t->t_opaque,
+               (int)t->t_expire,
+               (int)(t->t_expire - now),
+               t->t_name);
   }
 
   irq_permit(q);
