@@ -580,6 +580,13 @@ mutex_lock(mutex_t *m)
 }
 
 
+int
+mutex_trylock(mutex_t *m)
+{
+  return !cpu_mutex_lock_fast(m, task_current());
+}
+
+
 
 static void
 mutex_unlock_sched_locked(mutex_t *m)

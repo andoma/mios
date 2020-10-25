@@ -133,6 +133,8 @@ mutex_init(mutex_t *m, const char *name)
 
 void mutex_lock(mutex_t *m);
 
+int mutex_trylock(mutex_t *m); // Return 0 if locked
+
 void mutex_unlock(mutex_t *m);
 
 
