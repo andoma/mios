@@ -272,13 +272,16 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
     cli_printf(cli, " Link: %s\n",
            s->link_status == SX1280_LINK_UP ? "Up" :
            s->link_status == SX1280_LINK_SYNCHRONIZING ? "Sync" : "Down");
-    cli_printf(cli, " RxPackets: %-10d RxBytes: %-10d\n"
-           " RxErrors:  %-10d RSSI: %d dBm\n"
-           " TxPackets: %-10d TxBytes: %-10d\n",
+    cli_printf(cli,
+               " RxPackets: %-10u RxBytes: %-10u\n"
+               " RxErrors:  %-10u RSSI: %d dBm\n"
+               " LLErrors:  %d\n"
+               " TxPackets: %-10u TxBytes: %-10u\n",
            s->rx_packets,
            s->rx_bytes,
            s->rx_errors,
            s->rx_rssi,
+           s->rx_ll_errors,
            s->tx_packets,
            s->tx_bytes);
   }
