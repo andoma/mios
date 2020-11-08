@@ -11,7 +11,7 @@ typedef struct cli {
   int16_t cl_pos;
 
   void (*cl_printf)(struct cli *cli, const char *fmt, ...);
-
+  void *cl_opaque;
   // This includes a terminating 0 at all times
   char cl_buf[CLI_LINE_BUF_SIZE];
 
