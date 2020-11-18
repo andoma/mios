@@ -35,3 +35,5 @@ clk_enable(uint16_t id)
 {
   reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
+
+int clk_get_freq(uint16_t id);
