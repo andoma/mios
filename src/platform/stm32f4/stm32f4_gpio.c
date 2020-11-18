@@ -158,7 +158,7 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
     irq = 23;
     group = 5;
   } else {
-    irq = 47;
+    irq = 40;
     group = 6;
   }
 
