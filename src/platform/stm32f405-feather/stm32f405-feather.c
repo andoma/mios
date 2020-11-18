@@ -9,40 +9,20 @@
 
 #include "stm32f4.h"
 #include "stm32f4_i2c.h"
-
-#include "uart.h"
+#include "stm32f4_uart.h"
 
 #define NEOPIX_GPIO GPIO_PC(0)
 #define PANIC_GPIO  GPIO_PA(4)
 #define BLINK_GPIO  GPIO_PC(1) // Red led close to USB connection
 
-static uart_t console;
-
-void
-irq_71(void)
-{
-  uart_irq(&console);
-}
-
+static stm32f4_uart_t console;
 
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  reg_set_bit(RCC_APB2ENR, 5); // CLK ENABLE: USART6
-
-  // Configure PA2 for USART6 TX (Alternative Function 8)
-  gpio_conf_af(GPIO_PC(6), 8,
-               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
-  gpio_conf_af(GPIO_PC(7), 8,
-               GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
-
-  uart_init(&console, 0x40011400, 115200 / 2);
-
-  irq_enable(71, IRQ_LEVEL_CONSOLE);
-
-  init_printf(&console, uart_putc);
-  init_getchar(&console, uart_getc);
+  stm32f4_uart_init(&console, 6, 115200, GPIO_PC(6), GPIO_PC(7));
+  init_printf(&console, (void *)stm32f4_uart_putc);
+  init_getchar(&console, (void *)stm32f4_uart_getc);
 }
 
 

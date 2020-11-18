@@ -3,10 +3,8 @@
 #include <task.h>
 #include <irq.h>
 
-#include "uart.h"
-#include "stm32f4.h"
-
-#include "clk_config.h"
+#include "stm32f4_uart.h"
+#include "stm32f4_clk.h"
 
 #define USART_SR   0x00
 #define USART_DR   0x04
@@ -18,10 +16,8 @@
 #define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
 
 void
-uart_putc(void *arg, char c)
+stm32f4_uart_putc(stm32f4_uart_t *u, char c)
 {
-  uart_t *u = arg;
-
   const int busy_wait = !can_sleep();
 
   int s = irq_forbid(IRQ_LEVEL_CONSOLE);
@@ -58,10 +54,8 @@ uart_putc(void *arg, char c)
 
 
 int
-uart_getc(void *arg)
+stm32f4_uart_getc(stm32f4_uart_t *u)
 {
-  uart_t *u = arg;
-
   if(!can_sleep()) {
     // We are not on user thread, busy wait
     while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {}
@@ -82,9 +76,12 @@ uart_getc(void *arg)
 
 
 
-void
-uart_irq(uart_t *u)
+static void
+uart_irq(stm32f4_uart_t *u)
 {
+  if(u == NULL)
+    return;
+
   const uint32_t sr = reg_rd(u->reg_base + USART_SR);
 
   if(sr & (1 << 5)) {
@@ -116,15 +113,60 @@ uart_irq(uart_t *u)
 }
 
 
-void
-uart_init(uart_t *u, int reg_base, int baudrate)
-{
-  const unsigned int bbr = (APB1CLOCK + baudrate - 1) / baudrate;
 
-  u->reg_base = reg_base;
+static const struct {
+  uint16_t base;
+  uint16_t clkid;
+  uint8_t irq;
+  uint8_t af;
+} uart_config[] = {
+  { 0x0110, CLK_USART1, 37, 7},
+  { 0x0044, CLK_USART2, 38, 7},
+  { 0x0048, CLK_USART3, 39, 7},
+  { 0x004c, CLK_UART4,  52, 8},
+  { 0x0050, CLK_UART5,  53, 8},
+  { 0x0140, CLK_USART6, 71, 8},
+};
+
+
+static stm32f4_uart_t *uarts[6];
+
+void
+stm32f4_uart_init(stm32f4_uart_t *u, int instance, int baudrate,
+                  gpio_t tx, gpio_t rx)
+{
+  if(instance < 1 || instance > 6)
+    return;
+
+  instance--;
+
+  const int af = uart_config[instance].af;
+  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+
+  clk_enable(uart_config[instance].clkid);
+
+  u->reg_base = (uart_config[instance].base << 8) + 0x40000000;
+
+  const unsigned int freq = clk_get_freq(uart_config[instance].clkid);
+  const unsigned int bbr = (freq + baudrate - 1) / baudrate;
+
   reg_wr(u->reg_base + USART_CR1, (1 << 13)); // ENABLE
   reg_wr(u->reg_base + USART_BBR, bbr);
   reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
+
   task_waitable_init(&u->wait_rx, "uartrx");
   task_waitable_init(&u->wait_tx, "uarttx");
+  uarts[instance] = u;
+
+  irq_enable(uart_config[instance].irq, IRQ_LEVEL_CONSOLE);
 }
+
+void irq_37(void) { uart_irq(uarts[0]); }
+void irq_38(void) { uart_irq(uarts[1]); }
+void irq_39(void) { uart_irq(uarts[2]); }
+void irq_52(void) { uart_irq(uarts[3]); }
+void irq_53(void) { uart_irq(uarts[4]); }
+void irq_71(void) { uart_irq(uarts[5]); }
+
+

@@ -1,10 +1,8 @@
-#pragma once
-
 #include <task.h>
+#include <io.h>
 
-#define TX_FIFO_SIZE 128
-#define RX_FIFO_SIZE 64
-
+#define TX_FIFO_SIZE 32
+#define RX_FIFO_SIZE 32
 
 typedef struct {
 
@@ -22,13 +20,12 @@ typedef struct {
   uint8_t tx_fifo[TX_FIFO_SIZE];
   uint8_t rx_fifo[RX_FIFO_SIZE];
 
-} uart_t;
+} stm32f4_uart_t;
 
-void uart_init(uart_t *uart, int reg_base, int baudrate);
+void stm32f4_uart_init(stm32f4_uart_t *uart, int reg_base, int baudrate,
+                       gpio_t tx, gpio_t rx);
 
-void uart_irq(uart_t *uart);
+void stm32f4_uart_putc(stm32f4_uart_t *uart, char c);
 
-void uart_putc(void *uart, char c);
-
-int uart_getc(void *uart);
+int stm32f4_uart_getc(stm32f4_uart_t *uart);
 
