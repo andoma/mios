@@ -125,7 +125,7 @@ static const struct {
   { 0x0048, CLK_USART3, 39, 7},
   { 0x004c, CLK_UART4,  52, 8},
   { 0x0050, CLK_UART5,  53, 8},
-  { 0x0140, CLK_USART6, 71, 8},
+  { 0x0114, CLK_USART6, 71, 8},
 };
 
 
