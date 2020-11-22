@@ -48,10 +48,10 @@ exc_mm_fault(void)
   task_t *const t = task_current();
   if(t && ((addr & ~(CPU_STACK_REDZONE_SIZE - 1)) == (intptr_t)t->t_sp_bottom)) {
     panic("REDZONE HIT task:\"%s\" MFSR:0x%x address:0x%x PC:0x%x",
-          t->t_name, *MMFSR, *MMFAR, psp[6]);
+          t->t_name, *MMFSR, addr, psp[6]);
   }
 
-  panic("MM fault: 0x%x address:0x%x by 0x%x", *MMFSR, *MMFAR, psp[6]);
+  panic("MM fault: 0x%x address:0x%x by 0x%x", *MMFSR, addr, psp[6]);
 }
 
 void
