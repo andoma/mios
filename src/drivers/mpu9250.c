@@ -381,7 +381,7 @@ mpu9250_calibrate(mpu9250_t *dev)
 
 
 error_t
-mpu9250_read(mpu9250_t *dev, mpu9250_values_t *v)
+mpu9250_read(mpu9250_t *dev, imu_values_t *v)
 {
   error_t err;
   uint8_t buf[FIFO_ITEM_SIZE];
