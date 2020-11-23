@@ -12,7 +12,7 @@
 #include "stm32f4_uart.h"
 
 #define NEOPIX_GPIO GPIO_PC(0)
-#define PANIC_GPIO  GPIO_PA(4)
+#define PANIC_GPIO  GPIO_PA(4) // A0
 #define BLINK_GPIO  GPIO_PC(1) // Red led close to USB connection
 
 static stm32f4_uart_t console;
