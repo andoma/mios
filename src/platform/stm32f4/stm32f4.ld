@@ -1,22 +1,21 @@
-/* details on syntax can be found in GCC linker manual */
-
 MEMORY {
-  RAM   (xrw): ORIGIN = 0x20000200, LENGTH = 20K
-  FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 256K
+         FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 512K
+         CCM   (xrw): ORIGIN = 0x10000000, LENGTH = 64K
+         RAM   (xrw): ORIGIN = 0x20000200, LENGTH = 192K
 }
 
 SECTIONS {
         .isr_vector : {
                 . = ALIGN(4);
-                KEEP(*(.isr_vector))    /* vector table */
+                KEEP(*(.isr_vector))
                 . = ALIGN(4);
         } >FLASH
 
         .text : {
                 . = ALIGN(4);
-                *(.text)                /* Program code */
+                *(.text)
                 *(.text.*)
-                *(.rodata)              /* read only data */
+                *(.rodata)
                 *(.rodata*)
                 . = ALIGN(4);
                 _init_array_begin = .;
@@ -29,30 +28,27 @@ SECTIONS {
                 *(clicmd)
                 _clicmd_array_end = .;
                 . = ALIGN(4);
-        } >FLASH                        /* this section is code, hence gos to FLASH */
+        } >FLASH
 
-.ARM.exidx :
-{
-    *(.ARM.exidx*)
-    *(.gnu.linkonce.armexidx.*)
-    _etext = .;             /* _etext is end of program code */
-} > FLASH
+        .ARM.exidx : {
+                 *(.ARM.exidx*)
+                 *(.gnu.linkonce.armexidx.*)
+                 _etext = .;
+        } >FLASH
 
-
-        .data : AT ( _etext ) {         /* AT specifies the LMA (load memory address) */ 
-                . = ALIGN(4);           /* also, this section is for initialized
-                                             global/static variables */
+        .data : AT ( _etext ) {
+                . = ALIGN(4);
                 _sdata = .;
+                *(ramcode)
                 *(.data)
                 *(.data.*)
                 . = ALIGN(4);
                 _edata = .;
-        } >RAM                          /* this section go into this RAM */
+        } >RAM
 
-        .bss : {                        /* this section is for uninitialized global/static
-                                        variables, which we set to zero */
+        .bss : {
                 . = ALIGN(4);
-                _sbss = .;              /* the . sets the symbol to value of current counter */
+                _sbss = .;
                 *(.bss)
                 *(COMMON)
                 . = ALIGN(16);
