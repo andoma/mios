@@ -72,10 +72,11 @@ exc_bus_fault(void)
 void
 exc_usage_fault(void)
 {
+  uint32_t *psp;
+  asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
+
   uint16_t ufsr = *UFSR;
   if(ufsr & 0x2) {
-    void *psp;
-    asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
     panic("Invalid use of EPSR, PSP:%p ", psp);
   }
 #ifdef __ARM_FP
@@ -85,8 +86,8 @@ exc_usage_fault(void)
     task_t *const t = task_current();
 
     if(t == NULL || t->t_fpuctx == NULL) {
-      panic("Task %s tries to use FPU but is not allowed",
-            t ? t->t_name : "<none>");
+      panic("Task %s tries to use FPU but is not allowed. pc:0x%x",
+            t ? t->t_name : "<none>", psp[6]);
     }
 
     cpu_t *cpu = curcpu();
