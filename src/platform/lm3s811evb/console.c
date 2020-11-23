@@ -17,38 +17,6 @@ static uint8_t rx_fifo_wrptr;
 static uint8_t rx_fifo[RX_FIFO_SIZE];
 
 
-static void
-uart_putc(void *p, char c)
-{
-  *(volatile int *)p = c;
-}
-
-
-static int
-uart_getc(void *arg)
-{
-  int s = irq_forbid(IRQ_LEVEL_CONSOLE);
-
-  while(1) {
-    uint8_t avail = rx_fifo_wrptr - rx_fifo_rdptr;
-    if(avail)
-      break;
-    task_sleep(&uart_rx);
-  }
-
-  char c = rx_fifo[rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
-  rx_fifo_rdptr++;
-  irq_permit(s);
-  return c;
-}
-
-
-static void __attribute__((constructor(110)))
-platform_console_init_early(void)
-{
-  init_printf((void *)UART_DR, uart_putc);
-}
-
 void
 irq_5(void)
 {
@@ -59,11 +27,50 @@ irq_5(void)
 }
 
 
-static void  __attribute__((constructor(200)))
-lm3s811evb_console_init(void)
+static int
+uart_read(struct stream *s, void *buf, size_t size, int wait)
 {
-  init_getchar(NULL, uart_getc);
+  char *d = buf;
 
+  int q = irq_forbid(IRQ_LEVEL_CONSOLE);
+
+  for(size_t i = 0; i < size; i++) {
+    while(1) {
+      uint8_t avail = rx_fifo_wrptr - rx_fifo_rdptr;
+      if(avail)
+        break;
+      if(!wait) {
+        irq_permit(q);
+        return i;
+      }
+      task_sleep(&uart_rx);
+    }
+
+    d[i] = rx_fifo[rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
+    rx_fifo_rdptr++;
+  }
+  irq_permit(q);
+  return size;
+}
+
+
+static void
+uart_write(struct stream *s, const void *buf, size_t size)
+{
+  const char *d = buf;
+  for(size_t i = 0; i < size; i++) {
+    *UART_DR = d[i];
+  }
+}
+
+
+static stream_t uart_stdio = { uart_read, uart_write };
+
+static void __attribute__((constructor(110)))
+board_init_console(void)
+{
   irq_enable(5, IRQ_LEVEL_CONSOLE);
   *UART_IMSC = 0x10;
+
+  stdio = &uart_stdio;
 }

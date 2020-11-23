@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <mios/task.h>
+#include <stdio.h>
 
 #include "stm32f4_uart.h"
 #include "stm32f4_clk.h"
@@ -16,62 +17,85 @@
 #define CR1_IDLE       (1 << 13) | (1 << 5) | (1 << 3) | (1 << 2)
 #define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
 
+
 void
-stm32f4_uart_putc(stm32f4_uart_t *u, char c)
+stm32f4_uart_write(stream_t *s, const void *buf, size_t size)
 {
+  stm32f4_uart_t *u = (stm32f4_uart_t *)s;
+  const char *d = buf;
+
   const int busy_wait = !can_sleep();
 
-  int s = irq_forbid(IRQ_LEVEL_CONSOLE);
+  int q = irq_forbid(IRQ_LEVEL_CONSOLE);
 
   if(busy_wait) {
     // We are not on user thread, busy wait
-    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
-    reg_wr(u->reg_base + USART_DR, c);
-    irq_permit(s);
+    for(size_t i = 0; i < size; i++) {
+      while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+      reg_wr(u->reg_base + USART_DR, d[i]);
+    }
+    irq_permit(q);
     return;
   }
 
-  while(1) {
-    uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr);
+  for(size_t i = 0; i < size; i++) {
 
-    if(avail)
-      break;
-    assert(u->tx_busy);
-    task_sleep(&u->wait_tx);
-  }
+    while(1) {
+      uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr);
 
-  if(!u->tx_busy) {
-    reg_wr(u->reg_base + USART_DR, c);
-    reg_wr(u->reg_base + USART_CR1, CR1_ENABLE_TXI);
-    u->tx_busy = 1;
-  } else {
-    u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = c;
-    u->tx_fifo_wrptr++;
+      if(avail)
+        break;
+      assert(u->tx_busy);
+      task_sleep(&u->wait_tx);
+    }
+
+    if(!u->tx_busy) {
+      reg_wr(u->reg_base + USART_DR, d[i]);
+      reg_wr(u->reg_base + USART_CR1, CR1_ENABLE_TXI);
+      u->tx_busy = 1;
+    } else {
+      u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = d[i];
+      u->tx_fifo_wrptr++;
+    }
   }
-  irq_permit(s);
+  irq_permit(q);
 }
 
 
-
-
-int
-stm32f4_uart_getc(stm32f4_uart_t *u)
+static int
+stm32f4_uart_read(stream_t *s, void *buf, size_t size, int wait)
 {
+  stm32f4_uart_t *u = (stm32f4_uart_t *)s;
+  char *d = buf;
+
   if(!can_sleep()) {
     // We are not on user thread, busy wait
-    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {}
-    return reg_rd(u->reg_base + USART_DR);
+    for(size_t i = 0; i < size; i++) {
+      while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {
+        if(!wait)
+          return i;
+      }
+      d[i] = reg_rd(u->reg_base + USART_DR);
+    }
+    return size;
   }
 
-  int s = irq_forbid(IRQ_LEVEL_CONSOLE);
+  int q = irq_forbid(IRQ_LEVEL_CONSOLE);
 
-  while(u->rx_fifo_wrptr == u->rx_fifo_rdptr)
-    task_sleep(&u->wait_rx);
+  for(size_t i = 0; i < size; i++) {
+    while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
+      if(!wait) {
+        irq_permit(q);
+        return i;
+      }
+      task_sleep(&u->wait_rx);
+    }
 
-  char c = u->rx_fifo[u->rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
-  u->rx_fifo_rdptr++;
-  irq_permit(s);
-  return c;
+    d[i] = u->rx_fifo[u->rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
+    u->rx_fifo_rdptr++;
+  }
+  irq_permit(q);
+  return size;
 }
 
 
@@ -161,6 +185,9 @@ stm32f4_uart_init(stm32f4_uart_t *u, int instance, int baudrate,
   uarts[instance] = u;
 
   irq_enable(uart_config[instance].irq, IRQ_LEVEL_CONSOLE);
+
+  u->stream.read = stm32f4_uart_read;
+  u->stream.write = stm32f4_uart_write;
 }
 
 void irq_37(void) { uart_irq(uarts[0]); }
@@ -169,5 +196,3 @@ void irq_39(void) { uart_irq(uarts[2]); }
 void irq_52(void) { uart_irq(uarts[3]); }
 void irq_53(void) { uart_irq(uarts[4]); }
 void irq_71(void) { uart_irq(uarts[5]); }
-
-

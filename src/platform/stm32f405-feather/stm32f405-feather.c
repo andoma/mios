@@ -21,8 +21,7 @@ static void __attribute__((constructor(110)))
 board_init_console(void)
 {
   stm32f4_uart_init(&console, 6, 115200, GPIO_PC(6), GPIO_PC(7));
-  init_printf(&console, (void *)stm32f4_uart_putc);
-  init_getchar(&console, (void *)stm32f4_uart_getc);
+  stdio = &console.stream;
 }
 
 

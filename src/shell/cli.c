@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include <mios/cli.h>
+#include <mios/error.h>
 
 static int
 tokenize(char *buf, char **vec, int vecsize)
@@ -112,11 +113,28 @@ cli_console_printf(struct cli *cli, const char *fmt, ...)
 }
 
 
+static int
+cli_console_getc(struct cli *cli, int wait)
+{
+  char c;
+
+  if(stdio == NULL)
+    return ERR_NOT_IMPLEMENTED;
+
+  int r = stdio->read(stdio, &c, 1, wait);
+  if(r == 0)
+    return ERR_NOT_READY;
+  return c;
+}
+
+
+
 void
 cli_console(void)
 {
   cli_t cli = {};
   cli.cl_printf = cli_console_printf;
+  cli.cl_getc = cli_console_getc;
 
   cli_prompt(&cli);
   while(1) {

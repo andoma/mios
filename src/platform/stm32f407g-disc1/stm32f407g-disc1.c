@@ -20,8 +20,7 @@ board_init_console(void)
   reg_set(RCC_AHB1ENR, 0x01);    // CLK ENABLE: GPIOA
 
   stm32f4_uart_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3));
-  init_printf(&console, (void *)stm32f4_uart_putc);
-  init_getchar(&console, (void *)stm32f4_uart_getc);
+  stdio = &console.stream;
 }
 
 

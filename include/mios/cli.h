@@ -11,6 +11,8 @@ typedef struct cli {
   int16_t cl_pos;
 
   void (*cl_printf)(struct cli *cli, const char *fmt, ...);
+  int (*cl_getc)(struct cli *cli, int wait);
+
   void *cl_opaque;
   // This includes a terminating 0 at all times
   char cl_buf[CLI_LINE_BUF_SIZE];
@@ -32,6 +34,8 @@ typedef struct cli_cmd {
   static cli_cmd_t CLI_JOIN(cli, __LINE__) __attribute__ ((used, section("clicmd"))) = { name, fn};
 
 #define cli_printf(cli, fmt...) (cli)->cl_printf(cli, fmt)
+
+#define cli_getc(cli, wait) (cli)->cl_getc(cli, wait)
 
 void cli_input_char(cli_t *cl, char c);
 

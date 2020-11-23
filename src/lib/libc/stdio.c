@@ -304,34 +304,17 @@ main(int argc, char **argv)
 #else
 
 
-static void *stdio_putc_arg;
-static void (*stdio_putc)(void *arg, char c);
-static void *stdio_getchar_arg;
-static int (*stdio_getchar)(void *arg);
-
-
-void
-init_printf(void *arg, void (*cb)(void *arg, char c))
-{
-  stdio_putc_arg = arg;
-  stdio_putc = cb;
-}
-
-void
-init_getchar(void *arg, int (*cb)(void *arg))
-{
-  stdio_getchar_arg = arg;
-  stdio_getchar = cb;
-}
-
+stream_t *stdio;
 
 
 int
 getchar(void)
 {
-  if(stdio_getchar == NULL)
+  if(stdio == NULL || stdio->read == NULL)
     return -1;
-  return stdio_getchar(stdio_getchar_arg);
+  char c;
+  stdio->read(stdio, &c, 1, 1);
+  return c;
 }
 
 
@@ -339,11 +322,8 @@ getchar(void)
 static size_t
 stdout_cb(void *aux, const char *s, size_t len)
 {
-  if(stdio_putc) {
-    for(size_t i = 0; i < len; i++) {
-      stdio_putc(stdio_putc_arg, s[i]);
-    }
-  }
+  if(stdio != NULL)
+    stdio->write(stdio, s, len);
   return len;
 }
 
@@ -368,8 +348,9 @@ printf(const char *format, ...)
 int
 putchar(int c)
 {
-  if(stdio_putc) {
-    stdio_putc(stdio_putc_arg, c);
+  if(stdio) {
+    char s8 = c;
+    stdio->write(stdio, &s8, 1);
   }
   return c;
 }
@@ -378,12 +359,10 @@ putchar(int c)
 int
 puts(const char *s)
 {
-  if(stdio_putc) {
-    while(*s) {
-      stdio_putc(stdio_putc_arg, *s);
-      s++;
-    }
-    stdio_putc(stdio_putc_arg, '\n');
+  if(stdio) {
+    size_t len = strlen(s);
+    stdio->write(stdio, s, len);
+    stdio->write(stdio, "\n", 1);
   }
   return 0;
 }

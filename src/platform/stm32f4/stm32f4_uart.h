@@ -1,10 +1,12 @@
 #include <mios/task.h>
 #include <mios/io.h>
+#include <mios/stream.h>
 
 #define TX_FIFO_SIZE 32
 #define RX_FIFO_SIZE 32
 
 typedef struct {
+  stream_t stream;
 
   uint32_t reg_base;
 
@@ -24,8 +26,3 @@ typedef struct {
 
 void stm32f4_uart_init(stm32f4_uart_t *uart, int reg_base, int baudrate,
                        gpio_t tx, gpio_t rx);
-
-void stm32f4_uart_putc(stm32f4_uart_t *uart, char c);
-
-int stm32f4_uart_getc(stm32f4_uart_t *uart);
-

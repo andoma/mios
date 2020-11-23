@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdarg.h>
+#include <mios/stream.h>
 
 int printf(const char *format, ...) __attribute__ ((format(printf, 1, 2)));
 
@@ -11,9 +12,7 @@ int snprintf(char *str, size_t size, const char *format, ...) __attribute__ ((fo
 
 int getchar(void);
 
-void init_printf(void *arg, void (*cb)(void *arg, char c));
-
-void init_getchar(void *arg, int (*cb)(void *arg));
+extern stream_t *stdio;
 
 typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
 
