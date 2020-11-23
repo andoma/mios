@@ -4,8 +4,9 @@
 #include <stdlib.h>
 #include <malloc.h>
 
-#include "mios.h"
-#include "task.h"
+#include <mios/mios.h>
+#include <mios/task.h>
+
 #include "irq.h"
 
 #include "mpu9250.h"

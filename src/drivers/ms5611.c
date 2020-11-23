@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <mios.h>
+#include <mios/mios.h>
 
 #include "ms5611.h"
 

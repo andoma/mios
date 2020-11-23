@@ -1,5 +1,5 @@
-#include <io.h>
-#include <error.h>
+#include <mios/io.h>
+#include <mios/error.h>
 
 error_t
 i2c_read_u8(i2c_t *i2c, uint8_t addr, uint8_t reg, uint8_t *u8)

@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#include "task.h"
+#include <mios/task.h>
+#include <mios/mios.h>
+
 #include "cpu.h"
-#include "mios.h"
 
 //static volatile unsigned int * const UART0DR = (unsigned int *)0x4000c000;
 //static volatile unsigned int * const CPUID   = (unsigned int *)0xe000ed00;

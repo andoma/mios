@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <mios/mios.h>
+#include <mios/cli.h>
+
 #include "irq.h"
 #include "cpu.h"
 
@@ -12,8 +15,6 @@
 #include "stm32f4_tim.h"
 #include "stm32f4_clk.h"
 
-#include "mios.h"
-#include "cli.h"
 
 /************************************************************
  * TIM7 acts as high resolution system timer

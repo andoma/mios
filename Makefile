@@ -11,6 +11,8 @@ GLOBALDEPS += ${T}/Makefile
 
 SRC := ${T}/src
 
+MO := ${O}/${T}
+
 #
 # Include platform- (which in turn include CPU-) specific things
 #
@@ -27,29 +29,12 @@ LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 #
 # Core
 #
-SRCS += ${SRC}/mios.c \
-	${SRC}/io.c \
-	${SRC}/task.c \
-	${SRC}/libc.c \
-	${SRC}/stdio.c \
-	${SRC}/cli.c \
-	${SRC}/monitor.c \
-
-SRCS += ${SRC}/lib/math/trig.c \
-	${SRC}/lib/math/powf.c \
-	${SRC}/lib/math/sqrtf.c \
-	${SRC}/lib/math/math_diag.c \
-
-SRCS +=	${SRC}/net/pcs/pcs.c
-
-SRCS += ${SRC}/heap_simple.c
-
-SRCS += ${SRC}/drivers/ms5611.c
-SRCS += ${SRC}/drivers/mpu9250.c
-
-SRCS += ${SRC}/drivers/sx1280/sx1280.c \
-	${SRC}/drivers/sx1280/sx1280_tdma.c \
-	${SRC}/drivers/sx1280_mios.c
+include ${SRC}/kernel/kernel.mk
+include ${SRC}/shell/shell.mk
+include ${SRC}/lib/libc/libc.mk
+include ${SRC}/lib/math/math.mk
+include ${SRC}/drivers/drivers.mk
+include ${SRC}/net/net.mk
 
 OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}

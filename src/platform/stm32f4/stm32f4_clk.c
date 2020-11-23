@@ -1,4 +1,5 @@
-#include "mios.h"
+#include <mios/mios.h>
+
 #include "stm32f4_clk.h"
 #include "clk_config.h"
 

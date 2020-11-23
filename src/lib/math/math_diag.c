@@ -1,6 +1,6 @@
 #include <unistd.h>
 #include <math.h>
-#include "cli.h"
+#include <mios/cli.h>
 
 
 static int

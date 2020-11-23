@@ -1,5 +1,5 @@
-#include <task.h>
-#include <io.h>
+#include <mios/task.h>
+#include <mios/io.h>
 
 #define TX_FIFO_SIZE 32
 #define RX_FIFO_SIZE 32

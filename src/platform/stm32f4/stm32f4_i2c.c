@@ -2,13 +2,13 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
-#include <io.h>
+#include <mios/io.h>
+#include <mios/mios.h>
+#include <mios/task.h>
 
 #include "irq.h"
 #include "stm32f4.h"
 
-#include "mios.h"
-#include "task.h"
 
 #define NAME "stm32f4_i2c"
 

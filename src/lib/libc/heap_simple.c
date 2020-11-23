@@ -4,10 +4,10 @@
 #include <sys/queue.h>
 #include <stddef.h>
 #include <string.h>
-#include <mios.h>
 
-#include "cli.h"
-#include "task.h"
+#include <mios/mios.h>
+#include <mios/cli.h>
+#include <mios/task.h>
 
 #define ALIGN(a, b) (((a) + (b) - 1) & ~((b) - 1))
 

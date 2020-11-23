@@ -1,7 +1,8 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <mios/mios.h>
+
 #include "timer.h"
-#include "mios.h"
 #include "clk_config.h"
 #include "sys.h"
 #include "irq.h"

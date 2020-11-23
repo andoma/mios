@@ -1,7 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "cli.h"
+#include <mios/cli.h>
 
 static int
 tokenize(char *buf, char **vec, int vecsize)

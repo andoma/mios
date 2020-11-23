@@ -1,10 +1,10 @@
 #include <stdlib.h>
 #include <unistd.h>
+#include <mios/mios.h>
+#include <mios/cli.h>
 
 #include "stm32f4.h"
 
-#include "mios.h"
-#include "cli.h"
 #include "systick.h"
 #include "irq.h"
 

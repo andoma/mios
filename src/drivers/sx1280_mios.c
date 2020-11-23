@@ -4,9 +4,10 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#include <io.h>
-#include <irq.h>
-#include <cli.h>
+#include <mios/io.h>
+#include <mios/cli.h>
+
+#include "irq.h"
 
 #include "sx1280/sx1280.h"
 #include "sx1280/sx1280_i.h"

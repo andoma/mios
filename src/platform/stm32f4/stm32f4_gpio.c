@@ -1,6 +1,6 @@
-#include <io.h>
+#include <mios/io.h>
 
-#include "mios.h"
+#include <mios/mios.h>
 #include "stm32f4.h"
 #include "irq.h"
 

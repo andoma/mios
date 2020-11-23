@@ -1,6 +1,7 @@
 #include <stdio.h>
-#include <irq.h>
-#include <task.h>
+#include <mios/task.h>
+
+#include "irq.h"
 
 
 static volatile unsigned int * const UART_DR    = (unsigned int *)0x4000c000;

@@ -2,7 +2,7 @@
 
 // Wrapper for pthread defintions. Far from complete
 
-#include "task.h"
+#include <mios/task.h>
 
 #define PTHREAD_MUTEX_INITIALIZER MUTEX_INITIALIZER(NULL)
 

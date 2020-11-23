@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "mios.h"
+#include <mios/mios.h>
 #include "irq.h"
 
 void

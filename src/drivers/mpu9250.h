@@ -1,6 +1,6 @@
 #pragma once
 
-#include <io.h>
+#include <mios/io.h>
 
 typedef struct mpu9250 mpu9250_t;
 

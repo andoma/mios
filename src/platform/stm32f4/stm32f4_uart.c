@@ -1,10 +1,11 @@
 #include <assert.h>
 #include <stdint.h>
-#include <task.h>
-#include <irq.h>
+#include <mios/task.h>
 
 #include "stm32f4_uart.h"
 #include "stm32f4_clk.h"
+
+#include "irq.h"
 
 #define USART_SR   0x00
 #define USART_DR   0x04

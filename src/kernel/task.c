@@ -13,12 +13,13 @@
 #include <unistd.h>
 #include <malloc.h>
 
-#include "task.h"
+#include <mios/task.h>
+#include <mios/mios.h>
+#include <mios/cli.h>
+
 #include "sys.h"
 #include "irq.h"
 #include "cpu.h"
-#include "mios.h"
-#include "cli.h"
 
 #define TASK_PRIOS 32
 #define TASK_PRIO_MASK (TASK_PRIOS - 1)

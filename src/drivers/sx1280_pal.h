@@ -1,8 +1,8 @@
 #pragma once
 
-#include <error.h>
-#include <io.h>
-#include <task.h>
+#include <mios/error.h>
+#include <mios/io.h>
+#include <mios/task.h>
 #include <malloc.h>
 
 typedef mutex_t sx1280_mutex_t;

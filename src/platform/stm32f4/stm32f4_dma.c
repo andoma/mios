@@ -2,12 +2,12 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "task.h"
+#include <mios/task.h>
+
 #include "irq.h"
 #include "stm32f4.h"
 #include "stm32f4_dma.h"
 
-#include "mios.h"
 #define DMA_BASE(x) (0x40026000 + (x) * 0x400)
 #define DMA_ISR(x)  (0x00 + (x) * 4)
 #define DMA_IFCR(x) (0x08 + (x) * 4)

@@ -19,7 +19,7 @@
 
 #define IRQ_LEVEL_TO_PRI(x) ((x) << IRQ_PRI_LEVEL_SHIFT)
 
-#include "mios.h"
+#include <mios/mios.h>
 
 inline void  __attribute__((always_inline))
 irq_ensure0(unsigned int level, const char *file, int line)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <error.h>
+#include <mios/error.h>
 
 typedef unsigned char stm32f4_dma_instance_t;
 

@@ -41,7 +41,7 @@ rand(void)
 }
 
 
-#include "cli.h"
+#include <mios/cli.h>
 static int
 cmd_rand(cli_t *cli, int argc, char **argv)
 {

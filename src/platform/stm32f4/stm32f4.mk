@@ -1,7 +1,7 @@
 P := ${SRC}/platform/stm32f4
 
 GLOBALDEPS += ${P}/stm32f4.mk
-CPPFLAGS += -I${P}
+CPPFLAGS += -iquote${P}
 
 CFLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 
@@ -21,3 +21,5 @@ SRCS += ${P}/stm32f4.c \
 	${P}/stm32f4_clk.c \
 	${P}/stm32f4_uart.c \
 	${P}/stm32f4_flash.c \
+
+${MO}/src/platform/stm32f4/%.o : CFLAGS += ${NOFPU}

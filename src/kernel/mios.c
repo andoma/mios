@@ -1,8 +1,9 @@
+#include <mios/task.h>
+#include <mios/mios.h>
+#include <mios/cli.h>
 #include <stdio.h>
+
 #include "irq.h"
-#include "task.h"
-#include "mios.h"
-#include "cli.h"
 
 
 int  __attribute__((weak))

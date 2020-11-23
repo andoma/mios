@@ -1,11 +1,11 @@
 #include <unistd.h>
 #include <assert.h>
 #include <stdio.h>
-#include <io.h>
+#include <mios/io.h>
+#include <mios/mios.h>
+#include <mios/task.h>
 
-#include "mios.h"
 #include "irq.h"
-#include "task.h"
 
 #include "stm32f4.h"
 #include "stm32f4_i2c.h"
@@ -110,7 +110,7 @@ neopix(uint8_t r, uint8_t g, uint8_t b)
   irq_permit(q);
 }
 
-#include "cli.h"
+#include <mios/cli.h>
 #include <stdlib.h>
 
 static int

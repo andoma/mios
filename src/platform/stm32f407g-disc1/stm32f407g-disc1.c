@@ -1,11 +1,12 @@
 #include <assert.h>
 #include <stdio.h>
-#include <io.h>
 #include <unistd.h>
 
-#include "mios.h"
+#include <mios/io.h>
+#include <mios/mios.h>
+#include <mios/task.h>
+
 #include "irq.h"
-#include "task.h"
 
 #include "stm32f4.h"
 
