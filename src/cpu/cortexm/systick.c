@@ -8,17 +8,13 @@
 #include "systick.h"
 #include "cpu.h"
 
-#define HZ 100
-#define TICKS_PER_US (SYSTICK_RVR / 1000000)
-#define TICKS_PER_HZ (SYSTICK_RVR / HZ)
-
 static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
 static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
 static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
 
 static struct timer_list timers;
 
-static uint64_t clock;
+uint64_t clock;
 
 void
 exc_systick(void)

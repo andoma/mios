@@ -20,3 +20,4 @@ SRCS += ${P}/stm32f4.c \
 	${P}/stm32f4_rnd.c \
 	${P}/stm32f4_clk.c \
 	${P}/stm32f4_uart.c \
+	${P}/stm32f4_flash.c \
