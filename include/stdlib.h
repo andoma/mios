@@ -12,6 +12,8 @@ void *memalign(size_t size, size_t alignment) __attribute__((malloc,warn_unused_
 
 int atoi(const char *s);
 
+unsigned int atoix(const char *s);
+
 #define RAND_MAX 0x7fffffff
 
 int rand(void);

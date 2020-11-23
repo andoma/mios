@@ -29,51 +29,6 @@ mon_hexdump(cli_t *cli, const void *data_, int len, int offset)
 }
 
 
-
-static int
-hex2nibble(char c)
-{
-  switch(c) {
-  case '0' ... '9':
-    return c - '0';
-  case 'A' ... 'F':
-    return c - 'A' + 10;
-  case 'a' ... 'f':
-    return c - 'a' + 10;
-  default:
-    return -1;
-  }
-}
-
-
-
-static uint32_t
-atoi_hex(const char *s)
-{
-  uint32_t r = 0;
-
-  while(1) {
-    int v = hex2nibble(*s);
-    if(v == -1)
-      return r;
-    r = r * 16 + v;
-    s++;
-  }
-}
-
-uint32_t
-parse_val(const char *s)
-{
-  while(*s && *s <= 32)
-    s++;
-
-  if(s[0] == '0' && s[1] == 'x') {
-    return atoi_hex(s + 2);
-  }
-  return atoi(s);
-}
-
-
 static int
 cmd_md(cli_t *cli, int argc, char **argv)
 {
@@ -82,8 +37,8 @@ cmd_md(cli_t *cli, int argc, char **argv)
     return -1;
   }
 
-  const int start = parse_val(argv[1]);
-  const int len   = parse_val(argv[2]);
+  const int start = atoix(argv[1]);
+  const int len   = atoix(argv[2]);
   mon_hexdump(cli, (void *)start, len, start);
   return 0;
 }
