@@ -2,6 +2,21 @@
 
 #include <stdint.h>
 
+#define FP_NAN       0
+#define FP_INFINITE  1
+#define FP_ZERO      2
+#define FP_SUBNORMAL 3
+#define FP_NORMAL    4
+
+#define fpclassify(x) \
+  __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_ZERO, FP_SUBNORMAL, FP_NORMAL, x)
+
+#define isnan(x) (fpclassify(x) == FP_NAN)
+#define isfinite(x) (fpclassify(x) != FP_NAN && fpclassify(x) != FP_INFINITE)
+#define isnormal(x) (fpclassify(x) == FP_NORMAL)
+#define isinf(x) (fpclassify(x) == FP_INFINITE)
+
+
 #ifdef MATH_PREFIX
 
 #define MATH_MANGLE(x) mios_##x
