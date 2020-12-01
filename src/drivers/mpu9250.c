@@ -7,6 +7,8 @@
 #include <mios/mios.h>
 #include <mios/task.h>
 
+#include <math.h>
+
 #include "irq.h"
 
 #include "mpu9250.h"
@@ -20,7 +22,7 @@ struct mpu9250 {
   task_waitable_t waitable;
   int pending_irq;
   gpio_t nss;
-  float gs;
+  float ws;
   float as;
   float msx;
   float msy;
@@ -242,7 +244,7 @@ configure_magnetometer(mpu9250_t *dev)
   if((err = i2c_read_bytes(i2c, addr, AK8963_ASAX, calib, 3)))
     return err;
 
-  const float s = 10 * 4912 / 32760.0;
+  const float s = 4912.0 / 32760.0; // 1 LSB = 0.15µT
   dev->msx = s * (((calib[0] - 128) / 256.0f) + 1.0f);
   dev->msy = s * (((calib[1] - 128) / 256.0f) + 1.0f);
   dev->msz = s * (((calib[2] - 128) / 256.0f) + 1.0f);
@@ -295,8 +297,8 @@ mpu9250_reset(mpu9250_t *dev)
     return err;
   }
 
-  dev->gs = 250 / 32767.5;
-  dev->as = 1.0 / 16384.0;
+  dev->ws = M_PIf * 2 * 250 / (360 * 32767.5f);
+  dev->as = 1.0f / 16384.0f;
 
   return ERR_OK;
 }
@@ -393,9 +395,9 @@ mpu9250_read(mpu9250_t *dev, imu_values_t *v)
   const int16_t igy = buf[8]  << 8 | buf[9];
   const int16_t igz = buf[10] << 8 | buf[11];
 
-  v->gx = igx * dev->gs;
-  v->gy = igy * dev->gs;
-  v->gz = igz * dev->gs;
+  v->wx = igx * dev->ws;
+  v->wy = igy * dev->ws;
+  v->wz = igz * dev->ws;
 
   const int16_t iax = buf[0] << 8 | buf[1];
   const int16_t iay = buf[2] << 8 | buf[3];
