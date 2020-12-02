@@ -2,6 +2,8 @@
 
 #ifdef HAVE_HRTIMER
 
+#include <stdint.h>
+
 struct timer;
 
 int hrtimer_arm(struct timer *t, uint64_t expire);
