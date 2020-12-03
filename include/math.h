@@ -67,3 +67,9 @@ float MATH_MANGLE(sinf)(float) __attribute__ ((const));
 float MATH_MANGLE(cosf)(float) __attribute__ ((const));
 
 float MATH_MANGLE(powf)(float a, float b)  __attribute__ ((const));
+
+float MATH_MANGLE(atanf)(float)  __attribute__ ((const));
+
+float MATH_MANGLE(atan2f)(float, float)  __attribute__ ((const));
+
+float MATH_MANGLE(asinf)(float)  __attribute__ ((const));
