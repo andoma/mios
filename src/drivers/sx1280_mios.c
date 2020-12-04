@@ -197,14 +197,18 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t busy, gpio_t irq, gpio_t reset,
 
 
   sm->gpio_dbg1 = dbg1;
-  gpio_set_output(sm->gpio_dbg1, 0);
-  gpio_conf_output(sm->gpio_dbg1, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  if(dbg1 != GPIO_UNUSED) {
+    gpio_set_output(sm->gpio_dbg1, 0);
+    gpio_conf_output(sm->gpio_dbg1, GPIO_PUSH_PULL,
+                     GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  }
 
   sm->gpio_dbg2 = dbg2;
-  gpio_set_output(sm->gpio_dbg2, 0);
-  gpio_conf_output(sm->gpio_dbg2, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  if(dbg2 != GPIO_UNUSED) {
+    gpio_set_output(sm->gpio_dbg2, 0);
+    gpio_conf_output(sm->gpio_dbg2, GPIO_PUSH_PULL,
+                     GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  }
 
   mutex_init(&sm->s.mutex, "sx1280");
   cond_init(&sm->s.cond_work, "sx1280work");
@@ -255,10 +259,12 @@ sx1280_dbg(sx1280_t *s, int line, int value)
 
   switch(line) {
   case 1:
-    gpio_set_output(sm->gpio_dbg1, value);
+    if(sm->gpio_dbg1 != GPIO_UNUSED)
+      gpio_set_output(sm->gpio_dbg1, value);
     break;
   case 2:
-    gpio_set_output(sm->gpio_dbg2, value);
+    if(sm->gpio_dbg2 != GPIO_UNUSED)
+      gpio_set_output(sm->gpio_dbg2, value);
     break;
   }
 }

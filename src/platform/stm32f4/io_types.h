@@ -16,6 +16,8 @@
 #define GPIO_PJ(x)  GPIO(9, x)
 #define GPIO_PK(x)  GPIO(10, x)
 
+#define GPIO_UNUSED 0xff
+
 typedef unsigned char gpio_t;
 
 void gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
