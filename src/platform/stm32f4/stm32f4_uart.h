@@ -24,5 +24,5 @@ typedef struct {
 
 } stm32f4_uart_t;
 
-void stm32f4_uart_init(stm32f4_uart_t *uart, int reg_base, int baudrate,
+void stm32f4_uart_init(stm32f4_uart_t *uart, int instance, int baudrate,
                        gpio_t tx, gpio_t rx);
