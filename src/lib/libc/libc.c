@@ -126,8 +126,8 @@ atoi(const char *s)
 }
 
 
-static int
-hex2nibble(char c)
+int
+conv_hex_to_nibble(char c)
 {
   switch(c) {
   case '0' ... '9':
@@ -149,7 +149,7 @@ atoi_hex(const char *s)
   unsigned int r = 0;
 
   while(1) {
-    int v = hex2nibble(*s);
+    int v = conv_hex_to_nibble(*s);
     if(v == -1)
       return r;
     r = r * 16 + v;
