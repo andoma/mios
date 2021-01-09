@@ -63,7 +63,24 @@ stm32f4_uart_write(stream_t *s, const void *buf, size_t size)
 
 
 static int
-stm32f4_uart_read(stream_t *s, void *buf, size_t size, int wait)
+is_done(int mode, size_t done, size_t size)
+{
+  switch(mode) {
+  default:
+    return 1;
+  case STREAM_READ_WAIT_ONE:
+    return done;
+  case STREAM_READ_WAIT_ALL:
+    return done == size;
+  }
+}
+
+
+
+
+
+static int
+stm32f4_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 {
   stm32f4_uart_t *u = (stm32f4_uart_t *)s;
   char *d = buf;
@@ -72,7 +89,7 @@ stm32f4_uart_read(stream_t *s, void *buf, size_t size, int wait)
     // We are not on user thread, busy wait
     for(size_t i = 0; i < size; i++) {
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {
-        if(!wait)
+        if(is_done(mode, i, size))
           return i;
       }
       d[i] = reg_rd(u->reg_base + USART_DR);
@@ -84,7 +101,7 @@ stm32f4_uart_read(stream_t *s, void *buf, size_t size, int wait)
 
   for(size_t i = 0; i < size; i++) {
     while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
-      if(!wait) {
+      if(is_done(mode, i, size)) {
         irq_permit(q);
         return i;
       }
@@ -111,15 +128,13 @@ uart_irq(stm32f4_uart_t *u)
 
   if(sr & (1 << 5)) {
     const uint8_t c = reg_rd(u->reg_base + USART_DR);
-    if(c == 5) {
-      extern int task_trace;
-      task_trace = 1;
-    }
-    if(c == 4) {
+
+    if(u->flags & UART_CTRLD_IS_PANIC && c == 4) {
       panic("Halted from console");
     }
     u->rx_fifo[u->rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
     u->rx_fifo_wrptr++;
+
     task_wakeup(&u->wait_rx, 1);
   }
 
@@ -156,12 +171,12 @@ static const struct {
 
 static stm32f4_uart_t *uarts[6];
 
-void
+stream_t *
 stm32f4_uart_init(stm32f4_uart_t *u, int instance, int baudrate,
-                  gpio_t tx, gpio_t rx)
+                  gpio_t tx, gpio_t rx, uint8_t flags)
 {
   if(instance < 1 || instance > 6)
-    return;
+    return NULL;
 
   instance--;
 
@@ -172,6 +187,7 @@ stm32f4_uart_init(stm32f4_uart_t *u, int instance, int baudrate,
   clk_enable(uart_config[instance].clkid);
 
   u->reg_base = (uart_config[instance].base << 8) + 0x40000000;
+  u->flags = flags;
 
   const unsigned int freq = clk_get_freq(uart_config[instance].clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;
@@ -188,6 +204,7 @@ stm32f4_uart_init(stm32f4_uart_t *u, int instance, int baudrate,
 
   u->stream.read = stm32f4_uart_read;
   u->stream.write = stm32f4_uart_write;
+  return &u->stream;
 }
 
 void irq_37(void) { uart_irq(uarts[0]); }

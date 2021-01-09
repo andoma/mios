@@ -13,6 +13,8 @@ typedef struct {
   task_waitable_t wait_rx;
   task_waitable_t wait_tx;
 
+  uint8_t flags;
+
   uint8_t rx_fifo_rdptr;
   uint8_t rx_fifo_wrptr;
   uint8_t tx_fifo_rdptr;
@@ -24,5 +26,8 @@ typedef struct {
 
 } stm32f4_uart_t;
 
-void stm32f4_uart_init(stm32f4_uart_t *uart, int instance, int baudrate,
-                       gpio_t tx, gpio_t rx);
+
+#define UART_CTRLD_IS_PANIC 0x80
+
+stream_t *stm32f4_uart_init(stm32f4_uart_t *uart, int instance, int baudrate,
+                            gpio_t tx, gpio_t rx, uint8_t flags);

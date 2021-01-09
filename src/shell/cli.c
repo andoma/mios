@@ -121,7 +121,8 @@ cli_console_getc(struct cli *cli, int wait)
   if(stdio == NULL)
     return ERR_NOT_IMPLEMENTED;
 
-  int r = stdio->read(stdio, &c, 1, wait);
+  int r = stdio->read(stdio, &c, 1,
+                      wait ? STREAM_READ_WAIT_ONE : STREAM_READ_WAIT_NONE);
   if(r == 0)
     return ERR_NOT_READY;
   return c;
