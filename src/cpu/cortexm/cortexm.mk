@@ -5,8 +5,6 @@ CPPFLAGS += -iquote${C}
 
 TOOLCHAIN := arm-none-eabi-
 
-CFLAGS += -mcpu=cortex-m4 -mthumb
-
 LDSCRIPT ?= ${C}/linker.ld
 
 NOFPU := -mgeneral-regs-only

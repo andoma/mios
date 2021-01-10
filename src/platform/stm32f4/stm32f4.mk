@@ -3,7 +3,7 @@ P := ${SRC}/platform/stm32f4
 GLOBALDEPS += ${P}/stm32f4.mk
 CPPFLAGS += -iquote${P}
 
-CFLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+CFLAGS += -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 
 CPPFLAGS += -DHAVE_HRTIMER
 
