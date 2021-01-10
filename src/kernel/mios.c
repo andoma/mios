@@ -2,7 +2,7 @@
 #include <mios/mios.h>
 #include <mios/cli.h>
 #include <stdio.h>
-
+#include <string.h>
 #include "irq.h"
 
 
@@ -15,10 +15,19 @@ main(void)
   return 0;
 }
 
-
 void
 init(void)
 {
+  extern unsigned long _sdata;
+  extern unsigned long _etext;
+  extern unsigned long _edata;
+  memcpy(&_sdata, &_etext, (void *)&_edata - (void *)&_sdata);
+
+  extern unsigned long _sbss;
+  extern unsigned long _ebss;
+  memset(&_sbss, 0, (void *)&_ebss - (void *)&_sbss);
+
+
   extern unsigned long _init_array_begin;
   extern unsigned long _init_array_end;
 

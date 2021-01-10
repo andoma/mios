@@ -5,38 +5,13 @@
 
 start:
         cpsid i     // Disable interrupts
-
-        ldr r0, =_sdata
-        ldr r1, =_etext
-        ldr r2, =_edata
-
-copydata:
-        ldr r3, [r1]
-        add r1, r1, #4
-        str r3, [r0]
-        add r0, r0, #4
-        cmp r2, r0
-        bne copydata
-
-        ldr r0, =_sbss
-        mov r1, #0
-        ldr r2, =_ebss
-clearbss:
-        str r1, [r0]
-        add r0, r0, #4
-        cmp r2, r0
-        bne clearbss
-
         bl init
-        mov r0, #2  // Threaded mode
+        movs r0, #2  // Threaded mode
         msr control, r0
         isb
         ldr r0, =idle_stack + 128
         msr psp, r0
         isb
-        adr.w r0, #0xe000ed04
-        mov r1, #(1 << 28)
-        str r1, [r0]
         cpsie i     // Enable interrupts, off we go
         isb
 idle:   wfi
