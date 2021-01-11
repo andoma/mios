@@ -45,20 +45,21 @@ cpu_stack_redzone(task_t *t)
 void cpu_fpu_ctx_init(int *ctx);
 
 
-#ifdef TASK_ACCOUNTING
+
 static inline uint32_t
 cpu_cycle_counter(void)
 {
   volatile unsigned int *DWT_CYCCNT   = (volatile unsigned int *)0xE0001004;
   return *DWT_CYCCNT;
 }
-#endif
+
 
 
 // Return 1 if lock was acquired
 static inline int
 cpu_mutex_lock_fast(mutex_t *m, task_t *curtask)
 {
+#if __ARM_FEATURE_LDREX & 4  // (bit 2 indicate support for 32bit LDREX/STREX)
   task_t *cur;
   int status;
   asm volatile("ldrex %0, [%2]\n"
@@ -70,4 +71,7 @@ cpu_mutex_lock_fast(mutex_t *m, task_t *curtask)
                : "r"(m), "r"(curtask)
                : "cc", "memory");
   return !status;
+#else
+  return 0; // Force slow path
+#endif
 }
