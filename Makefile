@@ -50,7 +50,7 @@ ${O}/%.o: %.c ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
 	${TOOLCHAIN}gcc -MD -MP ${CPPFLAGS} ${CFLAGS} -c $< -o $@
 
-${O}/%.o: %.s ${GLOBALDEPS}
+${O}/%.o: %.S ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
 	${TOOLCHAIN}gcc -MD -MP ${CPPFLAGS} ${CFLAGS} -c $< -o $@
 

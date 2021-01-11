@@ -22,9 +22,30 @@ pendsv:
         push {lr}
         mrs r0, psp
         isb
+#ifdef __thumb2__
         stmdb r0!, {r4-r11}
+#else
+        subs	r0, #16
+        stmia	r0!,{r4-r7}
+        mov	r4, r8
+        mov	r5, r9
+        mov	r6, r10
+        mov	r7, r11
+        subs	r0, #32
+        stmia	r0!,{r4-r7}
+        subs	r0, #16
+#endif
         bl task_switch
+#ifdef __thumb2__
         ldmfd r0!, {r4-r11}
+#else
+        ldmia	r0!,{r4-r7}
+        mov	r8, r4
+        mov	r9, r5
+        mov	r10, r6
+        mov	r11, r7
+        ldmia	r0!,{r4-r7}
+#endif
         msr psp, r0
         isb
         pop {pc}
