@@ -58,7 +58,6 @@ hrtimer_trace_add(uint64_t when, timer_t *t,
 static void
 hrtimer_rearm(timer_t *t, int64_t now)
 {
-  irq_ensure(IRQ_LEVEL_CLOCK);
   const int64_t delta = t->t_expire - now;
   reg_wr(TIM7_BASE + TIMx_CR1, 0x0);
   uint32_t arr;
