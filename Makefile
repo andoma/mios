@@ -67,4 +67,7 @@ bin: ${O}/build.bin
 run: build.lm3s811evb/build.elf
 	qemu-system-arm -nographic -serial mon:stdio -machine lm3s811evb -cpu cortex-m4 -kernel $<
 
+builtindefs:
+	${TOOLCHAIN}gcc  ${CFLAGS} -dM -E - < /dev/null
+
 -include ${DEPS}
