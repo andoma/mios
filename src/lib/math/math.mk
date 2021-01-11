@@ -1,6 +1,9 @@
+ENABLE_MATH ?= yes
+
 GLOBALDEPS += ${SRC}/lib/math/math.mk
 
-SRCS += ${SRC}/lib/math/trig.c \
+SRCS-${ENABLE_MATH} += \
+	${SRC}/lib/math/trig.c \
 	${SRC}/lib/math/powf.c \
 	${SRC}/lib/math/sqrtf.c \
 	${SRC}/lib/math/asinf.c \

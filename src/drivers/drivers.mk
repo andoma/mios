@@ -1,11 +1,14 @@
 
 GLOBALDEPS += ${SRC}/drivers/drivers.mk
 
-SRCS += ${SRC}/drivers/ms5611.c
+SRCS-${ENABLE_MS5611} += \
+	${SRC}/drivers/ms5611.c
 
-SRCS += ${SRC}/drivers/mpu9250.c
+SRCS-${ENABLE_MPU9250} += \
+	${SRC}/drivers/mpu9250.c
 
-SRCS += ${SRC}/drivers/sx1280/sx1280.c \
+SRCS-${ENABLE_SX1280} += \
+	${SRC}/drivers/sx1280/sx1280.c \
 	${SRC}/drivers/sx1280/sx1280_tdma.c \
 	${SRC}/drivers/sx1280_mios.c
 

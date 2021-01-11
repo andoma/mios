@@ -7,6 +7,12 @@
 
 extern va_list fmt_double(va_list ap, char *buf, size_t buflen);
 
+va_list  __attribute__((weak))
+fmt_double(va_list ap, char *buf, size_t buflen)
+{
+  strlcpy(buf, "<nomath>", buflen);
+  return ap;
+}
 
 typedef struct {
   int16_t width;

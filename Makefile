@@ -36,6 +36,7 @@ include ${SRC}/lib/math/math.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 
+SRCS +=  ${SRCS-yes}
 OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}
 DEPS +=  ${OBJS:%.o=%.d}
