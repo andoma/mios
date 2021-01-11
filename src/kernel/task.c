@@ -683,7 +683,6 @@ task_mgmt_thread(void *arg)
     uint32_t cc_delta = (cc - prev_cc) / 10000;
     prev_cc = cc;
 #else
-    int do_accounting = 0;
     cond_wait(&task_mgmt_cond, &alltasks_mutex);
 #endif
 
