@@ -1,9 +1,12 @@
 
-B := ${SRC}/platform/stm32f405-feather
+BOARDNAME := stm32f405-feather
 
-GLOBALDEPS += ${B}/stm32f405-feather.mk
-CPPFLAGS += -I${B}
+B := ${SRC}/platform/${BOARDNAME}
+
+GLOBALDEPS += ${B}/${BOARDNAME}.mk
+
+CPPFLAGS += -I${B} -include ${BOARDNAME}.h
 
 include ${SRC}/platform/stm32f4/stm32f4.mk
 
-SRCS += ${B}/stm32f405-feather.c
+SRCS += ${B}/${BOARDNAME}.c

@@ -3,10 +3,12 @@
 #include <mios/mios.h>
 #include "irq.h"
 
+static volatile unsigned int * const ICSR    = (unsigned int *)0xe000ed04;
+
 void
 irq(void)
 {
-  panic("Unexpected IRQ");
+  panic("Unexpected IRQ %d", *ICSR & 0xff);
 }
 
 #include "irq_alias.h"

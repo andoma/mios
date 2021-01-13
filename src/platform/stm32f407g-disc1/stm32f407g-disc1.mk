@@ -1,9 +1,12 @@
 
-B := ${SRC}/platform/stm32f407g-disc1
+BOARDNAME := stm32f407g-disc1
 
-GLOBALDEPS += ${B}/stm32f407g-disc1.mk
-CPPFLAGS += -I${B}
+B := ${SRC}/platform/${BOARDNAME}
+
+GLOBALDEPS += ${B}/${BOARDNAME}.mk
+
+CPPFLAGS += -I${B} -include ${BOARDNAME}.h
 
 include ${SRC}/platform/stm32f4/stm32f4.mk
 
-SRCS += ${B}/stm32f407g-disc1.c
+SRCS += ${B}/${BOARDNAME}.c

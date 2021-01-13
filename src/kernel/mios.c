@@ -15,6 +15,7 @@ main(void)
   return 0;
 }
 
+
 void
 init(void)
 {
@@ -40,7 +41,12 @@ init(void)
     init_array_begin++;
   }
 
-  task_create((void *)&main, NULL, 1024, "main", TASK_FPU | TASK_DETACHED, 0);
+  int flags = TASK_DETACHED;
+#ifdef HAVE_FPU
+  flags |= TASK_FPU;
+#endif
+
+  task_create((void *)&main, NULL, 1024, "main", flags, 0);
 }
 
 

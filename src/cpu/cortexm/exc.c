@@ -46,12 +46,13 @@ exc_mm_fault(void)
   asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
 
   uint32_t addr = *MMFAR;
+#ifdef CPU_STACK_REDZONE_SIZE
   task_t *const t = task_current();
   if(t && ((addr & ~(CPU_STACK_REDZONE_SIZE - 1)) == (intptr_t)t->t_sp_bottom)) {
     panic("REDZONE HIT task:\"%s\" MFSR:0x%x address:0x%x PC:0x%x",
           t->t_name, *MMFSR, addr, psp[6]);
   }
-
+#endif
   panic("MM fault: 0x%x address:0x%x by 0x%x", *MMFSR, addr, psp[6]);
 }
 

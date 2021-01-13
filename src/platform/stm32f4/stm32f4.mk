@@ -1,15 +1,14 @@
 P := ${SRC}/platform/stm32f4
 
 GLOBALDEPS += ${P}/stm32f4.mk
-CPPFLAGS += -iquote${P}
 
-CFLAGS += -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+CPPFLAGS += -iquote${P}
 
 CPPFLAGS += -DHAVE_HRTIMER
 
 LDSCRIPT = ${P}/stm32f4.ld
 
-include ${SRC}/cpu/cortexm/cortexm.mk
+include ${SRC}/cpu/cortexm/cortexm4f.mk
 
 SRCS += ${P}/stm32f4.c \
 	${P}/stm32f4_gpio.c \

@@ -21,6 +21,8 @@
 
 #include <mios/mios.h>
 
+#ifdef HAVE_BASEPRI
+
 inline void  __attribute__((always_inline))
 irq_ensure0(unsigned int level, const char *file, int line)
 {
@@ -71,17 +73,6 @@ irq_lower(void)
 }
 
 
-void irq_enable(int irq, int level);
-
-void irq_disable(int irq);
-
-inline void  __attribute__((always_inline))
-irq_ack(int irq)
-{
-  volatile unsigned int * const NVIC_ICPR = (unsigned int *)0xe000e280;
-  NVIC_ICPR[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
-}
-
 
 static inline int  __attribute__((always_inline))
 can_sleep(void)
@@ -92,5 +83,58 @@ can_sleep(void)
   unsigned int control;
   asm volatile ("mrs %0, control\n\t" : "=r" (control));
   return !!(control & 0x2) && basepri == 0;
+}
+
+#else
+
+#define irq_ensure(l)
+
+inline unsigned int  __attribute__((always_inline))
+irq_forbid(int not_used)
+{
+  unsigned int old;
+  asm volatile ("mrs %0, primask\n\t" : "=r" (old));
+  asm volatile ("cpsid i");
+  return old;
+}
+
+inline void  __attribute__((always_inline))
+irq_permit(unsigned int old)
+{
+  asm volatile ("msr primask, %0\n\t" : : "r" (old));
+}
+
+
+inline unsigned int  __attribute__((always_inline))
+irq_lower(void)
+{
+  unsigned int old;
+  asm volatile ("mrs %0, primask\n\t" : "=r" (old));
+  asm volatile ("cpsie i");
+  return old;
+}
+
+static inline int  __attribute__((always_inline))
+can_sleep(void)
+{
+  unsigned int primask;
+  asm volatile ("mrs %0, primask\n\t" : "=r" (primask));
+
+  unsigned int control;
+  asm volatile ("mrs %0, control\n\t" : "=r" (control));
+  return !!(control & 0x2) && primask == 0;
+}
+
+#endif
+
+void irq_enable(int irq, int level);
+
+void irq_disable(int irq);
+
+inline void  __attribute__((always_inline))
+irq_ack(int irq)
+{
+  volatile unsigned int * const NVIC_ICPR = (unsigned int *)0xe000e280;
+  NVIC_ICPR[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
 }
 

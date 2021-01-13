@@ -3,7 +3,6 @@
 #include <mios/mios.h>
 #include <mios/timer.h>
 
-#include "clk_config.h"
 #include "sys.h"
 #include "irq.h"
 #include "systick.h"
@@ -98,30 +97,6 @@ clock_get(void)
   irq_permit(s);
   return r;
 }
-
-
-void
-systick_timepulse(void)
-{
-  uint32_t c = cpu_cycle_counter();
-  static uint32_t prev;
-  uint32_t delta = c - prev;
-  prev = c;
-
-  static uint32_t lp;
-
-  if(delta > SYSTICK_RVR - 10000 && delta < SYSTICK_RVR + 10000) {
-    if(lp) {
-      lp = (lp * 3 + 2 + delta) / 4;
-      *SYST_RVR = (lp + (HZ / 2)) / HZ - 1;
-    } else {
-      lp = delta;
-    }
-  } else {
-    lp = 0;
-  }
-}
-
 
 
 static void __attribute__((constructor(130)))

@@ -1,7 +1,4 @@
-// #define TASK_DEBUG
-
-
-#ifndef TASK_DEBUG
+#ifndef ENABLE_TASK_DEBUG
 #define NDEBUG
 #endif
 
@@ -55,7 +52,7 @@ task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom)
            "idle_%s", cpu_name);
 }
 
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
 
 static int
 task_is_on_queue(task_t *t, struct task_queue *q)
@@ -97,7 +94,7 @@ task_is_on_readyqueue(task_t *t)
 static void
 readyqueue_insert(task_t *t, const char *whom)
 {
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
   if(task_is_on_readyqueue(t)) {
     panic("%s: Inserting task %p on readyqueue but it's already there",
           whom, t);
@@ -115,7 +112,7 @@ task_switch(void *cur_sp)
   task_t *const curtask = task_current();
   curtask->t_sp = cur_sp;
 
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
   curtask->t_cycle_acc += cpu_cycle_counter() - curtask->t_cycle_enter;
 #endif
 
@@ -133,7 +130,7 @@ task_switch(void *cur_sp)
   } else {
     which = 31 - which;
     t = TAILQ_FIRST(&readyqueue[which]);
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
     if(t == NULL)
       panic("No task on queue %d", which);
 #endif
@@ -145,7 +142,7 @@ task_switch(void *cur_sp)
     assert(t->t_state == TASK_STATE_RUNNING);
   }
 
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
   if(task_trace) {
     uint32_t *sp = t->t_sp;
     printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p PC:%x]\n",
@@ -158,13 +155,15 @@ task_switch(void *cur_sp)
   cpu->sched.current = t;
   irq_permit(s);
 
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
   t->t_cycle_enter = cpu_cycle_counter();
   t->t_ctx_switches_acc++;
 #endif
 
   cpu_stack_redzone(t);
+#ifdef HAVE_FPU
   cpu_fpu_enable(cpu->sched.current_fpu == t);
+#endif
 
   return t->t_sp;
 }
@@ -173,16 +172,17 @@ task_switch(void *cur_sp)
 static void
 task_end(void)
 {
-  cpu_t *cpu = curcpu();
   task_t *const curtask = task_current();
 
   int s = irq_forbid(IRQ_LEVEL_SWITCH);
 
+#ifdef HAVE_FPU
+  cpu_t *cpu = curcpu();
   if(cpu->sched.current_fpu == curtask) {
     cpu->sched.current_fpu = NULL;
     cpu_fpu_enable(0);
   }
-
+#endif
   curtask->t_state = TASK_STATE_ZOMBIE;
 
   if(curtask->t_flags & TASK_DETACHED) {
@@ -236,10 +236,11 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
     stack_size = MIN_STACK_SIZE;
 
   size_t fpu_ctx_size = 0;
-
+#ifdef HAVE_FPU
   if(flags & TASK_FPU) {
     fpu_ctx_size += FPU_CTX_SIZE;
   }
+#endif
 
   void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(task_t),
                            CPU_STACK_ALIGNMENT,
@@ -253,19 +254,22 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   t->t_prio = prio;
   t->t_flags = flags;
 
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
   t->t_cycle_acc = 0;
   t->t_load = 0;
   t->t_ctx_switches = 0;
   t->t_ctx_switches_acc = 0;
 #endif
 
+#ifdef HAVE_FPU
   if(flags & TASK_FPU) {
     t->t_fpuctx = sp_bottom + stack_size;
     cpu_fpu_ctx_init(t->t_fpuctx);
   } else {
     t->t_fpuctx = NULL;
   }
+#endif
+
   t->t_sp = cpu_stack_init(sp, entry, arg, task_end);
   t->t_sp_bottom = sp_bottom;
 #if 0
@@ -360,11 +364,11 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
 
-#ifdef TASK_WCHAN
+#ifdef ENABLE_TASK_WCHAN
   curtask->t_wchan = waitable->name ?: __FUNCTION__;
 #endif
 
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
   if(task_is_on_readyqueue(curtask)) {
     panic("%s: Task %p is on readyqueue",
           __FUNCTION__, curtask);
@@ -396,11 +400,11 @@ task_sleep_sched_locked(task_waitable_t *waitable)
   assert(waitable != NULL);
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
-#ifdef TASK_WCHAN
+#ifdef ENABLE_TASK_WCHAN
   curtask->t_wchan = waitable->name ?: __FUNCTION__;
 #endif
 
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
   if(task_is_on_readyqueue(curtask)) {
     panic("%s: Task %p is on readyqueue",
           __FUNCTION__, curtask);
@@ -472,7 +476,7 @@ task_sleep_until(uint64_t deadline, int flags, const char *wchan)
 
   assert(curtask->t_state == TASK_STATE_RUNNING);
   curtask->t_state = TASK_STATE_SLEEPING;
-#ifdef TASK_WCHAN
+#ifdef ENABLE_TASK_WCHAN
   curtask->t_wchan = wchan;
 #endif
 
@@ -537,7 +541,7 @@ mutex_lock_sched_locked(mutex_t *m, task_t *curtask)
   while(m->owner != NULL) {
     assert(m->owner != curtask);
 
-#ifdef TASK_DEBUG
+#ifdef ENABLE_TASK_DEBUG
     if(task_is_on_readyqueue(curtask)) {
       panic("%s: Task %p is on readyqueue",
             __FUNCTION__, curtask);
@@ -665,7 +669,7 @@ task_init_early(void)
 static void __attribute__((noreturn))
 task_mgmt_thread(void *arg)
 {
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
   int64_t ts = clock_get();
   uint32_t prev_cc = cpu_cycle_counter();
 #endif
@@ -675,7 +679,7 @@ task_mgmt_thread(void *arg)
   while(1) {
 
 
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
     ts += 1000000;
     int do_accounting =
       cond_wait_timeout(&task_mgmt_cond, &alltasks_mutex, ts, 0);
@@ -696,7 +700,7 @@ task_mgmt_thread(void *arg)
         continue;
       }
 
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
       if(do_accounting) {
         t->t_load = t->t_cycle_acc / cc_delta;
         t->t_cycle_acc = 0;
@@ -724,24 +728,28 @@ cmd_ps(cli_t *cli, int argc, char **argv)
   cli_printf(cli, " Name           Stack      Sp         Pri Sta CtxSwch Load\n");
   SLIST_FOREACH(t, &alltasks, t_global_link) {
     cli_printf(cli, " %-14s %p %p %3d %c%c%c "
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
                "%-6d %3d.%-2d "
 #endif
-#ifdef TASK_WCHAN
+#ifdef ENABLE_TASK_WCHAN
                "%s"
 #endif
                "\n",
                t->t_name, t->t_sp_bottom, t->t_sp,
                t->t_prio,
                "RSZ"[t->t_state],
+#ifdef HAVE_FPU
                t->t_fpuctx ? 'F' : ' ',
+#else
+               ' ',
+#endif
                (t->t_flags & TASK_DETACHED) ? 'd' : ' '
-#ifdef TASK_ACCOUNTING
+#ifdef ENABLE_TASK_ACCOUNTING
                ,t->t_ctx_switches,
                t->t_load / 100,
                t->t_load % 100
 #endif
-#ifdef TASK_WCHAN
+#ifdef ENABLE_TASK_WCHAN
                ,t->t_state == TASK_STATE_SLEEPING ? t->t_wchan : ""
 #endif
                );

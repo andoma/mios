@@ -1,7 +1,10 @@
 C := ${SRC}/cpu/cortexm
 
 GLOBALDEPS += ${C}/cortexm.mk
+
 CPPFLAGS += -iquote${C}
+
+CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm.h
 
 TOOLCHAIN := arm-none-eabi-
 

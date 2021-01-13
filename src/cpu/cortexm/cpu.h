@@ -4,10 +4,11 @@
 
 #include <mios/task.h>
 
-#define FPU_CTX_SIZE (33 * 4) // s0 ... s31 + FPSCR
-
-#define CPU_STACK_ALIGNMENT 32
-#define CPU_STACK_REDZONE_SIZE 32
+#ifdef CPU_STACK_REDZONE_SIZE
+#define CPU_STACK_ALIGNMENT CPU_STACK_REDZONE_SIZE
+#else
+#define CPU_STACK_ALIGNMENT 8
+#endif
 
 #define MIN_STACK_SIZE 256
 
@@ -59,7 +60,8 @@ cpu_cycle_counter(void)
 static inline int
 cpu_mutex_lock_fast(mutex_t *m, task_t *curtask)
 {
-#if __ARM_FEATURE_LDREX & 4  // (bit 2 indicate support for 32bit LDREX/STREX)
+  // (bit 2 indicate support for 32bit LDREX/STREX)
+#if defined(__ARM_FEATURE_LDREX) && __ARM_FEATURE_LDREX & 4
   task_t *cur;
   int status;
   asm volatile("ldrex %0, [%2]\n"

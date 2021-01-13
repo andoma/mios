@@ -8,7 +8,6 @@
 #include "irq.h"
 #include "cpu.h"
 
-#include "clk_config.h"
 #include "systick.h"
 
 #include "stm32f4.h"
@@ -137,7 +136,7 @@ hrtimer_init(void)
 {
   clk_enable(CLK_TIM7);
   irq_enable(55, IRQ_LEVEL_CLOCK);
-  reg_wr(TIM7_BASE + TIMx_PSC, TIMERCLOCK / 1000000 - 1);
+  reg_wr(TIM7_BASE + TIMx_PSC, STM32F4_TIMERCLOCK / 1000000 - 1);
   reg_wr(TIM7_BASE + TIMx_DIER, 0x1);
   reg_wr(TIM7_BASE + TIMx_CR1, 0x8);
 }
