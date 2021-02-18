@@ -1,0 +1,35 @@
+#pragma once
+
+// https://cdn-shop.adafruit.com/product-files/4382/4382-schematic.pdf
+
+//      NAME              GPIO           ALT
+// JP1
+#define PIN_FEATHER_A0    GPIO_PA(4)
+#define PIN_FEATHER_A1    GPIO_PA(5)  // SPI1
+#define PIN_FEATHER_A2    GPIO_PA(6)  // SPI1  TIM3_CH1 TIM13_CH1
+#define PIN_FEATHER_A3    GPIO_PA(7)  // SPI1  TIM3_CH2 TIM14_CH1
+#define PIN_FEATHER_A4    GPIO_PC(4)
+#define PIN_FEATHER_A5    GPIO_PC(5)
+#define PIN_FEATHER_SCK   GPIO_PB(13) // SPI2
+#define PIN_FEATHER_MOSI  GPIO_PB(14) // SPI2  TIM12_CH1
+#define PIN_FEATHER_MISO  GPIO_PB(15) // SPI2
+#define PIN_FEATHER_RX_D0 GPIO_PB(11) // UART3
+#define PIN_FEATHER_TX_D1 GPIO_PB(10) // UART3
+
+
+// JP3
+
+#define PIN_FEATHER_D13   GPIO_PC(1)
+#define PIN_FEATHER_D12   GPIO_PC(2)
+#define PIN_FEATHER_D11   GPIO_PC(3)
+#define PIN_FEATHER_D10   GPIO_PB(9)  // TIM11_CH1
+#define PIN_FEATHER_D9    GPIO_PB(8)  // TIM10_CH1
+#define PIN_FEATHER_D6    GPIO_PC(6)  // TIM3_CH1  TIM8_CH1  UART6
+#define PIN_FEATHER_D5    GPIO_PC(7)  // TIM3_CH2  TIM8_CH2  UART6
+#define PIN_FEATHER_SCL   GPIO_PB(6)  // TIM4_CH1  I2C1   UART1
+#define PIN_FEATHER_SDA   GPIO_PB(7)  // TIM4_CH2  I2C1   UART1
+
+
+
+
+
