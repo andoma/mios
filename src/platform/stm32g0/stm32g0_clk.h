@@ -28,6 +28,9 @@
 #define CLK_USART6 CLK_ID(RCC_APBENR1,  9)
 
 
+#define CLK_TIM7 CLK_ID(RCC_APBENR1,  5)
+
+
 static inline void
 clk_enable(uint16_t id)
 {
