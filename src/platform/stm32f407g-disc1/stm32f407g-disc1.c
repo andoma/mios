@@ -9,7 +9,7 @@
 #include "irq.h"
 
 #include "stm32f4.h"
-
+#include "stm32f4_clk.h"
 #include "stm32f4_uart.h"
 
 static stm32f4_uart_t console;
@@ -17,7 +17,7 @@ static stm32f4_uart_t console;
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  reg_set(RCC_AHB1ENR, 0x01);    // CLK ENABLE: GPIOA
+  clk_enable(CLK_GPIOA);
 
   stm32f4_uart_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3),
                     UART_CTRLD_IS_PANIC);
@@ -65,7 +65,7 @@ board_setup_clocks(void)
 #endif
 
 
-  reg_set(RCC_AHB1ENR, 0x08);  // CLK ENABLE: GPIOD
+  clk_enable(CLK_GPIOD);
   for(int i = 0; i < 4; i++) {
     gpio_conf_output(GPIO_PD(i + 12), GPIO_PUSH_PULL,
                      GPIO_SPEED_LOW, GPIO_PULL_NONE);

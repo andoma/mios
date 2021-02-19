@@ -61,8 +61,3 @@ reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
 #define RCC_CR      0x40023800
 #define RCC_PLLCFGR 0x40023804
 #define RCC_CFGR    0x40023808
-
-#define RCC_AHB1ENR 0x40023830
-#define RCC_APB1ENR 0x40023840
-#define RCC_APB2ENR 0x40023844
-

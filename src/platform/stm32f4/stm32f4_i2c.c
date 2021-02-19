@@ -8,7 +8,7 @@
 
 #include "irq.h"
 #include "stm32f4.h"
-
+#include "stm32f4_clk.h"
 
 #define NAME "stm32f4_i2c"
 
@@ -233,7 +233,7 @@ stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
   }
   instance--;
 
-  reg_set_bit(RCC_APB1ENR, 21 + instance);  // CLK ENABLE
+  clk_enable(CLK_I2C(instance));
 
   usleep(10);
 

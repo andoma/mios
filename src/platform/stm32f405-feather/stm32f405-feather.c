@@ -7,12 +7,12 @@
 
 #include "irq.h"
 
+#include "pinmap.h"
 #include "stm32f4.h"
-#include "stm32f4_i2c.h"
+#include "stm32f4_clk.h"
 #include "stm32f4_uart.h"
 
 #define NEOPIX_GPIO GPIO_PC(0)
-#define PANIC_GPIO  GPIO_PA(4) // A0
 #define BLINK_GPIO  GPIO_PC(1) // Red led close to USB connection
 
 static stm32f4_uart_t console;
@@ -20,6 +20,8 @@ static stm32f4_uart_t console;
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
+  clk_enable(CLK_GPIOC);
+
   stm32f4_uart_init(&console, 6, 115200, GPIO_PC(6), GPIO_PC(7),
                     UART_CTRLD_IS_PANIC);
   stdio = &console.stream;
@@ -55,15 +57,11 @@ board_setup_clocks(void)
 
   while((reg_rd(RCC_CFGR) & 0xc) != 0x8) {}
 
+  clk_enable(CLK_SYSCFG);
 
-  reg_set_bit(RCC_APB2ENR, 14); // CLK ENABLE: SYSCFG
-
-  reg_set(RCC_AHB1ENR, 0x07);    // CLK ENABLE: GPIOA,B,C
-
-  gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
-                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
-
-  gpio_set_output(BLINK_GPIO, 1); // Red LED
+  clk_enable(CLK_GPIOA);
+  clk_enable(CLK_GPIOB);
+  clk_enable(CLK_GPIOC);
 }
 
 
@@ -128,6 +126,11 @@ CLI_CMD_DEF("neopix", cmd_neopix);
 static void *
 blinker(void *arg)
 {
+  gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
+                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
+  gpio_set_output(BLINK_GPIO, 1); // Red LED
+
   neopix_init();
   usleep(20);
   neopix(0,0,10);
@@ -144,13 +147,7 @@ blinker(void *arg)
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
-  gpio_set_output(PANIC_GPIO, 0);
-  gpio_conf_output(PANIC_GPIO, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
   task_create(blinker, NULL, 512, "blinker", 0, 0);
-
-
 }
 
 
@@ -158,6 +155,5 @@ platform_init_late(void)
 void
 platform_panic(void)
 {
-  gpio_set_output(PANIC_GPIO, 1);
   neopix(10,0,10);
 }

@@ -7,6 +7,7 @@
 #include "irq.h"
 #include "stm32f4.h"
 #include "stm32f4_dma.h"
+#include "stm32f4_clk.h"
 
 #define DMA_BASE(x) (0x40026000 + (x) * 0x400)
 #define DMA_ISR(x)  (0x00 + (x) * 4)
@@ -39,7 +40,7 @@ stm32f4_dma_alloc_instance(int instance)
 stm32f4_dma_instance_t
 stm32f4_dma_alloc_fixed(int controller, int stream)
 {
-  reg_set_bit(RCC_AHB1ENR, 21 + controller);  // CLK ENABLE: DMA
+  clk_enable(CLK_DMA(controller));
   return stm32f4_dma_alloc_instance(controller * 8 + stream);
 }
 
