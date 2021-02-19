@@ -53,11 +53,3 @@ reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
   *ptr = (*ptr & ~mask) | ((bits << shift) & mask);
 }
 
-
-
-#define FLASH_ACR   0x40023c00
-
-
-#define RCC_CR      0x40023800
-#define RCC_PLLCFGR 0x40023804
-#define RCC_CFGR    0x40023808

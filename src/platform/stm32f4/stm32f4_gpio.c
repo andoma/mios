@@ -1,6 +1,7 @@
 #include <mios/io.h>
 
 #include <mios/mios.h>
+#include "stm32f4_clk.h"
 #include "stm32f4.h"
 #include "irq.h"
 
@@ -119,6 +120,8 @@ void
 gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
               gpio_edge_t edge, int level)
 {
+  clk_enable(CLK_SYSCFG);
+
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
 

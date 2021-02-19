@@ -4,6 +4,12 @@
 #include "cpu.h"
 #include "systick.h"
 
+#define FLASH_ACR   0x40023c00
+#define RCC_CR      0x40023800
+#define RCC_PLLCFGR 0x40023804
+#define RCC_CFGR    0x40023808
+
+
 int
 clk_get_freq(uint16_t id)
 {
@@ -40,4 +46,36 @@ systick_timepulse(void)
   } else {
     lp = 0;
   }
+}
+
+
+
+void
+stm32f4_init_pll(void)
+{
+  reg_wr(FLASH_ACR, 0x75); // D-CACHE I-CACHE PREFETCH, 5 wait states
+
+  reg_wr(RCC_CFGR,
+         (0x7 << 27) | // MCO2PRE /5
+         (0x4 << 13) | // APB2 (High speed) prescaler = 2
+         (0x5 << 10)); // APB1 (Low speed)  prescaler = 4
+
+  reg_set_bit(RCC_CR, 16); // HSEON
+
+  while(!(reg_rd(RCC_CR) & (1 << 17))) {} // Wait for external oscillator
+
+  reg_wr(RCC_PLLCFGR,
+         (1 << 22)
+         | (4 << 0)         // input division
+         | (168 << 6)       // PLL multiplication
+         | (0 << 16)        // PLL sys clock division (0 == /2) */
+         | (7 << 24));      // PLL usb clock division =48MHz */
+
+  reg_set_bit(RCC_CR, 24);
+
+  while(!(reg_rd(RCC_CR) & (1 << 25))) {} // Wait for pll
+
+  reg_set_bits(RCC_CFGR, 0, 2, 2); // Use PLL as system clock
+
+  while((reg_rd(RCC_CFGR) & 0xc) != 0x8) {}
 }

@@ -72,3 +72,5 @@ clk_enable(uint16_t id)
 }
 
 int clk_get_freq(uint16_t id);
+
+void stm32f4_init_pll(void);
