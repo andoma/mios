@@ -36,3 +36,10 @@ cpu_fpu_ctx_init(int *ctx)
   memset(ctx, 0, sizeof(int) * 32);
   ctx[32] = 1 << 24; // Enable flush-to-zero
 }
+
+
+void
+halt(const char *msg)
+{
+  __asm("bkpt 1");
+}

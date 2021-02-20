@@ -56,6 +56,13 @@ platform_panic(void)
 {
 }
 
+void  __attribute__((weak, noreturn))
+halt(const char *msg)
+{
+  printf("%s\n", msg);
+  while(1) {}
+}
+
 
 void
 panic(const char *fmt, ...)
@@ -70,8 +77,7 @@ panic(const char *fmt, ...)
   va_end(ap);
   printf("\n");
   cli_console();
-  printf("Halted\n");
-  while(1) {}
+  halt(fmt);
 }
 
 
