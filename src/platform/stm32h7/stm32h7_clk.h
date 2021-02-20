@@ -6,8 +6,11 @@
 
 #define STM32H7_CLK_AHB4  0xe0
 #define STM32H7_CLK_APB1L 0xe8
+#define STM32H7_CLK_APB4  0xf4
 
 #define CLK_ID(reg, bit) (((reg) << 8) | (bit))
+
+#define CLK_SYSCFG CLK_ID(STM32H7_CLK_APB4, 1)
 
 #define CLK_GPIOA CLK_ID(STM32H7_CLK_AHB4, 0)
 #define CLK_GPIOB CLK_ID(STM32H7_CLK_AHB4, 1)
