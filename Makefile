@@ -94,7 +94,7 @@ builtindefs:
 	${TOOLCHAIN}gcc  ${CFLAGS} -dM -E - < /dev/null
 
 stlink: ${O}/build.elf
-	gdb-multiarch -ex "target extended-remote localhost:4242" $<
+	gdb-multiarch -ex "target extended-remote localhost:3333" $<
 
 include ${SRC}/platform/platforms.mk
 
