@@ -10,13 +10,12 @@
 
 #define BLINK_GPIO  GPIO_PB(0) // Green led (User LD1)
 
-#if 0
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {
   stm32h7_init_pll();
 }
-#endif
+
 
 
 // Virtual COM port (USB)
