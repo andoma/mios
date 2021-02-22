@@ -30,7 +30,11 @@
 
 #define M_HALF_PIf (0.5f * 3.14159265358979f)
 
-#ifdef __ARM_FP
+// ================
+// Single precision
+// ================
+
+#if __ARM_FP & 4
 
 static inline float __attribute__((always_inline))
 MATH_MANGLE(fabsf)(float f)
@@ -61,6 +65,28 @@ MATH_MANGLE(fabsf)(float x)
 float MATH_MANGLE(sqrtf)(float) __attribute__ ((const));
 
 #endif
+
+
+
+// ================
+// Double precision
+// ================
+
+#if __ARM_FP & 8
+
+static inline double __attribute__((always_inline))
+MATH_MANGLE(sqrt)(double f)
+{
+  double r;
+  asm("vsqrt.f64 %P0, %P1" : "=w"(r) : "w" (f));
+  return r;
+}
+
+#endif
+
+
+
+
 
 float MATH_MANGLE(sinf)(float) __attribute__ ((const));
 
