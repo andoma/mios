@@ -78,21 +78,23 @@ typedef struct {
 #endif
 } task_waitable_t;
 
+
+#ifdef ENABLE_TASK_WCHAN
+#define task_waitable_init(t, n) do { LIST_INIT(&(t)->list); (t)->name = n; } while(0)
+#define WAITABLE_INITIALIZER(n) { .name = (n)}
+#else
+#define task_waitable_init(t, n) LIST_INIT(&(t)->list)
+#define WAITABLE_INITIALIZER(n) {}
+
+#endif
+
+
 typedef struct mutex {
   struct task *owner;
   task_waitable_t waiters;
 } mutex_t;
 
 typedef task_waitable_t cond_t;
-
-#ifdef ENABLE_TASK_WCHAN
-#define task_waitable_init(t, n) do { LIST_INIT(&(t)->list); (t)->name = n; } while(0)
-
-#else
-#define task_waitable_init(t, n) LIST_INIT(&(t)->list)
-
-#endif
-
 
 void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 
