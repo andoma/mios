@@ -5,6 +5,8 @@
 
 #define RCC_BASE 0x40021000
 
+#define RCC_APBRSTR1 0x2c
+
 #define RCC_IOPENR  0x34
 #define RCC_AHBENR  0x38
 #define RCC_APBENR1 0x3c
@@ -27,9 +29,13 @@
 #define CLK_USART5 CLK_ID(RCC_APBENR1,  8)
 #define CLK_USART6 CLK_ID(RCC_APBENR1,  9)
 
+#define CLK_I2C(x) CLK_ID(RCC_APBENR1, 20 + (x))
+#define RST_I2C(x) CLK_ID(RCC_APBRSTR1, 20 + (x))
 
 #define CLK_TIM7 CLK_ID(RCC_APBENR1,  5)
 
+
+void reset_peripheral(uint16_t id);
 
 static inline void
 clk_enable(uint16_t id)
