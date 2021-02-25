@@ -2,7 +2,7 @@
         .text
         .thumb
         .thumb_func
-
+        .global start
 start:
         cpsid i     // Disable interrupts
         bl init

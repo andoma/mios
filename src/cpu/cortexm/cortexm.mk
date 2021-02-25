@@ -10,6 +10,8 @@ TOOLCHAIN := arm-none-eabi-
 
 LDSCRIPT ?= ${C}/linker.ld
 
+LDFLAGS += -e start
+
 NOFPU := -mgeneral-regs-only
 
 SRCS += ${C}/isr.s \
