@@ -12,5 +12,9 @@ typedef enum {
   ERR_MTU_EXCEEDED          = -8,
   ERR_INVALID_ID            = -9,
   ERR_DMA_ERROR             = -10,
+  ERR_BUS_ERROR             = -11,
+  ERR_ARBITRATION_LOST      = -12,
+  ERR_BAD_STATE             = -13,
+
 } error_t;
 
