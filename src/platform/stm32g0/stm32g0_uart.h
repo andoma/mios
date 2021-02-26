@@ -27,6 +27,7 @@ typedef struct {
 } stm32g0_uart_t;
 
 
+#define UART_HALF_DUPLEX    0x1
 #define UART_CTRLD_IS_PANIC 0x80
 
 stream_t *stm32g0_uart_init(stm32g0_uart_t *uart, int instance, int baudrate,

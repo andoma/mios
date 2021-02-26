@@ -9,6 +9,7 @@
 #include "irq.h"
 
 #define USART_CR1  0x00
+#define USART_CR3  0x08
 #define USART_BBR  0x0c
 #define USART_SR   0x1c
 #define USART_RDR  0x24
@@ -181,8 +182,13 @@ stm32g0_uart_init(stm32g0_uart_t *u, int instance, int baudrate,
   instance--;
 
   const int af = uart_config[instance].af;
-  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+
+  if(flags & UART_HALF_DUPLEX) {
+    gpio_conf_af(tx, af, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  } else {
+    gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+    gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+  }
 
   clk_enable(uart_config[instance].clkid);
 
@@ -191,6 +197,9 @@ stm32g0_uart_init(stm32g0_uart_t *u, int instance, int baudrate,
 
   const unsigned int freq = 16000000; // clk_get_freq(uart_config[instance].clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;
+
+  if(flags & UART_HALF_DUPLEX)
+    reg_wr(u->reg_base + USART_CR3, 0x8); // HDSEL
 
   reg_wr(u->reg_base + USART_CR1, (1 << 0)); // ENABLE
   reg_wr(u->reg_base + USART_BBR, bbr);
