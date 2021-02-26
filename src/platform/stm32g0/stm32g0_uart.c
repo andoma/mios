@@ -161,7 +161,7 @@ static const struct {
   uint8_t irq;
   uint8_t af;
 } uart_config[] = {
-  { 0x0138, CLK_USART1, 27, 1},
+  { 0x0138, CLK_USART1, 27, 0},
   { 0x0044, CLK_USART2, 28, 1},
   { 0x0048, CLK_USART3, 29, 1},
   { 0x004c, CLK_USART4, 29, 1},
