@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #define STREAM_READ_WAIT_NONE 0
 #define STREAM_READ_WAIT_ONE  1
 #define STREAM_READ_WAIT_ALL  2
