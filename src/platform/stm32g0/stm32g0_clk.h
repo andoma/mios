@@ -14,6 +14,7 @@
 
 #define CLK_ID(reg, bit) (((reg) << 8) | (bit))
 
+#define CLK_CRC CLK_ID(RCC_AHBENR, 12)
 
 #define CLK_GPIOA CLK_ID(RCC_IOPENR, 0)
 #define CLK_GPIOB CLK_ID(RCC_IOPENR, 1)
@@ -40,7 +41,13 @@ void reset_peripheral(uint16_t id);
 static inline void
 clk_enable(uint16_t id)
 {
-  reg_set_bits(RCC_BASE + (id >> 8), id & 0xff, 1, 1);
+  reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
+}
+
+static inline void
+clk_disable(uint16_t id)
+{
+  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
 
 int clk_get_freq(uint16_t id);
