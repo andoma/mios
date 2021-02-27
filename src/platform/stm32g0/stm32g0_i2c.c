@@ -72,8 +72,8 @@ stm32g0_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
   gpio_conf_af(sda, 6, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
 
   clk_enable(c->clk_id);
-
-  stm32_i2c_t *d = stm32_i2c_create(c->base_addr, c->irq);
+  stm32_i2c_t *d = stm32_i2c_create(c->base_addr);
+  irq_enable(c->irq, IRQ_LEVEL_IO);
 
   g_i2c[instance] = d;
 

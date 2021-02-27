@@ -61,15 +61,9 @@ i2c_irq(stm32_i2c_t *i2c)
     return;
   }
 
-  if(isr & 0x40 && i2c->read_len) {
-    // Write cycle completed, initiate read
-
-    reg_wr(i2c->base_addr + I2C_CR2,
-           (reg_rd(i2c->base_addr + I2C_CR2) & 0x3ff) |
-           (1 << 10) | // READ
-           (1 << 13) | // Generate Start
-           (1 << 25) | // AutoEnd
-           (i2c->read_len << 16));
+  if(i2c->result != 1) {
+    // Thread is no longer waiting, cancel everything
+    reg_wr(i2c->base_addr + I2C_ICR, isr);
     return;
   }
 
@@ -83,16 +77,22 @@ i2c_irq(stm32_i2c_t *i2c)
     return i2c_done(i2c, i2c->write_len ? ERR_TX : ERR_RX);
   }
 
-  if(i2c->result != 1) {
-    // Thread is no longer waiting, cancel everything
-    reg_wr(i2c->base_addr + I2C_ICR, isr);
-    return;
-  }
-
   if(isr & 0x100)
     return i2c_done(i2c, ERR_BUS_ERROR);
   if(isr & 0x200)
     return i2c_done(i2c, ERR_ARBITRATION_LOST);
+
+  if(!i2c->write_len && i2c->read_len) {
+    // Write cycle completed, initiate read
+
+    reg_wr(i2c->base_addr + I2C_CR2,
+           (reg_rd(i2c->base_addr + I2C_CR2) & 0x3ff) |
+           (1 << 10) | // READ
+           (1 << 13) | // Generate Start
+           (1 << 25) | // AutoEnd
+           (i2c->read_len << 16));
+    return;
+  }
 
   return i2c_done(i2c, ERR_BAD_STATE);
 }
@@ -158,7 +158,7 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
 
 
 static stm32_i2c_t *
-stm32_i2c_create(uint32_t base_addr, int irq)
+stm32_i2c_create(uint32_t base_addr)
 {
   stm32_i2c_t *d = malloc(sizeof(stm32_i2c_t));
   d->base_addr = base_addr;
@@ -167,6 +167,5 @@ stm32_i2c_create(uint32_t base_addr, int irq)
   task_waitable_init(&d->wait, "i2c");
   mutex_init(&d->mutex, "i2clock");
   reg_wr(d->base_addr + I2C_CR1, 0);
-  irq_enable(irq, IRQ_LEVEL_IO);
   return d;
 }
