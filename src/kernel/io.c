@@ -23,6 +23,11 @@ i2c_read_bytes(i2c_t *i2c, uint8_t addr, uint8_t reg,
   return i2c->rw(i2c, addr, &reg, 1, u8, len);
 }
 
+i2c_t *  __attribute__((weak))
+i2c_get_bus(unsigned int bus_id)
+{
+  return NULL;
+}
 
 
 // Weak stubs for IO methods. There are overriden by the linker if
