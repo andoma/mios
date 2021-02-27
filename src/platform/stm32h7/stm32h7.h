@@ -38,3 +38,9 @@ reg_set_bit(uint32_t addr, uint32_t bit)
 {
   reg_set_bits(addr, bit, 1, 1);
 }
+
+static inline void
+reg_clr_bit(uint32_t addr, uint32_t bit)
+{
+  reg_set_bits(addr, bit, 1, 0);
+}
