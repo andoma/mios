@@ -46,16 +46,16 @@ cmd_i2c_read(cli_t *cli, int argc, char **argv)
   }
 
   const int bus_id = atoi(argv[1]);
-  const int addr = atoi(argv[2]);
-  const int reg = atoi(argv[3]);
-  const int len = atoi(argv[4]);
+  const int addr = atoix(argv[2]);
+  const uint8_t reg = atoix(argv[3]);
+  const int len = atoix(argv[4]);
   i2c_t *bus = i2c_get_bus(bus_id);
   if(bus == NULL) {
     cli_printf(cli, "i2c bus %d not available\n", bus_id);
     return 0;
   }
 
-  if(len > 256) {
+  if(len > 255) {
     cli_printf(cli, "Bad length:%d\n", len);
     return 0;
   }
