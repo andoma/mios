@@ -46,7 +46,7 @@ init(void)
   flags |= TASK_FPU;
 #endif
 
-  task_create((void *)&main, NULL, 1024, "main", flags, 0);
+  task_create((void *)&main, NULL, 1024, "main", flags, 2);
 }
 
 
