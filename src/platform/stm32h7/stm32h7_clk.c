@@ -9,6 +9,7 @@
 
 #define PWR_BASE              0x58024800
 
+#define PWR_CSR1       (PWR_BASE + 0x04)
 #define PWR_CR3        (PWR_BASE + 0x0c)
 #define PWR_D3CR       (PWR_BASE + 0x18)
 
@@ -57,6 +58,8 @@ set_flash_latency(int axi_freq, int vos)
 static void
 voltage_scaling(int level)
 {
+  while(!(reg_rd(PWR_CSR1) & (1 << 13))) {}
+
   // Set VOS
   reg_set_bits(PWR_D3CR, 14, 2, level);
 
@@ -93,12 +96,15 @@ voltage_scaling(int level)
 void
 stm32h7_init_pll(void)
 {
-  // Run at 400MHz
+  // Lock LDO setup
+  reg_clr_bit(PWR_CR3, 2);
 
   int sysclk_freq = 400;
   int axi_freq = sysclk_freq / 2;
 
-  const uint32_t pllm = 1; // Input prescaler (1 == divide  by 1)
+  const uint32_t pll1m = 1; // Input prescaler (1 == divide  by 1)
+  const uint32_t pll2m = 1; // Input prescaler (1 == divide  by 1)
+  const uint32_t pll3m = 1; // Input prescaler (1 == divide  by 1)
   const uint32_t plln = 49;
   const uint32_t pllp = 0;
   const uint32_t pllq = 20;
@@ -117,10 +123,30 @@ stm32h7_init_pll(void)
   set_flash_latency(axi_freq, vos);
 
   voltage_scaling(vos);
+  int pllscr;
 
+#if 1
+  // Use external 8MHz clock
+  // HSE osc bypass (no crystal)
+  reg_set_bit(RCC_CR, 18);
+
+  // HSE clock enable
+  reg_set_bit(RCC_CR, 16);
+
+  // Wait for stable HSE clock
+  while(!(reg_rd(RCC_CR) & (1 << 17))) {}
+
+  pllscr = 2; // HSE is PLL clock
+
+#else
   // HSI Clock divide by 8   64 -> 8 MHz
   reg_set_bits(RCC_CR, 3, 2, 3);
 
+  pllscr = 0; // HSI is PLL clock
+
+#endif
+
+  // Configure clock dividers for domains
   reg_wr(RCC_D1CFGR,
          (hpre << 0) |
          (d1ppre << 4) |
@@ -133,11 +159,22 @@ stm32h7_init_pll(void)
   reg_wr(RCC_D3CFGR, d3ppre << 4);
 
 
-  // Set prescaler for PLL1
-  reg_wr(RCC_PLLCKSELR, pllm << 4);
+  // Set prescalers for PLLx
+  reg_wr(RCC_PLLCKSELR,
+         pllscr |
+         pll1m << 4 |
+         pll2m << 12 |
+         pll3m << 20);
 
-  // PLL1 input rage (8-16 MHz) - DIVP1 output enable
-  reg_wr(RCC_PLLCFGR, (3 << 2) | (1 << 16) | (1 << 17));
+
+  // PLLx input rage (8-16 MHz) - output enables
+  reg_wr(RCC_PLLCFGR,
+         (3 << 2)  | // PLL1 Input range
+         (3 << 6)  | // PLL2 Input range
+         (3 << 10) | // PLL3 Input range
+         (1 << 16) | // PLL1(p) enable
+         (1 << 17) | // PLL1(q) enable
+         0);
 
   // Write multiplier and output divider
   reg_wr(RCC_PLL1DIVR, (pllq << 16) | (pllp << 9) | plln);
@@ -160,6 +197,13 @@ stm32h7_init_pll(void)
 unsigned int
 clk_get_freq(uint16_t id)
 {
-  // TODO: Fix this hack
+  // TODO: Fix this incorrect hack
   return 100000000;
+}
+
+void
+reset_peripheral(uint16_t id)
+{
+  reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
+  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
