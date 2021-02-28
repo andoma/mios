@@ -14,6 +14,8 @@ SRCS += ${P}/stm32h7.c \
 	${P}/stm32h7_clk.c \
 	${P}/stm32h7_gpio.c \
 	${P}/stm32h7_uart.c \
+	${P}/stm32h7_i2c.c \
+	${P}/stm32h7_dma.c \
 
 
 ${MO}/src/platform/stm32h7/%.o : CFLAGS += ${NOFPU}
