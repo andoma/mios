@@ -716,7 +716,7 @@ task_mgmt_thread(void *arg)
 static void __attribute__((constructor(900)))
 task_init_late(void)
 {
-  task_create((void *)task_mgmt_thread, NULL, 256, "taskmgmt", 0, 0);
+  task_create((void *)task_mgmt_thread, NULL, 256, "taskmgmt", 0, 3);
 }
 
 
