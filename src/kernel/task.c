@@ -712,7 +712,7 @@ task_mgmt_thread(void *arg)
 
 #ifdef ENABLE_TASK_ACCOUNTING
       if(do_accounting) {
-        t->t_load = t->t_cycle_acc / cc_delta;
+        t->t_load = cc_delta ? t->t_cycle_acc / cc_delta : 0;
         t->t_cycle_acc = 0;
         t->t_ctx_switches = t->t_ctx_switches_acc;
         t->t_ctx_switches_acc = 0;
