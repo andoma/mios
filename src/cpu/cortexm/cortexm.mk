@@ -8,8 +8,6 @@ CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm.h
 
 TOOLCHAIN := arm-none-eabi-
 
-LDSCRIPT ?= ${C}/linker.ld
-
 LDFLAGS += -e start
 
 NOFPU := -mgeneral-regs-only

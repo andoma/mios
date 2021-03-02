@@ -24,6 +24,12 @@ CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 CPPFLAGS += -I${T}/include -I${SRC} -include ${O}/include/config.h
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
+CFLAGS += -ffunction-sections -fdata-sections
+LDFLAGS += -Wl,--gc-sections
+
+# Needed for linker script includes
+LDFLAGS += -L${SRC}
+
 
 #
 # Set defaults for all variables
