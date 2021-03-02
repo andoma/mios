@@ -333,7 +333,7 @@ task_insert_wait_list(task_waitable_t *waitable, task_t *t)
 
 
 static void
-task_sleep_abs_sched_locked_timeout(void *opaque)
+task_sleep_abs_sched_locked_timeout(void *opaque, uint64_t expire)
 {
   task_t *t = opaque;
 
@@ -453,7 +453,7 @@ task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
 
 
 static void
-task_sleep_until_timeout(void *opaque)
+task_sleep_until_timeout(void *opaque, uint64_t expire)
 {
   task_t *t = opaque;
   const int s = irq_forbid(IRQ_LEVEL_SCHED);

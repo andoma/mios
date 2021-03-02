@@ -7,7 +7,7 @@ LIST_HEAD(timer_list, timer);
 
 typedef struct timer {
   LIST_ENTRY(timer) t_link;
-  void (*t_cb)(void *opaque);
+  void (*t_cb)(void *opaque, uint64_t expire);
   void *t_opaque;
   uint64_t t_expire;
   const char *t_name;

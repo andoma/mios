@@ -92,7 +92,9 @@ irq_55(void)
     if(t == NULL)
       return;
 
-    if(t->t_expire > now) {
+    int64_t expire = t->t_expire;
+
+    if(expire > now) {
       hrtimer_rearm(t, now);
       return;
     }
@@ -109,7 +111,7 @@ irq_55(void)
 
     LIST_REMOVE(t, t_link);
     t->t_expire = 0;
-    t->t_cb(t->t_opaque);
+    t->t_cb(t->t_opaque, expire);
   }
 }
 
