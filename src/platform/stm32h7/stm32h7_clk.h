@@ -28,6 +28,8 @@
 #define CLK_GPIOJ CLK_ID(STM32H7_CLK_AHB4, 9)
 #define CLK_GPIOK CLK_ID(STM32H7_CLK_AHB4, 10)
 
+#define CLK_CRC   CLK_ID(STM32H7_CLK_AHB4, 19)
+
 #define CLK_USART2 CLK_ID(STM32H7_CLK_APB1L, 17)
 #define CLK_USART3 CLK_ID(STM32H7_CLK_APB1L, 18)
 #define CLK_USART4 CLK_ID(STM32H7_CLK_APB1L, 19)
@@ -50,6 +52,12 @@ static inline void
 clk_enable(uint16_t id)
 {
   reg_set_bit(STM32H7_RCC_BASE + (id >> 8), id & 0xff);
+}
+
+static inline void
+clk_disable(uint16_t id)
+{
+  reg_clr_bit(STM32H7_RCC_BASE + (id >> 8), id & 0xff);
 }
 
 unsigned int clk_get_freq(uint16_t id);

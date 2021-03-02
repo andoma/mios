@@ -12,6 +12,7 @@ include ${SRC}/cpu/cortexm/cortexm7.mk
 
 SRCS += ${P}/stm32h7.c \
 	${P}/stm32h7_clk.c \
+	${P}/stm32h7_crc.c \
 	${P}/stm32h7_gpio.c \
 	${P}/stm32h7_uart.c \
 	${P}/stm32h7_i2c.c \

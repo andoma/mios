@@ -24,7 +24,7 @@ crc32_for_byte(uint32_t r)
 
 
 uint32_t  __attribute__((weak))
-crc32(const void *data, size_t n_bytes)
+crc32(uint32_t crc, const void *data, size_t n_bytes)
 {
   static mutex_t mutex = MUTEX_INITIALIZER("crcinit");
   static uint32_t *table;
@@ -37,7 +37,6 @@ crc32(const void *data, size_t n_bytes)
   }
   mutex_unlock(&mutex);
 
-  uint32_t crc = 0;
   for(size_t i = 0; i < n_bytes; ++i)
     crc = table[(uint8_t)crc ^ ((uint8_t*)data)[i]] ^ crc >> 8;
 
