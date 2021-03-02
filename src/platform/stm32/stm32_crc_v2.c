@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <mios/task.h>
-#include "net/crc32.h"
+#include "util/crc32.h"
 
 #define CRC_DR   0x00
 #define CRC_IDR  0x04

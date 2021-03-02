@@ -53,6 +53,7 @@ include ${SRC}/lib/libc/libc.mk
 include ${SRC}/lib/math/math.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
+include ${SRC}/util/util.mk
 
 SRCS +=  ${SRCS-yes}
 OBJS +=  ${SRCS:%.c=${O}/%.o}

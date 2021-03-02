@@ -23,7 +23,7 @@ hdlc_read(stream_t *s,
 
     switch(c) {
     case 0x7e:
-      if(len > 4 && (uint32_t)~crc32(buf, len) == 0)
+      if(len > 4 && (uint32_t)~crc32(0, buf, len) == 0)
         cb(opaque, buf, len - 4);
       len = 0;
       break;
@@ -80,7 +80,7 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
 void
 hdlc_send(stream_t *s, const void *data, size_t len)
 {
-  uint32_t crc = ~crc32(data, len);
+  uint32_t crc = ~crc32(0, data, len);
 
   struct iovec vec[2] = {
     { .iov_base = (void *)data,
