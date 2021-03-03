@@ -7,9 +7,10 @@ static int
 cmd_arp(cli_t *cli, int argc, char **argv)
 {
   const netif_t *ni;
-  mutex_lock(&net_output_mutex);
 
-  LIST_FOREACH(ni, &netifs, ni_global_link) {
+  mutex_lock(&netif_mutex);
+
+  SLIST_FOREACH(ni, &netifs, ni_global_link) {
     const nexthop_t *nh;
 
     LIST_FOREACH(nh, &ni->ni_nexthops, nh_netif_link) {
@@ -28,11 +29,11 @@ cmd_arp(cli_t *cli, int argc, char **argv)
                    nh->nh_hwaddr[5],
                    nh->nh_state,
                    nh->nh_in_use ? " (Active)" : "");
-}
+      }
     }
   }
+  mutex_unlock(&netif_mutex);
 
-  mutex_unlock(&net_output_mutex);
   return 0;
 }
 

@@ -108,7 +108,7 @@ nexthop_resolve(uint32_t addr)
   }
 
   netif_t *ni;
-  LIST_FOREACH(ni, &netifs, ni_global_link) {
+  SLIST_FOREACH(ni, &netifs, ni_global_link) {
     if(ipv4_prefix_match(addr, ni->ni_ipv4_addr, ni->ni_ipv4_prefixlen))
       break;
   }
@@ -139,16 +139,12 @@ ipv4_output(pbuf_t *pb)
   ip->cksum = 0;
   ip->cksum = ipv4_cksum_pbuf(0, pb, 0, 20);
 
-  mutex_lock(&net_output_mutex);
-
   nexthop_t *nh = nexthop_resolve(ip->dst_addr);
   if(nh != NULL) {
     nh->nh_netif->ni_ipv4_output(nh->nh_netif, nh, pb);
   } else {
     pbuf_free(pb);
   }
-
-  mutex_unlock(&net_output_mutex);
 }
 
 void

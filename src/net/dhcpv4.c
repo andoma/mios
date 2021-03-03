@@ -415,9 +415,14 @@ static int
 cmd_dhcp(cli_t *cli, int argc, char **argv)
 {
   const netif_t *ni;
-  mutex_lock(&net_output_mutex);
 
-  LIST_FOREACH(ni, &netifs, ni_global_link) {
+  mutex_lock(&netif_mutex);
+
+  SLIST_FOREACH(ni, &netifs, ni_global_link) {
+
+    if(ni->ni_iftype != NETIF_TYPE_ETHERNET)
+      continue;
+
     const ether_netif_t *eni = (const ether_netif_t *)ni;
 
     cli_printf(cli, "DHCP State: %s\n", dhcp_state_str[eni->eni_dhcp_state]);
@@ -433,8 +438,7 @@ cmd_dhcp(cli_t *cli, int argc, char **argv)
       }
     }
   }
-
-  mutex_unlock(&net_output_mutex);
+  mutex_unlock(&netif_mutex);
   return 0;
 }
 

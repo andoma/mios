@@ -12,7 +12,6 @@
 
 typedef struct ether_netif {
   netif_t eni_ni;
-  timer_t eni_periodic_timer;
   void (*eni_output)(struct ether_netif *eni, pbuf_t *pb, int flags);
 
   uint16_t eni_work_bits; // Protected at IRQ_LEVEL_NET

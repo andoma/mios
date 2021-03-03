@@ -291,7 +291,7 @@ handle_irq_rx(stm32h7_eth_t *se)
         pb->pb_buflen = len;
         pb->pb_pktlen = len;
         STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
-        task_wakeup(&se->se_eni.eni_ni.ni_rx_waitable, 0);
+        netif_wakeup(&se->se_eni.eni_ni);
       } else {
 
         STAILQ_INSERT_TAIL(&se->se_rx_scatter_queue, pb, pb_link);
@@ -304,7 +304,7 @@ handle_irq_rx(stm32h7_eth_t *se)
 
           STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
                         &se->se_rx_scatter_queue);
-          task_wakeup(&se->se_eni.eni_ni.ni_rx_waitable, 0);
+          netif_wakeup(&se->se_eni.eni_ni);
 
         } else {
           se->se_rx_scatter_length = len;

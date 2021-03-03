@@ -96,8 +96,6 @@ arp_input(ether_netif_t *eni, pbuf_t *pb)
     return NULL;
   } else if(ap->oper == htons(2)) {
 
-    mutex_lock(&net_output_mutex);
-
     nexthop_t *nh;
     LIST_FOREACH(nh, &eni->eni_ni.ni_nexthops, nh_netif_link) {
       if(nh->nh_addr == ap->spa) {
@@ -110,7 +108,6 @@ arp_input(ether_netif_t *eni, pbuf_t *pb)
         }
       }
     }
-    mutex_unlock(&net_output_mutex);
   }
 
 
@@ -119,8 +116,9 @@ arp_input(ether_netif_t *eni, pbuf_t *pb)
 
 
 static pbuf_t *
-ether_input(ether_netif_t *eni, pbuf_t *pb)
+ether_input(netif_t *ni, pbuf_t *pb)
 {
+  ether_netif_t *eni = (ether_netif_t *)ni;
   //  pbuf_print("ether", pb);
 
   if((pb = pbuf_pullup(pb, sizeof(ether_hdr_t))) == NULL)
@@ -157,11 +155,10 @@ nexthop_destroy(nexthop_t *nh)
 }
 
 
+
 static void
 ether_nexthop_periodic(ether_netif_t *eni)
 {
-  mutex_lock(&net_output_mutex);
-
   nexthop_t *nh, *next;
   for(nh = LIST_FIRST(&eni->eni_ni.ni_nexthops); nh != NULL; nh = next) {
     next = LIST_NEXT(nh, nh_netif_link);
@@ -175,55 +172,17 @@ ether_nexthop_periodic(ether_netif_t *eni)
 
     if(nh->nh_in_use)
       nh->nh_in_use--;
-
   }
-
-  mutex_unlock(&net_output_mutex);
 }
-
-
 
 
 
 static void
-ether_work(ether_netif_t *eni, uint16_t work_bits)
+ether_periodic(netif_t *ni)
 {
-  if(work_bits & ETHER_NETIF_PERIODIC) {
-    ether_nexthop_periodic(eni);
-    dhcpv4_periodic(eni);
-  }
-}
-
-
-static void __attribute__((noreturn))
-ether_thread(void *arg)
-{
-  ether_netif_t *eni = arg;
-
-  int q = irq_forbid(IRQ_LEVEL_NET);
-
-  while(1) {
-
-    if(eni->eni_work_bits) {
-      const uint16_t work_bits = eni->eni_work_bits;
-      eni->eni_work_bits = 0;
-      irq_permit(q);
-      ether_work(eni, work_bits);
-      q = irq_forbid(IRQ_LEVEL_NET);
-      continue;
-    }
-
-    pbuf_t *pb = pbuf_splice(&eni->eni_ni.ni_rx_queue);
-    if(pb != NULL) {
-      irq_permit(q);
-      pb = ether_input(eni, pb);
-      q = irq_forbid(IRQ_LEVEL_NET);
-      if(pb)
-        pbuf_free_irq_blocked(pb);
-      continue;
-    }
-    task_sleep(&eni->eni_ni.ni_rx_waitable);
-  }
+  ether_netif_t *eni = (ether_netif_t *)ni;
+  ether_nexthop_periodic(eni);
+  dhcpv4_periodic(eni);
 }
 
 
@@ -258,32 +217,14 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
 }
 
 
-static void
-periodic_timer_cb(void *opaque, uint64_t expire)
-{
-  ether_netif_t *eni = opaque;
-
-  int q = irq_forbid(IRQ_LEVEL_NET);
-  eni->eni_work_bits |= ETHER_NETIF_PERIODIC;
-  task_wakeup(&eni->eni_ni.ni_rx_waitable, 0);
-  irq_permit(q);
-  timer_arm_abs(&eni->eni_periodic_timer, expire + 1000000, 0);
-}
 
 void
 ether_netif_init(ether_netif_t *eni, const char *name)
 {
-  STAILQ_INIT(&eni->eni_ni.ni_rx_queue);
+  eni->eni_ni.ni_iftype = NETIF_TYPE_ETHERNET;
   eni->eni_ni.ni_ipv4_output = ether_ipv4_output;
-  task_waitable_init(&eni->eni_ni.ni_rx_waitable, name);
-  task_create((void *)ether_thread, eni, 512, name, 0, 4);
+  eni->eni_ni.ni_periodic = ether_periodic;
+  eni->eni_ni.ni_input = ether_input;
 
-  mutex_lock(&net_output_mutex);
-  LIST_INSERT_HEAD(&netifs, &eni->eni_ni, ni_global_link);
-  mutex_unlock(&net_output_mutex);
-
-  eni->eni_periodic_timer.t_cb = periodic_timer_cb;
-  eni->eni_periodic_timer.t_opaque = eni;
-
-  timer_arm_abs(&eni->eni_periodic_timer, clock_get() + 1000000, 0);
+  netif_attach(&eni->eni_ni);
 }
