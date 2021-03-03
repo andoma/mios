@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifdef ENABLE_NET
+#include <net/net.h>
+#endif
+
 extern va_list fmt_double(va_list ap, char *buf, size_t buflen);
 
 va_list  __attribute__((weak))
@@ -18,6 +22,9 @@ typedef struct {
   int16_t width;
   unsigned char lz:1;
   unsigned char la:1;
+#ifdef ENABLE_NET
+  unsigned char ipv4:1;
+#endif
 } fmtparam_t;
 
 
@@ -122,6 +129,21 @@ static size_t  __attribute__((noinline))
 emit_s32(fmtcb_t *cb, void *aux, int x,
          const fmtparam_t *fp)
 {
+#ifdef ENABLE_NET
+  if(fp->ipv4) {
+    size_t r = 0;
+    x = ntohl(x);
+    char dot = '.';
+    r += emit_u32(cb, aux, (x >> 24) & 0xff, fp, 0);
+    r += cb(aux, &dot, 1);
+    r += emit_u32(cb, aux, (x >> 16) & 0xff, fp, 0);
+    r += cb(aux, &dot, 1);
+    r += emit_u32(cb, aux, (x >> 8) & 0xff, fp, 0);
+    r += cb(aux, &dot, 1);
+    r += emit_u32(cb, aux, x & 0xff, fp, 0);
+    return r;
+  }
+#endif
   if(x < 0)
     return emit_u32(cb, aux, -x, fp, 1);
   else
@@ -201,7 +223,9 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
     fmtparam_t fp;
     fp.lz = 0;
     fp.la = 0;
-
+#ifdef ENABLE_NET
+    fp.ipv4 = 0;
+#endif
     if(*fmt == '0') {
       fp.lz = 1;
       fmt++;
@@ -212,6 +236,11 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     fp.width = parse_dec(&fmt, -1);
 
+#ifdef ENABLE_NET
+    fp.ipv4 = fmt[0] == 'I';
+    if(fp.ipv4)
+      fmt++;
+#endif
     const int ll = fmt[0] == 'l' && fmt[1] == 'l';
     if(ll)
       fmt += 2;
