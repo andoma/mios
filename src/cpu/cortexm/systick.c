@@ -27,8 +27,10 @@ exc_systick(void)
 
   while(1) {
     timer_t *t = LIST_FIRST(&timers);
+    if(t == NULL)
+      break;
     uint64_t expire = t->t_expire;
-    if(t == NULL || expire > now)
+    if(expire > now)
       break;
     LIST_REMOVE(t, t_link);
     t->t_expire = 0;
