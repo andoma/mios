@@ -206,12 +206,10 @@ ipv4_input_udp(netif_t *ni, pbuf_t *pb, int udp_offset)
   const udp_hdr_t *udp = pbuf_data(pb, udp_offset);
 
   if(udp->dst_port == htons(68)) {
-    pb = pbuf_drop(pb, udp_offset + 8);
-    if(pb == NULL)
-      return NULL;
-
-    return dhcpv4_input(ni, pb, src_addr);
+    return dhcpv4_input(ni, pbuf_drop(pb, udp_offset + 8), src_addr);
   }
+
+
 #if 0
   printf("UDP %Id:%d > %Id:%d\n",
          ip->src_addr,
