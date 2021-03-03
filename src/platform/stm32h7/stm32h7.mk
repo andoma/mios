@@ -18,6 +18,9 @@ SRCS += ${P}/stm32h7.c \
 	${P}/stm32h7_i2c.c \
 	${P}/stm32h7_dma.c \
 
+SRCS-${ENABLE_NET} += \
+	${P}/stm32h7_eth.c \
+
 
 ${MO}/src/platform/stm32h7/%.o : CFLAGS += ${NOFPU}
 

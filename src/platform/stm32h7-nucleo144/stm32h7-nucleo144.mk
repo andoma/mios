@@ -1,5 +1,7 @@
 BOARDNAME := stm32h7-nucleo144
 
+ENABLE_NET := yes
+
 B := ${SRC}/platform/${BOARDNAME}
 
 GLOBALDEPS += ${B}/${BOARDNAME}.mk
