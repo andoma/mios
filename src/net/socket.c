@@ -39,3 +39,11 @@ socket_net_ctl(socket_t *s, socket_ctl_t *sc)
   }
   return ERR_NOT_IMPLEMENTED;
 }
+
+
+void
+socket_init(socket_t *s)
+{
+  STAILQ_INIT(&s->s_tx_queue);
+  STAILQ_INIT(&s->s_op_queue);
+}

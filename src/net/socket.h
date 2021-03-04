@@ -54,6 +54,8 @@ typedef struct socket {
 
 } socket_t;
 
+void socket_init(socket_t *s);
+
 error_t socket_attach(socket_t *s);
 
 error_t socket_detach(socket_t *s);
