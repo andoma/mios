@@ -93,8 +93,6 @@ i2c_irq(stm32_i2c_t *i2c)
            (i2c->read_len << 16));
     return;
   }
-
-  return i2c_done(i2c, ERR_BAD_STATE);
 }
 
 
