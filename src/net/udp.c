@@ -29,6 +29,8 @@ udp_input_ipv4(netif_t *ni, pbuf_t *pb, int udp_offset)
   socket_t *s;
   LIST_FOREACH(s, &udp_sockets, s_net_link) {
     if(s->s_local_port == dst_port) {
+      if((pb = pbuf_drop(pb, udp_offset + 8)) == NULL)
+        return NULL;
       return s->s_rx(s, pb);
     }
   }
