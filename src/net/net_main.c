@@ -156,6 +156,7 @@ net_thread(void *arg)
           irq_permit(q);
           sc->sc_result = socket_net_ctl(s, sc);
           q = irq_forbid(IRQ_LEVEL_NET);
+          sc->sc_op = 0;
           task_wakeup(&sc->sc_waitq, 0);
         }
 
