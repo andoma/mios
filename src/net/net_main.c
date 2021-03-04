@@ -164,6 +164,9 @@ net_thread(void *arg)
         netif_t *ni = interfaces[ifindex];
         pbuf_t *pb = pbuf_splice(&ni->ni_rx_queue);
         if(pb != NULL) {
+          if(STAILQ_FIRST(&ni->ni_rx_queue) != NULL)
+            net_work_bits |= (1 << which);
+
           irq_permit(q);
           pb = ni->ni_input(ni, pb);
           q = irq_forbid(IRQ_LEVEL_NET);
