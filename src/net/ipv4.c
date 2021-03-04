@@ -8,7 +8,7 @@
 #include "net.h"
 #include "ipv4.h"
 #include "irq.h"
-#include "dhcpv4.h"
+#include "udp.h"
 
 static uint32_t
 ipv4_cksum_add(uint32_t sum, const void *data, size_t len)
@@ -194,27 +194,6 @@ ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
 }
 
 
-pbuf_t *
-ipv4_input_udp(netif_t *ni, pbuf_t *pb, int udp_offset)
-{
-  const ipv4_header_t *ip = pbuf_data(pb, 0);
-  uint32_t src_addr = ip->src_addr;
-  const udp_hdr_t *udp = pbuf_data(pb, udp_offset);
-
-  if(udp->dst_port == htons(68)) {
-    return dhcpv4_input(ni, pbuf_drop(pb, udp_offset + 8), src_addr);
-  }
-
-
-#if 0
-  printf("UDP %Id:%d > %Id:%d\n",
-         ip->src_addr,
-         ntohs(udp->src_port),
-         ip->dst_addr,
-         ntohs(udp->dst_port));
-#endif
-  return pb;
-}
 
 
 pbuf_t *
@@ -246,7 +225,7 @@ ipv4_input(netif_t *ni, pbuf_t *pb)
   case IPPROTO_ICMP:
     return ipv4_input_icmp(ni, pb, 20);
   case IPPROTO_UDP:
-    return ipv4_input_udp(ni, pb, 20);
+    return udp_input_ipv4(ni, pb, 20);
   default:
     return pb;
   }

@@ -10,11 +10,11 @@
 #include "socket.h"
 
 #define NET_WORK_PERIODIC  0
-
+#define NET_WORK_SOCKET_OP 1
+#define NET_WORK_SOCKET_TX 2
 #define NET_WORK_NETIF_RX  8
 
 _Static_assert(NET_WORK_NETIF_RX + NET_MAX_INTERFACES <= 32);
-
 
 struct netif_list netifs;
 mutex_t netif_mutex = MUTEX_INITIALIZER("netifs");
@@ -23,6 +23,60 @@ static task_waitable_t net_waitq = WAITABLE_INITIALIZER("net");
 static uint32_t net_work_bits;
 static timer_t net_periodic_timer;
 static netif_t *interfaces[NET_MAX_INTERFACES];
+
+
+struct socket_list sockets;
+static struct socket_queue socket_op_queue =
+  STAILQ_HEAD_INITIALIZER(socket_op_queue);
+
+
+static void
+net_wakeup(int bit)
+{
+  net_work_bits |= 1 << bit;
+  task_wakeup(&net_waitq, 0);
+}
+
+
+static error_t
+socket_issue_ctl(socket_t *s, socket_ctl_op_t op)
+{
+  socket_ctl_t sc;
+
+  task_waitable_init(&sc.sc_waitq, "sockop");
+  sc.sc_op = op;
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+
+  if(STAILQ_FIRST(&s->s_op_queue) == NULL) {
+    if(STAILQ_FIRST(&socket_op_queue) == NULL)
+      net_wakeup(NET_WORK_SOCKET_OP);
+    STAILQ_INSERT_TAIL(&socket_op_queue, s, s_op_link);
+  }
+  STAILQ_INSERT_TAIL(&s->s_op_queue, &sc, sc_link);
+
+  while(sc.sc_op)
+    task_sleep(&sc.sc_waitq);
+  irq_permit(q);
+  return sc.sc_result;
+}
+
+
+
+error_t
+socket_attach(socket_t *s)
+{
+  return socket_issue_ctl(s, SOCKET_CTL_ATTACH);
+}
+
+error_t
+socket_detach(socket_t *s)
+{
+  return socket_issue_ctl(s, SOCKET_CTL_DETACH);
+}
+
+
+
 
 void
 netif_attach(netif_t *ni)
@@ -44,13 +98,6 @@ netif_attach(netif_t *ni)
   panic("ifindex range depleted");
 }
 
-
-void
-netif_wakeup(netif_t *ni)
-{
-  net_work_bits |= (1 << (NET_WORK_NETIF_RX + ni->ni_ifindex));
-  task_wakeup(&net_waitq, 0);
-}
 
 
 
@@ -85,10 +132,32 @@ net_thread(void *arg)
     net_work_bits = 0;
     while(bits) {
       int which = 31 - __builtin_clz(bits);
+
       if(which == NET_WORK_PERIODIC) {
         irq_permit(q);
         net_periodic();
         q = irq_forbid(IRQ_LEVEL_NET);
+
+      } else if(which == NET_WORK_SOCKET_OP) {
+
+        while(1) {
+          socket_t *s = STAILQ_FIRST(&socket_op_queue);
+          if(s == NULL)
+            break;
+
+          socket_ctl_t *sc = STAILQ_FIRST(&s->s_op_queue);
+          assert(sc != NULL);
+
+          STAILQ_REMOVE_HEAD(&s->s_op_queue, sc_link);
+          if(STAILQ_FIRST(&s->s_op_queue) == NULL) {
+            STAILQ_REMOVE_HEAD(&socket_op_queue, s_op_link);
+          }
+
+          irq_permit(q);
+          sc->sc_result = socket_net_ctl(s, sc);
+          q = irq_forbid(IRQ_LEVEL_NET);
+          task_wakeup(&sc->sc_waitq, 0);
+        }
 
       } else if(which >= 8) {
         int ifindex = which - NET_WORK_NETIF_RX;
@@ -108,12 +177,18 @@ net_thread(void *arg)
 }
 
 
+void
+netif_wakeup(netif_t *ni)
+{
+  net_wakeup(NET_WORK_NETIF_RX + ni->ni_ifindex);
+}
+
+
 static void
 periodic_timer_cb(void *opaque, uint64_t expire)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
-  net_work_bits |= (1 << NET_WORK_PERIODIC);
-  task_wakeup(&net_waitq, 0);
+  net_wakeup(NET_WORK_PERIODIC);
   irq_permit(q);
 
   timer_arm_abs(&net_periodic_timer, expire + 1000000, 0);

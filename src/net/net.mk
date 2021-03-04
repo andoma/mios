@@ -2,9 +2,11 @@ GLOBALDEPS += ${SRC}/net/net.mk
 
 SRCS-${ENABLE_NET} += \
 	${SRC}/net/pbuf.c \
+	${SRC}/net/socket.c \
 	${SRC}/net/net_main.c \
 	${SRC}/net/ether.c \
 	${SRC}/net/ipv4.c \
+	${SRC}/net/udp.c \
 	${SRC}/net/dhcpv4.c \
 	${SRC}/net/cmd_net.c \
 
