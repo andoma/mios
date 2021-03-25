@@ -19,6 +19,17 @@
 #define GPIO_AFRH(x)    (GPIO_PORT_ADDR(x) + 0x24)
 
 
+void
+gpio_conf_analog(gpio_t gpio)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  int s = irq_forbid(IRQ_LEVEL_IO);
+  reg_set_bits(GPIO_MODER(port), bit * 2, 2, 3);
+  reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, 0);
+  irq_permit(s);
+}
 
 void
 gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
