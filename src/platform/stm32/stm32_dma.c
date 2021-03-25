@@ -79,12 +79,14 @@ stm32_dma_set_paddr(stm32_dma_instance_t instance, uint32_t paddr)
 void
 stm32_dma_set_mem0(stm32_dma_instance_t instance, void *maddr)
 {
+  assert(maddr != NULL);
   reg_wr(DMA_SM0AR(instance), (uint32_t)maddr);
 }
 
 void
 stm32_dma_set_mem1(stm32_dma_instance_t instance, void *maddr)
 {
+  assert(maddr != NULL);
   reg_wr(DMA_SM1AR(instance), (uint32_t)maddr);
 }
 
