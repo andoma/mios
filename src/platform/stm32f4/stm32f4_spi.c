@@ -20,6 +20,7 @@ struct stm32f4_spi {
 
   stm32_dma_instance_t rx_dma;
   stm32_dma_instance_t tx_dma;
+  uint8_t instance;
 };
 
 #define SPI_CR1  0x00
@@ -51,13 +52,14 @@ spi_dma(struct stm32f4_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len)
 
 static error_t
 spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
-              gpio_t nss)
+              gpio_t nss, int config)
 {
   struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
   if(len == 0)
     return ERR_OK;
 
   gpio_set_output(nss, 0);
+  reg_wr(spi->base_addr + SPI_CR1, config);
 
   int s = irq_forbid(IRQ_LEVEL_DMA);
   spi_dma(spi, tx, rx, len);
@@ -69,12 +71,13 @@ spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
 
 
 static error_t
-spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss)
+spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss,
+       int config)
 {
   struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
 
   mutex_lock(&spi->mutex);
-  error_t err = spi_rw_locked(&spi->spi, tx, rx, len, nss);
+  error_t err = spi_rw_locked(&spi->spi, tx, rx, len, nss, config);
   mutex_unlock(&spi->mutex);
   return err;
 }
@@ -102,6 +105,41 @@ static const struct {
 };
 
 
+
+
+static int
+spi_get_config(spi_t *dev, int clock_flags, int baudrate)
+{
+  struct stm32f4_spi *spi = (struct stm32f4_spi *)dev;
+
+  int config =
+    (1 << 9) | // SSM
+    (1 << 8) | // SSI
+    (1 << 6) | // SPI Enable
+    (1 << 2);  // Master configuration
+
+  if(clock_flags & SPI_CPHA)
+    config |= (1 << 0);
+  if(clock_flags & SPI_CPOL)
+    config |= (1 << 1);
+
+  int f = clk_get_freq(spi_config[spi->instance].clkid) / 2;
+
+  if(baudrate == 0)
+    baudrate = 1;
+
+  int d;
+  for(d = 0; d < 7; d++) {
+    if(baudrate >= f)
+      break;
+    f >>= 1;
+  }
+  config |= (d << 3); // Divider
+  return config;
+}
+
+
+
 spi_t *
 stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
                    gpio_pull_t mosi)
@@ -114,15 +152,10 @@ stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
   clk_enable(spi_config[instance].clkid);
 
   struct stm32f4_spi *spi = malloc(sizeof(struct stm32f4_spi));
+  spi->instance = instance;
   spi->base_addr = (spi_config[instance].base << 8) + 0x40000000;
   mutex_init(&spi->mutex, "spi");
-
-  reg_wr(spi->base_addr + SPI_CR1,
-         (1 << 9) |
-         (1 << 8) |
-         (1 << 6) |
-         (1 << 2) |
-         (2 << 3));
+  reg_wr(spi->base_addr + SPI_CR1, spi_get_config(&spi->spi, 0, 1));
 
   assert(instance == 1); // Only DMA over SPI2 right now
 
@@ -161,5 +194,6 @@ stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
   spi->spi.rw = spi_rw;
   spi->spi.rw_locked = spi_rw_locked;
   spi->spi.lock = spi_lock;
+  spi->spi.get_config = spi_get_config;
   return &spi->spi;
 }
