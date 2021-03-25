@@ -34,6 +34,7 @@ stm32f4_uart_write(stream_t *s, const void *buf, size_t size)
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
       reg_wr(u->reg_base + USART_DR, d[i]);
     }
+    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
     irq_permit(q);
     return;
   }
