@@ -18,8 +18,8 @@ struct stm32f4_spi {
   uint32_t base_addr;
   mutex_t mutex;
 
-  stm32f4_dma_instance_t rx_dma;
-  stm32f4_dma_instance_t tx_dma;
+  stm32_dma_instance_t rx_dma;
+  stm32_dma_instance_t tx_dma;
 };
 
 #define SPI_CR1  0x00
@@ -30,22 +30,22 @@ struct stm32f4_spi {
 static void
 spi_dma(struct stm32f4_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len)
 {
-  stm32f4_dma_start(spi->tx_dma, (void *)tx, spi->base_addr + SPI_DR,
-                    len, DMA_M_TO_P, 0);
-
-  stm32f4_dma_start(spi->rx_dma, rx, spi->base_addr + SPI_DR,
-                    len, DMA_P_TO_M, 0);
+  stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
+  stm32_dma_set_mem0(spi->rx_dma, rx);
+  stm32_dma_set_nitems(spi->tx_dma, len);
+  stm32_dma_set_nitems(spi->rx_dma, len);
+  stm32_dma_start(spi->tx_dma);
+  stm32_dma_start(spi->rx_dma);
 
   reg_wr(spi->base_addr + SPI_CR2, 3);
 
   error_t err;
 
-  err = stm32f4_dma_wait(spi->rx_dma);
+  err = stm32_dma_wait(spi->rx_dma);
   assert(err == 0);
-  err = stm32f4_dma_wait(spi->tx_dma);
+  err = stm32_dma_wait(spi->tx_dma);
   assert(err == 0);
   reg_wr(spi->base_addr + SPI_CR2, 0);
-
 }
 
 
@@ -126,8 +126,31 @@ stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
 
   assert(instance == 1); // Only DMA over SPI2 right now
 
-  spi->rx_dma = stm32f4_dma_alloc_fixed(0, 3);
-  spi->tx_dma = stm32f4_dma_alloc_fixed(0, 4);
+  spi->rx_dma = stm32f4_dma_alloc_fixed(0, 3, 0, NULL, NULL, "spirx");
+  spi->tx_dma = stm32f4_dma_alloc_fixed(0, 4, 0, NULL, NULL, "spitx");
+
+  stm32_dma_config(spi->rx_dma,
+                   STM32_DMA_BURST_NONE,
+                   STM32_DMA_BURST_NONE,
+                   STM32_DMA_PRIO_LOW,
+                   STM32_DMA_8BIT,
+                   STM32_DMA_8BIT,
+                   STM32_DMA_INCREMENT,
+                   STM32_DMA_FIXED,
+                   STM32_DMA_P_TO_M);
+
+  stm32_dma_config(spi->tx_dma,
+                   STM32_DMA_BURST_NONE,
+                   STM32_DMA_BURST_NONE,
+                   STM32_DMA_PRIO_LOW,
+                   STM32_DMA_8BIT,
+                   STM32_DMA_8BIT,
+                   STM32_DMA_INCREMENT,
+                   STM32_DMA_FIXED,
+                   STM32_DMA_M_TO_P);
+
+  stm32_dma_set_paddr(spi->rx_dma, spi->base_addr + SPI_DR);
+  stm32_dma_set_paddr(spi->tx_dma, spi->base_addr + SPI_DR);
 
   // Configure GPIO
   const uint8_t af = spi_config[instance].af;
