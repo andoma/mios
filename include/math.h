@@ -16,6 +16,7 @@
 #define isnormal(x) (fpclassify(x) == FP_NORMAL)
 #define isinf(x) (fpclassify(x) == FP_INFINITE)
 
+#define NAN __builtin_nanf("")
 
 #ifdef MATH_PREFIX
 
