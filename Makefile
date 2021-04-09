@@ -52,6 +52,7 @@ include ${SRC}/kernel/kernel.mk
 include ${SRC}/shell/shell.mk
 include ${SRC}/lib/libc/libc.mk
 include ${SRC}/lib/math/math.mk
+include ${SRC}/lib/fixedpoint/fixedpoint.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
