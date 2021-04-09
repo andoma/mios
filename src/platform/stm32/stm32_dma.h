@@ -2,6 +2,8 @@
 
 typedef uint8_t stm32_dma_instance_t;
 
+#define STM32_DMA_INSTANCE_NONE 0xff
+
 typedef enum {
   STM32_DMA_BURST_NONE   = 0,
   STM32_DMA_BURST_INCR4  = 1,
