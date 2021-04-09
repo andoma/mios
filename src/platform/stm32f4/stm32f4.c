@@ -2,6 +2,7 @@
 #include <malloc.h>
 
 #include "stm32f4_clk.h"
+#include "cpu.h"
 
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1fff7a22;
 static volatile uint32_t *const ACTLR        = (volatile uint32_t *)0xe000e008;
@@ -25,7 +26,7 @@ stm32f4_init(void)
 
    // CCM
   clk_enable(CLK_CCMDATARAMEN);
-  heap_add_mem(0x10000000, 0x10010000, MEM_TYPE_LOCAL);
+  heap_add_mem(0x10000000 + sizeof(cpu_t), 0x10010000, MEM_TYPE_LOCAL);
 
 
   if(0) {

@@ -1,18 +1,31 @@
 #include <string.h>
-
+#include <malloc.h>
 #include "cpu.h"
 
-cpu_t cpu0 = {
-  .name = "cpu0",
-};
-
-
+// If curcpu() is not a macro defined by the platform we define a
+// inline function in cortexm.h that expects a global cpu0 to exist
+//
+#ifndef curcpu
+struct cpu cpu0;
+#endif
 
 static void __attribute__((constructor(150)))
 cpu_init(void)
 {
-  extern void *idle_stack;
-  task_init_cpu(&cpu0.sched, cpu0.name, &idle_stack);
+  const size_t stack_size = 128;
+
+  // Create idle task
+  void *sp_bottom = xalloc(stack_size + sizeof(task_t),
+                                CPU_STACK_ALIGNMENT, 0);
+  void *sp = sp_bottom + stack_size;
+  asm volatile ("msr psp, %0" : : "r" (sp));
+
+  task_t *t = sp;
+  t->t_sp_bottom = sp_bottom;
+
+  t->t_state = TASK_STATE_ZOMBIE;
+  sched_cpu_init(&curcpu()->sched, t);
+
 }
 
 

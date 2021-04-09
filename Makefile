@@ -78,7 +78,7 @@ ${O}/%.o: %.c ${GLOBALDEPS} ${CONFIG_H}
 ${O}/%.o: %.S ${GLOBALDEPS} ${CONFIG_H}
 	@mkdir -p $(dir $@)
 	@echo "\tASM\t$<"
-	${TOOLCHAIN}gcc -MD -MP ${CPPFLAGS} ${CFLAGS} -c $< -o $@
+	${TOOLCHAIN}gcc -MD -MP -DASM ${CPPFLAGS} ${CFLAGS} -c $< -o $@
 
 CONFIG_H_CONTENTS := $(foreach K,$(ALL_ENABLE_VARS), \
 	$(if $(subst no,,${${K}}),"\#define ${K}\n",""))

@@ -17,16 +17,9 @@ void *cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
 
 typedef struct cpu {
   sched_cpu_t sched;
-  char name[8];
 } cpu_t;
 
-extern cpu_t cpu0;
 
-static inline cpu_t *
-curcpu(void)
-{
-  return &cpu0;
-}
 
 static inline void
 cpu_fpu_enable(int on)

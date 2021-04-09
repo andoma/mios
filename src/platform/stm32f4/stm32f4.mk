@@ -2,7 +2,7 @@ P := ${SRC}/platform/stm32f4
 
 GLOBALDEPS += ${P}/stm32f4.mk
 
-CPPFLAGS += -iquote${P}
+CPPFLAGS += -iquote${P} -include stm32f4_cpu.h
 
 CPPFLAGS += -DHAVE_HRTIMER
 

@@ -18,17 +18,11 @@
 #include "irq.h"
 #include "cpu.h"
 
-#define TASK_PRIOS 32
-#define TASK_PRIO_MASK (TASK_PRIOS - 1)
-
 SLIST_HEAD(task_slist, task);
-TAILQ_HEAD(task_queue, task);
 
 int task_trace;
 
 
-static struct task_queue readyqueue[TASK_PRIOS];
-static uint32_t active_queues;
 static struct task_slist alltasks;
 
 static mutex_t alltasks_mutex = MUTEX_INITIALIZER("alltasks");
@@ -42,15 +36,6 @@ task_current(void)
   return curcpu()->sched.current;
 }
 
-void
-task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom)
-{
-  sc->current = &sc->idle;
-  sc->idle.t_state = TASK_STATE_ZOMBIE;
-  sc->idle.t_sp_bottom = sp_bottom;
-  snprintf(sc->idle.t_name, sizeof(sc->idle.t_name),
-           "idle_%s", cpu_name);
-}
 
 #ifdef ENABLE_TASK_DEBUG
 
@@ -92,7 +77,7 @@ task_is_on_readyqueue(task_t *t)
 #endif
 
 static void
-readyqueue_insert(task_t *t, const char *whom)
+readyqueue_insert(cpu_t *cpu, task_t *t, const char *whom)
 {
 #ifdef ENABLE_TASK_DEBUG
   if(task_is_on_readyqueue(t)) {
@@ -100,8 +85,8 @@ readyqueue_insert(task_t *t, const char *whom)
           whom, t);
   }
 #endif
-  TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_ready_link);
-  active_queues |= 1 << t->t_prio;
+  TAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
+  cpu->sched.active_queues |= 1 << t->t_prio;
 }
 
 
@@ -116,28 +101,28 @@ task_switch(void *cur_sp)
   curtask->t_cycle_acc += cpu_cycle_counter() - curtask->t_cycle_enter;
 #endif
 
-  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(curtask->t_state == TASK_STATE_RUNNING) {
     // Task should be running, re-insert in readyqueue
-    readyqueue_insert(curtask, "task_switch");
+    readyqueue_insert(cpu, curtask, "task_switch");
   }
 
   task_t *t;
-  int which = __builtin_clz(active_queues);
+  int which = __builtin_clz(cpu->sched.active_queues);
   if(which == 32) {
-    t = &cpu->sched.idle;
+    t = cpu->sched.idle;
   } else {
     which = 31 - which;
-    t = TAILQ_FIRST(&readyqueue[which]);
+    t = TAILQ_FIRST(&cpu->sched.readyqueue[which]);
 #ifdef ENABLE_TASK_DEBUG
     if(t == NULL)
       panic("No task on queue %d", which);
 #endif
-    TAILQ_REMOVE(&readyqueue[which], t, t_ready_link);
+    TAILQ_REMOVE(&cpu->sched.readyqueue[which], t, t_ready_link);
 
-    if(TAILQ_FIRST(&readyqueue[which]) == NULL) {
-      active_queues &= ~(1 << t->t_prio);
+    if(TAILQ_FIRST(&cpu->sched.readyqueue[which]) == NULL) {
+      cpu->sched.active_queues &= ~(1 << t->t_prio);
     }
     assert(t->t_state == TASK_STATE_RUNNING);
   }
@@ -153,7 +138,7 @@ task_switch(void *cur_sp)
 #endif
 
   cpu->sched.current = t;
-  irq_permit(s);
+  irq_permit(q);
 
 #ifdef ENABLE_TASK_ACCOUNTING
   t->t_cycle_enter = cpu_cycle_counter();
@@ -230,6 +215,8 @@ task_t *
 task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
             const char *name, int flags, unsigned int prio)
 {
+  cpu_t *cpu = curcpu();
+
   prio &= TASK_PRIO_MASK;
 
   if(stack_size < MIN_STACK_SIZE)
@@ -272,13 +259,10 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   t->t_sp = cpu_stack_init(sp, entry, arg, task_end);
   t->t_sp_bottom = sp_bottom;
-#if 0
-  printf("Created new task sp_bottom:%p sp:%p t:%p FPU:%p\n",
-         sp_bottom, sp, t, t->t_fpuctx);
-#endif
+
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-  TAILQ_INSERT_TAIL(&readyqueue[t->t_prio], t, t_ready_link);
-  active_queues |= 1 << t->t_prio;
+  TAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
+  cpu->sched.active_queues |= 1 << t->t_prio;
   irq_permit(s);
 
   mutex_lock(&alltasks_mutex);
@@ -299,8 +283,9 @@ task_wakeup(task_waitable_t *waitable, int all)
     assert(t->t_state == TASK_STATE_SLEEPING);
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
-    if(t != task_current())
-      readyqueue_insert(t, "wakeup");
+    cpu_t *cpu = curcpu();
+    if(t != cpu->sched.current)
+      readyqueue_insert(cpu, t, "wakeup");
     schedule();
     if(!all)
       break;
@@ -344,8 +329,9 @@ task_sleep_abs_sched_locked_timeout(void *opaque, uint64_t expire)
     LIST_REMOVE(t, t_wait_link);
 
     t->t_state = TASK_STATE_RUNNING;
-    if(t != task_current())
-      readyqueue_insert(t, "sleep-timo");
+    cpu_t *cpu = curcpu();
+    if(t != cpu->sched.current)
+      readyqueue_insert(cpu, t, "sleep-timo");
     schedule();
   }
   irq_permit(s);
@@ -460,8 +446,9 @@ task_sleep_until_timeout(void *opaque, uint64_t expire)
 
   assert(t->t_state == TASK_STATE_SLEEPING);
   t->t_state = TASK_STATE_RUNNING;
-  if(t != task_current())
-    readyqueue_insert(t, "sleep-timo2");
+  cpu_t *cpu = curcpu();
+  if(t != cpu->sched.current)
+    readyqueue_insert(cpu, t, "sleep-timo2");
   schedule();
   irq_permit(s);
 }
@@ -596,7 +583,8 @@ mutex_trylock(mutex_t *m)
 static void
 mutex_unlock_sched_locked(mutex_t *m)
 {
-  task_t *cur = task_current();
+  cpu_t *cpu = curcpu();
+  task_t *cur = cpu->sched.current;
   assert(m->owner == cur);
   m->owner = NULL;
 
@@ -605,7 +593,7 @@ mutex_unlock_sched_locked(mutex_t *m)
     assert(t != cur);
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
-    readyqueue_insert(t, "mutex_unlock");
+    readyqueue_insert(cpu, t, "mutex_unlock");
     if(t->t_prio >= cur->t_prio)
       schedule();
   }
@@ -658,12 +646,20 @@ cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
 }
 
 
-static void __attribute__((constructor(101)))
-task_init_early(void)
+void
+sched_cpu_init(sched_cpu_t *sc, task_t *idle)
 {
+  sc->idle = idle;
+  sc->current = idle;
+#ifdef HAVE_FPU
+  sc->current_fpu = NULL;
+#endif
+  sc->active_queues = 0;
+
   for(int i = 0; i < TASK_PRIOS; i++)
-    TAILQ_INIT(&readyqueue[i]);
+    TAILQ_INIT(&sc->readyqueue[i]);
 }
+
 
 
 static void __attribute__((noreturn))

@@ -9,9 +9,6 @@ start:
         movs r0, #2  // Threaded mode
         msr control, r0
         isb
-        ldr r0, =idle_stack + 128
-        msr psp, r0
-        isb
         cpsie i     // Enable interrupts, off we go
         isb
 idle:   wfi
@@ -89,8 +86,3 @@ vectors:
         .endr
 
         .size vectors, . - vectors
-
-        .bss
-        .align 5
-        .global idle_stack
-        .lcomm idle_stack 128

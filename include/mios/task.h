@@ -6,7 +6,12 @@
 
 #include "timer.h"
 
+TAILQ_HEAD(task_queue, task);
 LIST_HEAD(task_list, task);
+
+#define TASK_PRIOS 32
+#define TASK_PRIO_MASK (TASK_PRIOS - 1)
+
 
 #define TASK_STATE_RUNNING  0
 #define TASK_STATE_SLEEPING 1
@@ -60,9 +65,11 @@ typedef struct task {
 } task_t;
 
 typedef struct sched_cpu {
-
-  task_t idle;
   task_t *current;
+  task_t *idle;
+  uint32_t active_queues;
+  struct task_queue readyqueue[TASK_PRIOS];
+
 #ifdef HAVE_FPU
   task_t *current_fpu;
 #endif
@@ -70,6 +77,7 @@ typedef struct sched_cpu {
 } sched_cpu_t;
 
 
+void sched_cpu_init(sched_cpu_t *sc, task_t *idle);
 
 typedef struct {
   struct task_list list;
