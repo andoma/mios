@@ -43,7 +43,7 @@ static int
 task_is_on_queue(task_t *t, struct task_queue *q)
 {
   task_t *x;
-  TAILQ_FOREACH(x, q, t_ready_link) {
+  STAILQ_FOREACH(x, q, t_ready_link) {
     if(x == t) {
       return 1;
     }
@@ -66,10 +66,10 @@ task_is_on_list(task_t *t, struct task_list *l)
 
 
 static int
-task_is_on_readyqueue(task_t *t)
+task_is_on_readyqueue(cpu_t *cpu, task_t *t)
 {
   for(int i = 0; i < TASK_PRIOS; i++) {
-    if(task_is_on_queue(t, &readyqueue[i]))
+    if(task_is_on_queue(t, &cpu->sched.readyqueue[i]))
       return 1;
   }
   return 0;
@@ -80,12 +80,12 @@ static void
 readyqueue_insert(cpu_t *cpu, task_t *t, const char *whom)
 {
 #ifdef ENABLE_TASK_DEBUG
-  if(task_is_on_readyqueue(t)) {
+  if(task_is_on_readyqueue(cpu, t)) {
     panic("%s: Inserting task %p on readyqueue but it's already there",
           whom, t);
   }
 #endif
-  TAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
+  STAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
   cpu->sched.active_queues |= 1 << t->t_prio;
 }
 
@@ -114,14 +114,14 @@ task_switch(void *cur_sp)
     t = cpu->sched.idle;
   } else {
     which = 31 - which;
-    t = TAILQ_FIRST(&cpu->sched.readyqueue[which]);
+    t = STAILQ_FIRST(&cpu->sched.readyqueue[which]);
 #ifdef ENABLE_TASK_DEBUG
     if(t == NULL)
       panic("No task on queue %d", which);
 #endif
-    TAILQ_REMOVE(&cpu->sched.readyqueue[which], t, t_ready_link);
+    STAILQ_REMOVE_HEAD(&cpu->sched.readyqueue[which], t_ready_link);
 
-    if(TAILQ_FIRST(&cpu->sched.readyqueue[which]) == NULL) {
+    if(STAILQ_FIRST(&cpu->sched.readyqueue[which]) == NULL) {
       cpu->sched.active_queues &= ~(1 << t->t_prio);
     }
     assert(t->t_state == TASK_STATE_RUNNING);
@@ -146,6 +146,7 @@ task_switch(void *cur_sp)
 #endif
 
   cpu_stack_redzone(t);
+
 #ifdef HAVE_FPU
   cpu_fpu_enable(cpu->sched.current_fpu == t);
 #endif
@@ -235,6 +236,12 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   void *sp = sp_bottom + stack_size;
   task_t *t = sp + fpu_ctx_size;
+
+#if 0
+  printf("Created new task sp_bottom:%p sp:%p t:%p flags:0x%x %s\n",
+         sp_bottom, sp, t, flags, name);
+#endif
+
   strlcpy(t->t_name, name, sizeof(t->t_name));
 
   t->t_state = 0;
@@ -261,7 +268,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   t->t_sp_bottom = sp_bottom;
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-  TAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
+  STAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
   cpu->sched.active_queues |= 1 << t->t_prio;
   irq_permit(s);
 
@@ -355,7 +362,7 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
 #endif
 
 #ifdef ENABLE_TASK_DEBUG
-  if(task_is_on_readyqueue(curtask)) {
+  if(task_is_on_readyqueue(curcpu(), curtask)) {
     panic("%s: Task %p is on readyqueue",
           __FUNCTION__, curtask);
   }
@@ -391,7 +398,7 @@ task_sleep_sched_locked(task_waitable_t *waitable)
 #endif
 
 #ifdef ENABLE_TASK_DEBUG
-  if(task_is_on_readyqueue(curtask)) {
+  if(task_is_on_readyqueue(curcpu(), curtask)) {
     panic("%s: Task %p is on readyqueue",
           __FUNCTION__, curtask);
   }
@@ -529,7 +536,7 @@ mutex_lock_sched_locked(mutex_t *m, task_t *curtask)
     assert(m->owner != curtask);
 
 #ifdef ENABLE_TASK_DEBUG
-    if(task_is_on_readyqueue(curtask)) {
+    if(task_is_on_readyqueue(curcpu(), curtask)) {
       panic("%s: Task %p is on readyqueue",
             __FUNCTION__, curtask);
     }
@@ -657,7 +664,7 @@ sched_cpu_init(sched_cpu_t *sc, task_t *idle)
   sc->active_queues = 0;
 
   for(int i = 0; i < TASK_PRIOS; i++)
-    TAILQ_INIT(&sc->readyqueue[i]);
+    STAILQ_INIT(&sc->readyqueue[i]);
 }
 
 

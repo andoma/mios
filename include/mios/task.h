@@ -6,7 +6,7 @@
 
 #include "timer.h"
 
-TAILQ_HEAD(task_queue, task);
+STAILQ_HEAD(task_queue, task);
 LIST_HEAD(task_list, task);
 
 #define TASK_PRIOS 32
@@ -35,7 +35,7 @@ LIST_HEAD(task_list, task);
 
 typedef struct task {
   union {
-    TAILQ_ENTRY(task) t_ready_link;
+    STAILQ_ENTRY(task) t_ready_link;
     LIST_ENTRY(task) t_wait_link;
   };
 
