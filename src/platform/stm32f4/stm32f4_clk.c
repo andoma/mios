@@ -51,8 +51,10 @@ systick_timepulse(void)
 
 
 void
-stm32f4_init_pll(void)
+stm32f4_init_pll(int hse_freq)
 {
+  int pll_p = 8;
+  uint32_t pllcfgr = 0;
   reg_wr(FLASH_ACR, 0x75); // D-CACHE I-CACHE PREFETCH, 5 wait states
 
   reg_wr(RCC_CFGR,
@@ -60,16 +62,20 @@ stm32f4_init_pll(void)
          (0x4 << 13) | // APB2 (High speed) prescaler = 2
          (0x5 << 10)); // APB1 (Low speed)  prescaler = 4
 
-  reg_set_bit(RCC_CR, 16); // HSEON
+  if(hse_freq) {
+    reg_set_bit(RCC_CR, 16); // HSEON
+    while(!(reg_rd(RCC_CR) & (1 << 17))) {} // Wait for external oscillator
+    pll_p = hse_freq / 2;
+    pllcfgr |= (1 << 22);
 
-  while(!(reg_rd(RCC_CR) & (1 << 17))) {} // Wait for external oscillator
+  }
 
   reg_wr(RCC_PLLCFGR,
-         (1 << 22)
-         | (4 << 0)         // input division
-         | (168 << 6)       // PLL multiplication
-         | (0 << 16)        // PLL sys clock division (0 == /2) */
-         | (7 << 24));      // PLL usb clock division =48MHz */
+         pllcfgr |
+         (pll_p << 0) |          // input division
+         (CPU_SYSCLK_MHZ << 6) | // PLL multiplication
+         (0 << 16) |             // PLL sys clock division (0 == /2) */
+         (7 << 24));             // PLL usb clock division =48MHz */
 
   reg_set_bit(RCC_CR, 24);
 

@@ -20,8 +20,6 @@ static stm32f4_uart_t console;
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  clk_enable(CLK_GPIOC);
-
   stm32f4_uart_init(&console, 6, 115200, GPIO_PC(6), GPIO_PC(7),
                     UART_CTRLD_IS_PANIC);
   stdio = &console.stream;
@@ -31,10 +29,7 @@ board_init_console(void)
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {
-  stm32f4_init_pll();
-  clk_enable(CLK_GPIOA);
-  clk_enable(CLK_GPIOB);
-  clk_enable(CLK_GPIOC);
+  stm32f4_init_pll(8);
 }
 
 
