@@ -55,7 +55,7 @@ stm32f4_init_pll(int hse_freq)
 {
   int pll_p = 8;
   uint32_t pllcfgr = 0;
-  reg_wr(FLASH_ACR, 0x75); // D-CACHE I-CACHE PREFETCH, 5 wait states
+  reg_wr(FLASH_ACR, 0x705); // D-CACHE I-CACHE PREFETCH, 5 wait states
 
   reg_wr(RCC_CFGR,
          (0x7 << 27) | // MCO2PRE /5
