@@ -171,10 +171,6 @@ stm32h7_eth_init(stm32h7_eth_t *se)
   se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0, MEM_TYPE_DMA);
 
   clk_enable(CLK_SYSCFG);
-  clk_enable(CLK_GPIOA);
-  clk_enable(CLK_GPIOB);
-  clk_enable(CLK_GPIOC);
-  clk_enable(CLK_GPIOG);
 
   static const uint8_t gpios[] =
     { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7),

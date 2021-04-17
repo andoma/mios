@@ -25,18 +25,12 @@ static stm32h7_uart_t console;
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  clk_enable(CLK_GPIOA);
-  clk_enable(CLK_GPIOB);
-  clk_enable(CLK_GPIOC);
-  clk_enable(CLK_GPIOD);
-
   stm32h7_uart_init(&console, 3, 115200, GPIO_PD(8), GPIO_PD(9),
                     UART_CTRLD_IS_PANIC);
   stdio = &console.stream;
 
   gpio_conf_af(GPIO_PC(9), 0, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 
-  gpio_set_output(BLINK_GPIO, 1);
   gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 }
