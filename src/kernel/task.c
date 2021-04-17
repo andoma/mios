@@ -532,46 +532,45 @@ sleep(unsigned int sec)
 static void
 mutex_lock_sched_locked(mutex_t *m, task_t *curtask)
 {
-  while(m->owner != NULL) {
-    assert(m->owner != curtask);
+  while(m->lock & 1) {
 
 #ifdef ENABLE_TASK_DEBUG
     if(task_is_on_readyqueue(curcpu(), curtask)) {
       panic("%s: Task %p is on readyqueue",
             __FUNCTION__, curtask);
     }
+#endif
 
+#ifdef ENABLE_TASK_DEBUG
+    m->lock &= ~1;
     if(task_is_on_list(curtask, &m->waiters.list)) {
       panic("%s: Task %p is already on wait queue",
             __FUNCTION__, curtask);
     }
-
-    if(task_trace) {
-      printf("Task %p:%s waiting owner %p:%s\n",
-             curtask, curtask->t_name,
-             m->owner, m->owner->t_name);
-    }
+    m->lock |= 1;
 #endif
 
     if(curtask->t_state != TASK_STATE_SLEEPING) {
       curtask->t_state = TASK_STATE_SLEEPING;
+
+      // We need to clear the lockbit or list manipulation will fail
+      // as they share the same memory address
+      m->lock &= ~1;
       task_insert_wait_list(&m->waiters, curtask);
+      m->lock |= 1;
     }
 
     schedule();
     irq_permit(irq_lower());
   }
-  m->owner = curtask;
+  m->lock |= 1;
 }
 
 
 void
-mutex_lock(mutex_t *m)
+mutex_lock_slow(mutex_t *m)
 {
   task_t *const curtask = task_current();
-
-  if(cpu_mutex_lock_fast(m, curtask))
-    return;
 
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_lock_sched_locked(m, curtask);
@@ -582,7 +581,7 @@ mutex_lock(mutex_t *m)
 int
 mutex_trylock(mutex_t *m)
 {
-  return !cpu_mutex_lock_fast(m, task_current());
+  panic("mutex_trylock not implemeted");
 }
 
 
@@ -590,14 +589,15 @@ mutex_trylock(mutex_t *m)
 static void
 mutex_unlock_sched_locked(mutex_t *m)
 {
-  cpu_t *cpu = curcpu();
-  task_t *cur = cpu->sched.current;
-  assert(m->owner == cur);
-  m->owner = NULL;
+  assert(m->lock != 0);
+
+  m->lock &= ~1;
 
   task_t *t = LIST_FIRST(&m->waiters.list);
   if(t != NULL) {
-    assert(t != cur);
+    cpu_t *const cpu = curcpu();
+    task_t *const cur = cpu->sched.current;
+
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
     readyqueue_insert(cpu, t, "mutex_unlock");
@@ -608,7 +608,7 @@ mutex_unlock_sched_locked(mutex_t *m)
 
 
 void
-mutex_unlock(mutex_t *m)
+mutex_unlock_slow(mutex_t *m)
 {
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);

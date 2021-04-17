@@ -46,27 +46,3 @@ cpu_cycle_counter(void)
   volatile unsigned int *DWT_CYCCNT   = (volatile unsigned int *)0xE0001004;
   return *DWT_CYCCNT;
 }
-
-
-
-// Return 1 if lock was acquired
-static inline int
-cpu_mutex_lock_fast(mutex_t *m, task_t *curtask)
-{
-  // (bit 2 indicate support for 32bit LDREX/STREX)
-#if defined(__ARM_FEATURE_LDREX) && __ARM_FEATURE_LDREX & 4
-  task_t *cur;
-  int status;
-  asm volatile("ldrex %0, [%2]\n"
-               "mov %1, #1\n"
-               "teq %0, #0\n"
-               "it eq\n"
-               "strexeq %1, %3, [%2]\n"
-               : "=&r"(cur), "=&r"(status)
-               : "r"(m), "r"(curtask)
-               : "cc", "memory");
-  return !status;
-#else
-  return 0; // Force slow path
-#endif
-}

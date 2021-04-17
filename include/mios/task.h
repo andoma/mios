@@ -97,9 +97,11 @@ typedef struct {
 #endif
 
 
-typedef struct mutex {
-  struct task *owner;
-  task_waitable_t waiters;
+typedef struct {
+  union {
+    task_waitable_t waiters;
+    intptr_t lock;
+  };
 } mutex_t;
 
 typedef task_waitable_t cond_t;
@@ -144,15 +146,40 @@ mutex_init(mutex_t *m, const char *name)
 #ifdef ENABLE_TASK_WCHAN
   m->waiters.name = name;
 #endif
-  m->owner = NULL;
 }
 
-void mutex_lock(mutex_t *m);
+void mutex_lock_slow(mutex_t *m);
+
+inline void  __attribute__((always_inline))
+mutex_lock(mutex_t *m)
+{
+  if(__atomic_always_lock_free(sizeof(intptr_t), 0)) {
+    intptr_t expected = 0;
+    if(__builtin_expect(__atomic_compare_exchange_n(&m->lock, &expected, 1, 1,
+                                                    __ATOMIC_SEQ_CST,
+                                                    __ATOMIC_RELAXED), 1))
+      return;
+  }
+  mutex_lock_slow(m);
+}
+
+void mutex_unlock_slow(mutex_t *m);
+
+inline void  __attribute__((always_inline))
+mutex_unlock(mutex_t *m)
+{
+  if(__atomic_always_lock_free(sizeof(intptr_t), 0)) {
+    intptr_t expected = 1;
+    if(__builtin_expect(__atomic_compare_exchange_n(&m->lock, &expected, 0, 1,
+                                                    __ATOMIC_SEQ_CST,
+                                                    __ATOMIC_RELAXED), 1))
+      return;
+  }
+  mutex_unlock_slow(m);
+}
+
 
 int mutex_trylock(mutex_t *m); // Return 0 if locked
-
-void mutex_unlock(mutex_t *m);
-
 
 #ifdef ENABLE_TASK_WCHAN
 #define COND_INITIALIZER(n) {.name = (n)}
