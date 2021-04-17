@@ -160,7 +160,7 @@ net_thread(void *arg)
           task_wakeup(&sc->sc_waitq, 0);
         }
 
-      } else if(which >= 8) {
+      } else if(which >= NET_WORK_NETIF_RX) {
         int ifindex = which - NET_WORK_NETIF_RX;
         netif_t *ni = interfaces[ifindex];
         pbuf_t *pb = pbuf_splice(&ni->ni_rx_queue);
