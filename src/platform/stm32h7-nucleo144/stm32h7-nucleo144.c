@@ -20,14 +20,13 @@ board_setup_clocks(void)
 
 // Virtual COM port (USB)
 // Connected to USART 3 - PD8 (Our TX)  PD9 (Our RX)
-static stm32h7_uart_t console;
 
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  stm32h7_uart_init(&console, 3, 115200, GPIO_PD(8), GPIO_PD(9),
-                    UART_CTRLD_IS_PANIC);
-  stdio = &console.stream;
+  static stm32_uart_t console;
+  stdio = stm32h7_uart_init(&console, 3, 115200, GPIO_PD(8), GPIO_PD(9),
+                            UART_CTRLD_IS_PANIC);
 
   gpio_conf_af(GPIO_PC(9), 0, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 

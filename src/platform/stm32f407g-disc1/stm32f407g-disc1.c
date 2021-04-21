@@ -12,7 +12,7 @@
 #include "stm32f4_clk.h"
 #include "stm32f4_uart.h"
 
-static stm32f4_uart_t console;
+static stm32_uart_t console;
 
 static void __attribute__((constructor(110)))
 board_init_console(void)

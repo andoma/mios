@@ -1,8 +1,3 @@
-#include <assert.h>
-#include <stdint.h>
-#include <mios/task.h>
-#include <stdio.h>
-
 #include "stm32h7_uart.h"
 #include "stm32h7_clk.h"
 
@@ -17,142 +12,7 @@
 #define CR1_IDLE       (1 << 0) | (1 << 5) | (1 << 3) | (1 << 2)
 #define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
 
-
-void
-stm32h7_uart_write(stream_t *s, const void *buf, size_t size)
-{
-  stm32h7_uart_t *u = (stm32h7_uart_t *)s;
-  const char *d = buf;
-
-  const int busy_wait = !can_sleep();
-
-  int q = irq_forbid(IRQ_LEVEL_CONSOLE);
-
-  if(busy_wait) {
-    // We are not on user thread, busy wait
-    for(size_t i = 0; i < size; i++) {
-      while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
-      reg_wr(u->reg_base + USART_TDR, d[i]);
-    }
-    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
-    irq_permit(q);
-    return;
-  }
-
-  for(size_t i = 0; i < size; i++) {
-
-    while(1) {
-      uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr);
-
-      if(avail)
-        break;
-      assert(u->tx_busy);
-      task_sleep(&u->wait_tx);
-    }
-
-    if(!u->tx_busy) {
-      reg_wr(u->reg_base + USART_TDR, d[i]);
-      reg_wr(u->reg_base + USART_CR1, CR1_ENABLE_TXI);
-      u->tx_busy = 1;
-    } else {
-      u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = d[i];
-      u->tx_fifo_wrptr++;
-    }
-  }
-  irq_permit(q);
-}
-
-
-static int
-is_done(int mode, size_t done, size_t size)
-{
-  switch(mode) {
-  default:
-    return 1;
-  case STREAM_READ_WAIT_ONE:
-    return done;
-  case STREAM_READ_WAIT_ALL:
-    return done == size;
-  }
-}
-
-
-
-
-
-static int
-stm32h7_uart_read(stream_t *s, void *buf, const size_t size, int mode)
-{
-  stm32h7_uart_t *u = (stm32h7_uart_t *)s;
-  char *d = buf;
-
-  if(!can_sleep()) {
-    // We are not on user thread, busy wait
-    for(size_t i = 0; i < size; i++) {
-      while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {
-        if(is_done(mode, i, size))
-          return i;
-      }
-      d[i] = reg_rd(u->reg_base + USART_RDR);
-    }
-    return size;
-  }
-
-  int q = irq_forbid(IRQ_LEVEL_CONSOLE);
-
-  for(size_t i = 0; i < size; i++) {
-    while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
-      if(is_done(mode, i, size)) {
-        irq_permit(q);
-        return i;
-      }
-      task_sleep(&u->wait_rx);
-    }
-
-    d[i] = u->rx_fifo[u->rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
-    u->rx_fifo_rdptr++;
-  }
-  irq_permit(q);
-  return size;
-}
-
-
-
-
-static void
-uart_irq(stm32h7_uart_t *u)
-{
-  if(u == NULL)
-    return;
-
-  const uint32_t sr = reg_rd(u->reg_base + USART_SR);
-
-  if(sr & (1 << 5)) {
-    const uint8_t c = reg_rd(u->reg_base + USART_RDR);
-
-    if(u->flags & UART_CTRLD_IS_PANIC && c == 4) {
-      panic("Halted from console");
-    }
-    u->rx_fifo[u->rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
-    u->rx_fifo_wrptr++;
-
-    task_wakeup(&u->wait_rx, 1);
-  }
-
-  if(sr & (1 << 7)) {
-    uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
-    if(avail == 0) {
-      u->tx_busy = 0;
-      reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
-    } else {
-      uint8_t c = u->tx_fifo[u->tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
-      u->tx_fifo_rdptr++;
-      task_wakeup(&u->wait_tx, 1);
-      reg_wr(u->reg_base + USART_TDR, c);
-    }
-  }
-}
-
+#include "platform/stm32/stm32_uart.c"
 
 
 static const struct {
@@ -169,41 +29,28 @@ static const struct {
 };
 
 
-static stm32h7_uart_t *uarts[6];
+static stm32_uart_t *uarts[6];
 
 stream_t *
-stm32h7_uart_init(stm32h7_uart_t *u, int instance, int baudrate,
+stm32h7_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
                   gpio_t tx, gpio_t rx, uint8_t flags)
 {
-  if(instance < 1 || instance > 5)
-    return NULL;
-
   instance--;
+  if(instance >= ARRAYSIZE(uart_config))
+    return NULL;
 
   const int af = uart_config[instance].af;
   gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 
-  clk_enable(uart_config[instance].clkid);
 
-  u->reg_base = (uart_config[instance].base << 8) + 0x40000000;
-  u->flags = flags;
-
-  const unsigned int freq = clk_get_freq(uart_config[instance].clkid);
-  const unsigned int bbr = (freq + baudrate - 1) / baudrate;
-
-  reg_wr(u->reg_base + USART_CR1, (1 << 0)); // ENABLE
-  reg_wr(u->reg_base + USART_BBR, bbr);
-  reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
-
-  task_waitable_init(&u->wait_rx, "uartrx");
-  task_waitable_init(&u->wait_tx, "uarttx");
+  u = stm32_uart_init(u,
+                      (uart_config[instance].base << 8) + 0x40000000,
+                      baudrate,
+                      uart_config[instance].clkid,
+                      uart_config[instance].irq,
+                      flags);
   uarts[instance] = u;
-
-  irq_enable(uart_config[instance].irq, IRQ_LEVEL_CONSOLE);
-
-  u->stream.read = stm32h7_uart_read;
-  u->stream.write = stm32h7_uart_write;
   return &u->stream;
 }
 
