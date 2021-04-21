@@ -1,7 +1,9 @@
 #include <mios/io.h>
 
 #include <mios/mios.h>
+
 #include "stm32g0.h"
+#include "stm32g0_clk.h"
 #include "irq.h"
 
 #define GPIO_PORT_ADDR(x) (0x50000000 + ((x) * 0x400))
@@ -26,6 +28,7 @@ gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
   const int bit = gpio & 0xf;
 
   int s = irq_forbid(IRQ_LEVEL_IO);
+  clk_enable(CLK_GPIO(port));
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 0);
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
   irq_permit(s);
@@ -43,6 +46,7 @@ gpio_conf_output(gpio_t gpio,
   const int bit = gpio & 0xf;
 
   int s = irq_forbid(IRQ_LEVEL_IO);
+  clk_enable(CLK_GPIO(port));
   reg_set_bits(GPIO_OTYPER(port),  bit, 1, type);
   reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
@@ -59,6 +63,7 @@ gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
   const int bit = gpio & 0xf;
 
   int s = irq_forbid(IRQ_LEVEL_IO);
+  clk_enable(CLK_GPIO(port));
 
   reg_set_bits(GPIO_OTYPER(port),  bit, 1, type);
   reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);

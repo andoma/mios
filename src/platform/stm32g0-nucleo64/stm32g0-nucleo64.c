@@ -19,15 +19,6 @@
 static void __attribute__((constructor(101)))
 board_init_console(void)
 {
-  clk_enable(CLK_GPIOA);
-  clk_enable(CLK_GPIOB);
-  clk_enable(CLK_GPIOC);
-  clk_enable(CLK_GPIOD);
-
-  gpio_set_output(BLINK_GPIO, 1);
-  gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
-                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-
   static stm32_uart_t console;
 
   stdio = stm32g0_uart_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3),
@@ -99,3 +90,26 @@ cmd_i2c_makebus(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("i2c-makebus", cmd_i2c_makebus);
+
+
+static void *
+blinker(void *arg)
+{
+  while(1) {
+    usleep(500000);
+    gpio_set_output(BLINK_GPIO, 0);
+    usleep(500000);
+    gpio_set_output(BLINK_GPIO, 1);
+  }
+  return NULL;
+}
+
+static void __attribute__((constructor(800)))
+platform_init_late(void)
+{
+  gpio_set_output(BLINK_GPIO, 1);
+  gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
+                   GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  task_create(blinker, NULL, 512, "blinker", 0, 0);
+}
