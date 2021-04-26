@@ -141,13 +141,13 @@ spi_get_config(spi_t *dev, int clock_flags, int baudrate)
 
 
 spi_t *
-stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
+stm32f4_spi_create(unsigned int instance, gpio_t clk, gpio_t miso,
                    gpio_pull_t mosi)
 {
-  if(instance < 1 || instance > 3)
-    panic("%s: Invalid instance %d", NAME, instance);
-
   instance--;
+
+  if(instance > ARRAYSIZE(spi_config))
+    panic("%s: Invalid instance %d", NAME, instance + 1);
 
   clk_enable(spi_config[instance].clkid);
 
@@ -157,10 +157,18 @@ stm32f4_spi_create(int instance, gpio_t clk, gpio_t miso,
   mutex_init(&spi->mutex, "spi");
   reg_wr(spi->base_addr + SPI_CR1, spi_get_config(&spi->spi, 0, 1));
 
-  assert(instance == 1); // Only DMA over SPI2 right now
-
-  spi->rx_dma = stm32f4_dma_alloc_fixed(0, 3, 0, NULL, NULL, "spirx");
-  spi->tx_dma = stm32f4_dma_alloc_fixed(0, 4, 0, NULL, NULL, "spitx");
+  switch(instance) {
+  case 1:
+    spi->rx_dma = stm32f4_dma_alloc_fixed(0, 3, 0, NULL, NULL, "spirx");
+    spi->tx_dma = stm32f4_dma_alloc_fixed(0, 4, 0, NULL, NULL, "spitx");
+    break;
+  case 2:
+    spi->rx_dma = stm32f4_dma_alloc_fixed(0, 0, 0, NULL, NULL, "spirx");
+    spi->tx_dma = stm32f4_dma_alloc_fixed(0, 5, 0, NULL, NULL, "spitx");
+    break;
+  default:
+    panic("Can't do SPI DMA for instance %d", instance + 1);
+  }
 
   stm32_dma_config(spi->rx_dma,
                    STM32_DMA_BURST_NONE,
