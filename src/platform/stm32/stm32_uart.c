@@ -11,6 +11,9 @@
 void
 stm32_uart_write(stream_t *s, const void *buf, size_t size)
 {
+  if(size == 0)
+    return;
+
   stm32_uart_t *u = (stm32_uart_t *)s;
   const char *d = buf;
 

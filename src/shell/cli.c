@@ -66,6 +66,7 @@ void
 cli_prompt(cli_t *cl)
 {
   cli_printf(cl, "> ");
+  cli_printf(cl, NULL);
 }
 
 void
@@ -101,11 +102,18 @@ cli_input_char(cli_t *cl, char c)
     //    printf("\n\nGot code %d\n", c);
     break;
   }
+  cli_printf(cl, NULL);
 }
 
 static void
 cli_console_printf(struct cli *cli, const char *fmt, ...)
 {
+  if(fmt == NULL) {
+    if(stdio)
+      stdio->write(stdio, NULL, 0);
+    return;
+  }
+
   va_list ap;
   va_start(ap, fmt);
   vprintf(fmt, ap);
