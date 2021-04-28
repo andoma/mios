@@ -140,8 +140,10 @@ uart_irq(stm32_uart_t *u)
     } else {
       uint8_t c = u->tx_fifo[u->tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
       u->tx_fifo_rdptr++;
-      task_wakeup(&u->wait_tx, 1);
       reg_wr(u->reg_base + USART_TDR, c);
+      uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr);
+      if(avail > 3 * TX_FIFO_SIZE / 4)
+        task_wakeup(&u->wait_tx, 1);
     }
   }
 }
