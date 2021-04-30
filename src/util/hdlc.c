@@ -1,30 +1,32 @@
+#include <stdio.h>
+
 #include <mios/stream.h>
 #include <stdlib.h>
+#include <alloca.h>
 
 #include "hdlc.h"
-#include "crc32.h"
 
-void
-hdlc_read(stream_t *s,
-          void (*cb)(void *opaque, const uint8_t *data, size_t len),
-          void *opaque, size_t max_frame_size)
+#ifdef __mios__
+#include "crc32.h"
+#else
+#include <zlib.h>
+#endif
+
+int
+hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
 {
   int len = -1;
-  uint8_t *buf;
-  if(max_frame_size <= 16)
-    buf = __builtin_alloca(max_frame_size); // FIXME: Add alloca.h
-  else
-    buf = malloc(max_frame_size);
 
   while(1) {
 
     char c;
-    s->read(s, &c, 1, STREAM_READ_WAIT_ALL);
+    if(s->read(s, &c, 1, len < 1 ? wait : STREAM_READ_WAIT_ALL) == 0)
+      return 0;
 
     switch(c) {
     case 0x7e:
       if(len > 4 && (uint32_t)~crc32(0, buf, len) == 0)
-        cb(opaque, buf, len - 4);
+        return len - 4;
       len = 0;
       break;
     case 0x7d:
@@ -40,6 +42,22 @@ hdlc_read(stream_t *s,
       }
       break;
     }
+  }
+}
+
+
+
+void
+hdlc_read(stream_t *s,
+          void (*cb)(void *opaque, const uint8_t *data, size_t len),
+          void *opaque, size_t max_frame_size)
+{
+  uint8_t *buf;
+  buf = max_frame_size <= 16 ? alloca(max_frame_size) : malloc(max_frame_size);
+
+  while(1) {
+    cb(opaque, buf,
+       hdlc_read_to_buf(s, buf, max_frame_size, STREAM_READ_WAIT_ALL));
   }
 }
 
@@ -92,4 +110,21 @@ hdlc_send(stream_t *s, const void *data, size_t len)
   };
 
   hdlc_write_rawv(s, vec, 2);
+}
+
+void
+hdlc_sendv(stream_t *s, struct iovec *iov, size_t count)
+{
+  uint32_t crc = 0;
+  struct iovec vec[count + 1];
+  for(size_t i = 0; i < count; i++) {
+    crc = crc32(crc, iov[i].iov_base, iov[i].iov_len);
+    vec[i].iov_base = iov[i].iov_base;
+    vec[i].iov_len = iov[i].iov_len;
+  }
+
+  crc = ~crc;
+  vec[count].iov_base = &crc;
+  vec[count].iov_len = 4;
+  hdlc_write_rawv(s, vec, count + 1);
 }
