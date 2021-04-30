@@ -2,7 +2,7 @@
 
 #include <mios/mios.h>
 #include "stm32f4_clk.h"
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 #include "irq.h"
 
 #define GPIO_PORT_ADDR(x) (0x40020000 + ((x) * 0x400))

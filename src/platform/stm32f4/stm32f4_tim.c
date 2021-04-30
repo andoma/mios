@@ -10,7 +10,7 @@
 
 #include "systick.h"
 
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 #include "stm32f4_tim.h"
 #include "stm32f4_clk.h"
 

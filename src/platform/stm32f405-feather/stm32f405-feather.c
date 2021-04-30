@@ -8,7 +8,7 @@
 #include "irq.h"
 
 #include "pinmap.h"
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 #include "stm32f4_clk.h"
 #include "stm32f4_uart.h"
 

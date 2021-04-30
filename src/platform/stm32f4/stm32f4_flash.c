@@ -3,7 +3,7 @@
 #include <mios/mios.h>
 #include <mios/cli.h>
 
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 
 #include "systick.h"
 #include "irq.h"

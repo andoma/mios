@@ -7,7 +7,7 @@
 #include <mios/task.h>
 
 #include "irq.h"
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 #include "stm32f4_clk.h"
 
 #define NAME "stm32f4_i2c"

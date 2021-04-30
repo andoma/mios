@@ -6,7 +6,7 @@
 #include <mios/task.h>
 
 #include "irq.h"
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 #include "stm32f4_clk.h"
 #include "stm32f4_spi.h"
 #include "stm32f4_dma.h"

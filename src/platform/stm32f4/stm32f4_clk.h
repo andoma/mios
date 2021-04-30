@@ -1,6 +1,6 @@
 #pragma once
 
-#include "stm32f4.h"
+#include "stm32f4_reg.h"
 
 #define CLK_AHB1 0x30
 #define CLK_AHB2 0x34
