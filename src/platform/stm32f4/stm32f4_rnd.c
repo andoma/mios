@@ -1,7 +1,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "stm32f4.h"
 #include "stm32f4_clk.h"
 
 #define RNG_BASE 0x50060800

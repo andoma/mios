@@ -24,10 +24,6 @@ stm32f4_init(void)
   // SRAM1
   heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
 
-   // CCM
-  clk_enable(CLK_CCMDATARAMEN);
-  heap_add_mem(0x10000000 + sizeof(cpu_t), 0x10010000, MEM_TYPE_LOCAL);
-
 
   if(0) {
     // Enable this to disable instruction folding, write buffer and

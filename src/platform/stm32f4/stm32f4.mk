@@ -2,7 +2,7 @@ P := ${SRC}/platform/stm32f4
 
 GLOBALDEPS += ${P}/stm32f4.mk
 
-CPPFLAGS += -iquote${P} -include stm32f4_cpu.h
+CPPFLAGS += -iquote${P}
 
 CPPFLAGS += -DHAVE_HRTIMER
 
@@ -16,7 +16,6 @@ SRCS += ${P}/stm32f4.c \
 	${P}/stm32f4_spi.c \
 	${P}/stm32f4_dma.c \
 	${P}/stm32f4_tim.c \
-	${P}/stm32f4_rnd.c \
 	${P}/stm32f4_clk.c \
 	${P}/stm32f4_uart.c \
 	${P}/stm32f4_flash.c \
