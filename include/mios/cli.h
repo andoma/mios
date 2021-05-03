@@ -8,12 +8,13 @@
 
 typedef struct cli {
 
-  int16_t cl_pos;
-
   void (*cl_printf)(struct cli *cli, const char *fmt, ...);
   int (*cl_getc)(struct cli *cli, int wait);
 
   void *cl_opaque;
+
+  int16_t cl_pos;
+
   // This includes a terminating 0 at all times
   char cl_buf[CLI_LINE_BUF_SIZE];
 
@@ -40,5 +41,8 @@ typedef struct cli_cmd {
 void cli_input_char(cli_t *cl, char c);
 
 void cli_prompt(cli_t *cl);
+
+struct stream;
+void cli_on_stream(struct stream *s);
 
 void cli_console(void);

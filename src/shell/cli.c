@@ -105,51 +105,71 @@ cli_input_char(cli_t *cl, char c)
   cli_printf(cl, NULL);
 }
 
-static void
-cli_console_printf(struct cli *cli, const char *fmt, ...)
+
+
+static size_t
+cli_stream_fmt(void *arg, const char *buf, size_t len)
 {
+  stream_t *s = arg;
+  s->write(s, buf, len);
+  return len;
+}
+
+
+static void
+cli_stream_printf(struct cli *cli, const char *fmt, ...)
+{
+  stream_t *s = cli->cl_opaque;
+
   if(fmt == NULL) {
-    if(stdio)
-      stdio->write(stdio, NULL, 0);
+    s->write(s, NULL, 0);
     return;
   }
 
   va_list ap;
   va_start(ap, fmt);
-  vprintf(fmt, ap);
+  fmtv(cli_stream_fmt, s, fmt, ap);
   va_end(ap);
 }
 
 
 static int
-cli_console_getc(struct cli *cli, int wait)
+cli_stream_getc(struct cli *cli, int wait)
 {
-  char c;
-
-  if(stdio == NULL)
+  stream_t *s = cli->cl_opaque;
+  if(s->read == NULL)
     return ERR_NOT_IMPLEMENTED;
 
-  int r = stdio->read(stdio, &c, 1,
-                      wait ? STREAM_READ_WAIT_ONE : STREAM_READ_WAIT_NONE);
+  char c;
+  int r = s->read(s, &c, 1,
+                  wait ? STREAM_READ_WAIT_ONE : STREAM_READ_WAIT_NONE);
   if(r == 0)
     return ERR_NOT_READY;
   return c;
 }
 
 
-
 void
-cli_console(void)
+cli_on_stream(stream_t *s)
 {
-  cli_t cli = {};
-  cli.cl_printf = cli_console_printf;
-  cli.cl_getc = cli_console_getc;
+  cli_t cli = {
+    .cl_printf = cli_stream_printf,
+    .cl_getc = cli_stream_getc,
+    .cl_opaque = s
+  };
 
   cli_prompt(&cli);
   while(1) {
-    int c = getchar();
+    int c = cli_getc(&cli, 1);
     if(c < 0)
       break;
     cli_input_char(&cli, c);
   }
+}
+
+
+void
+cli_console(void)
+{
+  cli_on_stream(stdio);
 }
