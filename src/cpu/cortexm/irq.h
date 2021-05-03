@@ -10,7 +10,6 @@
 #define IRQ_LEVEL_IO       4
 
 #define IRQ_LEVEL_NET      5
-#define IRQ_LEVEL_DMA      5
 
 #define IRQ_LEVEL_CLOCK    6
 #define IRQ_LEVEL_SWITCH   7

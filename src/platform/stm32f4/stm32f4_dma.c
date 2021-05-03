@@ -15,11 +15,24 @@
 #include "platform/stm32/stm32_dma.c"
 
 stm32_dma_instance_t
-stm32f4_dma_alloc_fixed(int controller, int stream, int channel,
-                        void (*cb)(stm32_dma_instance_t instance,
-                                   void *arg, error_t err),
-                        void *arg, const char *name)
+stm32_dma_alloc(uint32_t resource_id,
+                void (*cb)(stm32_dma_instance_t instance,
+                           void *arg, error_t err),
+                void *arg, const char *name, int irq_level)
 {
-  assert(channel == 0);
-  return stm32_dma_alloc(1 << (controller * 8 + stream), cb, arg, name);
+  uint32_t sa = (resource_id >> 16) & 0xff;
+  uint32_t sb = resource_id & 0xff;
+
+  uint32_t mask = (1 << sb);
+  if(sa != 0xff) {
+    mask |= (1 << sa);
+  }
+
+  stm32_dma_instance_t inst =
+    stm32_dma_alloc_instance(mask, cb, arg, name, irq_level);
+
+  int channel = inst == sa ? resource_id >> 24 : (resource_id >> 8) & 0xff;
+  assert(channel < 8);
+  reg_set_bits(DMA_SCR(inst), 25, 3, channel);
+  return inst;
 }

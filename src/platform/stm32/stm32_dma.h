@@ -55,3 +55,10 @@ void stm32_dma_set_nitems(stm32_dma_instance_t instance, int nitems);
 void stm32_dma_start(stm32_dma_instance_t instance);
 
 error_t stm32_dma_wait(stm32_dma_instance_t instance);
+
+
+stm32_dma_instance_t stm32_dma_alloc(uint32_t resource_id,
+                                     void (*cb)(stm32_dma_instance_t,
+                                                void *arg, error_t err),
+                                     void *arg, const char *name,
+                                     int irq_level);

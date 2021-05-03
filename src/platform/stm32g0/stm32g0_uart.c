@@ -48,7 +48,8 @@ stm32g0_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
                       baudrate,
                       uart_config[instance].clkid,
                       uart_config[instance].irq,
-                      flags);
+                      flags,
+                      0);
 
   if(flags & UART_HALF_DUPLEX)
     reg_wr(u->reg_base + USART_CR3, 0x8); // HDSEL

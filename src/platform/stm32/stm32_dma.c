@@ -40,11 +40,11 @@ wakeup_cb(stm32_dma_instance_t instance, void *arg, error_t err)
 
 
 static stm32_dma_instance_t
-stm32_dma_alloc(int eligible, void (*cb)(stm32_dma_instance_t instance,
-                                         void *arg, error_t err),
-                void *arg, const char *name)
+stm32_dma_alloc_instance(int eligible, void (*cb)(stm32_dma_instance_t instance,
+                                                  void *arg, error_t err),
+                         void *arg, const char *name, int irq_level)
 {
-  int q = irq_forbid(IRQ_LEVEL_DMA);
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
   for(int i = 0; i < 16; i++) {
     if(!((1 << i) & eligible))
       continue;
@@ -62,9 +62,9 @@ stm32_dma_alloc(int eligible, void (*cb)(stm32_dma_instance_t instance,
     ds->err = 1; // Waiting
     clk_enable(i >= 8 ? CLK_DMA2 : CLK_DMA1);
     g_streams[i] = ds;
-    irq_enable(irqmap[i], IRQ_LEVEL_DMA);
+    irq_enable(irqmap[i], irq_level);
     irq_permit(q);
-    printf("DMA ch%d allocated by %s\n", i, name);
+    printf("%s: Using DMA #%d/%d\n", name, i >> 3, i & 7);
     return i;
   }
   panic("Out of DMA channels");
@@ -103,7 +103,7 @@ stm32_dma_config(stm32_dma_instance_t instance,
 {
   uint32_t reg = reg_rd(DMA_SCR(instance));
 
-  reg &= 0x00fffffe;
+  reg &= 0xfe000001;
 
   reg |= mburst << 23;
   reg |= pburst << 21;

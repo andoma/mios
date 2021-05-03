@@ -22,9 +22,10 @@ stm32_dma_instance_t
 stm32h7_dma_alloc(int resource_id,
                   void (*cb)(stm32_dma_instance_t instance,
                              void *arg, error_t err),
-                  void *arg, const char *name)
+                  void *arg, const char *name, int irq_level)
 {
-  stm32_dma_instance_t instance = stm32_dma_alloc(-1, cb, arg, name);
+  stm32_dma_instance_t instance =
+    stm32_dma_alloc_instance(-1, cb, arg, name, irq_level);
   reg_wr(DMAMUX1_CxCR(instance), resource_id);
   return instance;
 }

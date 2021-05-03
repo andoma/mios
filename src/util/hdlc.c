@@ -92,6 +92,7 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
       s->write(s, buf + b, i - b);
   }
   s->write(s, &byte_7e, 1);
+  s->write(s, NULL, 0);
 }
 
 

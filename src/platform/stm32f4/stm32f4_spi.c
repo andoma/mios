@@ -61,7 +61,7 @@ spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
   gpio_set_output(nss, 0);
   reg_wr(spi->base_addr + SPI_CR1, config);
 
-  int s = irq_forbid(IRQ_LEVEL_DMA);
+  int s = irq_forbid(IRQ_LEVEL_IO);
   spi_dma(spi, tx, rx, len);
   irq_permit(s);
 
@@ -98,10 +98,12 @@ static const struct {
   uint16_t base;
   uint16_t clkid;
   uint8_t af;
+  uint32_t tx_dma;
+  uint32_t rx_dma;
 } spi_config[] = {
-  { 0x0130, CLK_SPI1, 5 },
-  { 0x0038, CLK_SPI2, 5 },
-  { 0x003c, CLK_SPI3, 6 },
+  { 0x0130, CLK_SPI1, 5, STM32F4_DMA_SPI1_TX, STM32F4_DMA_SPI1_RX},
+  { 0x0038, CLK_SPI2, 5, STM32F4_DMA_SPI2_TX, STM32F4_DMA_SPI2_RX},
+  { 0x003c, CLK_SPI3, 6, STM32F4_DMA_SPI3_TX, STM32F4_DMA_SPI3_RX},
 };
 
 
@@ -157,18 +159,10 @@ stm32f4_spi_create(unsigned int instance, gpio_t clk, gpio_t miso,
   mutex_init(&spi->mutex, "spi");
   reg_wr(spi->base_addr + SPI_CR1, spi_get_config(&spi->spi, 0, 1));
 
-  switch(instance) {
-  case 1:
-    spi->rx_dma = stm32f4_dma_alloc_fixed(0, 3, 0, NULL, NULL, "spirx");
-    spi->tx_dma = stm32f4_dma_alloc_fixed(0, 4, 0, NULL, NULL, "spitx");
-    break;
-  case 2:
-    spi->rx_dma = stm32f4_dma_alloc_fixed(0, 0, 0, NULL, NULL, "spirx");
-    spi->tx_dma = stm32f4_dma_alloc_fixed(0, 5, 0, NULL, NULL, "spitx");
-    break;
-  default:
-    panic("Can't do SPI DMA for instance %d", instance + 1);
-  }
+  spi->rx_dma = stm32_dma_alloc(spi_config[instance].rx_dma,
+                                NULL, NULL, "spirx", IRQ_LEVEL_IO);
+  spi->tx_dma = stm32_dma_alloc(spi_config[instance].tx_dma,
+                                NULL, NULL, "spitx", IRQ_LEVEL_IO);
 
   stm32_dma_config(spi->rx_dma,
                    STM32_DMA_BURST_NONE,

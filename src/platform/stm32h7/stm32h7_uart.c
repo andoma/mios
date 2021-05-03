@@ -49,7 +49,8 @@ stm32h7_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
                       baudrate,
                       uart_config[instance].clkid,
                       uart_config[instance].irq,
-                      flags);
+                      flags,
+                      0);
   uarts[instance] = u;
   return &u->stream;
 }
