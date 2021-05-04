@@ -1,5 +1,8 @@
 #include <string.h>
 #include <malloc.h>
+
+#include <mios/cli.h>
+
 #include "cpu.h"
 
 // If curcpu() is not a macro defined by the platform we define a
@@ -57,3 +60,15 @@ halt(const char *msg)
 {
   __asm("bkpt 1");
 }
+
+
+static volatile uint32_t *const AIRCR  = (volatile uint32_t *)0xe000ed0c;
+
+static int
+cmd_reset(cli_t *cli, int argc, char **argv)
+{
+  *AIRCR = 0x05fa0004;
+  return 0;
+}
+
+CLI_CMD_DEF("reset", cmd_reset);
