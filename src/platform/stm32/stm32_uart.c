@@ -154,13 +154,16 @@ uart_irq(stm32_uart_t *u)
     }
 
   } else {
+#ifdef CR1_ENABLE_TCIE
 
     if(sr & (1 << 6)) {
       u->tx_busy = 0;
       u->tx_fifo_wrptr = 0;
       task_wakeup(&u->wait_tx, 1);
       reg_clr_bit(u->reg_base + USART_SR, 6); // Clear TC
+      stm32_dma_reset(u->tx_dma);
     }
+#endif
   }
 }
 
@@ -275,7 +278,7 @@ stm32_uart_init(stm32_uart_t *u, int reg_base, int baudrate,
   if(flags & UART_TXDMA) {
 
     u->tx_dma = stm32_dma_alloc(tx_dma_resouce_id,
-                                uart_irq_tx_dma, u, "uart", IRQ_LEVEL_IO);
+                                uart_irq_tx_dma, u, "uart", IRQ_LEVEL_NONE);
 
     stm32_dma_config(u->tx_dma,
                      STM32_DMA_BURST_NONE,

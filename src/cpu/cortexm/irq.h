@@ -16,6 +16,7 @@
 
 #define IRQ_PRI_LEVEL_SHIFT 5
 
+#define IRQ_LEVEL_NONE -1 // Place holder value to signal no IRQ
 
 #define IRQ_LEVEL_TO_PRI(x) ((x) << IRQ_PRI_LEVEL_SHIFT)
 

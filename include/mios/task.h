@@ -123,6 +123,9 @@ void *task_join(task_t *t);
 
 void task_wakeup(task_waitable_t *waitable, int all);
 
+// Use if you have irq_forbid(IRQ_LEVEL_SCHED)
+void task_wakeup_sched_locked(task_waitable_t *waitable, int all);
+
 void task_sleep(task_waitable_t *waitable);
 
 int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)

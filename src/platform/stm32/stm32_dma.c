@@ -9,6 +9,9 @@
 #define DMA_SM1AR(x) (DMA_BASE((x) >> 3) + 0x20 + 0x18 * ((x) & 7))
 #define DMA_SFCR(x)  (DMA_BASE((x) >> 3) + 0x24 + 0x18 * ((x) & 7))
 
+#define DMA_ISR(hi)  (0x00 + (hi) * 4)
+#define DMA_IFCR(hi) (0x08 + (hi) * 4)
+
 
 static const uint8_t irqmap[16] = {
   11,12,13,14,15,16,17,47,56,57,58,59,60,68,69,70
@@ -35,7 +38,7 @@ wakeup_cb(stm32_dma_instance_t instance, void *arg, error_t err)
 {
   dma_stream_t *ds = arg;
   ds->err = err;
-  task_wakeup(&ds->waitq, 0);
+  task_wakeup_sched_locked(&ds->waitq, 0);
 }
 
 
@@ -56,13 +59,17 @@ stm32_dma_alloc_instance(int eligible, void (*cb)(stm32_dma_instance_t instance,
     if(cb == NULL) {
       cb = wakeup_cb;
       arg = ds;
+      irq_level = IRQ_LEVEL_SCHED;
     }
     ds->cb = cb;
     ds->arg = arg;
     ds->err = 1; // Waiting
     clk_enable(i >= 8 ? CLK_DMA2 : CLK_DMA1);
     g_streams[i] = ds;
-    irq_enable(irqmap[i], irq_level);
+    if(irq_level != IRQ_LEVEL_NONE) {
+      irq_enable(irqmap[i], irq_level);
+      reg_wr(DMA_SCR(i), 0b10110);
+    }
     irq_permit(q);
     printf("%s: Using DMA #%d/%d\n", name, i >> 3, i & 7);
     return i;
@@ -91,31 +98,11 @@ stm32_dma_set_mem1(stm32_dma_instance_t instance, void *maddr)
 }
 
 void
-stm32_dma_config(stm32_dma_instance_t instance,
-                 stm32_dma_burst_t mburst,
-                 stm32_dma_burst_t pburst,
-                 stm32_dma_prio_t prio,
-                 stm32_dma_data_size_t msize,
-                 stm32_dma_data_size_t psize,
-                 stm32_dma_incr_mode_t minc,
-                 stm32_dma_incr_mode_t pinc,
-                 stm32_dma_direction_t dir)
+stm32_dma_config_u32(stm32_dma_instance_t instance, uint32_t val)
 {
   uint32_t reg = reg_rd(DMA_SCR(instance));
-
-  reg &= 0xfe000001;
-
-  reg |= mburst << 23;
-  reg |= pburst << 21;
-  reg |= prio   << 16;
-  reg |= msize  << 13;
-  reg |= psize  << 11;
-  reg |= minc   << 10;
-  reg |= pinc   << 9;
-  reg |= dir    << 6;
-  reg |= 1 << 4;
-  reg |= 1 << 2;
-  reg |= 1 << 1;
+  reg &= 0xfe00001f;
+  reg |= val;
   reg_wr(DMA_SCR(instance), reg);
 }
 
@@ -135,6 +122,14 @@ stm32_dma_start(stm32_dma_instance_t instance)
 }
 
 
+void
+stm32_dma_reset(stm32_dma_instance_t instance)
+{
+  const uint32_t base = DMA_BASE(instance >> 3);
+  const int hi = (instance >> 2) & 1;
+  const uint8_t offset = (const uint8_t []){0,6,16,22}[instance & 3];
+  reg_wr(base + DMA_IFCR(hi), 0x3f << offset);
+}
 
 error_t
 stm32_dma_wait(stm32_dma_instance_t instance)
@@ -166,8 +161,6 @@ dma_irq(int instance, int bits)
   ds->cb(instance, ds->arg, bits & 0xc ? ERR_DMA_ERROR : 0);
 }
 
-#define DMA_ISR(hi)  (0x00 + (hi) * 4)
-#define DMA_IFCR(hi) (0x08 + (hi) * 4)
 
 
 #define GET_ISR(controller, hi, offset)                                \

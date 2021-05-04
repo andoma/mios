@@ -282,9 +282,8 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
 
 void
-task_wakeup(task_waitable_t *waitable, int all)
+task_wakeup_sched_locked(task_waitable_t *waitable, int all)
 {
-  int s = irq_forbid(IRQ_LEVEL_SCHED);
   task_t *t;
   while((t = LIST_FIRST(&waitable->list)) != NULL) {
     assert(t->t_state == TASK_STATE_SLEEPING);
@@ -297,6 +296,14 @@ task_wakeup(task_waitable_t *waitable, int all)
     if(!all)
       break;
   }
+}
+
+
+void
+task_wakeup(task_waitable_t *waitable, int all)
+{
+  int s = irq_forbid(IRQ_LEVEL_SCHED);
+  task_wakeup_sched_locked(waitable, all);
   irq_permit(s);
 }
 
