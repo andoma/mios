@@ -10,6 +10,8 @@ static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
 static volatile uint32_t *const DWT_LAR      = (volatile uint32_t *)0xE0001FB0;
 static volatile uint32_t *const SCB_DEMCR    = (volatile uint32_t *)0xE000EDFC;
 
+static volatile uint32_t *const DBGMCU_CR    = (volatile uint32_t *)0xe0042004;
+
 
 static void  __attribute__((constructor(120)))
 stm32f4_init(void)
@@ -38,3 +40,10 @@ stm32f4_init(void)
   *DWT_CONTROL = 1;
 }
 
+
+static void  __attribute__((destructor(120)))
+stm32f4_fini(void)
+{
+  if(*DBGMCU_CR & 7)
+    __asm("bkpt #2");
+}
