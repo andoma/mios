@@ -157,7 +157,7 @@ cli_on_stream(stream_t *s)
     .cl_getc = cli_stream_getc,
     .cl_opaque = s
   };
-
+  cli_printf(&cli, "\n");
   cli_prompt(&cli);
   while(1) {
     int c = cli_getc(&cli, 1);
