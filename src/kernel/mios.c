@@ -5,6 +5,11 @@
 #include <string.h>
 #include "irq.h"
 
+extern unsigned long _init_array_begin;
+extern unsigned long _init_array_end;
+extern unsigned long _fini_array_begin;
+extern unsigned long _fini_array_end;
+
 
 int  __attribute__((weak))
 main(void)
@@ -14,6 +19,26 @@ main(void)
   printf("No console input\n");
   return 0;
 }
+
+static void
+call_array_fwd(void **p, void **end)
+{
+  while(p != end) {
+    void (*fn)(void) = *p++;
+    fn();
+  }
+}
+
+
+static void
+call_array_rev(void **p, void **start)
+{
+  while(p != start) {
+    void (*fn)(void) = *--p;
+    fn();
+  }
+}
+
 
 
 void
@@ -28,18 +53,7 @@ init(void)
   extern unsigned long _ebss;
   memset(&_sbss, 0, (void *)&_ebss - (void *)&_sbss);
 
-
-  extern unsigned long _init_array_begin;
-  extern unsigned long _init_array_end;
-
-  void **init_array_begin = (void *)&_init_array_begin;
-  void **init_array_end = (void *)&_init_array_end;
-
-  while(init_array_begin != init_array_end) {
-    void (*init)(void) = *init_array_begin;
-    init();
-    init_array_begin++;
-  }
+  call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
 
   int flags = TASK_DETACHED;
 #ifdef HAVE_FPU
@@ -49,12 +63,6 @@ init(void)
   task_create((void *)&main, NULL, 1024, "main", flags, 2);
 }
 
-
-
-void  __attribute__((weak))
-platform_panic(void)
-{
-}
 
 void  __attribute__((weak, noreturn))
 halt(const char *msg)
@@ -68,7 +76,9 @@ void
 panic(const char *fmt, ...)
 {
   irq_forbid(IRQ_LEVEL_ALL);
-  platform_panic();
+
+  call_array_rev((void *)&_fini_array_end, (void *)&_fini_array_begin);
+
   task_t *t = task_current();
   printf("\n\nPANIC in %s: ", t ? t->t_name : "<notask>");
   va_list ap;

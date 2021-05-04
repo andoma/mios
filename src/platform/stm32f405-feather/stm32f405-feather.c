@@ -119,8 +119,8 @@ platform_init_late(void)
 
 
 
-void
-platform_panic(void)
+static void __attribute__((destructor(800)))
+platform_fini_late(void)
 {
   neopix(10,0,10);
 }

@@ -23,6 +23,12 @@ SECTIONS {
                 _init_array_end = .;
 
                 . = ALIGN(4);
+                _fini_array_begin = .;
+                *(.fini_array)
+                KEEP(*(SORT_BY_NAME(.fini_array.*)))
+                _fini_array_end = .;
+
+                . = ALIGN(4);
                 _clicmd_array_begin = .;
                 KEEP(*(clicmd))
                 _clicmd_array_end = .;
