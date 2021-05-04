@@ -21,6 +21,7 @@ cpu_init(void)
   asm volatile ("msr psp, %0" : : "r" (sp));
 
   task_t *t = sp;
+  strlcpy(t->t_name, "idle", sizeof(t->t_name));
   t->t_sp_bottom = sp_bottom;
 
   t->t_state = TASK_STATE_ZOMBIE;
