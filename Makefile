@@ -1,3 +1,5 @@
+-include local.mk
+
 PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
