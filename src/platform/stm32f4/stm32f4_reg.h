@@ -43,6 +43,13 @@ reg_clr_bit(uint32_t addr, int bit)
   *ptr = 0;
 }
 
+static inline int
+reg_get_bit(uint32_t addr, int bit)
+{
+  return (reg_rd(addr) >> bit) & 1;
+}
+
+
 static inline void
 reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
 {
