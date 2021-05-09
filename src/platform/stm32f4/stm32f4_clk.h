@@ -71,6 +71,7 @@
 
 #define CLK_CCMDATARAMEN CLK_ID(CLK_AHB1, 20)
 #define CLK_RNG          CLK_ID(CLK_AHB2, 6)
+#define CLK_OTGFS        CLK_ID(CLK_AHB2, 7)
 
 
 static inline void
