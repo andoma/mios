@@ -3,6 +3,7 @@
 
 #include <mios/cli.h>
 #include <mios/error.h>
+#include <mios/version.h>
 
 static int
 tokenize(char *buf, char **vec, int vecsize)
@@ -157,6 +158,10 @@ cli_on_stream(stream_t *s)
     .cl_getc = cli_stream_getc,
     .cl_opaque = s
   };
+  cli_printf(&cli, "%s %s (Mios: %s) ready\n",
+             mios_get_app_name(),
+             mios_get_app_version(),
+             mios_get_version());
   cli_printf(&cli, "\n");
   cli_prompt(&cli);
   while(1) {

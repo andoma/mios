@@ -1,5 +1,7 @@
 -include local.mk
 
+APPNAME ?= MIOS-standalone
+
 PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
@@ -23,7 +25,7 @@ CFLAGS += -Wframe-larger-than=128
 
 CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
-CPPFLAGS += -I${T}/include -I${SRC} -include ${O}/include/config.h
+CPPFLAGS += -I${T}/include -I${SRC} -I${O} -include ${O}/include/config.h
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 CFLAGS += -ffunction-sections -fdata-sections
@@ -58,6 +60,8 @@ include ${SRC}/lib/fixedpoint/fixedpoint.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
+
+SRCS += ${SRC}/version.c
 
 SRCS +=  ${SRCS-yes}
 OBJS +=  ${SRCS:%.c=${O}/%.o}
@@ -95,6 +99,26 @@ clean:
 	rm -rf "${O}"
 
 
+GITVER_MD5 := md5sum
+
+GITVER_VARGUARD = $(1)_GUARD_$(shell echo $($(1)) $($(2)) $($(3)) | ${GITVER_MD5} | cut -d ' ' -f 1)
+
+GIT_DESC_MIOS_OUTPUT ?= $(shell cd "$(T)" && git describe --always --dirty)
+GIT_DESC_APP_OUTPUT  ?= $(shell git describe --always --dirty)
+
+VERSION_DIGEST := $(call GITVER_VARGUARD,GIT_DESC_MIOS_OUTPUT,GIT_DESC_APP_OUTPUT,APPNAME)
+
+${O}/version_git.h: ${O}/.version_git/${VERSION_DIGEST}
+	echo >$@ "#define VERSION_MIOS_GIT \"${GIT_DESC_MIOS_OUTPUT}\""
+	echo >>$@ "#define VERSION_APP_GIT \"${GIT_DESC_APP_OUTPUT}\""
+	echo >>$@ "#define APPNAME \"${APPNAME}\""
+
+${O}/.version_git/${VERSION_DIGEST}:
+	rm -rf "${O}/.version_git"
+	mkdir -p "${O}/.version_git"
+	touch $@
+
+${SRC}/version.c : ${O}/version_git.h
 
 bin: ${O}/build.bin
 

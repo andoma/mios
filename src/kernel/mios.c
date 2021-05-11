@@ -14,7 +14,6 @@ extern unsigned long _fini_array_end;
 int  __attribute__((weak))
 main(void)
 {
-  printf("Welcome to Mios default main()\n");
   cli_console();
   printf("No console input\n");
   return 0;
