@@ -60,23 +60,6 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size)
 
 
 static int
-is_done(int mode, size_t done, size_t size)
-{
-  switch(mode) {
-  default:
-    return 1;
-  case STREAM_READ_WAIT_ONE:
-    return done;
-  case STREAM_READ_WAIT_ALL:
-    return done == size;
-  }
-}
-
-
-
-
-
-static int
 stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 {
   stm32_uart_t *u = (stm32_uart_t *)s;
@@ -86,7 +69,7 @@ stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
     // We are not on user thread, busy wait
     for(size_t i = 0; i < size; i++) {
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {
-        if(is_done(mode, i, size))
+        if(stream_wait_is_done(mode, i, size))
           return i;
       }
       d[i] = reg_rd(u->reg_base + USART_RDR);
@@ -98,7 +81,7 @@ stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 
   for(size_t i = 0; i < size; i++) {
     while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
-      if(is_done(mode, i, size)) {
+      if(stream_wait_is_done(mode, i, size)) {
         irq_permit(q);
         return i;
       }
