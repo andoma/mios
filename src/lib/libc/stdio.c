@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <mios/stream.h>
+
 #ifdef ENABLE_NET
 #include <net/net.h>
 #endif
@@ -289,6 +291,42 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
   return total;
 }
+
+
+
+
+static size_t
+stream_fmt(void *arg, const char *buf, size_t len)
+{
+  stream_t *s = arg;
+  s->write(s, buf, len);
+  return len;
+}
+
+
+int
+vstprintf(stream_t *s, const char *fmt, va_list ap)
+{
+  if(fmt == NULL) {
+    s->write(s, NULL, 0);
+    return 0;
+  }
+
+  return fmtv(stream_fmt, s, fmt, ap);
+}
+
+int
+stprintf(stream_t *s, const char *fmt, ...)
+{
+  va_list ap;
+  va_start(ap, fmt);
+  int x = vstprintf(s, fmt, ap);
+  va_end(ap);
+  return x;
+}
+
+
+
 
 
 #if WITH_MAIN

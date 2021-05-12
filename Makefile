@@ -1,7 +1,5 @@
 -include local.mk
 
-APPNAME ?= MIOS-standalone
-
 PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
@@ -103,8 +101,8 @@ GITVER_MD5 := md5sum
 
 GITVER_VARGUARD = $(1)_GUARD_$(shell echo $($(1)) $($(2)) $($(3)) | ${GITVER_MD5} | cut -d ' ' -f 1)
 
-GIT_DESC_MIOS_OUTPUT ?= $(shell cd "$(T)" && git describe --always --dirty)
-GIT_DESC_APP_OUTPUT  ?= $(shell git describe --always --dirty)
+GIT_DESC_MIOS_OUTPUT ?= $(shell cd "$(T)" && git describe --always --dirty 2>/dev/null)
+GIT_DESC_APP_OUTPUT  ?= $(shell git describe --always --dirty 2>/dev/null)
 
 VERSION_DIGEST := $(call GITVER_VARGUARD,GIT_DESC_MIOS_OUTPUT,GIT_DESC_APP_OUTPUT,APPNAME)
 

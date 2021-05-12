@@ -1,17 +1,16 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdio.h>
 
 #define CLI_LINE_BUF_SIZE 32
-
-
 
 typedef struct cli {
 
   void (*cl_printf)(struct cli *cli, const char *fmt, ...);
   int (*cl_getc)(struct cli *cli, int wait);
 
-  void *cl_opaque;
+  struct stream *cl_stream;
 
   int16_t cl_pos;
 
@@ -34,15 +33,10 @@ typedef struct cli_cmd {
 #define CLI_CMD_DEF(name, fn) \
   static cli_cmd_t CLI_JOIN(cli, __LINE__) __attribute__ ((used, section("clicmd"))) = { name, fn};
 
-#define cli_printf(cli, fmt...) (cli)->cl_printf(cli, fmt)
+#define cli_printf(cli, fmt...) stprintf((cli)->cl_stream, fmt);
 
-#define cli_getc(cli, wait) (cli)->cl_getc(cli, wait)
+int cli_getc(cli_t *cli, int wait);
 
-void cli_input_char(cli_t *cl, char c);
-
-void cli_prompt(cli_t *cl);
-
-struct stream;
-void cli_on_stream(struct stream *s);
+int cli_on_stream(struct stream *s);
 
 void cli_console(void);

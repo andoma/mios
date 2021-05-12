@@ -7,58 +7,40 @@
 #include "pcs/pcs.h"
 #include "pcs_shell.h"
 
-static size_t
-remote_output(void *arg, const char *s, size_t len)
-{
-  if(len)
-    pcs_send(arg, s, len, 0);
-  return len;
-}
+typedef struct {
+  stream_t s;
+  pcs_t *pcs;
 
-static void
-remote_printf(struct cli *cli, const char *fmt, ...)
-{
-  va_list ap;
-  va_start(ap, fmt);
-  fmtv(remote_output, cli->cl_opaque, fmt, ap);
-  va_end(ap);
-}
+} pcs_shell_stream_t;
+
 
 static int
-remote_getc(struct cli *cli, int wait)
+pcs_shell_read(struct stream *s, void *buf, size_t size, int wait)
 {
-  char c;
-  int r = pcs_read(cli->cl_opaque, &c, 1, wait);
-  if(r == 0)
-    return ERR_NOT_READY;
-  if(r != 1)
-    return ERR_RX;
-  return c;
+  pcs_shell_stream_t *pss = (pcs_shell_stream_t *)s;
+  return pcs_read(pss->pcs, buf, size, wait != STREAM_READ_WAIT_NONE);
+}
+
+
+static void
+pcs_shell_write(struct stream *s, const void *buf, size_t size)
+{
+  pcs_shell_stream_t *pss = (pcs_shell_stream_t *)s;
+  if(size)
+    pcs_send(pss->pcs, buf, size, 0);
 }
 
 
 static void *
 pcs_shell(void *arg)
 {
-  pcs_t *pcs = arg;
+  pcs_shell_stream_t pss;
+  pss.s.read = pcs_shell_read;
+  pss.s.write = pcs_shell_write;
+  pss.pcs = arg;
 
-  cli_t cli = {};
-  cli.cl_printf = remote_printf;
-  cli.cl_getc = remote_getc;
-  cli.cl_opaque = pcs;
-
-
-  cli_prompt(&cli);
-
-  while(1) {
-    char c;
-    int r = pcs_read(pcs, &c, 1, 1);
-    if(r < 1 || c == 4) // ^D
-      break;
-
-    cli_input_char(&cli, c);
-  }
-  pcs_close(pcs);
+  cli_on_stream(&pss.s);
+  pcs_close(pss.pcs);
   return NULL;
 }
 

@@ -63,7 +63,7 @@ dispatch_command(cli_t *c, char *line)
 
 
 
-void
+static void
 cli_prompt(cli_t *cl)
 {
   cli_printf(cl, "> ");
@@ -107,37 +107,10 @@ cli_input_char(cli_t *cl, char c)
 }
 
 
-
-static size_t
-cli_stream_fmt(void *arg, const char *buf, size_t len)
+int
+cli_getc(struct cli *cli, int wait)
 {
-  stream_t *s = arg;
-  s->write(s, buf, len);
-  return len;
-}
-
-
-static void
-cli_stream_printf(struct cli *cli, const char *fmt, ...)
-{
-  stream_t *s = cli->cl_opaque;
-
-  if(fmt == NULL) {
-    s->write(s, NULL, 0);
-    return;
-  }
-
-  va_list ap;
-  va_start(ap, fmt);
-  fmtv(cli_stream_fmt, s, fmt, ap);
-  va_end(ap);
-}
-
-
-static int
-cli_stream_getc(struct cli *cli, int wait)
-{
-  stream_t *s = cli->cl_opaque;
+  stream_t *s = cli->cl_stream;
   if(s->read == NULL)
     return ERR_NOT_IMPLEMENTED;
 
@@ -149,25 +122,21 @@ cli_stream_getc(struct cli *cli, int wait)
   return c;
 }
 
-
-void
+int
 cli_on_stream(stream_t *s)
 {
   cli_t cli = {
-    .cl_printf = cli_stream_printf,
-    .cl_getc = cli_stream_getc,
-    .cl_opaque = s
+    .cl_stream = s
   };
-  cli_printf(&cli, "%s %s (Mios: %s) ready\n",
-             mios_get_app_name(),
-             mios_get_app_version(),
-             mios_get_version());
-  cli_printf(&cli, "\n");
+  stprintf(s, "\n");
+  mios_print_version(s);
   cli_prompt(&cli);
   while(1) {
     int c = cli_getc(&cli, 1);
     if(c < 0)
-      break;
+      return -1;
+    if(c == 4)
+      return 0;
     cli_input_char(&cli, c);
   }
 }
@@ -176,5 +145,8 @@ cli_on_stream(stream_t *s)
 void
 cli_console(void)
 {
-  cli_on_stream(stdio);
+  while(1) {
+    if(cli_on_stream(stdio) < 0)
+      return;
+  }
 }
