@@ -1,0 +1,14 @@
+Connect via openocd:
+
+  openocd -f interface/stlink-v2.cfg -f target/stm32g0x.cfg
+
+Another shell, launch gdb:
+
+  make PLATFORM=stm32g0-nucleo64 stlink
+
+  (gdb) load
+
+    ....
+
+  (gdb) c
+  Continuing.
