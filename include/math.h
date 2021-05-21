@@ -17,6 +17,7 @@
 #define isinf(x) (fpclassify(x) == FP_INFINITE)
 
 #define NAN __builtin_nanf("")
+#define INFINITY __builtin_inff()
 
 #ifdef MATH_PREFIX
 
