@@ -145,6 +145,8 @@ cli_on_stream(stream_t *s)
 void
 cli_console(void)
 {
+  if(stdio == NULL)
+    return;
   while(1) {
     if(cli_on_stream(stdio) < 0)
       return;
