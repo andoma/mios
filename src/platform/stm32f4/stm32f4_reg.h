@@ -60,3 +60,9 @@ reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
   *ptr = (*ptr & ~mask) | ((bits << shift) & mask);
 }
 
+
+static inline void
+reg_or(uint32_t addr, uint32_t bits)
+{
+  reg_wr(addr, reg_rd(addr) | bits);
+}
