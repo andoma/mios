@@ -3,8 +3,6 @@
 #include <mios/cli.h>
 #include <mios/io.h>
 
-#include "monitor.h"
-
 static int
 cmd_i2c_scan(cli_t *cli, int argc, char **argv)
 {
@@ -67,7 +65,7 @@ cmd_i2c_read(cli_t *cli, int argc, char **argv)
   if(err) {
     cli_printf(cli, "ERR: %d\n", err);
   } else {
-    mon_hexdump(cli, buf, len, 0);
+    sthexdump(cli->cl_stream, NULL, buf, len, 0);
   }
   free(buf);
   return 0;

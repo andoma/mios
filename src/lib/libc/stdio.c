@@ -326,7 +326,37 @@ stprintf(stream_t *s, const char *fmt, ...)
 }
 
 
+void
+sthexdump(stream_t *s, const char *prefix, const void *buf, size_t len,
+          uint32_t offset)
+{
+  int i, j, k;
+  const uint8_t *data = buf;
 
+  for(i = 0; i < len; i+= 16) {
+    stprintf(s, "%s%s0x%04x: ", prefix ?: "", prefix ? ": " : "", i + offset);
+
+    for(j = 0; j + i < len && j < 16; j++) {
+      stprintf(s, "%s%02x ", j==8 ? " " : "", data[i+j]);
+    }
+    const int cnt = (17 - j) * 3 + (j < 8);
+    for(k = 0; k < cnt; k++) {
+      stprintf(s, " ");
+    }
+
+    for(j = 0; j + i < len && j < 16; j++) {
+      char c = data[i+j] < 32 || data[i+j] > 126 ? '.' : data[i+j];
+      stprintf(s, "%c", c);
+    }
+    stprintf(s, "\n");
+  }
+}
+
+void
+hexdump(const char *prefix, const void *data, size_t len)
+{
+  sthexdump(stdio, prefix, data, len, 0);
+}
 
 
 #if WITH_MAIN
