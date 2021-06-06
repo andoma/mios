@@ -20,5 +20,6 @@ SRCS += ${P}/stm32f4.c \
 	${P}/stm32f4_uart.c \
 	${P}/stm32f4_flash.c \
 	${P}/stm32f4_adc.c \
+	${P}/stm32f4_otgfs.c \
 
 ${MO}/src/platform/stm32f4/%.o : CFLAGS += ${NOFPU}
