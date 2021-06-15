@@ -37,3 +37,5 @@
 #define TIMx_BDTR  0x44
 #define TIMx_DCR   0x48
 #define TIMx_DMAR  0x4c
+
+#define TIMx_CCRx(x)  (0x30 + (x) * 4)
