@@ -17,6 +17,8 @@
 #include <usb/usb.h>
 #include <usb/usb_desc.h>
 
+#define NUM_ENDPOINTS 4
+
 #define OTG_FS_BASE 0x50000000
 
 #define OTG_FS_GAHBCFG  (OTG_FS_BASE + 0x008)
@@ -114,8 +116,8 @@ struct usb_ctrl {
 
   struct usb_device_descriptor uc_desc;
 
-  usb_ep_t *uc_in_ue[4];
-  usb_ep_t *uc_out_ue[4];
+  usb_ep_t *uc_in_ue[NUM_ENDPOINTS];
+  usb_ep_t *uc_out_ue[NUM_ENDPOINTS];
 
   const char *uc_manufacturer;
   const char *uc_product;
@@ -379,7 +381,7 @@ handle_get_descriptor(usb_ctrl_t *uc)
 static void
 ep0_handle_set_config(usb_ctrl_t *uc)
 {
-  for(int ep = 1; ep < 4; ep++) {
+  for(int ep = 1; ep < NUM_ENDPOINTS; ep++) {
 
     if(uc->uc_in_ue[ep] != NULL) {
       usb_ep_t *in = uc->uc_in_ue[ep];
@@ -482,12 +484,12 @@ ep0_rx(device_t *d, usb_ep_t *ue,
     ep_cnak(ep);
     return 0;
   case 4:  // SETUP completed
-    ep0_handle_setup(uc);
-    ep_cnak(ep);
     return 0;
   case 6: // SETUP packet
     uc->uc_ep0_out.setup_words[0] = reg_rd(OTG_FS_FIFO(0));
     uc->uc_ep0_out.setup_words[1] = reg_rd(OTG_FS_FIFO(0));
+    ep0_handle_setup(uc);
+    ep_cnak(ep);
     return 0;
   default:
     return ERR_NOT_IMPLEMENTED;
@@ -534,7 +536,7 @@ handle_iepint(usb_ctrl_t *uc)
 {
   uint32_t daint = reg_rd(OTG_FS_DAINT);
 
-  for(int ep = 0; ep < 4; ep++) {
+  for(int ep = 0; ep < NUM_ENDPOINTS; ep++) {
     if(!((1 << ep) & daint)) // replace with ffs()
       continue;
 
@@ -558,7 +560,7 @@ handle_oepint(usb_ctrl_t *uc)
 {
   uint32_t daint = reg_rd(OTG_FS_DAINT);
 
-  for(int i = 0; i < 4; i++) {
+  for(int i = 0; i < NUM_ENDPOINTS; i++) {
     if(!((0x10000 << i) & daint))
       continue;
 
@@ -576,7 +578,7 @@ handle_reset(usb_ctrl_t *uc)
 {
   set_address(0);
 
-  for(int ep = 0; ep < 4; ep++) {
+  for(int ep = 0; ep < NUM_ENDPOINTS; ep++) {
     usb_ep_t *ue;
 
     // Clear all pending IRQs
@@ -704,7 +706,7 @@ irq_67(void)
     // Read from FIFO
     if(gint & OTG_FS_GINT_RXFLVL) {
       const uint32_t rspr = reg_rd(OTG_FS_GRXSTSP);
-      const uint32_t ep = rspr & 0x3;
+      const uint32_t ep = rspr & 0xf;
       usb_ep_t *ue = uc->uc_out_ue[ep];
       if(ue == NULL) {
         panic("usb: Got packet on uninitialized endpoint %d", ep);
@@ -782,7 +784,7 @@ stm32f4_otgfs_init_regs(void)
 
   fifo_addr += 32;
 
-  for(int i = 1; i < 4; i++) {
+  for(int i = 1; i < NUM_ENDPOINTS; i++) {
     reg_wr(OTG_FS_DIEPTXF(i),
          (32 << 16) |
          fifo_addr);
