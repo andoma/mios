@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <mios/cli.h>
 
@@ -47,3 +48,25 @@ cmd_rd32(cli_t *cli, int argc, char **argv)
 
 
 CLI_CMD_DEF("rd32", cmd_rd32);
+
+
+
+static int
+cmd_uptime(cli_t *cli, int argc, char **argv)
+{
+  int64_t now = clock_get();
+
+  int seconds = now / 1000000LLU;
+
+  int h = seconds / 3600;
+  int m = (seconds / 60) % 60;
+  int s = seconds % 60;
+
+  cli_printf(cli, "%02d:%02d:%02d (%d seconds)\n",
+             h, m, s, seconds);
+  return 0;
+}
+
+
+
+CLI_CMD_DEF("uptime", cmd_uptime);
