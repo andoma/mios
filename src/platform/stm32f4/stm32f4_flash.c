@@ -82,3 +82,14 @@ cmd_flash_write(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("write", cmd_flash_write);
+
+
+static int
+cmd_flash_unlock(cli_t *cli, int argc, char **argv)
+{
+  reg_wr(FLASH_KEYR, 0x45670123);
+  reg_wr(FLASH_KEYR, 0xCDEF89AB);
+  return 0;
+}
+
+CLI_CMD_DEF("flash-unlock", cmd_flash_unlock);
