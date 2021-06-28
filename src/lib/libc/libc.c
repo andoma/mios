@@ -1,4 +1,5 @@
 #include <string.h>
+#include <inttypes.h>
 
 static void
 bcopy(const void *src, void *dest, size_t len)
@@ -42,7 +43,26 @@ memcmp(const void *str1, const void *str2, size_t count)
 void *
 memcpy(void *dest, const void *src, size_t n)
 {
-  bcopy(src, dest, n);
+  char *d = dest;
+  const char *s = src;
+  const char *e = s + n;
+
+  if(n >= 8 && ((intptr_t)d & 3) == 0 && ((intptr_t)s & 3) == 0) {
+    size_t words = n >> 2;
+    int *d32 = dest;
+    const int *s32 = src;
+
+    const int *e32 = s32 + words;
+    while(s32 != e32) {
+      *d32++ = *s32++;
+    }
+    s = (const char *)s32;
+    d = (char *)d32;
+  }
+
+  while(s != e) {
+    *d++ = *s++;
+  }
   return dest;
 }
 
