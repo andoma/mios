@@ -15,6 +15,11 @@ typedef enum {
   ERR_BUS_ERROR             = -11,
   ERR_ARBITRATION_LOST      = -12,
   ERR_BAD_STATE             = -13,
+  ERR_INVALID_ADDRESS       = -14,
+  ERR_NO_DEVICE             = -15,
+  ERR_MISMATCH              = -16,
+  ERR_NOT_FOUND             = -17,
+  ERR_CHECKSUM_ERROR        = -18,
 
 } error_t;
 

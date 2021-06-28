@@ -1,12 +1,48 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <mios/mios.h>
-#include <mios/cli.h>
+#include <mios/flash.h>
 
 #include "stm32f4_reg.h"
+#include "stm32f4_flash.h"
 
 #include "systick.h"
 #include "irq.h"
+
+
+typedef struct {
+  uint16_t offset; // in kB
+  uint16_t size;   // in kB
+} sector_t;
+
+
+static const sector_t sectors[12] = {
+  { 0,    16 },
+  { 16,   16 },
+  { 32,   16 },
+  { 48,   16 },
+  { 64,   64 },
+  { 128,  128 },
+  { 256,  128 },
+  { 384,  128 },
+  { 512,  128 },
+  { 640,  128 },
+  { 768,  128 },
+  { 896,  128 },
+};
+
+
+static const sector_t *
+get_sector(unsigned int sector)
+{
+  if(sector >= ARRAYSIZE(sectors))
+    return NULL;
+  return &sectors[sector];
+}
+
+
+
+
 
 #define FLASH_BASE 0x40023c00
 
@@ -32,64 +68,142 @@ flash_wait_ready(void)
   }
 }
 
-
-
-static int  __attribute__((section("ramcode")))
-cmd_erase(cli_t *cli, int argc, char **argv)
+static void
+flash_unlock(void)
 {
-  if(argc < 2)
+  reg_wr(FLASH_KEYR, 0x45670123);
+  reg_wr(FLASH_KEYR, 0xCDEF89AB);
+}
+
+static void
+flash_lock(void)
+{
+  reg_wr(FLASH_CR, 0x80000000);
+}
+
+
+
+
+static size_t
+flash_get_sector_size(const struct flash_iface *fif, int sector)
+{
+  const sector_t *s = get_sector(sector);
+  if(s == NULL)
     return 0;
+  return s->size * 1024;
+}
 
-  int sector = atoi(argv[1]);
-  int64_t t1 = clock_get();
 
-  int q = irq_forbid(IRQ_LEVEL_ALL);
-
+static void __attribute__((section("ramcode")))
+flash_erase_sector0(int sector)
+{
   reg_wr(FLASH_CR, 0x2 | (sector << 3));
   reg_set_bit(FLASH_CR, 16);
   flash_wait_ready();
+}
 
+
+static error_t
+flash_erase_sector(const struct flash_iface *fif, int sector)
+{
+  const sector_t *s = get_sector(sector);
+  if(s == NULL)
+    return ERR_INVALID_ID;
+
+  int q = irq_forbid(IRQ_LEVEL_ALL);
+  flash_unlock();
+  flash_erase_sector0(sector);
+  flash_lock();
   irq_permit(q);
-
-  t1 = clock_get() - t1;
-
-  cli_printf(cli, "done: %d\n", (int)t1);
-
   return 0;
 }
 
 
-CLI_CMD_DEF("erase", cmd_erase);
-
-
-
-static int
-cmd_flash_write(cli_t *cli, int argc, char **argv)
+static error_t
+flash_write(const struct flash_iface *fif, int sector,
+            size_t offset, const void *data, size_t len)
 {
-  if(argc < 3)
-    return 0;
+  const sector_t *s = get_sector(sector);
+  if(s == NULL)
+    return ERR_INVALID_ID;
 
-  const uint32_t addr = atoix(argv[1]);
-  const uint32_t value = atoix(argv[2]);
+  if(offset + len >= s->size * 1024)
+    return ERR_INVALID_ADDRESS;
+
+  const uint8_t *d8 = data;
+  volatile uint8_t *addr = (uint8_t *)(0x8000000 + offset + s->offset * 1024);
+
+  flash_unlock();
 
   while(reg_rd(FLASH_SR) & (1 << 16)) {
   }
 
-  reg_wr(FLASH_CR, 0x1 | (2 << 8));
+  reg_wr(FLASH_CR, 0x1 | (0 << 8));
 
-  *(uint32_t *)addr = value;
+  for(size_t i = 0; i < len; i++)
+    addr[i] = d8[i];
+
+  flash_lock();
   return 0;
 }
 
-CLI_CMD_DEF("write", cmd_flash_write);
 
-
-static int
-cmd_flash_unlock(cli_t *cli, int argc, char **argv)
+static error_t
+flash_read(const struct flash_iface *fif, int sector,
+           size_t offset, void *data, size_t len)
 {
-  reg_wr(FLASH_KEYR, 0x45670123);
-  reg_wr(FLASH_KEYR, 0xCDEF89AB);
+  const sector_t *s = get_sector(sector);
+  if(s == NULL)
+    return ERR_INVALID_ID;
+
+  if(offset + len >= s->size * 1024)
+    return ERR_INVALID_ADDRESS;
+
+  uint8_t *d8 = data;
+  volatile uint8_t *addr = (uint8_t *)(0x8000000 + offset + s->offset * 1024);
+
+  for(size_t i = 0; i < len; i++)
+    d8[i] = addr[i];
+
   return 0;
 }
 
-CLI_CMD_DEF("flash-unlock", cmd_flash_unlock);
+
+static error_t
+flash_compare(const struct flash_iface *fif, int sector,
+              size_t offset, const void *data, size_t len)
+{
+  const sector_t *s = get_sector(sector);
+  if(s == NULL)
+    return ERR_INVALID_ID;
+
+  if(offset + len >= s->size * 1024)
+    return ERR_INVALID_ADDRESS;
+
+  const uint8_t *d8 = data;
+  volatile uint8_t *addr = (uint8_t *)(0x8000000 + offset + s->offset * 1024);
+
+  for(size_t i = 0; i < len; i++) {
+    if(d8[i] != addr[i])
+      return ERR_MISMATCH;
+  }
+
+  return 0;
+}
+
+
+
+static const flash_iface_t stm32f4_flash = {
+  .get_sector_size = flash_get_sector_size,
+  .erase_sector = flash_erase_sector,
+  .write = flash_write,
+  .read = flash_read,
+  .compare = flash_compare,
+};
+
+
+const flash_iface_t *
+stm32f4_flash_get(void)
+{
+  return &stm32f4_flash;
+}
