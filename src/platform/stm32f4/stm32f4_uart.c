@@ -48,8 +48,8 @@ stm32f4_uart_init(stm32_uart_t *u, int instance, int baudrate,
     return NULL;
 
   const int af = uart_config[instance].af;
-  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
 
   u = stm32_uart_init(u,
                       (uart_config[instance].base << 8) + 0x40000000,
