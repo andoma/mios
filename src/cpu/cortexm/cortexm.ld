@@ -5,7 +5,7 @@ SECTIONS {
                 . = ALIGN(4);
                 KEEP(*(.isr_vector))
                 . = ALIGN(4);
-        } >FLASH
+        } >VTBL
 
         .text : {
                 . = ALIGN(4);
