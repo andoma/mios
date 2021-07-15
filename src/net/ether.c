@@ -8,12 +8,12 @@
 #include "irq.h"
 #include "ether.h"
 #include "net.h"
-#include "ipv4.h"
-#include "dhcpv4.h"
+#include "ipv4/ipv4.h"
+#include "ipv4/dhcpv4.h"
+
+struct ether_netif_list ether_netifs;
 
 static const uint8_t ether_bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-
-
 
 typedef struct ether_hdr {
   uint8_t dst_addr[6];
@@ -227,4 +227,6 @@ ether_netif_init(ether_netif_t *eni, const char *name)
   eni->eni_ni.ni_input = ether_input;
 
   netif_attach(&eni->eni_ni);
+
+  SLIST_INSERT_HEAD(&ether_netifs, eni, eni_global_link);
 }

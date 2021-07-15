@@ -29,6 +29,9 @@ struct socket_list sockets;
 static struct socket_queue socket_op_queue =
   STAILQ_HEAD_INITIALIZER(socket_op_queue);
 
+static void net_init(void);
+
+static char net_initialized;
 
 static void
 net_wakeup(int bit)
@@ -66,6 +69,9 @@ socket_issue_ctl(socket_t *s, socket_ctl_op_t op)
 error_t
 socket_attach(socket_t *s)
 {
+  if(!__atomic_test_and_set(&net_initialized, __ATOMIC_SEQ_CST))
+    net_init();
+
   return socket_issue_ctl(s, SOCKET_CTL_ATTACH);
 }
 
@@ -81,6 +87,9 @@ socket_detach(socket_t *s)
 void
 netif_attach(netif_t *ni)
 {
+  if(!__atomic_test_and_set(&net_initialized, __ATOMIC_SEQ_CST))
+    net_init();
+
   STAILQ_INIT(&ni->ni_rx_queue);
 
   mutex_lock(&netif_mutex);
@@ -199,11 +208,9 @@ periodic_timer_cb(void *opaque, uint64_t expire)
 }
 
 
-static void  __attribute__((constructor(190)))
-net_main_init(void)
+static void
+net_init(void)
 {
-  pbuf_alloc(64);
-
   task_create((void *)net_thread, NULL, 512, "net", 0, 4);
 
   net_periodic_timer.t_cb = periodic_timer_cb;

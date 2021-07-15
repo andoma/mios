@@ -7,7 +7,7 @@
 
 #include <mios/stream.h>
 
-#ifdef ENABLE_NET
+#ifdef ENABLE_IPV4
 #include <net/net.h>
 #endif
 
@@ -24,7 +24,7 @@ typedef struct {
   int16_t width;
   unsigned char lz:1;
   unsigned char la:1;
-#ifdef ENABLE_NET
+#ifdef ENABLE_IPV4
   unsigned char ipv4:1;
 #endif
 } fmtparam_t;
@@ -131,7 +131,7 @@ static size_t  __attribute__((noinline))
 emit_s32(fmtcb_t *cb, void *aux, int x,
          const fmtparam_t *fp)
 {
-#ifdef ENABLE_NET
+#ifdef ENABLE_IPV4
   if(fp->ipv4) {
     size_t r = 0;
     x = ntohl(x);
@@ -222,12 +222,8 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
     if(s != fmt)
       total += cb(aux, s, fmt - s - 1);
 
-    fmtparam_t fp;
-    fp.lz = 0;
-    fp.la = 0;
-#ifdef ENABLE_NET
-    fp.ipv4 = 0;
-#endif
+    fmtparam_t fp = {};
+
     if(*fmt == '0') {
       fp.lz = 1;
       fmt++;
@@ -238,7 +234,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     fp.width = parse_dec(&fmt, -1);
 
-#ifdef ENABLE_NET
+#ifdef ENABLE_IPV4
     fp.ipv4 = fmt[0] == 'I';
     if(fp.ipv4)
       fmt++;

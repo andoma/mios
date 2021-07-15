@@ -4,9 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef PBUF_DATA_SIZE
 #define PBUF_DATA_SIZE 512
-
-
+#endif
 
 STAILQ_HEAD(pbuf_queue, pbuf);
 

@@ -5,10 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "pbuf.h"
+#include "net/pbuf.h"
 #include "dhcpv4.h"
-#include "ether.h"
-#include "net.h"
+#include "net/ether.h"
+#include "net/net.h"
 
 typedef struct dhcp_hdr {
   uint8_t op;
@@ -414,16 +414,11 @@ static const char *dhcp_state_str[] = {
 static int
 cmd_dhcp(cli_t *cli, int argc, char **argv)
 {
-  const netif_t *ni;
+  ether_netif_t *eni;
 
   mutex_lock(&netif_mutex);
 
-  SLIST_FOREACH(ni, &netifs, ni_global_link) {
-
-    if(ni->ni_iftype != NETIF_TYPE_ETHERNET)
-      continue;
-
-    const ether_netif_t *eni = (const ether_netif_t *)ni;
+  SLIST_FOREACH(eni, &ether_netifs, eni_global_link) {
 
     cli_printf(cli, "DHCP State: %s\n", dhcp_state_str[eni->eni_dhcp_state]);
     cli_printf(cli, "     Our address: %Id\n", eni->eni_dhcp_requested_ip);

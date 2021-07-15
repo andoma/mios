@@ -1,10 +1,12 @@
-#include "pbuf.h"
-#include "netif.h"
-#include "ipv4.h"
 #include "udp.h"
-#include "net.h"
+
+#include "net/pbuf.h"
+#include "net/netif.h"
+#include "net/net.h"
+#include "net/socket.h"
+
+#include "ipv4.h"
 #include "dhcpv4.h"
-#include "socket.h"
 
 static struct socket_list udp_sockets; // FIXME: Make a hash
 
@@ -43,16 +45,18 @@ udp_input_ipv4(netif_t *ni, pbuf_t *pb, int udp_offset)
 }
 
 
-error_t
-udp_socket_attach(struct socket *s)
+static error_t
+udp_control(socket_t *s, socket_ctl_t *sc)
 {
-  LIST_INSERT_HEAD(&udp_sockets, s, s_net_link);
-  return 0;
+  switch(sc->sc_op) {
+  case SOCKET_CTL_ATTACH:
+    LIST_INSERT_HEAD(&udp_sockets, s, s_net_link);
+    return 0;
+  case SOCKET_CTL_DETACH:
+    LIST_REMOVE(s, s_net_link);
+    return 0;
+  }
+  return ERR_NOT_IMPLEMENTED;
 }
 
-error_t
-udp_socket_detach(struct socket *s)
-{
-  LIST_REMOVE(s, s_net_link);
-  return 0;
-}
+NET_SOCKET_PROTO_DEF(AF_INET, IPPROTO_UDP, udp_control);

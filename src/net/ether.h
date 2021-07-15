@@ -7,11 +7,11 @@
 #define ETHERTYPE_IPV4 0x0800
 #define ETHERTYPE_ARP  0x0806
 
-#define ETHER_NETIF_PERIODIC 0x1
-
-
 typedef struct ether_netif {
   netif_t eni_ni;
+
+  SLIST_ENTRY(ether_netif) eni_global_link;
+
   void (*eni_output)(struct ether_netif *eni, pbuf_t *pb, int flags);
 
   uint16_t eni_work_bits; // Protected at IRQ_LEVEL_NET
@@ -27,3 +27,7 @@ typedef struct ether_netif {
 
 
 void ether_netif_init(ether_netif_t *eni, const char *name);
+
+SLIST_HEAD(ether_netif_list, ether_netif);
+
+extern struct ether_netif_list ether_netifs;

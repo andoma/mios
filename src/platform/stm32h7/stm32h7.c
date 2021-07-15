@@ -53,8 +53,6 @@ stm32h7_init(void)
   void *DTCM_end   = (void *)0x20000000 + 128 * 1024;
   heap_add_mem((long)DTCM_start, (long)DTCM_end, 0);
 
-#ifdef ENABLE_NET
   // Packet buffers from SRAM2
   pbuf_data_add((void *)0x30020000, (void *)0x30020000 + 32 * 1024);
-#endif
 }

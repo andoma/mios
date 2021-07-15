@@ -1,49 +1,40 @@
 #include "irq.h"
 #include "socket.h"
 
-#include "ipv4.h"
-#include "udp.h"
+#include "ipv4/ipv4.h"
+#include "ipv4/udp.h"
 
-static error_t
-socket_net_attach(socket_t *s, socket_ctl_t *sc)
+
+static const socket_proto_t *
+socket_proto_find(uint8_t family, uint8_t proto)
 {
-  switch(s->s_protocol) {
-  case IPPROTO_UDP:
-    return udp_socket_attach(s);
-  default:
-    return ERR_NOT_IMPLEMENTED;
+  extern unsigned long _netsock_array_begin;
+  extern unsigned long _netsock_array_end;
+
+  socket_proto_t *sp = (void *)&_netsock_array_begin;
+  socket_proto_t *e = (void *)&_netsock_array_end;
+
+  for(; sp != e; sp++) {
+    if(sp->sp_family == family && sp->sp_protocol == proto)
+      return sp;
   }
+  return NULL;
 }
-
-
-static error_t
-socket_net_detach(socket_t *s, socket_ctl_t *sc)
-{
-  switch(s->s_protocol) {
-  case IPPROTO_UDP:
-    return udp_socket_detach(s);
-  default:
-    return ERR_NOT_IMPLEMENTED;
-  }
-}
-
 
 error_t
 socket_net_ctl(socket_t *s, socket_ctl_t *sc)
 {
-  switch(sc->sc_op) {
-  case SOCKET_CTL_ATTACH:
-    return socket_net_attach(s, sc);
-  case SOCKET_CTL_DETACH:
-    return socket_net_detach(s, sc);
-  }
-  return ERR_NOT_IMPLEMENTED;
+  if(s->s_proto == NULL)
+    return ERR_NOT_IMPLEMENTED;
+
+  return s->s_proto->sp_ctl(s, sc);
 }
 
 
 void
-socket_init(socket_t *s)
+socket_init(socket_t *s, uint8_t family, uint8_t proto)
 {
   STAILQ_INIT(&s->s_tx_queue);
   STAILQ_INIT(&s->s_op_queue);
+  s->s_proto = socket_proto_find(family, proto);
 }

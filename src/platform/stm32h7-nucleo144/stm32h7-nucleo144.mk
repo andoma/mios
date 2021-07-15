@@ -1,6 +1,6 @@
 BOARDNAME := stm32h7-nucleo144
 
-ENABLE_NET := yes
+ENABLE_NET_IPV4 := yes
 
 B := ${SRC}/platform/${BOARDNAME}
 

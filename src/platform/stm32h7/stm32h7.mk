@@ -18,7 +18,7 @@ SRCS += ${P}/stm32h7.c \
 	${P}/stm32h7_i2c.c \
 	${P}/stm32h7_dma.c \
 
-SRCS-${ENABLE_NET} += \
+SRCS-${ENABLE_NET_IPV4} += \
 	${P}/stm32h7_eth.c \
 
 

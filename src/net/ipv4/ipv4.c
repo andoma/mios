@@ -4,8 +4,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#include "netif.h"
-#include "net.h"
+#include "net/netif.h"
+#include "net/net.h"
 #include "ipv4.h"
 #include "irq.h"
 #include "udp.h"

@@ -4,6 +4,8 @@
 #include "stm32f4_clk.h"
 #include "cpu.h"
 
+#include <net/pbuf.h>
+
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1fff7a22;
 static volatile uint32_t *const ACTLR        = (volatile uint32_t *)0xe000e008;
 static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
@@ -25,6 +27,9 @@ stm32f4_init(void)
 
   // SRAM1
   heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
+
+  pbuf_data_add((void *)0x20000000 + 112 * 1024,
+                (void *)0x20000000 + 128 * 1024);
 
 
   if(0) {

@@ -1,7 +1,7 @@
 #include <mios/cli.h>
 #include <string.h>
 
-#include "netif.h"
+#include "net/netif.h"
 
 static int
 cmd_arp(cli_t *cli, int argc, char **argv)

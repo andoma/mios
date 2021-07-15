@@ -2,6 +2,7 @@
 
 #include <mios/task.h>
 #include <mios/error.h>
+#include <mios/mios.h>
 
 #include "pbuf.h"
 
@@ -9,7 +10,7 @@ STAILQ_HEAD(socket_ctl_queue, socket_ctl);
 STAILQ_HEAD(socket_queue, socket);
 LIST_HEAD(socket_list, socket);
 
-
+#define AF_INET 1
 
 typedef enum {
 
@@ -35,6 +36,8 @@ typedef struct socket {
 
   LIST_ENTRY(socket) s_net_link;
 
+  const struct socket_proto *s_proto;
+
   struct pbuf *(*s_rx)(struct socket *s, struct pbuf *pb);
 
   struct pbuf_queue s_tx_queue;
@@ -49,15 +52,24 @@ typedef struct socket {
   uint16_t s_remote_port;
   uint16_t s_local_port;
 
-  uint8_t s_protocol;
   uint8_t s_net_state;
 
 } socket_t;
 
-void socket_init(socket_t *s);
+void socket_init(socket_t *s, uint8_t family, uint8_t protocol);
 
 error_t socket_attach(socket_t *s);
 
 error_t socket_detach(socket_t *s);
 
 error_t socket_net_ctl(socket_t *s, socket_ctl_t *sc);
+
+
+typedef struct socket_proto {
+  uint8_t sp_family;
+  uint8_t sp_protocol;
+  error_t (*sp_ctl)(socket_t *s, socket_ctl_t *sc);
+} socket_proto_t;
+
+#define NET_SOCKET_PROTO_DEF(family, protocol, ctl)                \
+  static socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl };
