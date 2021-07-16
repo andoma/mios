@@ -9,6 +9,16 @@ typedef struct mbus_netif {
 
   uint8_t mni_hdr_len;
 
+  uint32_t mni_rx_packets;
+  uint32_t mni_rx_bytes;
+  uint32_t mni_rx_crc_errors;
+  uint32_t mni_rx_runts;
+
+  uint32_t mni_rx_unknown_opcode;
+
+  uint32_t mni_tx_packets;
+  uint32_t mni_tx_bytes;
+
 } mbus_netif_t;
 
 void mbus_netif_attach(mbus_netif_t *mni, const char *name,

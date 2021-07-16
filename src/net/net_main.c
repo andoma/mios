@@ -86,7 +86,7 @@ socket_detach(socket_t *s)
 
 
 void
-netif_attach(netif_t *ni)
+netif_attach(netif_t *ni, const char *name)
 {
   if(!__atomic_test_and_set(&net_initialized, __ATOMIC_SEQ_CST))
     net_init();
@@ -102,6 +102,8 @@ netif_attach(netif_t *ni)
       SLIST_INSERT_HEAD(&netifs, ni, ni_global_link);
       if(ni->ni_buffers_avail)
         ni->ni_buffers_avail(ni);
+      ni->ni_dev.d_name = name;
+      device_register(&ni->ni_dev);
       mutex_unlock(&netif_mutex);
       return;
     }

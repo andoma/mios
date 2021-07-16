@@ -40,6 +40,8 @@ mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
   uint32_t crc = mbus_crc32(pb);
   uint32_t *trailer = pbuf_append(pb, sizeof(uint32_t));
   *trailer = crc;
+  mni->mni_tx_packets++;
+  mni->mni_tx_bytes += pb->pb_pktlen;
   mni->mni_output(mni, pb);
 }
 
@@ -57,6 +59,7 @@ mbus_local(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
     return NULL;
 
   default:
+    mni->mni_rx_unknown_opcode++;
     return pb;
   }
 }
@@ -67,18 +70,21 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 {
   mbus_netif_t *mni = (mbus_netif_t *)ni;
 
+  mni->mni_rx_packets++;
+  mni->mni_rx_bytes += pb->pb_pktlen;
+
   if(mbus_crc32(pb)) {
-    printf("mbus: bad crc\n");
+    mni->mni_rx_crc_errors++;
     return pb;
   }
 
   if((pb = pbuf_trim(pb, 4)) == NULL) {
-    printf("mbus: short packet\n");
+    mni->mni_rx_runts++;
     return pb;
   }
 
   if((pb = pbuf_pullup(pb, mni->mni_hdr_len + 1)) == NULL) {
-    printf("mbus: short packet\n");
+    mni->mni_rx_runts++;
     return pb;
   }
 
@@ -97,10 +103,28 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 }
 
 
+
+static void
+mbus_print_info(struct device *d, struct stream *st)
+{
+  mbus_netif_t *mni = (mbus_netif_t *)d;
+  stprintf(st, "\tRX %u packets  %u bytes\n",
+           mni->mni_rx_packets, mni->mni_rx_bytes);
+  stprintf(st, "\t   %u CRC  %u runts  %u bad opcode\n",
+           mni->mni_rx_crc_errors, mni->mni_rx_runts,
+           mni->mni_rx_unknown_opcode);
+  stprintf(st, "\tTX %u packets  %u bytes\n",
+           mni->mni_tx_packets, mni->mni_tx_bytes);
+}
+
+
 void
 mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr)
 {
   mni->mni_ni.ni_local_addr = addr;
   mni->mni_ni.ni_input = mbus_input;
-  netif_attach(&mni->mni_ni);
+
+  mni->mni_ni.ni_dev.d_print_info = mbus_print_info;
+
+  netif_attach(&mni->mni_ni, name);
 }

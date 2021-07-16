@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mios/device.h>
 #include <mios/task.h>
 
 #include "pbuf.h"
@@ -14,6 +15,8 @@ struct nexthop;
 extern struct netif_list netifs;
 
 typedef struct netif {
+
+  device_t ni_dev;
 
   struct pbuf_queue ni_rx_queue;
 
@@ -60,6 +63,6 @@ typedef struct nexthop {
 
 void netif_wakeup(netif_t *ni);
 
-void netif_attach(netif_t *ni);
+void netif_attach(netif_t *ni, const char *name);
 
 extern mutex_t netif_mutex;

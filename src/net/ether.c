@@ -225,7 +225,7 @@ ether_netif_init(ether_netif_t *eni, const char *name)
   eni->eni_ni.ni_periodic = ether_periodic;
   eni->eni_ni.ni_input = ether_input;
 
-  netif_attach(&eni->eni_ni);
+  netif_attach(&eni->eni_ni, name);
 
   SLIST_INSERT_HEAD(&ether_netifs, eni, eni_global_link);
 }

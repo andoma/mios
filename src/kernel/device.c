@@ -21,14 +21,15 @@ device_not_implemented(device_t *d)
 static int
 cmd_dev(cli_t *cli, int argc, char **argv)
 {
-  cli_printf(cli, "Devices:\n");
+  cli_printf(cli, "\nDevices:\n");
 
   device_t *d;
   STAILQ_FOREACH(d, &devices, d_link) {
-    cli_printf(cli, "%s\n", d->d_name);
+    cli_printf(cli, "\n[%s]\n", d->d_name);
     if(d->d_print_info)
-      d->d_print_info(cli->cl_stream);
+      d->d_print_info(d, cli->cl_stream);
   }
+  cli_printf(cli, "\n");
   return 0;
 }
 
