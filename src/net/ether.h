@@ -14,7 +14,6 @@ typedef struct ether_netif {
 
   void (*eni_output)(struct ether_netif *eni, pbuf_t *pb, int flags);
 
-  uint16_t eni_work_bits; // Protected at IRQ_LEVEL_NET
   uint8_t eni_addr[6];    // Our address
 
   uint8_t eni_dhcp_state;
