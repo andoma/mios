@@ -24,14 +24,20 @@ typedef struct pbuf_pool {
 static struct pbuf_pool pbuf_datas = { . pp_wait = WAITABLE_INITIALIZER("pbufdata")};
 static struct pbuf_pool pbufs  = { . pp_wait = WAITABLE_INITIALIZER("pbuf")};
 
+void net_buffers_available(void);
+
 static void
 pbuf_pool_put(pbuf_pool_t *pp, void *item)
 {
   pbuf_item_t *pi = item;
   assert(((uint32_t)item & 0x3) == 0);
   SLIST_INSERT_HEAD(&pp->pp_items, pi, pi_link);
+
+  if(pp->pp_avail == 0) {
+    task_wakeup(&pp->pp_wait, 0);
+    net_buffers_available();
+  }
   pp->pp_avail++;
-  if(0)  task_wakeup(&pp->pp_wait, 0);
 }
 
 static void *

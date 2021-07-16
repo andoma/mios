@@ -12,6 +12,7 @@
 #define NET_WORK_PERIODIC  0
 #define NET_WORK_SOCKET_OP 1
 #define NET_WORK_SOCKET_TX 2
+#define NET_WORK_BUFFERS_AVAIL 3
 #define NET_WORK_NETIF_RX  8
 
 _Static_assert(NET_WORK_NETIF_RX + NET_MAX_INTERFACES <= 32);
@@ -99,6 +100,8 @@ netif_attach(netif_t *ni)
       ni->ni_ifindex = i;
       interfaces[i] = ni;
       SLIST_INSERT_HEAD(&netifs, ni, ni_global_link);
+      if(ni->ni_buffers_avail)
+        ni->ni_buffers_avail(ni);
       mutex_unlock(&netif_mutex);
       return;
     }
@@ -124,6 +127,21 @@ net_periodic(void)
 }
 
 
+static void
+net_call_buffers_avail(void)
+{
+  netif_t *ni;
+
+  mutex_lock(&netif_mutex);
+  SLIST_FOREACH(ni, &netifs, ni_global_link) {
+    if(ni->ni_buffers_avail != NULL)
+      ni->ni_buffers_avail(ni);
+  }
+  mutex_unlock(&netif_mutex);
+}
+
+
+
 static void __attribute__((noreturn))
 net_thread(void *arg)
 {
@@ -143,7 +161,8 @@ net_thread(void *arg)
     while(bits) {
       int which = 31 - __builtin_clz(bits);
 
-      if(which == NET_WORK_PERIODIC) {
+      if(unlikely(which == NET_WORK_PERIODIC)) {
+
         irq_permit(q);
         net_periodic();
         q = irq_forbid(IRQ_LEVEL_NET);
@@ -171,6 +190,7 @@ net_thread(void *arg)
         }
 
       } else if(which >= NET_WORK_NETIF_RX) {
+
         int ifindex = which - NET_WORK_NETIF_RX;
         netif_t *ni = interfaces[ifindex];
         pbuf_t *pb = pbuf_splice(&ni->ni_rx_queue);
@@ -184,7 +204,15 @@ net_thread(void *arg)
           if(pb)
             pbuf_free_irq_blocked(pb);
         }
+
+      } else if(unlikely(which == NET_WORK_BUFFERS_AVAIL)) {
+
+        irq_permit(q);
+        net_call_buffers_avail();
+        q = irq_forbid(IRQ_LEVEL_NET);
+
       }
+
       bits &= ~(1 << which);
     }
   }
@@ -195,6 +223,13 @@ void
 netif_wakeup(netif_t *ni)
 {
   net_wakeup(NET_WORK_NETIF_RX + ni->ni_ifindex);
+}
+
+
+void
+net_buffers_available(void)
+{
+  net_wakeup(NET_WORK_BUFFERS_AVAIL);
 }
 
 

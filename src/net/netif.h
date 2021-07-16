@@ -27,6 +27,9 @@ typedef struct netif {
   void (*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 
   void (*ni_periodic)(struct netif *ni);
+
+  void (*ni_buffers_avail)(struct netif *ni);
+
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
 
   SLIST_ENTRY(netif) ni_global_link;
