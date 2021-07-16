@@ -264,6 +264,31 @@ tx_start(int ep, tx_ptr_t *tx, int max_packet_size)
 }
 
 
+static void
+stm32f4_ep_write(device_t *dev, usb_ep_t *ue,
+                 const uint8_t *buf, size_t len)
+{
+  const uint32_t ep = ue->ue_address & 0x7f;
+  ep_start(ep, len);
+
+  uint32_t u32 = 0;
+  for(size_t i = 0; i < len; i++) {
+    uint8_t b = buf[i];
+    u32 |= b << ((i & 3) * 8);
+
+    if((i & 3) == 3) {
+      reg_wr(OTG_FS_FIFO(ep), u32);
+      u32 = 0;
+    }
+  }
+
+  if(len & 3) {
+    reg_wr(OTG_FS_FIFO(ep), u32);
+  }
+}
+
+
+
 
 static void
 drop_packet(int ep, int bcnt)
@@ -854,6 +879,7 @@ stm32f4_ep_avail_bytes(device_t *dev, usb_ep_t *ue)
 static const usb_ctrl_vtable_t stm32f4_otgfs_vtable =
 {
   .read = stm32f4_ep_read,
+  .write = stm32f4_ep_write,
   .write1 = stm32f4_ep_write1,
   .cnak = stm32f4_ep_cnak,
   .avail_bytes = stm32f4_ep_avail_bytes,

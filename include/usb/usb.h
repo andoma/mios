@@ -12,6 +12,9 @@ typedef struct {
                uint8_t *buf, size_t buf_size,
                size_t buf_offset, size_t bytes);
 
+  void (*write)(device_t *dev, usb_ep_t *ep,
+                const uint8_t *buf, size_t buf_size);
+
   void (*write1)(device_t *dev, usb_ep_t *ep,
                  size_t len, uint8_t (*getu8)(void *opaque), void *opaque);
 
