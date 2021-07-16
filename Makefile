@@ -27,7 +27,7 @@ CPPFLAGS += -I${T}/include -I${SRC} -I${O} -include ${O}/include/config.h
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 CFLAGS += -ffunction-sections -fdata-sections
-LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,--gc-sections -Wl,--build-id=sha1
 
 # Needed for linker script includes
 LDFLAGS += -L${SRC}

@@ -13,6 +13,8 @@ SECTIONS {
                 *(.text.*)
                 *(.rodata)
                 *(.rodata.*)
+                PROVIDE(_build_id = .);
+                KEEP(*(.note.gnu.build-id))
         } >FLASH
 
         .inits : {
