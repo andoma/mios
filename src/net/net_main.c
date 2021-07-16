@@ -117,7 +117,8 @@ net_periodic(void)
 
   mutex_lock(&netif_mutex);
   SLIST_FOREACH(ni, &netifs, ni_global_link) {
-    ni->ni_periodic(ni);
+    if(ni->ni_periodic != NULL)
+      ni->ni_periodic(ni);
   }
   mutex_unlock(&netif_mutex);
 }
