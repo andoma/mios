@@ -156,6 +156,21 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
   return pb;
 }
 
+
+pbuf_t *
+pbuf_trim(pbuf_t *pb, size_t bytes)
+{
+  while(pb) {
+    assert(bytes < pb->pb_buflen); // Fix this case
+    pb->pb_buflen -= bytes;
+    pb->pb_pktlen -= bytes;
+    break;
+  }
+  return pb;
+}
+
+
+
 pbuf_t *
 pbuf_prepend(pbuf_t *pb, size_t bytes)
 {
