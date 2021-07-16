@@ -6,6 +6,9 @@ SRCS += \
 	${SRC}/net/net_main.c \
 	${SRC}/net/ether.c \
 
+SRCS += \
+	${SRC}/net/mbus/mbus.c \
+
 SRCS-${ENABLE_NET_IPV4} += \
 	${SRC}/net/ipv4/ipv4.c \
 	${SRC}/net/ipv4/udp.c \
