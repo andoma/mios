@@ -9,8 +9,6 @@
 SLIST_HEAD(netif_list, netif);
 LIST_HEAD(nexthop_list, nexthop);
 
-#define NETIF_TYPE_ETHERNET 1
-
 struct nexthop;
 
 extern struct netif_list netifs;
@@ -19,14 +17,14 @@ typedef struct netif {
 
   struct pbuf_queue ni_rx_queue;
 
-  uint32_t ni_ipv4_addr;  // Our address
-  uint8_t ni_ipv4_prefixlen;
-  uint8_t ni_ifindex;
-  uint8_t ni_iftype;
-
   struct nexthop_list ni_nexthops;
 
-  void (*ni_ipv4_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
+  // FIXME: This needs to be reworks to support multiple addresses
+  // and address families per interface
+  uint32_t ni_local_addr;  // Our address
+  uint8_t ni_local_prefixlen;
+  uint8_t ni_ifindex;
+  void (*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 
   void (*ni_periodic)(struct netif *ni);
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);

@@ -127,7 +127,7 @@ dhcpv4_make(ether_netif_t *eni)
   dh->hlen = 6;
   eni->eni_dhcp_xid = rand();
   dh->xid = eni->eni_dhcp_xid;
-  dh->ciaddr = eni->eni_ni.ni_ipv4_addr;
+  dh->ciaddr = eni->eni_ni.ni_local_addr;
   memcpy(dh->chaddr, eni->eni_addr, 6);
   dh->cookie[0] = 0x63;
   dh->cookie[1] = 0x82;
@@ -168,14 +168,14 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
   ip->ttl = 30;
   ip->proto = 17;
   ip->cksum = 0;
-  ip->src_addr = eni->eni_ni.ni_ipv4_addr;
+  ip->src_addr = eni->eni_ni.ni_local_addr;
   ip->dst_addr = dst_addr;
 
   printf("DHCP: Sending to %Id (%s)\n", dst_addr, why);
 
   if(dst_addr == 0xffffffff) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, 20);
-    eni->eni_ni.ni_ipv4_output(&eni->eni_ni, NULL, pb);
+    eni->eni_ni.ni_output(&eni->eni_ni, NULL, pb);
   } else {
     ipv4_output(pb);
   }
@@ -204,7 +204,7 @@ dhcpv4_send_request(struct ether_netif *eni, const char *why)
   append_client_identifier(pb, eni);
   append_parameter_request_list(pb);
 
-  if(!eni->eni_ni.ni_ipv4_addr) {
+  if(!eni->eni_ni.ni_local_addr) {
     // If have no address yet we are in SELECTING state
     append_option_v4addr(pb, DHCP_SERVER_IDENTIFIER, eni->eni_dhcp_server_ip);
     append_option_v4addr(pb, DHCP_REQUESTED_IP_ADDRESS,
@@ -212,7 +212,7 @@ dhcpv4_send_request(struct ether_netif *eni, const char *why)
   }
 
   append_end(pb);
-  dhcpv4_send(eni, pb, eni->eni_ni.ni_ipv4_addr ?
+  dhcpv4_send(eni, pb, eni->eni_ni.ni_local_addr ?
               eni->eni_dhcp_server_ip : 0xffffffff, why);
 }
 
@@ -226,7 +226,7 @@ dhcpv4_periodic(struct ether_netif *eni)
 
   switch(eni->eni_dhcp_state) {
   case DHCP_STATE_SELECTING:
-    eni->eni_ni.ni_ipv4_addr = 0;
+    eni->eni_ni.ni_local_addr = 0;
     eni->eni_dhcp_server_ip = 0;
     eni->eni_dhcp_requested_ip = 0;
     dhcpv4_send_discover(eni);
@@ -386,8 +386,8 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
         break;
       }
 
-      eni->eni_ni.ni_ipv4_addr = yiaddr;
-      eni->eni_ni.ni_ipv4_prefixlen = 24; // XXX FIX
+      eni->eni_ni.ni_local_addr = yiaddr;
+      eni->eni_ni.ni_local_prefixlen = 24; // XXX FIX
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
       eni->eni_dhcp_timeout =
         clock_get() + 1000000ull * (ntohl(po.lease_time) / 2);

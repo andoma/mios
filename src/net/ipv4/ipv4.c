@@ -109,7 +109,7 @@ nexthop_resolve(uint32_t addr)
 
   netif_t *ni;
   SLIST_FOREACH(ni, &netifs, ni_global_link) {
-    if(ipv4_prefix_match(addr, ni->ni_ipv4_addr, ni->ni_ipv4_prefixlen))
+    if(ipv4_prefix_match(addr, ni->ni_local_addr, ni->ni_local_prefixlen))
       break;
   }
 
@@ -141,7 +141,7 @@ ipv4_output(pbuf_t *pb)
 
   nexthop_t *nh = nexthop_resolve(ip->dst_addr);
   if(nh != NULL) {
-    nh->nh_netif->ni_ipv4_output(nh->nh_netif, nh, pb);
+    nh->nh_netif->ni_output(nh->nh_netif, nh, pb);
   } else {
     pbuf_free(pb);
   }
@@ -154,7 +154,7 @@ icmp_input_icmp_echo(netif_t *ni, pbuf_t *pb, int icmp_offset)
   icmp_hdr_t *icmp = pbuf_data(pb, icmp_offset);
 
   ip->dst_addr = ip->src_addr;
-  ip->src_addr = ni->ni_ipv4_addr;
+  ip->src_addr = ni->ni_local_addr;
 
   icmp->type = 0;
 
@@ -169,7 +169,7 @@ pbuf_t *
 ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
 {
   // No address configured yet, no ICMP activity
-  if(ni->ni_ipv4_addr == 0)
+  if(ni->ni_local_addr == 0)
     return pb;
 
   if(pb->pb_flags & PBUF_MCAST)
