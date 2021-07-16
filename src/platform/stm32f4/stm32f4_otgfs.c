@@ -988,5 +988,5 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
 
   stm32f4_otgfs_init_regs();
 
-  irq_enable(67, IRQ_LEVEL_IO);
+  irq_enable(67, IRQ_LEVEL_NET);
 }

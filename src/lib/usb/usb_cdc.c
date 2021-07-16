@@ -252,7 +252,7 @@ cdc_read(struct stream *s, void *buf, size_t size, int wait)
   usb_cdc_t *uc = (usb_cdc_t *)s;
   usb_ep_t *ue = &uc->data_iface->ui_endpoints[1]; // OUT
 
-  int q = irq_forbid(IRQ_LEVEL_IO);
+  int q = irq_forbid(IRQ_LEVEL_NET);
 
   uint8_t *d = buf;
 
@@ -288,7 +288,7 @@ cdc_write(struct stream *s, const void *buf, size_t size)
   usb_ep_t *ue = &uc->data_iface->ui_endpoints[0]; // IN
 
   const uint8_t *b = buf;
-  int q = irq_forbid(IRQ_LEVEL_IO);
+  int q = irq_forbid(IRQ_LEVEL_NET);
 
   for(size_t i = 0; i < size; i++) {
     while(fifo_is_full(&uc->tx_fifo))
