@@ -266,7 +266,7 @@ pbuf_print(const char *prefix, pbuf_t *pb)
 
     if(pb->pb_buflen < 8) {
       tail = pb->pb_buflen / 2;
-      head = 8 - tail;
+      head = pb->pb_buflen - tail;
     }
 
     for(int i = 0; i < head; i++) {
