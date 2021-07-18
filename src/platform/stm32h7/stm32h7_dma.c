@@ -14,7 +14,7 @@
 
 #define DMA_BASE(x) (0x40020000 + (x) * 0x400)
 
-#include "platform/stm32/stm32_dma.c"
+#include "platform/stm32/stm32_dma_v1.c"
 
 
 stm32_dma_instance_t

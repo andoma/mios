@@ -97,7 +97,7 @@ stm32_dma_set_mem1(stm32_dma_instance_t instance, void *maddr)
   reg_wr(DMA_SM1AR(instance), (uint32_t)maddr);
 }
 
-void
+static void
 stm32_dma_config_u32(stm32_dma_instance_t instance, uint32_t val)
 {
   uint32_t reg = reg_rd(DMA_SCR(instance));
@@ -105,6 +105,31 @@ stm32_dma_config_u32(stm32_dma_instance_t instance, uint32_t val)
   reg |= val;
   reg_wr(DMA_SCR(instance), reg);
 }
+
+void
+stm32_dma_config(stm32_dma_instance_t instance,
+                 stm32_dma_burst_t mburst,
+                 stm32_dma_burst_t pburst,
+                 stm32_dma_prio_t prio,
+                 stm32_dma_data_size_t msize,
+                 stm32_dma_data_size_t psize,
+                 stm32_dma_incr_mode_t minc,
+                 stm32_dma_incr_mode_t pinc,
+                 stm32_dma_direction_t direction)
+{
+  uint32_t reg = 0;
+
+  reg |= mburst << 23;
+  reg |= pburst << 21;
+  reg |= prio   << 16;
+  reg |= msize  << 13;
+  reg |= psize  << 11;
+  reg |= minc   << 10;
+  reg |= pinc   << 9;
+  reg |= direction << 6;
+  stm32_dma_config_u32(instance, reg);
+}
+
 
 
 void
@@ -123,7 +148,7 @@ stm32_dma_start(stm32_dma_instance_t instance)
 
 
 void
-stm32_dma_reset(stm32_dma_instance_t instance)
+stm32_dma_stop(stm32_dma_instance_t instance)
 {
   const uint32_t base = DMA_BASE(instance >> 3);
   const int hi = (instance >> 2) & 1;

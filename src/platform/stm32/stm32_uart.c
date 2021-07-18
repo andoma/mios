@@ -144,7 +144,7 @@ uart_irq(stm32_uart_t *u)
       u->tx_fifo_wrptr = 0;
       task_wakeup(&u->wait_tx, 1);
       reg_clr_bit(u->reg_base + USART_SR, 6); // Clear TC
-      stm32_dma_reset(u->tx_dma);
+      stm32_dma_stop(u->tx_dma);
     }
 #endif
   }
