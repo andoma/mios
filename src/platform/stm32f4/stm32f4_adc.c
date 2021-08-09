@@ -18,7 +18,7 @@ static uint8_t adc_initialized;
 
 
 void
-adc_set_smpr(uint32_t adc_base, uint32_t channel, uint32_t value)
+stm32f4_adc_set_smpr(uint32_t adc_base, uint32_t channel, uint32_t value)
 {
   if(channel < 10) {
     reg_set_bits(adc_base + ADCx_SMPR2, channel * 3, 3, value);
