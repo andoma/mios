@@ -7,6 +7,8 @@
 
 #include <stdio.h>
 
+#include "mbus_rpc.h"
+
 static uint32_t
 mbus_crc32(struct pbuf *pb)
 {
@@ -19,7 +21,7 @@ mbus_crc32(struct pbuf *pb)
 }
 
 
-static void
+void
 mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
 {
   pb = pbuf_prepend(pb, mni->mni_hdr_len);
@@ -46,22 +48,51 @@ mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
 }
 
 
+static pbuf_t *
+mbus_handle_none(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
+{
+  mni->mni_rx_unknown_opcode++;
+  return pb;
+}
+
+
+static pbuf_t *
+mbus_handle_ping(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
+{
+  uint8_t *pkt = pbuf_data(pb, 0);
+  pkt[0] = MBUS_OP_PONG;
+  mbus_output(mni, pb, src_addr);
+  return NULL;
+}
+
+typedef pbuf_t *(*ophandler_t)(struct mbus_netif *, pbuf_t *, uint8_t);
+
+static const ophandler_t ophandlers[16] = {
+  [MBUS_OP_PING]        = mbus_handle_ping,
+  [MBUS_OP_PONG]        = mbus_handle_none,
+  [MBUS_OP_TLM_NAME]    = mbus_handle_none,
+  [MBUS_OP_TLM_FP32]    = mbus_handle_none,
+  [MBUS_OP_TLM_FP24]    = mbus_handle_none,
+  [MBUS_OP_TLM_FP16]    = mbus_handle_none,
+  [MBUS_OP_TLM_I16]     = mbus_handle_none,
+  [7]                   = mbus_handle_none,
+  [MBUS_OP_RPC_RESOLVE] = mbus_handle_rpc_resolve,
+  [MBUS_OP_RPC_RESOLVE_REPLY] = mbus_handle_none,
+  [MBUS_OP_RPC_INVOKE]  = mbus_handle_rpc_invoke,
+  [MBUS_OP_RPC_ERR]     = mbus_handle_none,
+  [MBUS_OP_RPC_REPLY]   = mbus_handle_none,
+  [13]                  = mbus_handle_none,
+  [14]                  = mbus_handle_none,
+  [15]                  = mbus_handle_none,
+};
+
+
 struct pbuf *
 mbus_local(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
 {
-  uint8_t *pkt = pbuf_data(pb, 0);
-  uint8_t opcode = pkt[0] & 0xf;
-
-  switch(opcode) {
-  case MBUS_OP_PING:
-    pkt[0] = MBUS_OP_PONG;
-    mbus_output(mni, pb, src_addr);
-    return NULL;
-
-  default:
-    mni->mni_rx_unknown_opcode++;
-    return pb;
-  }
+  const uint8_t *pkt = pbuf_cdata(pb, 0);
+  const uint8_t opcode = pkt[0] & 0xf;
+  return ophandlers[opcode](mni, pb, src_addr);
 }
 
 
@@ -83,7 +114,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     return pb;
   }
 
-  if((pb = pbuf_pullup(pb, mni->mni_hdr_len + 1)) == NULL) {
+  if((pb = pbuf_pullup(pb, pb->pb_pktlen)) == NULL) {
     mni->mni_rx_runts++;
     return pb;
   }

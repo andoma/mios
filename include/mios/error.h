@@ -20,6 +20,9 @@ typedef enum {
   ERR_MISMATCH              = -16,
   ERR_NOT_FOUND             = -17,
   ERR_CHECKSUM_ERROR        = -18,
-
+  ERR_MALFORMED             = -19,
+  ERR_INVALID_RPC_ID        = -20,
+  ERR_INVALID_RPC_ARGS      = -21,
+  ERR_NO_FLASH_SPACE        = -22,
 } error_t;
 

@@ -34,6 +34,10 @@ static inline void *pbuf_data(pbuf_t *pb, size_t offset) {
   return pb->pb_data + pb->pb_offset + offset;
 }
 
+static inline const void *pbuf_cdata(const pbuf_t *pb, size_t offset) {
+  return pb->pb_data + pb->pb_offset + offset;
+}
+
 // Remove from head
 pbuf_t *pbuf_drop(pbuf_t *pb, size_t bytes);
 
