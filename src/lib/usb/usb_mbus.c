@@ -133,6 +133,11 @@ usb_mbus_output(struct mbus_netif *mni, pbuf_t *pb)
 {
   usb_mbus_t *um = (usb_mbus_t *)mni;
 
+  if(pb->pb_buflen != pb->pb_pktlen) {
+    printf("usb_mbus: Warning buflen %d != pktlen %d\n",
+           pb->pb_buflen, pb->pb_pktlen);
+  }
+
   assert((pb->pb_flags & (PBUF_SOP | PBUF_EOP)) == (PBUF_SOP | PBUF_EOP));
 
   int q = irq_forbid(IRQ_LEVEL_NET);
