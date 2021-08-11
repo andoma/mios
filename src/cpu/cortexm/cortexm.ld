@@ -13,6 +13,7 @@ SECTIONS {
                 *(.text.*)
                 *(.rodata)
                 *(.rodata.*)
+                . = ALIGN(4);
                 PROVIDE(_build_id = .);
                 KEEP(*(.note.gnu.build-id))
         } >FLASH
