@@ -1,5 +1,8 @@
-#include "irq.h"
 #include "socket.h"
+
+#include <string.h>
+
+#include "irq.h"
 
 #include "ipv4/ipv4.h"
 #include "ipv4/udp.h"
@@ -37,4 +40,23 @@ socket_init(socket_t *s, uint8_t family, uint8_t proto)
   STAILQ_INIT(&s->s_tx_queue);
   STAILQ_INIT(&s->s_op_queue);
   s->s_proto = socket_proto_find(family, proto);
+}
+
+
+error_t
+socket_send(socket_t *s, const void *data, size_t len, int flags)
+{
+  int wait = !(flags & SOCK_NONBLOCK);
+  pbuf_t *pb = pbuf_make(s->s_header_size, wait);
+  if(pb == NULL)
+    return ERR_NO_BUFFER;
+
+  void *dst = pbuf_append(pb, len);
+  memcpy(dst, data, len);
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  net_wakeup_socket(s);
+  STAILQ_INSERT_TAIL(&s->s_tx_queue, pb, pb_link);
+  irq_permit(q);
+  return 0;
 }

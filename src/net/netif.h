@@ -4,6 +4,7 @@
 #include <mios/task.h>
 
 #include "pbuf.h"
+#include "socket.h"
 
 #define NET_MAX_INTERFACES 8
 
@@ -36,6 +37,8 @@ typedef struct netif {
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
 
   SLIST_ENTRY(netif) ni_global_link;
+
+  struct socket_list ni_sockets;
 
 } netif_t;
 

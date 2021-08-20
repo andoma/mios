@@ -34,17 +34,18 @@ typedef struct socket_ctl {
 
 typedef struct socket {
 
-  LIST_ENTRY(socket) s_net_link;
+  LIST_ENTRY(socket) s_proto_link;
+
+  LIST_ENTRY(socket) s_netif_link;
+  struct netif *s_netif;
 
   const struct socket_proto *s_proto;
 
   struct pbuf *(*s_rx)(struct socket *s, struct pbuf *pb);
 
   struct pbuf_queue s_tx_queue;
-  STAILQ_ENTRY(socket) s_tx_link;
-
   struct socket_ctl_queue s_op_queue;
-  STAILQ_ENTRY(socket) s_op_link;
+  STAILQ_ENTRY(socket) s_work_link;
 
   uint32_t s_remote_addr;
   uint32_t s_local_addr;
@@ -53,6 +54,7 @@ typedef struct socket {
   uint16_t s_local_port;
 
   uint8_t s_net_state;
+  uint8_t s_header_size;
 
 } socket_t;
 
@@ -64,12 +66,18 @@ error_t socket_detach(socket_t *s);
 
 error_t socket_net_ctl(socket_t *s, socket_ctl_t *sc);
 
+error_t socket_send(socket_t *s, const void *data, size_t len, int flags);
+
+#define SOCK_NONBLOCK 0x1
 
 typedef struct socket_proto {
   uint8_t sp_family;
   uint8_t sp_protocol;
   error_t (*sp_ctl)(socket_t *s, socket_ctl_t *sc);
+  pbuf_t *(*sp_send_async)(socket_t *s, pbuf_t *pb);
 } socket_proto_t;
 
-#define NET_SOCKET_PROTO_DEF(family, protocol, ctl)                \
-  static socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl };
+#define NET_SOCKET_PROTO_DEF(family, protocol, ctl, send)               \
+  static socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl, send };
+
+void net_wakeup_socket(struct socket *s);

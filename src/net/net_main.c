@@ -42,6 +42,17 @@ net_wakeup(int bit)
 }
 
 
+void
+net_wakeup_socket(socket_t *s)
+{
+  if(STAILQ_FIRST(&s->s_op_queue) == NULL &&
+     STAILQ_FIRST(&s->s_tx_queue) == NULL) {
+    if(STAILQ_FIRST(&socket_op_queue) == NULL)
+      net_wakeup(NET_WORK_SOCKET_OP);
+    STAILQ_INSERT_TAIL(&socket_op_queue, s, s_work_link);
+  }
+}
+
 static error_t
 socket_issue_ctl(socket_t *s, socket_ctl_op_t op)
 {
@@ -51,12 +62,7 @@ socket_issue_ctl(socket_t *s, socket_ctl_op_t op)
   sc.sc_op = op;
 
   int q = irq_forbid(IRQ_LEVEL_NET);
-
-  if(STAILQ_FIRST(&s->s_op_queue) == NULL) {
-    if(STAILQ_FIRST(&socket_op_queue) == NULL)
-      net_wakeup(NET_WORK_SOCKET_OP);
-    STAILQ_INSERT_TAIL(&socket_op_queue, s, s_op_link);
-  }
+  net_wakeup_socket(s);
   STAILQ_INSERT_TAIL(&s->s_op_queue, &sc, sc_link);
 
   while(sc.sc_op)
@@ -176,13 +182,27 @@ net_thread(void *arg)
           if(s == NULL)
             break;
 
+          pbuf_t *pb = pbuf_splice(&s->s_tx_queue);
+          if(pb != NULL) {
+
+            if(STAILQ_FIRST(&s->s_op_queue) == NULL &&
+               STAILQ_FIRST(&s->s_tx_queue) == NULL)
+              STAILQ_REMOVE_HEAD(&socket_op_queue, s_work_link);
+
+            irq_permit(q);
+            pb = s->s_proto->sp_send_async(s, pb);
+            q = irq_forbid(IRQ_LEVEL_NET);
+            if(pb)
+              pbuf_free_irq_blocked(pb);
+            continue;
+          }
+
           socket_ctl_t *sc = STAILQ_FIRST(&s->s_op_queue);
           assert(sc != NULL);
-
           STAILQ_REMOVE_HEAD(&s->s_op_queue, sc_link);
-          if(STAILQ_FIRST(&s->s_op_queue) == NULL) {
-            STAILQ_REMOVE_HEAD(&socket_op_queue, s_op_link);
-          }
+
+          if(STAILQ_FIRST(&s->s_op_queue) == NULL)
+            STAILQ_REMOVE_HEAD(&socket_op_queue, s_work_link);
 
           irq_permit(q);
           sc->sc_result = socket_net_ctl(s, sc);
