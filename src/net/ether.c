@@ -57,7 +57,10 @@ ether_output(ether_netif_t *eni, pbuf_t *pb,
 static void
 arp_send_who_has(ether_netif_t *eni, uint32_t addr)
 {
-  pbuf_t *pb = pbuf_make(14);
+  pbuf_t *pb = pbuf_make(14, 0);
+  if(pb == NULL)
+    return;
+
   struct arp_pkt *ap = pbuf_append(pb, sizeof(struct arp_pkt));
   ap->htype = htons(1);
   ap->ptype = htons(ETHERTYPE_IPV4);

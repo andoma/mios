@@ -50,7 +50,7 @@ pbuf_t *pbuf_pullup(pbuf_t *pb, size_t bytes);
 
 void pbuf_free(pbuf_t *pb);
 
-pbuf_t *pbuf_make(int offset);
+pbuf_t *pbuf_make(int offset, int wait);
 
 void *pbuf_append(pbuf_t *pb, size_t bytes);
 

@@ -220,13 +220,13 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
 
 
 pbuf_t *
-pbuf_make(int offset)
+pbuf_make(int offset, int wait)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
-  pbuf_t *pb = pbuf_get(0);
+  pbuf_t *pb = pbuf_get(wait);
   if(pb != NULL) {
     pb->pb_next = NULL;
-    pb->pb_data = pbuf_data_get(0);
+    pb->pb_data = pbuf_data_get(wait);
     if(pb->pb_data == NULL) {
       pbuf_put(pb);
       pb = NULL;

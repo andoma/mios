@@ -118,7 +118,9 @@ append_parameter_request_list(pbuf_t *pb)
 static pbuf_t *
 dhcpv4_make(ether_netif_t *eni)
 {
-  pbuf_t *pb = pbuf_make(16 + 20 + 8); // Make space for ether + ip + udp
+  pbuf_t *pb = pbuf_make(16 + 20 + 8, 0); // Make space for ether + ip + udp
+  if(pb == NULL)
+    return NULL;
   dhcp_hdr_t *dh = pbuf_append(pb, sizeof(dhcp_hdr_t));
 
   memset(dh, 0, sizeof(dhcp_hdr_t));
@@ -188,6 +190,8 @@ static void
 dhcpv4_send_discover(struct ether_netif *eni)
 {
   pbuf_t *pb = dhcpv4_make(eni);
+  if(pb == NULL)
+    return;
   append_option_u8(pb, DHCP_MESSAGE_TYPE, DHCPDISCOVER);
   append_client_identifier(pb, eni);
   append_parameter_request_list(pb);
@@ -200,6 +204,8 @@ static void
 dhcpv4_send_request(struct ether_netif *eni, const char *why)
 {
   pbuf_t *pb = dhcpv4_make(eni);
+  if(pb == NULL)
+    return;
   append_option_u8(pb, DHCP_MESSAGE_TYPE, DHCPREQUEST);
   append_client_identifier(pb, eni);
   append_parameter_request_list(pb);
