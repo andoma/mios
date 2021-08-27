@@ -64,20 +64,10 @@ emit_str(fmtcb_t *cb, void *aux, const char *str,
   return total;
 }
 
-
 static size_t  __attribute__((noinline))
-emit_u32(fmtcb_t *cb, void *aux, unsigned int x,
-         const fmtparam_t *fp, int neg)
+emit_intstr(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int neg,
+            const char *end, int digits)
 {
-  char buf[10];
-  int digits = 1;
-  for(int i = 0; i < 10; i++, x /= 10) {
-    const unsigned int d = x % 10;
-    buf[9 - i] = '0' + d;
-    if(d)
-      digits = i + 1;
-  }
-
   size_t total = 0;
 
   const int pad = fp->width - (digits + neg);
@@ -87,18 +77,35 @@ emit_u32(fmtcb_t *cb, void *aux, unsigned int x,
 
   if(neg)
     total += cb(aux, "-", 1);
-  total += cb(aux, buf + sizeof(buf) - digits, digits);
+  total += cb(aux, end - digits, digits);
 
   if(fp->la)
     total += emit_repeated_char(cb, aux, pad, ' ');
 
   return total;
+
+}
+
+static size_t  __attribute__((noinline))
+emit_u32(fmtcb_t *cb, void *aux, const fmtparam_t *fp,
+         int neg, unsigned int x)
+{
+  char buf[10];
+  int digits = 1;
+  for(int i = 0; i < 10; i++, x /= 10) {
+    const unsigned int d = x % 10;
+    buf[9 - i] = '0' + d;
+    if(d)
+      digits = i + 1;
+  }
+  return emit_intstr(cb, aux, fp, neg, buf + sizeof(buf), digits);
 }
 
 
+#ifndef DISABLE_FMT_64BIT
 static size_t  __attribute__((noinline))
-emit_u64(fmtcb_t *cb, void *aux, uint64_t x,
-         const fmtparam_t *fp, int neg)
+emit_u64(fmtcb_t *cb, void *aux,
+         const fmtparam_t *fp, int neg, uint64_t x)
 {
   char buf[20];
   int digits = 1;
@@ -109,59 +116,46 @@ emit_u64(fmtcb_t *cb, void *aux, uint64_t x,
       digits = i + 1;
   }
 
-  size_t total = 0;
-
-  const int pad = fp->width - (digits + neg);
-  if(!fp->la)
-    total += emit_repeated_char(cb, aux, pad,
-                                fp->lz ? '0' : ' ');
-
-  if(neg)
-    total += cb(aux, "-", 1);
-  total += cb(aux, buf + sizeof(buf) - digits, digits);
-
-  if(fp->la)
-    total += emit_repeated_char(cb, aux, pad, ' ');
-
-  return total;
+  return emit_intstr(cb, aux, fp, neg, buf + sizeof(buf), digits);
 }
-
+#endif
 
 static size_t  __attribute__((noinline))
-emit_s32(fmtcb_t *cb, void *aux, int x,
-         const fmtparam_t *fp)
+emit_s32(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
 {
 #ifdef ENABLE_IPV4
   if(fp->ipv4) {
     size_t r = 0;
     x = ntohl(x);
     char dot = '.';
-    r += emit_u32(cb, aux, (x >> 24) & 0xff, fp, 0);
+    r += emit_u32(cb, aux, fp, 0, (x >> 24) & 0xff);
     r += cb(aux, &dot, 1);
-    r += emit_u32(cb, aux, (x >> 16) & 0xff, fp, 0);
+    r += emit_u32(cb, aux, fp, 0, (x >> 16) & 0xff);
     r += cb(aux, &dot, 1);
-    r += emit_u32(cb, aux, (x >> 8) & 0xff, fp, 0);
+    r += emit_u32(cb, aux, fp, 0, (x >> 8) & 0xff);
     r += cb(aux, &dot, 1);
-    r += emit_u32(cb, aux, x & 0xff, fp, 0);
+    r += emit_u32(cb, aux, fp, 0, x & 0xff);
     return r;
   }
 #endif
   if(x < 0)
-    return emit_u32(cb, aux, -x, fp, 1);
+    return emit_u32(cb, aux, fp, 1, -x);
   else
-    return emit_u32(cb, aux, x, fp, 0);
+    return emit_u32(cb, aux, fp, 0, x);
 }
 
 
+#ifndef DISABLE_FMT_64BIT
 static size_t  __attribute__((noinline))
-emit_s64(fmtcb_t *cb, void *aux, int64_t x,
-         const fmtparam_t *fp)
+emit_s64(fmtcb_t *cb, void *aux,
+         const fmtparam_t *fp, int64_t x)
 {
   if(x < 0)
-    return emit_u64(cb, aux, -x, fp, 1);
+    return emit_u64(cb, aux, fp, 1, x);
   else
-    return emit_u64(cb, aux, x, fp, 0);
+    return emit_u64(cb, aux, fp, 0, x);
 }
+#endif
 
 static size_t  __attribute__((noinline))
 emit_x32(fmtcb_t *cb, void *aux, unsigned int x,
@@ -259,16 +253,20 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += emit_x32(cb, aux, va_arg(ap, unsigned int), &fp);
       break;
     case 'd':
+#ifndef DISABLE_FMT_64BIT
       if(ll)
-        total += emit_s64(cb, aux, va_arg(ap, uint64_t), &fp);
+        total += emit_s64(cb, aux, &fp, va_arg(ap, uint64_t));
       else
-        total += emit_s32(cb, aux, va_arg(ap, unsigned int), &fp);
+#endif
+        total += emit_s32(cb, aux, &fp, va_arg(ap, unsigned int));
       break;
     case 'u':
+#ifndef DISABLE_FMT_64BIT
       if(ll)
-        total += emit_u64(cb, aux, va_arg(ap, uint64_t), &fp, 0);
+        total += emit_u64(cb, aux, &fp, 0, va_arg(ap, uint64_t));
       else
-        total += emit_u32(cb, aux, va_arg(ap, unsigned int), &fp, 0);
+#endif
+        total += emit_u32(cb, aux, &fp, 0, va_arg(ap, unsigned int));
       break;
     case 'f':
       ap = fmt_double(ap, tmp, sizeof(tmp));
