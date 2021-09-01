@@ -21,6 +21,7 @@
 
 #define OTG_FS_BASE 0x50000000
 
+#define OTG_FS_GOTGCTL  (OTG_FS_BASE + 0x000)
 #define OTG_FS_GAHBCFG  (OTG_FS_BASE + 0x008)
 #define OTG_FS_GUSBCFG  (OTG_FS_BASE + 0x00c)
 #define OTG_FS_GRSTCTL  (OTG_FS_BASE + 0x010)
@@ -787,6 +788,8 @@ stm32f4_otgfs_init_regs(void)
   reg_wr(OTG_FS_GCCFG,
          (1 << 21) | // Disable VBUS sense
          0);
+
+  reg_set_bits(OTG_FS_GOTGCTL, 6, 2, 3);
 
   reg_wr(OTG_FS_PCGCCTL, 0);   // Make sure clocks are not gated
 
