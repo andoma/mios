@@ -11,6 +11,9 @@
 
 #include "crc32.h"
 
+static mutex_t g_pkv_mutex = MUTEX_INITIALIZER("gpkv");
+static pkv_t *g_pkv;
+
 struct pkv {
   const struct flash_iface *fif;
   int sector_a;
@@ -39,6 +42,14 @@ typedef struct kv_header {
 
 #define MARKED_EMPTY 0xff
 
+
+static struct pkv *
+pkv_obtain(struct pkv *p)
+{
+  if(p)
+    return p;
+  return pkv_obtain_global();
+}
 
 static int
 get_sector_version(struct pkv *pkv, int sector)
@@ -71,7 +82,7 @@ write_sector_header(struct pkv *pkv, int sector, int version)
 }
 
 
-error_t
+static error_t
 pkv_get_locked(struct pkv *pkv, const char *key, void *buf, size_t *len)
 {
   const size_t keysize = strlen(key);
@@ -137,6 +148,7 @@ pkv_get_locked(struct pkv *pkv, const char *key, void *buf, size_t *len)
 error_t
 pkv_get(struct pkv *pkv, const char *key, void *buf, size_t *len)
 {
+  pkv = pkv_obtain(pkv);
   if(pkv == NULL)
     return ERR_NO_DEVICE;
 
@@ -355,6 +367,8 @@ static error_t
 pkv_set_typed(struct pkv *pkv, int type,
               const char *key, const void *buf, size_t len)
 {
+  pkv = pkv_obtain(pkv);
+
   if(pkv == NULL)
     return ERR_NO_DEVICE;
 
@@ -403,6 +417,8 @@ pkv_get_int(struct pkv *pkv, const char *key, int default_value)
 error_t
 pkv_gc(struct pkv *pkv)
 {
+  pkv = pkv_obtain(pkv);
+
   if(pkv == NULL)
     return ERR_NO_DEVICE;
 
@@ -413,13 +429,9 @@ pkv_gc(struct pkv *pkv)
 }
 
 
-
 struct pkv *
 pkv_create(const struct flash_iface *fif, int sector_a, int sector_b)
 {
-  if(fif == NULL)
-    return NULL;
-
   const size_t size_a = fif->get_sector_size(fif, sector_a);
   const size_t size_b = fif->get_sector_size(fif, sector_b);
   if(size_a == 0 || size_b != size_a) {
@@ -467,9 +479,54 @@ pkv_create(const struct flash_iface *fif, int sector_a, int sector_b)
 }
 
 
+struct pkv *
+pkv_get_global0(void)
+{
+  if(g_pkv)
+    return g_pkv;
+
+  const struct flash_iface *fif = flash_get_primary();
+  if(fif == NULL)
+    return NULL;
+
+  int s = 0;
+  int sectors[2];
+
+  for(int i = 0; i < 2; i++) {
+    while(1) {
+      flash_sector_type_t t = fif->get_sector_type(fif, s);
+      if(t == 0)
+        return NULL;
+      if(t == FLASH_SECTOR_TYPE_PKV) {
+        sectors[i] = s;
+        break;
+      }
+      s++;
+    }
+  }
+
+  g_pkv = pkv_create(fif, sectors[0], sectors[1]);
+  return g_pkv;
+}
+
+
+struct pkv *
+pkv_obtain_global(void)
+{
+  mutex_lock(&g_pkv_mutex);
+  struct pkv *r = pkv_get_global0();
+  mutex_unlock(&g_pkv_mutex);
+  return r;
+}
+
+
 void
 pkv_show(struct pkv *pkv, stream_t *out)
 {
+  pkv = pkv_obtain(pkv);
+  if(pkv == NULL)
+    return;
+
   size_t buflen = 256;
   char *buf = malloc(buflen);
   int val32;

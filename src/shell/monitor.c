@@ -4,7 +4,7 @@
 #include <mios/cli.h>
 #include <mios/flash.h>
 #include <mios/mios.h>
-
+#include <mios/pkv.h>
 
 
 static int
@@ -96,8 +96,9 @@ cmd_flash_info(cli_t *cli, int argc, char **argv)
     size_t size = fi->get_sector_size(fi, i);
     if(size == 0)
       break;
-    printf("Sector: %2d  size: %7d  type: %d\n",
-           i, size, fi->get_sector_type(fi, i));
+    cli_printf(cli,
+               "Sector: %2d  size: %7d  type: %d\n",
+               i, size, fi->get_sector_type(fi, i));
   }
   return 0;
 }
@@ -105,3 +106,13 @@ cmd_flash_info(cli_t *cli, int argc, char **argv)
 
 
 CLI_CMD_DEF("flash_info", cmd_flash_info);
+
+
+static int
+cmd_settings(cli_t *cli, int argc, char **argv)
+{
+  pkv_show(NULL, cli->cl_stream);
+  return 0;
+}
+
+CLI_CMD_DEF("settings", cmd_settings)

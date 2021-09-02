@@ -10,6 +10,8 @@
 typedef struct pkv pkv_t;
 struct flash_iface;
 
+struct pkv *pkv_obtain_global(void);
+
 struct pkv *pkv_create(const struct flash_iface *fif,
                        int sector_a, int sector_b);
 
