@@ -61,14 +61,10 @@ halt(const char *msg)
   __asm("bkpt 1");
 }
 
-
-static volatile uint32_t *const AIRCR  = (volatile uint32_t *)0xe000ed0c;
-
-static int
-cmd_reset(cli_t *cli, int argc, char **argv)
+void
+reboot(void)
 {
+  static volatile uint32_t *const AIRCR  = (volatile uint32_t *)0xe000ed0c;
   *AIRCR = 0x05fa0004;
-  return 0;
+  while(1) {}
 }
-
-CLI_CMD_DEF("reset", cmd_reset);

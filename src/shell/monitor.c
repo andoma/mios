@@ -2,6 +2,19 @@
 #include <unistd.h>
 
 #include <mios/cli.h>
+#include <mios/flash.h>
+#include <mios/mios.h>
+
+
+
+static int
+cmd_reset(cli_t *cli, int argc, char **argv)
+{
+  reboot();
+  return 0;
+}
+
+CLI_CMD_DEF("reset", cmd_reset);
 
 
 static int
