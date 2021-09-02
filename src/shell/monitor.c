@@ -83,3 +83,25 @@ cmd_uptime(cli_t *cli, int argc, char **argv)
 
 
 CLI_CMD_DEF("uptime", cmd_uptime);
+
+
+static int
+cmd_flash_info(cli_t *cli, int argc, char **argv)
+{
+  const flash_iface_t *fi = flash_get_primary();
+  if(fi == NULL)
+    return 0;
+
+  for(int i = 0; ; i++) {
+    size_t size = fi->get_sector_size(fi, i);
+    if(size == 0)
+      break;
+    printf("Sector: %2d  size: %7d  type: %d\n",
+           i, size, fi->get_sector_type(fi, i));
+  }
+  return 0;
+}
+
+
+
+CLI_CMD_DEF("flash_info", cmd_flash_info);
