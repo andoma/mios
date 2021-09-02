@@ -97,3 +97,9 @@ __assert_func(const char *expr, const char *file, int line)
 }
 
 
+const struct flash_iface *   __attribute__((weak))
+flash_get_primary(void)
+{
+  return NULL;
+}
+
