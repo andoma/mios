@@ -3,6 +3,7 @@
 #include <mios/task.h>
 #include <mios/error.h>
 #include <mios/mios.h>
+#include <sys/uio.h>
 
 #include "pbuf.h"
 
@@ -67,6 +68,9 @@ error_t socket_detach(socket_t *s);
 error_t socket_net_ctl(socket_t *s, socket_ctl_t *sc);
 
 error_t socket_send(socket_t *s, const void *data, size_t len, int flags);
+
+error_t socket_sendv(socket_t *s, const struct iovec *iov,
+                     size_t iovcnt, int flags);
 
 #define SOCK_NONBLOCK 0x1
 

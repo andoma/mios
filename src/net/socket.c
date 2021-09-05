@@ -42,21 +42,29 @@ socket_init(socket_t *s, uint8_t family, uint8_t proto)
   s->s_proto = socket_proto_find(family, proto);
 }
 
-
 error_t
-socket_send(socket_t *s, const void *data, size_t len, int flags)
+socket_sendv(socket_t *s, const struct iovec *iov, size_t iovcnt, int flags)
 {
   int wait = !(flags & SOCK_NONBLOCK);
   pbuf_t *pb = pbuf_make(s->s_header_size, wait);
   if(pb == NULL)
     return ERR_NO_BUFFER;
 
-  void *dst = pbuf_append(pb, len);
-  memcpy(dst, data, len);
+  for(size_t i = 0; i < iovcnt; i++) {
+    void *dst = pbuf_append(pb, iov[i].iov_len);
+    memcpy(dst, iov[i].iov_base, iov[i].iov_len);
+  }
 
   int q = irq_forbid(IRQ_LEVEL_NET);
   net_wakeup_socket(s);
   STAILQ_INSERT_TAIL(&s->s_tx_queue, pb, pb_link);
   irq_permit(q);
   return 0;
+}
+
+error_t
+socket_send(socket_t *s, const void *data, size_t len, int flags)
+{
+  struct iovec iov = {(void *)data, len};
+  return socket_sendv(s, &iov, 1, flags);
 }
