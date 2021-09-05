@@ -28,6 +28,7 @@ cpu_init(void)
   t->t_sp_bottom = sp_bottom;
 
   t->t_state = TASK_STATE_ZOMBIE;
+  t->t_prio = 0;
   sched_cpu_init(&curcpu()->sched, t);
 
 }
