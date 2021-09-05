@@ -285,17 +285,25 @@ void
 task_wakeup_sched_locked(task_waitable_t *waitable, int all)
 {
   task_t *t;
+  int do_sched = 0;
   while((t = LIST_FIRST(&waitable->list)) != NULL) {
     assert(t->t_state == TASK_STATE_SLEEPING);
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
     cpu_t *cpu = curcpu();
-    if(t != cpu->sched.current)
+
+    if(t != cpu->sched.current) {
+      if(t->t_prio >= cpu->sched.current->t_prio)
+        do_sched = 1;
       readyqueue_insert(cpu, t, "wakeup");
-    schedule();
+    } else {
+      do_sched = 1;
+    }
     if(!all)
       break;
   }
+  if(do_sched)
+    schedule();
 }
 
 
