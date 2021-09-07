@@ -29,11 +29,8 @@ void mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 
 #define MBUS_OP_PING       0
 #define MBUS_OP_PONG       1
-#define MBUS_OP_TLM_META   2
-#define MBUS_OP_TLM_FP32   3
-#define MBUS_OP_TLM_FP24   4
-#define MBUS_OP_TLM_FP16   5
-#define MBUS_OP_TLM_I16    6
+#define MBUS_OP_PUB_META   2
+#define MBUS_OP_PUB_DATA   3
 
 #define MBUS_OP_RPC_RESOLVE         8
 // [u8 txid] [name ...]
