@@ -52,3 +52,14 @@ stm32f4_fini(void)
   if(*DBGMCU_CR & 7)
     __asm("bkpt #2");
 }
+
+void  __attribute__((noreturn))
+cpu_idle(void)
+{
+  while(1) {
+    for(int i = 0; i < 100; i++) {
+      asm volatile ("wfi;nop;nop;nop");
+    }
+    *DBGMCU_CR |= 1;
+  }
+}
