@@ -11,8 +11,7 @@ start:
         isb
         cpsie i     // Enable interrupts, off we go
         isb
-idle:   wfi
-        b idle
+        b cpu_idle
 
         .thumb_func
 pendsv:

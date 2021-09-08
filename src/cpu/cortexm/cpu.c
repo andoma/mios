@@ -69,3 +69,11 @@ reboot(void)
   *AIRCR = 0x05fa0004;
   while(1) {}
 }
+
+void   __attribute__((weak, noreturn))
+cpu_idle(void)
+{
+  while(1) {
+    asm volatile ("wfi");
+  }
+}
