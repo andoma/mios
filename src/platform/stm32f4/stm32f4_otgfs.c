@@ -36,6 +36,7 @@
 
 #define OTG_FS_DCFG     (OTG_FS_BASE + 0x800)
 #define OTG_FS_DCTL     (OTG_FS_BASE + 0x804)
+#define OTG_FS_DSTS     (OTG_FS_BASE + 0x808)
 #define OTG_FS_DIEPMSK  (OTG_FS_BASE + 0x810)
 #define OTG_FS_DOEPMSK  (OTG_FS_BASE + 0x814)
 #define OTG_FS_DAINT    (OTG_FS_BASE + 0x818)
@@ -966,6 +967,23 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 }
 
 
+static void
+usb_print_info(struct device *d, struct stream *st)
+{
+  //  struct usb_ctrl *uc = (struct usb_ctrl *)d;
+
+  const uint32_t dsts = reg_rd(OTG_FS_DSTS);
+  stprintf(st, "\tCore status: %s\n", dsts & 0x8 ? "Error" : "OK");
+  const uint32_t addr = (reg_rd(OTG_FS_DCFG) >> 4) & 0xff;
+  if(addr == 0) {
+    stprintf(st, "\tNot connected to host\n");
+    return;
+  }
+  stprintf(st, "\tAssigned address: %d\n", addr);
+  stprintf(st, "\tLast SOF Frame: %d\n", (dsts >> 8) & 0x3fff);
+}
+
+
 void
 stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
                      const char *manfacturer_string,
@@ -979,6 +997,7 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
 
   usb_ctrl_t *uc = &g_usb_ctrl;
 
+  uc->uc_dev.d_print_info = usb_print_info;
   uc->uc_dev.d_name = "usb";
   device_register(&uc->uc_dev);
 
