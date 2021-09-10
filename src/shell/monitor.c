@@ -5,6 +5,7 @@
 #include <mios/flash.h>
 #include <mios/mios.h>
 #include <mios/pkv.h>
+#include <mios/version.h>
 
 
 static int
@@ -116,3 +117,13 @@ cmd_settings(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("settings", cmd_settings)
+
+
+static int
+cmd_version(cli_t *cli, int argc, char **argv)
+{
+  mios_print_version(cli->cl_stream);
+  return 0;
+}
+
+CLI_CMD_DEF("version", cmd_version)
