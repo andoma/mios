@@ -736,11 +736,13 @@ irq_67(void)
       const uint32_t ep = rspr & 0xf;
       usb_ep_t *ue = uc->uc_out_ue[ep];
       if(ue == NULL) {
-        panic("usb: Got packet on uninitialized endpoint %d", ep);
+        // Got packet on uninitialized endpoint, ignore
+        ep_cnak(ep);
+      } else {
+        const uint32_t status = (rspr >> 17) & 0xf;
+        const uint32_t bytes = (rspr >> 4) & 0x7ff;
+        ue->ue_completed(&uc->uc_dev, ue, status, bytes);
       }
-      const uint32_t status = (rspr >> 17) & 0xf;
-      const uint32_t bytes = (rspr >> 4) & 0x7ff;
-      ue->ue_completed(&uc->uc_dev, ue, status, bytes);
     }
 
     if(gint & OTG_FS_GINT_OEPINT) {
