@@ -6,6 +6,7 @@
 #include <mios/mios.h>
 #include <mios/pkv.h>
 #include <mios/version.h>
+#include <mios/sys.h>
 
 
 static int
@@ -127,3 +128,38 @@ cmd_version(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("version", cmd_version)
+
+
+
+
+static const char *reset_reasons[8] = {
+  [0] = "Unknown",
+  [RESET_REASON_LOW_POWER_RESET] = "Low power",
+  [RESET_REASON_WATCHDOG] = "Watchdog",
+  [RESET_REASON_SW_RESET] = "SW-Reset",
+  [RESET_REASON_POWER_ON] = "Power On",
+  [RESET_REASON_EXT_RESET] = "External",
+  [RESET_REASON_BROWNOUT] = "Brownout",
+};
+
+
+
+static int
+cmd_sysinfo(cli_t *cli, int argc, char **argv)
+{
+  const struct serial_number sn = sys_get_serial_number();
+
+  if(sn.len) {
+    cli_printf(cli, "Serial number: ");
+    const uint8_t *d8 = sn.data;
+    for(int i = 0; i < 12 ; i++) {
+      cli_printf(cli, "%02x", d8[i]);
+    }
+    cli_printf(cli, "\n");
+  }
+  cli_printf(cli, "Last reset reason: %s\n",
+             reset_reasons[sys_get_reset_reason()]);
+  return 0;
+}
+
+CLI_CMD_DEF("sysinfo", cmd_sysinfo);

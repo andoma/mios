@@ -1,6 +1,7 @@
 #include <mios/task.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
+#include <mios/sys.h>
 #include <stdio.h>
 #include <string.h>
 #include "irq.h"
@@ -103,3 +104,21 @@ flash_get_primary(void)
   return NULL;
 }
 
+reset_reason_t __attribute__((weak))
+sys_get_reset_reason(void)
+{
+  return RESET_REASON_UNKNOWN;
+}
+
+const struct serial_number __attribute__((weak))
+sys_get_serial_number(void)
+{
+  struct serial_number sn = {};
+  return sn;
+}
+
+void  __attribute__((weak))
+sys_watchdog_start(gpio_t blink)
+{
+
+}
