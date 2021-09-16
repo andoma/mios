@@ -167,7 +167,7 @@ msmp_shell_thread(void *arg)
 {
   msmp_t *m = arg;
   while(1) {
-    if(cli_on_stream(&m->console) < 0)
+    if(cli_on_stream(&m->console, '>') < 0)
       break;
   }
   return NULL;

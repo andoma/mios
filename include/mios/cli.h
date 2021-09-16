@@ -37,6 +37,6 @@ typedef struct cli_cmd {
 
 int cli_getc(cli_t *cli, int wait);
 
-int cli_on_stream(struct stream *s);
+int cli_on_stream(struct stream *s, char promptchar);
 
-void cli_console(void);
+void cli_console(char promptchar);

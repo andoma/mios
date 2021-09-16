@@ -39,7 +39,7 @@ pcs_shell(void *arg)
   pss.s.write = pcs_shell_write;
   pss.pcs = arg;
 
-  cli_on_stream(&pss.s);
+  cli_on_stream(&pss.s, '>');
   pcs_close(pss.pcs);
   return NULL;
 }

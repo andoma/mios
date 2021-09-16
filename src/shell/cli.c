@@ -64,14 +64,14 @@ dispatch_command(cli_t *c, char *line)
 
 
 static void
-cli_prompt(cli_t *cl)
+cli_prompt(cli_t *cl, char promptchar)
 {
-  cli_printf(cl, "> ");
+  cli_printf(cl, "%c ", promptchar);
   cli_printf(cl, NULL);
 }
 
 void
-cli_input_char(cli_t *cl, char c)
+cli_input_char(cli_t *cl, char c, char promptchar)
 {
   switch((uint8_t)c) {
   case 127:
@@ -97,7 +97,7 @@ cli_input_char(cli_t *cl, char c)
     dispatch_command(cl, cl->cl_buf);
     cl->cl_pos = 0;
     cl->cl_buf[cl->cl_pos] = 0;
-    cli_prompt(cl);
+    cli_prompt(cl, promptchar);
     break;
   default:
     //    printf("\n\nGot code %d\n", c);
@@ -123,32 +123,32 @@ cli_getc(struct cli *cli, int wait)
 }
 
 int
-cli_on_stream(stream_t *s)
+cli_on_stream(stream_t *s, char promptchar)
 {
   cli_t cli = {
     .cl_stream = s
   };
   stprintf(s, "\n");
   mios_print_version(s);
-  cli_prompt(&cli);
+  cli_prompt(&cli, promptchar);
   while(1) {
     int c = cli_getc(&cli, 1);
     if(c < 0)
       return -1;
     if(c == 4)
       return 0;
-    cli_input_char(&cli, c);
+    cli_input_char(&cli, c, promptchar);
   }
 }
 
 
 void
-cli_console(void)
+cli_console(char promptchar)
 {
   if(stdio == NULL)
     return;
   while(1) {
-    if(cli_on_stream(stdio) < 0)
+    if(cli_on_stream(stdio, promptchar) < 0)
       return;
   }
 }

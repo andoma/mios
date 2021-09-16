@@ -14,7 +14,7 @@ extern unsigned long _fini_array_end;
 int  __attribute__((weak))
 main(void)
 {
-  cli_console();
+  cli_console('>');
   printf("No console input\n");
   return 0;
 }
@@ -85,7 +85,7 @@ panic(const char *fmt, ...)
   vprintf(fmt, ap);
   va_end(ap);
   printf("\n");
-  cli_console();
+  cli_console('#');
   halt(fmt);
 }
 

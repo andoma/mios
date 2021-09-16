@@ -311,7 +311,7 @@ cdc_shell_thread(void *arg)
 {
   usb_cdc_t *cdc = arg;
   while(1) {
-    if(cli_on_stream(&cdc->s) < 0)
+    if(cli_on_stream(&cdc->s, '>') < 0)
       break;
   }
   return NULL;
