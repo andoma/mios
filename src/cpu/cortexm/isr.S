@@ -11,7 +11,8 @@ start:
         isb
         cpsie i     // Enable interrupts, off we go
         isb
-        b cpu_idle
+        ldr r0,=cpu_idle
+        bx  r0
 
         .thumb_func
 pendsv:
