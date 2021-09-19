@@ -2,7 +2,7 @@
 
 #include <mios/mios.h>
 
-#include "stm32g0.h"
+#include "stm32g0_reg.h"
 #include "stm32g0_clk.h"
 #include "irq.h"
 

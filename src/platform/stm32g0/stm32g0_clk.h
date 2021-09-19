@@ -1,6 +1,6 @@
 #pragma once
 
-#include "stm32g0.h"
+#include "stm32g0_reg.h"
 
 
 #define RCC_BASE 0x40021000
