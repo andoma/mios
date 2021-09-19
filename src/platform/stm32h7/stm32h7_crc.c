@@ -1,4 +1,3 @@
-#include "stm32h7.h"
 #include "stm32h7_clk.h"
 
 #define CRC_BASE 0x58024C00

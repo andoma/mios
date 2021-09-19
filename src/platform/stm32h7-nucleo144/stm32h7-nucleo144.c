@@ -3,8 +3,6 @@
 #include <mios/io.h>
 #include <mios/task.h>
 
-
-#include "stm32h7.h"
 #include "stm32h7_clk.h"
 #include "stm32h7_uart.h"
 

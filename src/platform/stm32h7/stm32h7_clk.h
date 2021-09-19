@@ -1,6 +1,6 @@
 #pragma once
 
-#include "stm32h7.h"
+#include "stm32h7_reg.h"
 
 #define STM32H7_RCC_BASE 0x58024400
 

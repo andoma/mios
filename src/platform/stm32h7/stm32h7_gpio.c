@@ -2,7 +2,6 @@
 
 #include "irq.h"
 #include "stm32h7_clk.h"
-#include "stm32h7.h"
 
 #define GPIO_PORT_ADDR(x) (0x58020000 + ((x) * 0x400))
 

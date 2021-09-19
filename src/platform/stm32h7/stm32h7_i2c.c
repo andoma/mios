@@ -7,7 +7,6 @@
 #include <mios/task.h>
 
 #include "irq.h"
-#include "stm32h7.h"
 #include "stm32h7_clk.h"
 
 

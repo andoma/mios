@@ -1,7 +1,6 @@
 #include <mios/mios.h>
 
 #include "stm32h7_clk.h"
-#include "stm32h7.h"
 
 
 #define FLASH_ACR 0x52002000

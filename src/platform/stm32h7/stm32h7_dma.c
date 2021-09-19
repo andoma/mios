@@ -6,9 +6,8 @@
 #include <mios/task.h>
 
 #include "irq.h"
-#include "stm32h7.h"
-#include "stm32h7_dma.h"
 #include "stm32h7_clk.h"
+#include "stm32h7_dma.h"
 
 #define DMAMUX1_BASE 0x40020800
 #define DMAMUX1_CxCR(x) (DMAMUX1_BASE + 4 * (x))
