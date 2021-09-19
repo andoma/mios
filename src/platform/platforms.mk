@@ -5,6 +5,7 @@ ALLPLATFORMS := \
 	stm32g0-nucleo64 \
 	stm32f407g-disc1 \
 	stm32h7-nucleo144 \
+	bluefruit-nrf52 \
 
 ${ALLPLATFORMS}:
 	$(MAKE) PLATFORM=$@
