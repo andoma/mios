@@ -2,7 +2,7 @@ P := ${SRC}/platform/stm32g0
 
 GLOBALDEPS += ${P}/stm32g0.mk
 
-CPPFLAGS += -iquote${P}
+CPPFLAGS += -iquote${P} -include ${P}/stm32g0.h
 
 LDSCRIPT = ${P}/stm32g0.ld
 

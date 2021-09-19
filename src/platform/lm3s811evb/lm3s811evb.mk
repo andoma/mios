@@ -3,7 +3,7 @@ P := ${SRC}/platform/lm3s811evb
 
 GLOBALDEPS += ${P}/lm3s811evb.mk
 
-CPPFLAGS += -I${P} -include lm3s811evb.h
+CPPFLAGS += -iquote${P} -include ${P}/lm3s811evb.h
 
 LDSCRIPT = ${P}/lm3s811evb.ld
 

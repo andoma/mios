@@ -2,7 +2,7 @@ P := ${SRC}/platform/stm32h7
 
 GLOBALDEPS += ${P}/stm32h7.mk
 
-CPPFLAGS += -iquote${P}
+CPPFLAGS += -iquote${P} -include ${P}/stm32h7.h
 
 #CPPFLAGS += -DHAVE_HRTIMER
 

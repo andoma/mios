@@ -80,7 +80,7 @@ vectors:
         .long exc_systick
 
         .set i,0
-        .rept 240
+        .rept CORTEXM_IRQ_COUNT
         insert_irq %i
         .set i, i+1
         .endr
