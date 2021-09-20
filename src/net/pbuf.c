@@ -227,18 +227,15 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
 
 
 pbuf_t *
-pbuf_make(int offset, int wait)
+pbuf_make_irq_blocked(int offset, int wait)
 {
-  int q = irq_forbid(IRQ_LEVEL_NET);
   pbuf_t *pb = pbuf_get(wait);
   if(pb != NULL) {
     pb->pb_next = NULL;
     pb->pb_data = pbuf_data_get(wait);
     if(pb->pb_data == NULL) {
       pbuf_put(pb);
-      pb = NULL;
     } else {
-      irq_permit(q);
       pb->pb_flags = PBUF_SOP | PBUF_EOP;
       pb->pb_pktlen = 0;
       pb->pb_offset = offset;
@@ -246,8 +243,17 @@ pbuf_make(int offset, int wait)
       return pb;
     }
   }
-  irq_permit(q);
   return NULL;
+}
+
+
+pbuf_t *
+pbuf_make(int offset, int wait)
+{
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  pbuf_t *pb = pbuf_make_irq_blocked(offset, wait);
+  irq_permit(q);
+  return pb;
 }
 
 void

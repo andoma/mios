@@ -75,3 +75,5 @@ pbuf_t *pbuf_get(int wait);
 void pbuf_put(pbuf_t *pb);
 
 void pbuf_free_irq_blocked(pbuf_t *pb);
+
+pbuf_t *pbuf_make_irq_blocked(int offset, int wait);
