@@ -64,6 +64,7 @@ include ${SRC}/util/util.mk
 SRCS += ${SRC}/version.c
 
 SRCS +=  ${SRCS-yes}
+SRCS :=  $(sort $(SRCS))
 OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}
 DEPS +=  ${OBJS:%.o=%.d}
