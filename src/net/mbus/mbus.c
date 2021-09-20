@@ -46,8 +46,11 @@ mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
   }
 
   uint32_t crc = mbus_crc32(pb);
-  uint32_t *trailer = pbuf_append(pb, sizeof(uint32_t));
-  *trailer = crc;
+  uint8_t *trailer = pbuf_append(pb, sizeof(uint32_t));
+  trailer[0] = crc;
+  trailer[1] = crc >> 8;
+  trailer[2] = crc >> 16;
+  trailer[3] = crc >> 24;
   mni->mni_tx_packets++;
   mni->mni_tx_bytes += pb->pb_pktlen;
   mni->mni_output(mni, pb);
