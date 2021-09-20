@@ -56,7 +56,7 @@ void *pbuf_append(pbuf_t *pb, size_t bytes);
 
 pbuf_t *pbuf_splice(struct pbuf_queue *pq);
 
-void pbuf_print(const char *prefix, pbuf_t *pb);
+void pbuf_print(const char *prefix, const pbuf_t *pb);
 
 // =========================================================
 // All functions below here assume irq_forbid(IRQ_LEVEL_NET)

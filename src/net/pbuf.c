@@ -266,7 +266,7 @@ pbuf_status(void)
 
 
 void
-pbuf_print(const char *prefix, pbuf_t *pb)
+pbuf_print(const char *prefix, const pbuf_t *pb)
 {
   for(; pb != NULL; pb = pb->pb_next) {
 
