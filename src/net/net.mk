@@ -1,16 +1,16 @@
 GLOBALDEPS += ${SRC}/net/net.mk
 
-SRCS += \
+SRCS_net += \
 	${SRC}/net/pbuf.c \
 	${SRC}/net/socket.c \
 	${SRC}/net/net_main.c \
 	${SRC}/net/ether.c \
 
-SRCS-${ENABLE_NET_MBUS} += \
+SRCS-${ENABLE_NET_MBUS} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus.c \
 	${SRC}/net/mbus/mbus_rpc.c \
 
-SRCS-${ENABLE_NET_IPV4} += \
+SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ipv4/ipv4.c \
 	${SRC}/net/ipv4/udp.c \
 	${SRC}/net/ipv4/dhcpv4.c \

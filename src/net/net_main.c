@@ -269,8 +269,13 @@ periodic_timer_cb(void *opaque, uint64_t expire)
 static void
 net_init(void)
 {
-  task_create((void *)net_thread, NULL, 512, "net", 0, 4);
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  // If no pbufs has been allocated by platform specific code,
+  // we allocate some now
+  pbuf_data_add(NULL, NULL);
+  irq_permit(q);
 
+  task_create((void *)net_thread, NULL, 512, "net", 0, 4);
   net_periodic_timer.t_cb = periodic_timer_cb;
 }
 

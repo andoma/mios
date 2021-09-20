@@ -76,6 +76,13 @@ pbuf_pool_add(pbuf_pool_t *pp, void *start, void *end, size_t item_size)
 void
 pbuf_data_add(void *start, void *end)
 {
+  if(end == NULL) {
+    if(pbuf_datas.pp_avail)
+      return;
+    const size_t size = PBUF_DATA_SIZE * 8;
+    start = xalloc(size, 0, 0);
+    end = start + size;
+  }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
   printf("net: Add %d pbuf data at %p\n", count, start);
   pbuf_alloc(count);

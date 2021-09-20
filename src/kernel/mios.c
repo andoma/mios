@@ -122,3 +122,8 @@ sys_watchdog_start(gpio_t blink)
 {
 
 }
+
+void __attribute__((weak))
+pbuf_data_add(void *start, void *end)
+{
+}
