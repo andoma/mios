@@ -1,13 +1,19 @@
 #include "mbus.h"
-
 #include "util/crc32.h"
 
 #include "net/pbuf.h"
 #include "net/netif.h"
+#include "net/socket.h"
 
 #include <stdio.h>
 
 #include "mbus_rpc.h"
+
+SLIST_HEAD(mbus_netif_list, mbus_netif);
+
+struct mbus_netif_list mbus_netifs;
+
+static struct socket_list mbus_sockets;
 
 static uint32_t
 mbus_crc32(struct pbuf *pb)
@@ -158,4 +164,46 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr)
   mni->mni_ni.ni_dev.d_print_info = mbus_print_info;
 
   netif_attach(&mni->mni_ni, name);
+
+  SLIST_INSERT_HEAD(&mbus_netifs, mni, mni_global_link);
 }
+
+
+static error_t
+mbus_control(socket_t *s, socket_ctl_t *sc)
+{
+  mbus_netif_t *mni;
+
+  switch(sc->sc_op) {
+  case SOCKET_CTL_ATTACH:
+    mni = SLIST_FIRST(&mbus_netifs);
+    if(mni == NULL)
+      return ERR_NO_DEVICE;
+
+    s->s_netif = &mni->mni_ni;
+    s->s_header_size = mni->mni_hdr_len;
+    s->s_mtu = s->s_netif->ni_mtu - s->s_header_size - 4;
+
+    LIST_INSERT_HEAD(&mni->mni_ni.ni_sockets, s, s_netif_link);
+    LIST_INSERT_HEAD(&mbus_sockets, s, s_proto_link);
+    return 0;
+
+  case SOCKET_CTL_DETACH:
+    LIST_REMOVE(s, s_netif_link);
+    LIST_REMOVE(s, s_proto_link);
+    return 0;
+  }
+  return ERR_NOT_IMPLEMENTED;
+}
+
+
+static pbuf_t *
+mbus_send(socket_t *s, pbuf_t *pb)
+{
+  mbus_output((mbus_netif_t *)s->s_netif, pb, s->s_remote_addr);
+  return NULL;
+}
+
+
+
+NET_SOCKET_PROTO_DEF(AF_MBUS, 0, mbus_control, mbus_send);

@@ -12,6 +12,7 @@ STAILQ_HEAD(socket_queue, socket);
 LIST_HEAD(socket_list, socket);
 
 #define AF_INET 1
+#define AF_MBUS 2
 
 typedef enum {
 
@@ -56,6 +57,7 @@ typedef struct socket {
 
   uint8_t s_net_state;
   uint8_t s_header_size;
+  uint16_t s_mtu;
 
 } socket_t;
 

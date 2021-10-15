@@ -28,6 +28,7 @@ typedef struct netif {
   uint32_t ni_local_addr;  // Our address
   uint8_t ni_local_prefixlen;
   uint8_t ni_ifindex;
+  uint16_t ni_mtu;
   void (*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 
   void (*ni_periodic)(struct netif *ni);

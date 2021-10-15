@@ -5,6 +5,8 @@
 typedef struct mbus_netif {
   netif_t mni_ni;
 
+  SLIST_ENTRY(mbus_netif) mni_global_link;
+
   void (*mni_output)(struct mbus_netif *mni, pbuf_t *pb);
 
   uint8_t mni_hdr_len;
