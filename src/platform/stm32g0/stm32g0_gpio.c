@@ -104,7 +104,6 @@ gpio_get_input(gpio_t gpio)
 }
 
 
-#if 0
 
 typedef struct {
   void (*cb)(void *arg);
@@ -112,14 +111,16 @@ typedef struct {
 } gpio_irq_t;
 
 static gpio_irq_t gpio_irqs[16];
-static uint8_t gpio_irq_level[7];
+static uint8_t gpio_irq_level[3];
 
-#define SYSCFG_EXTICR(x) (0x40013808 + (4 * x))
 
-#define EXTI_IMR          0x40013c00
-#define EXTI_RTSR         0x40013c08
-#define EXTI_FTSR         0x40013c0c
-#define EXTI_PR           0x40013c14
+#define EXTI_RTSR1        0x40021800
+#define EXTI_FTSR1        0x40021804
+#define EXTI_RPR1         0x4002180c
+#define EXTI_FPR1         0x40021810
+
+#define EXTI_EXTICR(x)   (0x40021860 + (4 * x))
+#define EXTI_IMR          0x40021880
 
 
 void
@@ -141,32 +142,32 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   const int slice = bit & 3;
 
   if(edge & GPIO_FALLING_EDGE)
-    reg_set_bit(EXTI_FTSR, bit);
+    reg_set_bit(EXTI_FTSR1, bit);
   else
-    reg_clr_bit(EXTI_FTSR, bit);
+    reg_clr_bit(EXTI_FTSR1, bit);
 
   if(edge & GPIO_RISING_EDGE)
-    reg_set_bit(EXTI_RTSR, bit);
+    reg_set_bit(EXTI_RTSR1, bit);
   else
-    reg_clr_bit(EXTI_RTSR, bit);
+    reg_clr_bit(EXTI_RTSR1, bit);
 
   reg_set_bit(EXTI_IMR, bit);
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-  reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
+  reg_set_bits(EXTI_EXTICR(icr), slice * 4, 4, port);
   irq_permit(s);
 
   int irq;
   int group;
-  if(bit < 5) {
-    irq = bit + 6;
-    group = bit;
-  } else if(bit < 10) {
-    irq = 23;
-    group = 5;
+  if(bit < 2) {
+    irq = 5;
+    group = 0;
+  } else if(bit < 4) {
+    irq = 6;
+    group = 1;
   } else {
-    irq = 40;
-    group = 6;
+    irq = 7;
+    group = 2;
   }
 
   if(gpio_irq_level[group] && gpio_irq_level[group] != level) {
@@ -177,61 +178,38 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   irq_enable(irq, level);
 }
 
-
 static void __attribute__((noinline))
-gpio_irq(int line)
+gpio_irq(int start, int end)
 {
-  reg_wr(EXTI_PR, 1 << line);
-  gpio_irqs[line].cb(gpio_irqs[line].arg);
+  const uint32_t rpr = reg_rd(EXTI_RPR1);
+  reg_wr(EXTI_RPR1, rpr);
+  const uint32_t fpr = reg_rd(EXTI_FPR1);
+  reg_wr(EXTI_FPR1, fpr);
+
+  const uint32_t pr = rpr | fpr;
+  for(int i = start; i <= end; i++) {
+    if((1 << i) & pr) {
+      gpio_irqs[i].cb(gpio_irqs[i].arg);
+    }
+  }
 }
 
 
 
 void
+irq_5(void)
+{
+  gpio_irq(0,1);
+}
+
+void
 irq_6(void)
 {
-  gpio_irq(0);
+  gpio_irq(2,3);
 }
 
 void
 irq_7(void)
 {
-  gpio_irq(1);
+  gpio_irq(4,15);
 }
-
-void
-irq_8(void)
-{
-  gpio_irq(2);
-}
-
-void
-irq_9(void)
-{
-  gpio_irq(3);
-}
-
-void
-irq_10(void)
-{
-  gpio_irq(4);
-}
-
-void
-irq_23(void)
-{
-  const uint32_t pr = reg_rd(EXTI_PR);
-  for(int i = 5; i <= 9; i++)
-    if((1 << i) & pr)
-      gpio_irq(i);
-}
-
-void
-irq_40(void)
-{
-  const uint32_t pr = reg_rd(EXTI_PR);
-  for(int i = 10; i <= 15; i++)
-    if((1 << i) & pr)
-      gpio_irq(i);
-}
-#endif
