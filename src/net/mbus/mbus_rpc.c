@@ -35,8 +35,11 @@ mbus_handle_rpc_resolve(struct mbus_netif *mni, struct pbuf *pb,
     const size_t len = strlen(rm->name);
     if(req_namelen == len && !memcmp(rm->name, req_name, len)) {
       pb = pbuf_trim(pb, req_namelen);
-      uint32_t *u32p = pbuf_append(pb, sizeof(uint32_t));
-      *u32p = id;
+      uint8_t *u8p = pbuf_append(pb, sizeof(uint32_t));
+      u8p[0] = id;
+      u8p[1] = id >> 8;
+      u8p[2] = id >> 16;
+      u8p[3] = id >> 24;
       mbus_output(mni, pb, remote_addr);
       return NULL;
     }
