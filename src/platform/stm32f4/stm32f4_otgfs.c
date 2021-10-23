@@ -266,15 +266,28 @@ tx_start(int ep, tx_ptr_t *tx, int max_packet_size)
 }
 
 
-static void
+static error_t
 stm32f4_ep_write(device_t *dev, usb_ep_t *ue,
                  const uint8_t *buf, size_t len)
 {
   const uint32_t ep = ue->ue_address & 0x7f;
+
+  if(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31))
+    return ERR_NOT_READY;
+
   ep_start(ep, len);
 
+  size_t i = 0;
+#if 0
+  if(((intptr_t)buf & 0x3) == 0) {
+    for(; i + 3 < len; i += 4) {
+      reg_wr(OTG_FS_FIFO(ep), *(uint32_t *)&buf[i]);
+    }
+  }
+#endif
+
   uint32_t u32 = 0;
-  for(size_t i = 0; i < len; i++) {
+  for(; i < len; i++) {
     uint8_t b = buf[i];
     u32 |= b << ((i & 3) * 8);
 
@@ -287,6 +300,7 @@ stm32f4_ep_write(device_t *dev, usb_ep_t *ue,
   if(len & 3) {
     reg_wr(OTG_FS_FIFO(ep), u32);
   }
+  return 0;
 }
 
 
@@ -575,7 +589,8 @@ handle_iepint(usb_ctrl_t *uc)
       continue;
 
     if(diepint & 1) {
-      ue->ue_completed(&uc->uc_dev, ue, 0, 0);
+      if(ue->ue_completed)
+        ue->ue_completed(&uc->uc_dev, ue, 0, 0);
     }
   }
 }
@@ -805,21 +820,22 @@ stm32f4_otgfs_init_regs(void)
          (3 << 0) | // Device speed = 0b11 (Full speed)
          0);
 
+  int fifo_words = 32;
   int fifo_addr = 0;
-  reg_wr(OTG_FS_GRXFSIZ, 32);
-  fifo_addr += 32;
+  reg_wr(OTG_FS_GRXFSIZ, fifo_words);
+  fifo_addr += fifo_words;
 
   reg_wr(OTG_FS_NPTXFSIZ,
-         (32 << 16) |
+         (fifo_words << 16) |
          fifo_addr);
 
-  fifo_addr += 32;
+  fifo_addr += fifo_words;
 
   for(int i = 1; i < NUM_ENDPOINTS; i++) {
     reg_wr(OTG_FS_DIEPTXF(i),
-         (32 << 16) |
+         (fifo_words << 16) |
          fifo_addr);
-    fifo_addr += 32;
+    fifo_addr += fifo_words;
   }
 
   reg_wr(OTG_FS_GINTMSK,
@@ -935,7 +951,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 
     for(size_t j = 0; j < ui->ui_num_endpoints; j++)  {
       usb_ep_t *ue = ui->ui_endpoints + j;
-
+      assert(ue->ue_max_packet_size < 2048);
       ue->ue_dev = &uc->uc_dev;
       ue->ue_vtable = &stm32f4_otgfs_vtable;
 
@@ -983,6 +999,13 @@ usb_print_info(struct device *d, struct stream *st)
   }
   stprintf(st, "\tAssigned address: %d\n", addr);
   stprintf(st, "\tLast SOF Frame: %d\n", (dsts >> 8) & 0x3fff);
+  for(int i = 0; i < NUM_ENDPOINTS; i++) {
+    stprintf(st, "\t\t[%d] = %3d 0x%08x 0x%08x\n",
+             i,
+             reg_rd(OTG_FS_DTXFSTS(i)),
+             reg_rd(OTG_FS_DIEPINT(i)),
+             reg_rd(OTG_FS_DIEPCTL(i)));
+  }
 }
 
 
