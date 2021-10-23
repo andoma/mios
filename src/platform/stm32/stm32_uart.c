@@ -99,10 +99,9 @@ stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 
 
 static void
-uart_irq(stm32_uart_t *u)
+uart_irq(void *arg)
 {
-  if(u == NULL)
-    return;
+  stm32_uart_t *u = arg;
 
   const uint32_t sr = reg_rd(u->reg_base + USART_SR);
 

@@ -1,10 +1,12 @@
 #include "stm32g0_clk.h"
 #include "stm32g0_uart.h"
+#include "stm32g0_tim.h"
 
 #define USART_CR1  0x00
 #define USART_CR3  0x08
 #define USART_BBR  0x0c
 #define USART_SR   0x1c
+#define USART_ICR  0x20
 #define USART_RDR  0x24
 #define USART_TDR  0x28
 
@@ -12,6 +14,7 @@
 #define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
 
 #include "platform/stm32/stm32_uart.c"
+#include "platform/stm32/stm32_mbus_uart.c"
 
 static const struct {
   uint16_t base;
@@ -61,3 +64,31 @@ stm32g0_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
 
 void irq_27(void) { uart_irq(uarts[0]); }
 void irq_28(void) { uart_irq(uarts[1]); }
+
+
+
+void
+stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
+                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr,
+                         const stm32_timer_info_t *timer)
+{
+  instance--;
+
+  if(instance > ARRAYSIZE(uart_config))
+    return;
+
+  const int af = uart_config[instance].af;
+
+  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
+  gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
+  stm32_mbus_uart_create((uart_config[instance].base << 8) + 0x40000000,
+                         baudrate,
+                         uart_config[instance].clkid,
+                         uart_config[instance].irq,
+                         0, txe,
+                         local_addr,
+                         timer,
+                         10);
+}
