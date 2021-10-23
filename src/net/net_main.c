@@ -149,13 +149,12 @@ net_call_buffers_avail(void)
 }
 
 
-
 static void __attribute__((noreturn))
 net_thread(void *arg)
 {
-  timer_arm_abs(&net_periodic_timer, clock_get() + 1000000, 0);
-
   int q = irq_forbid(IRQ_LEVEL_NET);
+
+  timer_arm_abs(&net_periodic_timer, clock_get() + 1000000, 0);
 
   while(1) {
 
