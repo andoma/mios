@@ -9,6 +9,7 @@ SRCS_net += \
 SRCS-${ENABLE_NET_MBUS} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus.c \
 	${SRC}/net/mbus/mbus_rpc.c \
+	${SRC}/net/mbus/mbus_dsig.c \
 
 SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ipv4/ipv4.c \

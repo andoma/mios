@@ -6,8 +6,10 @@
 #include "net/socket.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "mbus_rpc.h"
+#include "mbus_dsig.h"
 
 SLIST_HEAD(mbus_netif_list, mbus_netif);
 
@@ -84,7 +86,7 @@ static const ophandler_t ophandlers[16] = {
   [4]                   = mbus_handle_none,
   [5]                   = mbus_handle_none,
   [6]                   = mbus_handle_none,
-  [7]                   = mbus_handle_none,
+  [MBUS_OP_DSIG_EMIT]   = mbus_dsig_input,
   [MBUS_OP_RPC_RESOLVE] = mbus_handle_rpc_resolve,
   [MBUS_OP_RPC_RESOLVE_REPLY] = mbus_handle_none,
   [MBUS_OP_RPC_INVOKE]  = mbus_handle_rpc_invoke,

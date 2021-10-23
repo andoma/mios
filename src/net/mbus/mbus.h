@@ -34,6 +34,9 @@ void mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 #define MBUS_OP_PUB_META   2
 #define MBUS_OP_PUB_DATA   3
 
+#define MBUS_OP_DSIG_EMIT  7
+// [u8 signal] [u8 valid] [...]
+
 #define MBUS_OP_RPC_RESOLVE         8
 // [u8 txid] [name ...]
 
