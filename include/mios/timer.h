@@ -15,7 +15,9 @@ typedef struct timer {
 
 #define TIMER_HIGHRES 0x1
 
+// IRQ_LEVEL_CLOCK must be blocked
 void timer_arm_abs(timer_t *t, uint64_t deadline, int flags);
 
 // Return 1 if timer was NOT armed, return 0 if we managed to disarm
+// IRQ_LEVEL_CLOCK must be blocked
 int timer_disarm(timer_t *t);
