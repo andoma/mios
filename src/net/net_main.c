@@ -274,7 +274,7 @@ net_init(void)
   pbuf_data_add(NULL, NULL);
   irq_permit(q);
 
-  task_create((void *)net_thread, NULL, 512, "net", 0, 4);
+  task_create((void *)net_thread, NULL, 768, "net", 0, 4);
   net_periodic_timer.t_cb = periodic_timer_cb;
 }
 

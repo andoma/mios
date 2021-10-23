@@ -84,7 +84,6 @@ pbuf_data_add(void *start, void *end)
     end = start + size;
   }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
-  printf("net: Add %d pbuf data at %p\n", count, start);
   pbuf_alloc(count);
 }
 
