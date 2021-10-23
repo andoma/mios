@@ -266,7 +266,7 @@ pbuf_status(void)
 
 
 void
-pbuf_print(const char *prefix, const pbuf_t *pb)
+pbuf_print(const char *prefix, const pbuf_t *pb, int full)
 {
   for(; pb != NULL; pb = pb->pb_next) {
 
@@ -280,25 +280,32 @@ pbuf_print(const char *prefix, const pbuf_t *pb)
            pb->pb_buflen);
 
     const uint8_t *data = pb->pb_data + pb->pb_offset;
-    int head = 4;
-    int tail = 4;
+    int tail;
 
-    if(pb->pb_buflen < 8) {
-      tail = pb->pb_buflen / 2;
-      head = pb->pb_buflen - tail;
+    if(full) {
+      tail = pb->pb_buflen;
+    } else {
+
+      int head = 4;
+      tail = 4;
+
+      if(pb->pb_buflen < 8) {
+        tail = pb->pb_buflen / 2;
+        head = pb->pb_buflen - tail;
+      }
+
+      for(int i = 0; i < head; i++) {
+        printf("%02x ", data[i]);
+      }
+
+      if(pb->pb_buflen > 8) {
+        printf("... ");
+      }
     }
-
-    for(int i = 0; i < head; i++) {
-      printf("%02x ", data[i]);
-    }
-
-    if(pb->pb_buflen > 8) {
-      printf("... ");
-    }
-
     for(int i = 0; i < tail; i++) {
       printf("%02x ", data[pb->pb_buflen - tail + i]);
     }
+
     printf("\n");
   }
 }
