@@ -134,7 +134,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   uint8_t dst_addr = addr & 0xf;
 
-  if(ni->ni_local_addr == dst_addr) {
+  if(ni->ni_local_addr == dst_addr || dst_addr == 0x7) {
     // Destined for us
     return mbus_local(mni, pb, addr >> 4);
   }
