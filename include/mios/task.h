@@ -128,9 +128,11 @@ void task_wakeup_sched_locked(task_waitable_t *waitable, int all);
 
 void task_sleep(task_waitable_t *waitable);
 
+// Returns 1 if deadline expired
 int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
   __attribute__((warn_unused_result));
 
+// Returns 1 if deadline expired
 int task_sleep_delta(task_waitable_t *waitable, int useconds, int flags)
   __attribute__((warn_unused_result));
 
