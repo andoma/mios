@@ -16,6 +16,16 @@ extern unsigned long _rpcdef_array_end;
 static uint32_t rpc_method_salt;
 
 
+static void
+wr32_le(uint8_t *ptr, uint32_t u32)
+{
+  ptr[0] = u32;
+  ptr[1] = u32 >> 8;
+  ptr[2] = u32 >> 16;
+  ptr[3] = u32 >> 24;
+}
+
+
 struct pbuf *
 mbus_handle_rpc_resolve(struct mbus_netif *mni, struct pbuf *pb,
                         uint8_t remote_addr)
@@ -36,10 +46,7 @@ mbus_handle_rpc_resolve(struct mbus_netif *mni, struct pbuf *pb,
     if(req_namelen == len && !memcmp(rm->name, req_name, len)) {
       pb = pbuf_trim(pb, req_namelen);
       uint8_t *u8p = pbuf_append(pb, sizeof(uint32_t));
-      u8p[0] = id;
-      u8p[1] = id >> 8;
-      u8p[2] = id >> 16;
-      u8p[3] = id >> 24;
+      wr32_le(u8p, id);
       mbus_output(mni, pb, remote_addr);
       return NULL;
     }
@@ -57,8 +64,8 @@ mbus_rpc_error(struct mbus_netif *mni, struct pbuf *pb,
   pb = pbuf_trim(pb, pb->pb_pktlen - 2);
   uint8_t *pkt = pbuf_data(pb, 0);
   pkt[0] = MBUS_OP_RPC_ERR;
-  int *errptr = pbuf_append(pb, sizeof(int32_t));
-  *errptr = err;
+  uint8_t *errptr = pbuf_append(pb, sizeof(int32_t));
+  wr32_le(errptr, err);
   mbus_output(mni, pb, remote_addr);
   return NULL;
 }
