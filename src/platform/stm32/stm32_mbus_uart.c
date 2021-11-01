@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <unistd.h>
 
 #include "platform/stm32/stm32_tim.h"
@@ -49,11 +48,13 @@ start_timer(uart_mbus_t *um)
 static void
 start_tx(uart_mbus_t *um)
 {
-  gpio_set_output(um->txe, 1);
-  um->state = MBUS_STATE_TX_SOF;
-  um->txoff = 0;
   start_timer(um);
-  reg_wr(um->uart_reg_base + USART_TDR, 0x7e);
+  if(reg_rd(um->uart_reg_base + USART_SR) & (1 << 4)) {
+    gpio_set_output(um->txe, 1);
+    um->state = MBUS_STATE_TX_SOF;
+    um->txoff = 0;
+    reg_wr(um->uart_reg_base + USART_TDR, 0x7e);
+  }
 }
 
 
@@ -102,29 +103,9 @@ rx_and_tx(uart_mbus_t *um, uint8_t c, uint8_t xor)
   tx_byte(um, 0);
 }
 
-
-static uint8_t recbuf[256];
-static uint8_t recptr;
-
-#include <mios/cli.h>
-
-static int
-cmd_recbuf(cli_t *cli, int argc, char **argv)
-{
-  for(int i = 0; i < 256; i++) {
-    uint8_t p = i + recptr;
-    cli_printf(cli, "%02x%s\n", recbuf[p], recbuf[p] == 0x7e ? " ====" : "");
-  }
-  return 0;
-}
-
-CLI_CMD_DEF("recbuf", cmd_recbuf);
-
 static void
 uart_mbus_rxbyte(uart_mbus_t *um, uint8_t c)
 {
-  recbuf[recptr++] = c;
-
   switch(um->state) {
   case MBUS_STATE_IDLE:
   case MBUS_STATE_GAP:
@@ -230,16 +211,6 @@ uart_mbus_irq(void *arg)
     sr &= ~(1 << 5);
   }
 
-  if(sr & (1 << 1)) {
-    sr &= ~(1 << 1);
-    reg_wr(um->uart_reg_base + USART_ICR, (1 << 1));
-  }
-
-  if(sr & (1 << 2)) {
-    sr &= ~(1 << 2);
-    reg_wr(um->uart_reg_base + USART_ICR, (1 << 2));
-  }
-
   if(sr & (1 << 3)) {
     reg_wr(um->uart_reg_base + USART_ICR, (1 << 3));
     sr &= ~(1 << 3);
@@ -248,16 +219,6 @@ uart_mbus_irq(void *arg)
     reg_wr(um->uart_reg_base + USART_ICR, (1 << 20));
     sr &= ~(1 << 20);
   }
-#if 0
-  sr &= ~0x1000;   // end-of-block
-  sr &= ~0x10000;   // Busy line
-  sr &= ~0x10;   // Idle line
-  sr &= ~0xc0;   // TX stuff
-  sr &= ~0x620000; // Character match
-
-  if(sr)
-    panic("sr=%x\n", sr);
-#endif
 }
 
 
@@ -293,7 +254,7 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int baudrate,
                        int clkid, int uart_irq, uint32_t tx_dma_resouce_id,
                        gpio_t txe, uint8_t local_addr,
                        const stm32_timer_info_t *tim,
-                       uint8_t prio)
+                       uint8_t prio, int flags)
 {
   clk_enable(clkid);
 
@@ -309,11 +270,18 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int baudrate,
 
   um->uart_reg_base = uart_reg_base;
   reg_wr(um->uart_reg_base + USART_BBR, bbr);
-  reg_wr(um->uart_reg_base + USART_CR1, CR1_IDLE);
-#if 0
-  reg_wr(um->uart_reg_base + USART_CR1, CR1_IDLE | 2);
-  reg_wr(um->uart_reg_base + USART_CR3, 0b110 << 20);
+
+  uint32_t cr1 = CR1_IDLE;
+
+#if defined(USART_CR2) && defined(USART_CR3)
+  if(flags & UART_WAKEUP) {
+    reg_wr(um->uart_reg_base + USART_CR2, 0x7e << 24);
+    reg_wr(um->uart_reg_base + USART_CR3, 0b100 << 20);
+    cr1 |= 2;
+  }
 #endif
+  reg_wr(um->uart_reg_base + USART_CR1, cr1);
+
   um->tim_reg_base = tim->base;
   um->state = MBUS_STATE_GAP;
   um->txe = txe;

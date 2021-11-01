@@ -3,6 +3,7 @@
 #include "stm32g0_tim.h"
 
 #define USART_CR1  0x00
+#define USART_CR2  0x04
 #define USART_CR3  0x08
 #define USART_BBR  0x0c
 #define USART_SR   0x1c
@@ -70,7 +71,8 @@ void irq_28(void) { uart_irq(uarts[1]); }
 void
 stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
                          gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr,
-                         const stm32_timer_info_t *timer)
+                         const stm32_timer_info_t *timer,
+                         uint8_t prio, int flags)
 {
   instance--;
 
@@ -90,5 +92,5 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
                          0, txe,
                          local_addr,
                          timer,
-                         10);
+                         prio, flags);
 }
