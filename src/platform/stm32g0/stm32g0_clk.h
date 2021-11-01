@@ -13,6 +13,7 @@
 #define RCC_APBENR1 (RCC_BASE + 0x3c)
 #define RCC_APBENR2 (RCC_BASE + 0x40)
 #define RCC_CCIPR   (RCC_BASE + 0x54)
+#define RCC_CSR     (RCC_BASE + 0x60)
 
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 
