@@ -50,6 +50,8 @@
 #define CLK_TIM16 CLK_ID(RCC_APBENR2,  17)
 #define CLK_TIM17 CLK_ID(RCC_APBENR2,  18)
 
+#define CLK_ADC   CLK_ID(RCC_APBENR2,  20)
+
 void reset_peripheral(uint16_t id);
 
 static inline void
