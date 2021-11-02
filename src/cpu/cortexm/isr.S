@@ -4,6 +4,8 @@
         .thumb_func
         .global start
 start:
+        ldr r0,=_sdata
+        mov sp, r0
         cpsid i     // Disable interrupts
         bl init
         movs r0, #2  // Threaded mode
