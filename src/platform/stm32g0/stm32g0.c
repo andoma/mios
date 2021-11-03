@@ -2,9 +2,6 @@
 #include <stdio.h>
 #include <malloc.h>
 
-
-// Perhaps use 0x40015800 DBG_IDCODE
-
 static volatile uint16_t *const FLASH_SIZE = (volatile uint16_t *)0x1fff75e0;
 static volatile uint32_t *const DBG_IDCODE = (volatile uint32_t *)0x40015800;
 
@@ -46,4 +43,3 @@ stm32g0_init(void)
   heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
 
 }
-
