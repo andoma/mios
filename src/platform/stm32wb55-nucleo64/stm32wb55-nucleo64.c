@@ -10,6 +10,7 @@
 #include "irq.h"
 
 #include "stm32wb_uart.h"
+#include "stm32wb_spi.h"
 
 #define LED_BLUE  GPIO_PB(5)
 #define LED_GREEN GPIO_PB(0)

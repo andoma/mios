@@ -6,6 +6,7 @@
 #define RCC_BASE 0x58000000
 
 
+#define RCC_AHB1ENR  (RCC_BASE + 0x48)
 #define RCC_AHB2ENR  (RCC_BASE + 0x4c)
 #define RCC_APB1ENR2 (RCC_BASE + 0x5c)
 #define RCC_APB2ENR  (RCC_BASE + 0x60)
@@ -20,9 +21,13 @@
 #define CLK_GPIOE CLK_GPIO(4)
 #define CLK_GPIOH CLK_GPIO(7)
 
+#define CLK_DMA1    CLK_ID(RCC_AHB1ENR, 0)
+#define CLK_DMAMUX1 CLK_ID(RCC_AHB1ENR, 2)
 
 #define CLK_USART1  CLK_ID(RCC_APB2ENR,  14)
 #define CLK_LPUART1 CLK_ID(RCC_APB1ENR2, 14)
+
+#define CLK_SPI1    CLK_ID(RCC_APB2ENR,  12)
 
 static inline void
 clk_enable(uint16_t id)
