@@ -2,6 +2,8 @@
 
 #include "platform/stm32/stm32_tim.h"
 
+#include <mios/suspend.h>
+
 #include "net/mbus/mbus.h"
 #include "irq.h"
 
@@ -29,6 +31,7 @@ typedef struct uart_mbus {
   uint8_t state;
   uint8_t txoff;
   uint8_t prio;
+  uint8_t flags;
   gpio_t txe;
 
 } uart_mbus_t;
@@ -108,6 +111,9 @@ uart_mbus_rxbyte(uart_mbus_t *um, uint8_t c)
 {
   switch(um->state) {
   case MBUS_STATE_IDLE:
+    if(um->flags & UART_WAKEUP)
+      wakelock_acquire();
+    // FALLTHRU
   case MBUS_STATE_GAP:
     um->state = MBUS_STATE_RX;
     // FALLTHRU
@@ -229,8 +235,11 @@ uart_mbus_output(struct mbus_netif *mni, pbuf_t *pb)
   uart_mbus_t *um = (uart_mbus_t *)mni;
   int q = irq_forbid(IRQ_LEVEL_NET);
   STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
-  if(um->state == MBUS_STATE_IDLE)
+  if(um->state == MBUS_STATE_IDLE) {
+    if(um->flags & UART_WAKEUP)
+      wakelock_acquire();
     start_tx(um);
+  }
   irq_permit(q);
 }
 
@@ -245,6 +254,9 @@ timer_irq(void *arg)
     start_tx(um);
   } else {
     um->state = MBUS_STATE_IDLE;
+
+    if(um->flags & UART_WAKEUP)
+      wakelock_release();
   }
 }
 
@@ -286,6 +298,11 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int baudrate,
   um->state = MBUS_STATE_GAP;
   um->txe = txe;
   um->prio = prio;
+  um->flags = flags;
+
+  if(um->flags & UART_WAKEUP)
+    wakelock_acquire();
+
   clk_enable(tim->clk);
   irq_enable_fn_arg(tim->irq, IRQ_LEVEL_NET, timer_irq, um);
   irq_enable_fn_arg(uart_irq, IRQ_LEVEL_NET, uart_mbus_irq, um);

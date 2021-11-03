@@ -16,3 +16,4 @@ SRCS += ${P}/stm32g0.c \
 	${P}/stm32g0_crc.c \
 	${P}/stm32g0_adc.c \
 	${P}/stm32g0_info.c \
+	${P}/stm32g0_idle.c \

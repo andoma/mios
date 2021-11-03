@@ -127,3 +127,15 @@ void __attribute__((weak))
 pbuf_data_add(void *start, void *end)
 {
 }
+
+void  __attribute__((weak))
+wakelock_acquire(void)
+{
+
+}
+
+void  __attribute__((weak))
+wakelock_release(void)
+{
+
+}
