@@ -5,6 +5,10 @@
 
 #define RCC_BASE 0x58000000
 
+#define RCC_CR      (RCC_BASE + 0x00)
+#define RCC_CFGR    (RCC_BASE + 0x08)
+#define RCC_PLLCFGR (RCC_BASE + 0x0c)
+
 
 #define RCC_AHB1ENR  (RCC_BASE + 0x48)
 #define RCC_AHB2ENR  (RCC_BASE + 0x4c)
@@ -42,3 +46,5 @@ clk_disable(uint16_t id)
 }
 
 int clk_get_freq(uint16_t id);
+
+void stm32wb_use_hse(void);

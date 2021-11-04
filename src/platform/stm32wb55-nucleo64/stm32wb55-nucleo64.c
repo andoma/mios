@@ -11,14 +11,17 @@
 
 #include "stm32wb_uart.h"
 #include "stm32wb_spi.h"
+#include "stm32wb_clk.h"
 
 #define LED_BLUE  GPIO_PB(5)
 #define LED_GREEN GPIO_PB(0)
 #define LED_RED   GPIO_PB(1)
 
 static void __attribute__((constructor(101)))
-board_init_console(void)
+board_init(void)
 {
+  stm32wb_use_hse();
+
   static stm32_uart_t console;
 
   stdio = stm32wb_uart_init(&console, STM32WB_INSTANCE_USART1, 115200,
