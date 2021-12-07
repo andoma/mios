@@ -102,6 +102,16 @@ clock_get(void)
 }
 
 
+void
+udelay(unsigned int usec)
+{
+  int s = irq_forbid(IRQ_LEVEL_CLOCK);
+  uint64_t deadline = clock_get_irq_blocked() + usec;
+  while(clock_get_irq_blocked() < deadline) {}
+  irq_permit(s);
+}
+
+
 static void __attribute__((constructor(130)))
 timer_init(void)
 {
