@@ -222,23 +222,24 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
 }
 
 
-
-
-
 i2c_t *
-stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
+stm32f4_i2c_create(int instance, gpio_t scl, uint32_t sda_cfg, gpio_pull_t pull)
 {
   if(instance < 1 || instance > 3) {
     panic("%s: Invalid instance %d", NAME, instance);
   }
+
+  const int sda = sda_cfg & 0xff;
+  const int sda_af = sda_cfg >> 8;
+  if(!sda_af)
+    panic("i2c: Bad sda config");
+
   instance--;
 
   clk_enable(CLK_I2C(instance));
 
-  usleep(10);
-
   // If bus seems to be stuck, toggle SCL until SDA goes high again
-  gpio_conf_input(sda, GPIO_PULL_NONE);
+  gpio_conf_input(sda, GPIO_PULL_UP);
   gpio_conf_output(scl, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
   int c = 0;
@@ -250,21 +251,31 @@ stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
     c = !c;
     gpio_set_output(scl, c);
 
-    for(int i = 0; i < 200; i++)
-      asm("");
+    udelay(10);
   }
 
   stm32f4_i2c_t *d = malloc(sizeof(stm32f4_i2c_t));
   d->i2c.rw = i2c_rw;
   d->base_addr = I2C_BASE(instance);
+  reg_wr(d->base_addr + I2C_CR1, 0x0);
 
-  // Configure PB6, PB7 for I2C (Alternative Function 4)
   gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
-  gpio_conf_af(sda, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
 
-  reg_wr(d->base_addr + I2C_CCR, 210);
-  reg_wr(d->base_addr + I2C_CR2, 42); //  | (1 << 8) | (1 << 9));
-  reg_wr(d->base_addr + I2C_CR1, 0x1);
+  gpio_conf_af(sda, sda_af, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
+
+  udelay(100);
+  reg_wr(d->base_addr + I2C_CR1, 1);
+  udelay(100);
+  if(reg_rd(d->base_addr + I2C_SR2) & 2) {
+    reg_wr(d->base_addr + I2C_CR1, 0x8001);
+    while(reg_rd(d->base_addr + I2C_SR2) & 2) {
+    }
+    reg_wr(d->base_addr + I2C_CR1, 0x0);
+    udelay(100);
+    reg_wr(d->base_addr + I2C_CR1, 0x1);
+  }
+  reg_wr(d->base_addr + I2C_CCR, 110);
+  reg_wr(d->base_addr + I2C_CR2, 24); //  | (1 << 8) | (1 << 9));
 
   return &d->i2c;
 }
