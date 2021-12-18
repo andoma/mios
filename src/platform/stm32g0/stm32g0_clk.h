@@ -6,6 +6,8 @@
 #define RCC_BASE 0x40021000
 
 #define RCC_CR       (RCC_BASE + 0x00)
+#define RCC_CFGR     (RCC_BASE + 0x08)
+#define RCC_PLLCFGR  (RCC_BASE + 0x0c)
 #define RCC_APBRSTR1 (RCC_BASE + 0x2c)
 
 #define RCC_IOPENR  (RCC_BASE + 0x34)
@@ -48,6 +50,8 @@
 #define RST_I2C2 CLK_ID(RCC_APBRSTR1, 22)
 #define RST_I2C3 CLK_ID(RCC_APBRSTR1, 23)
 
+#define CLK_SYSCFG CLK_ID(RCC_APBENR2,  0)
+
 #define CLK_TIM1  CLK_ID(RCC_APBENR2,  11)
 #define CLK_TIM3  CLK_ID(RCC_APBENR1,  1)
 #define CLK_TIM4  CLK_ID(RCC_APBENR1,  2)
@@ -74,4 +78,11 @@ clk_disable(uint16_t id)
   reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
 
-int clk_get_freq(uint16_t id);
+
+void stm32g0_init_pll(void);
+
+static inline int
+clk_get_freq(uint16_t id)
+{
+  return CPU_SYSTICK_RVR;
+}

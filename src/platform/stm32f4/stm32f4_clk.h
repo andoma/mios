@@ -9,7 +9,7 @@
 
 #define RCC_BASE 0x40023800
 
-#define CLK_ID(reg, bit) (((reg) << 8) | (bit))
+#define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 
 #define CLK_SPI1 CLK_ID(CLK_APB2, 12)
 #define CLK_SPI2 CLK_ID(CLK_APB1, 14)
