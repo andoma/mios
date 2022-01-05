@@ -231,9 +231,12 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 #endif
 
   void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(task_t),
-                           CPU_STACK_ALIGNMENT,
-                           flags & TASK_DMA_STACK ? MEM_TYPE_DMA : 0);
+                           CPU_STACK_ALIGNMENT, MEM_MAY_FAIL |
+                           (flags & TASK_DMA_STACK ? MEM_TYPE_DMA : 0));
+  if(sp_bottom == NULL)
+    return NULL;
 
+  memset(sp_bottom, 0xbb, stack_size + fpu_ctx_size + sizeof(task_t));
   void *sp = sp_bottom + stack_size;
   task_t *t = sp + fpu_ctx_size;
 

@@ -4,6 +4,7 @@
 #include <sys/queue.h>
 #include <stddef.h>
 #include <string.h>
+#include <malloc.h>
 
 #include <mios/mios.h>
 #include <mios/cli.h>
@@ -147,9 +148,9 @@ cmd_mem(cli_t *cli, int argc, char **argv)
     size_t use = 0;
     size_t avail = 0;
     while(hb->next) {
-      cli_printf(cli, "\t%s @ %p size:0x%08x\n",
+      cli_printf(cli, "\t%s @ %p size:0x%08x %d\n",
                  hb->free ? "free" : "used",
-                 hb, hb_size(hb));
+                 hb, hb_size(hb), hb_size(hb));
       if(hb->free)
         avail += hb_size(hb);
       else
@@ -283,11 +284,11 @@ static void *
 malloc0(size_t size, size_t align, int type)
 {
   mutex_lock(&heap_mutex);
-  heap_block_t *hb = heap_find(type);
+  heap_block_t *hb = heap_find(type & 0xf);
   void *x = hb ? heap_alloc(hb, size, align) : NULL;
   mutex_unlock(&heap_mutex);
-  if(x == NULL)
-    panic("Out of memory (s=%d a=%d t=%d)", size, align, type);
+  if(x == NULL && !(type & MEM_MAY_FAIL))
+    panic("Out of memory (s=%d a=%d t=%d)", size, align, type & 0xf);
   return x;
 }
 
@@ -325,7 +326,7 @@ memalign(size_t size, size_t alignment)
 }
 
 void *
-xalloc(size_t size, size_t alignment, int type)
+xalloc(size_t size, size_t alignment, unsigned int type)
 {
   return malloc0(size, alignment, type);
 }
