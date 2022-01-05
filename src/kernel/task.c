@@ -594,9 +594,15 @@ mutex_lock_slow(mutex_t *m)
 
 
 int
-mutex_trylock(mutex_t *m)
+mutex_trylock_slow(mutex_t *m)
 {
-  panic("mutex_trylock not implemeted");
+  const int s = irq_forbid(IRQ_LEVEL_SCHED);
+  int r = m->lock & 1;
+  if(!r) {
+    m->lock |= 1;
+  }
+  irq_permit(s);
+  return r;
 }
 
 

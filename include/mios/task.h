@@ -170,6 +170,25 @@ mutex_lock(mutex_t *m)
   mutex_lock_slow(m);
 }
 
+
+// Return 0 if locked
+int mutex_trylock_slow(mutex_t *m);
+
+// Return 0 if locked
+inline int  __attribute__((always_inline))
+mutex_trylock(mutex_t *m)
+{
+  if(__atomic_always_lock_free(sizeof(intptr_t), 0)) {
+    intptr_t expected = 0;
+    if(__builtin_expect(__atomic_compare_exchange_n(&m->lock, &expected, 1, 1,
+                                                    __ATOMIC_SEQ_CST,
+                                                    __ATOMIC_RELAXED), 1))
+      return 0;
+  }
+  return mutex_trylock_slow(m);
+}
+
+
 void mutex_unlock_slow(mutex_t *m);
 
 inline void  __attribute__((always_inline))
@@ -185,8 +204,6 @@ mutex_unlock(mutex_t *m)
   mutex_unlock_slow(m);
 }
 
-
-int mutex_trylock(mutex_t *m); // Return 0 if locked
 
 #ifdef ENABLE_TASK_WCHAN
 #define COND_INITIALIZER(n) {.name = (n)}
