@@ -80,10 +80,10 @@ typedef struct socket_proto {
   uint8_t sp_family;
   uint8_t sp_protocol;
   error_t (*sp_ctl)(socket_t *s, socket_ctl_t *sc);
-  pbuf_t *(*sp_send_async)(socket_t *s, pbuf_t *pb);
+  pbuf_t *(*sp_xmit_pbuf)(socket_t *s, pbuf_t *pb);
 } socket_proto_t;
 
-#define NET_SOCKET_PROTO_DEF(family, protocol, ctl, send)               \
-  static socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl, send };
+#define NET_SOCKET_PROTO_DEF(family, protocol, ctl, xmit)               \
+  static socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl, xmit };
 
 void net_wakeup_socket(struct socket *s);

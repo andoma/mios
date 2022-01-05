@@ -189,7 +189,7 @@ net_thread(void *arg)
               STAILQ_REMOVE_HEAD(&socket_op_queue, s_work_link);
 
             irq_permit(q);
-            pb = s->s_proto->sp_send_async(s, pb);
+            pb = s->s_proto->sp_xmit_pbuf(s, pb);
             q = irq_forbid(IRQ_LEVEL_NET);
             if(pb)
               pbuf_free_irq_blocked(pb);
