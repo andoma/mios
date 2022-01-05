@@ -31,3 +31,7 @@
 #define TIMx_CCR3  0x3c
 #define TIMx_CCR4  0x40
 #define TIMx_BDTR  0x44
+#define TIMx_CCMR3 0x54
+#define TIMx_CCR5  0x58
+#define TIMx_CCR6  0x5c
+
