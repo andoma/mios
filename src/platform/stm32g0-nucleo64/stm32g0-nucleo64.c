@@ -17,11 +17,14 @@
 
 
 static void __attribute__((constructor(101)))
-board_init_console(void)
+board_init(void)
 {
-  static stm32_uart_t console;
+  stm32g0_init_pll();
 
-  stdio = stm32g0_uart_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3),
+  static stm32_uart_t console;
+  stdio = stm32g0_uart_init(&console, 2, 115200,
+                            stm32g0_uart_tx(2, GPIO_PA(2)),
+                            stm32g0_uart_rx(2, GPIO_PA(3)),
                             UART_CTRLD_IS_PANIC);
 }
 

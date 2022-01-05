@@ -21,30 +21,27 @@ static const struct {
   uint16_t base;
   uint16_t clkid;
   uint8_t irq;
-  uint8_t af;
 } uart_config[] = {
-  { 0x0138, CLK_USART1, 27, 0},
-  { 0x0044, CLK_USART2, 28, 1},
+  { 0x0138, CLK_USART1, 27},
+  { 0x0044, CLK_USART2, 28},
 };
 
 static stm32_uart_t *uarts[2];
 
 stream_t *
 stm32g0_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
-                  gpio_t tx, gpio_t rx, uint8_t flags)
+                  gpio_af_t tx, gpio_af_t rx, uint8_t flags)
 {
   instance--;
 
   if(instance > ARRAYSIZE(uart_config))
     return NULL;
 
-  const int af = uart_config[instance].af;
-
   if(flags & UART_HALF_DUPLEX) {
-    gpio_conf_af(tx, af, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+    gpio_conf_af(tx.gpio, tx.af, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   } else {
-    gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-    gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
+    gpio_conf_af(tx.gpio, tx.af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+    gpio_conf_af(rx.gpio, rx.af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
   }
 
   u = stm32_uart_init(u,
@@ -70,7 +67,8 @@ void irq_28(void) { uart_irq(uarts[1]); }
 
 void
 stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
-                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr,
+                         gpio_af_t tx, gpio_af_t rx, gpio_t txe,
+                         uint8_t local_addr,
                          const stm32_timer_info_t *timer,
                          uint8_t prio, int flags)
 {
@@ -79,11 +77,10 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
   if(instance > ARRAYSIZE(uart_config))
     return;
 
-  const int af = uart_config[instance].af;
-
-  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
-  gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_af(tx.gpio, tx.af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_af(rx.gpio, rx.af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
+  if(txe != GPIO_UNUSED)
+    gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
   if(flags & UART_WAKEUP) {
     // Run USART from HSI16 so it can resume us from STOP
