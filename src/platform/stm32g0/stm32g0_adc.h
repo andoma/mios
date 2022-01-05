@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define ADC_BASE  0x40012400
 
 #define ADC_ISR     (ADC_BASE + 0x00)
@@ -18,3 +20,16 @@
 int stm32g0_adc_vref(void); // Return vref in mV
 
 int adc_read_channel(int channel);
+
+void stm32g0_adc_multi(uint32_t channels,
+                       uint16_t *output,
+                       uint8_t trig);
+
+#define ADC_TRG_TIM1_TRGO2 0
+#define ADC_TRG_TIM1_CC4   1
+#define ADC_TRG_Res        2
+#define ADC_TRG_TIM3_TRGO  3
+#define ADC_TRG_TIM15_TRGO 4
+#define ADC_TRG_TIM6_TRGO  5
+#define ADC_TRG_TIM4_TRGO  6
+#define ADC_TRG_EXTI11     7

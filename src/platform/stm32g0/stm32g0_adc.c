@@ -1,3 +1,5 @@
+#include "stm32g0_adc.h"
+
 #include <stdint.h>
 #include <mios/error.h>
 #include <mios/cli.h>
@@ -9,26 +11,26 @@
 #include "irq.h"
 #include "stm32g0_reg.h"
 #include "stm32g0_clk.h"
-#include "stm32g0_adc.h"
+#include "stm32g0_dma.h"
 
-static mutex_t adc_mutex = MUTEX_INITIALIZER("adc");
 static uint8_t adc_initialized;
 
 static void
-adc_init(void)
+adc_init(int how)
 {
   if(adc_initialized)
     return;
-  adc_initialized = 1;
+  adc_initialized = how;
 
   clk_enable(CLK_ADC);
 
   // Enable Voltage Regulator
   reg_wr(ADC_CR, (1 << 28));
-  usleep(20);
+  udelay(20);
 
   // Enable VREFEN
   reg_set_bit(ADC_CCR, 22);
+  udelay(20);
 
   // Calibrate ADC
   reg_wr(ADC_CR, (1 << 31) | (1 << 28));
@@ -46,24 +48,37 @@ adc_init(void)
 }
 
 
+static void
+set_channel_mask(uint32_t channels)
+{
+  reg_wr(ADC_CHSELR, channels);
+  // Wait for Channel Configuration Ready flag
+  while(!(reg_rd(ADC_ISR) & (1 << 13))) {}
+  reg_wr(ADC_ISR, (1 << 13));
+}
+
+
 int
 adc_read_channel(int channel)
 {
-  mutex_lock(&adc_mutex);
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  adc_init(1);
 
-  adc_init();
+  int r;
+  if(adc_initialized != 2) {
 
-  reg_wr(ADC_CHSELR, (1 << channel));
-  reg_wr(ADC_SMPR, 7);
-  while(!(reg_rd(ADC_ISR) & (1 << 13))) {}
-  reg_wr(ADC_ISR, (1 << 13));
+    reg_wr(ADC_SMPR, 7);
+    set_channel_mask(1 << channel);
 
-  reg_wr(ADC_CR, (1 << 28) | (1 << 0) | (1 << 2));
+    reg_wr(ADC_CR, (1 << 28) | (1 << 0) | (1 << 2));
 
-  while(!(reg_rd(ADC_ISR) & 0x4)) {}
-  reg_wr(ADC_ISR, 4);
-  int r = reg_rd(ADC_DR);
-  mutex_unlock(&adc_mutex);
+    while(!(reg_rd(ADC_ISR) & 0x4)) {}
+    reg_wr(ADC_ISR, 4);
+    r = reg_rd(ADC_DR);
+  } else {
+    r = 0;
+  }
+  irq_permit(q);
   return r;
 }
 
@@ -81,8 +96,62 @@ stm32g0_adc_vref(void)
 static int
 cmd_vref(cli_t *cli, int argc, char **argv)
 {
-  printf("vref: %dmV\n", stm32g0_adc_vref());
+  cli_printf(cli, "vref: %dmV\n", stm32g0_adc_vref());
   return 0;
 }
 
 CLI_CMD_DEF("vref", cmd_vref);
+
+
+static void
+adc_dma_done(stm32_dma_instance_t i, void *arg, error_t err)
+{
+  panic("%s", __FUNCTION__);
+}
+
+
+void
+stm32g0_adc_multi(uint32_t channels,
+                  uint16_t *output,
+                  uint8_t trig)
+{
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+
+  int num_channels = __builtin_popcount(channels);
+
+  adc_init(2);
+  reg_wr(ADC_SMPR, 7);
+  set_channel_mask(channels);
+
+  reg_wr(ADC_CFGR1,
+         (0b01 << 10) | // Trig on rising edge
+         (trig << 6) |
+         (1 << 1) | // DMACFG (Circular mode)
+         (1 << 0) | // DMAEN
+         0);
+
+  reg_wr(ADC_CR, (1 << 28) | (1 << 0) | (1 << 2));
+
+  stm32_dma_instance_t dmainst = stm32_dma_alloc(5, "adc");
+
+  if(0)
+    stm32_dma_set_callback(dmainst, adc_dma_done, NULL, IRQ_LEVEL_IO);
+
+  stm32_dma_config(dmainst,
+                   STM32_DMA_BURST_NONE,
+                   STM32_DMA_BURST_NONE,
+                   STM32_DMA_PRIO_VERY_HIGH,
+                   STM32_DMA_16BIT,
+                   STM32_DMA_16BIT,
+                   STM32_DMA_INCREMENT,
+                   STM32_DMA_FIXED,
+                   STM32_DMA_SINGLE,
+                   STM32_DMA_P_TO_M);
+
+  stm32_dma_set_paddr(dmainst, ADC_DR);
+  stm32_dma_set_mem0(dmainst, output);
+  stm32_dma_set_nitems(dmainst, num_channels);
+  stm32_dma_start(dmainst);
+
+  irq_permit(q);
+}
