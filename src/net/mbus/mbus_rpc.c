@@ -120,3 +120,12 @@ mbus_rpc_init(void)
 {
   memcpy(&rpc_method_salt, mios_build_id(), sizeof(rpc_method_salt));
 }
+
+
+static error_t
+rpc_ping(const void *in, void *out, size_t in_size)
+{
+  return 0;
+}
+
+RPC_DEF("ping", 0, 0, rpc_ping, 0);
