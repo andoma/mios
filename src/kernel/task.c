@@ -693,7 +693,8 @@ sched_cpu_init(sched_cpu_t *sc, task_t *idle)
 
 
 
-static void __attribute__((noreturn))
+__attribute__((noreturn))
+static void *
 task_mgmt_thread(void *arg)
 {
 #ifdef ENABLE_TASK_ACCOUNTING
@@ -743,7 +744,7 @@ task_mgmt_thread(void *arg)
 static void __attribute__((constructor(900)))
 task_init_late(void)
 {
-  task_create((void *)task_mgmt_thread, NULL, 256, "taskmgmt", 0, 3);
+  task_create(task_mgmt_thread, NULL, 256, "taskmgmt", 0, 3);
 }
 
 
