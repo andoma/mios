@@ -95,6 +95,8 @@ cmd_i2c_makebus(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("i2c-makebus", cmd_i2c_makebus);
 
 
+
+__attribute__((noreturn))
 static void *
 blinker(void *arg)
 {
@@ -104,15 +106,25 @@ blinker(void *arg)
     usleep(500000);
     gpio_set_output(BLINK_GPIO, 1);
   }
-  return NULL;
 }
+
+
 
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
-  gpio_set_output(BLINK_GPIO, 1);
   gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_set_output(BLINK_GPIO, 1);
 
-  task_create(blinker, NULL, 512, "blinker", 0, 0);
+  task_create(blinker, NULL, 256, "blinker", 0, 0);
+
+#if 0 // Uncomment to start full duplex mbus on USART1
+  stm32g0_mbus_uart_create(1, 115200,
+                           stm32g0_uart_tx(1, GPIO_PA(9)),
+                           stm32g0_uart_rx(1, GPIO_PA(10)),
+                           GPIO_UNUSED,
+                           10, NULL, 1, 0);
+#endif
 }
+

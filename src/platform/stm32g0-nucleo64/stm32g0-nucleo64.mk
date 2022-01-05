@@ -12,3 +12,7 @@ CPPFLAGS += -I${B} -include ${BOARDNAME}.h
 include ${SRC}/platform/stm32g0/stm32g0.mk
 
 SRCS += ${B}/${BOARDNAME}.c
+
+OPTLEVEL ?= s
+
+CFLAGS += -flto
