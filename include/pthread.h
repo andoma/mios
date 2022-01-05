@@ -8,6 +8,7 @@
 
 typedef mutex_t pthread_mutex_t;
 
+#define pthread_mutex_init(m, attr) mutex_init(m, NULL)
 #define pthread_mutex_lock(m)   mutex_lock(m)
 #define pthread_mutex_trylock(m) mutex_trylock(m)
 #define pthread_mutex_unlock(m) mutex_unlock(m)
