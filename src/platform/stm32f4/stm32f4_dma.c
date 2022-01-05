@@ -15,10 +15,7 @@
 #include "platform/stm32/stm32_dma_v1.c"
 
 stm32_dma_instance_t
-stm32_dma_alloc(uint32_t resource_id,
-                void (*cb)(stm32_dma_instance_t instance,
-                           void *arg, error_t err),
-                void *arg, const char *name, int irq_level)
+stm32_dma_alloc(uint32_t resource_id, const char *name)
 {
   uint32_t sa = (resource_id >> 16) & 0xff;
   uint32_t sb = resource_id & 0xff;
@@ -28,8 +25,7 @@ stm32_dma_alloc(uint32_t resource_id,
     mask |= (1 << sa);
   }
 
-  stm32_dma_instance_t inst =
-    stm32_dma_alloc_instance(mask, cb, arg, name, irq_level);
+  stm32_dma_instance_t inst = stm32_dma_alloc_instance(mask, name);
 
   int channel = inst == sa ? resource_id >> 24 : (resource_id >> 8) & 0xff;
   assert(channel < 8);

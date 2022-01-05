@@ -43,9 +43,7 @@ wakeup_cb(stm32_dma_instance_t instance, void *arg, error_t err)
 
 
 static stm32_dma_instance_t
-stm32_dma_alloc_instance(int eligible, void (*cb)(stm32_dma_instance_t instance,
-                                                  void *arg, error_t err),
-                         void *arg, const char *name, int irq_level)
+stm32_dma_alloc_instance(int eligible, const char *name)
 {
   int q = irq_forbid(IRQ_LEVEL_SWITCH);
   for(int i = 0; i < 16; i++) {
@@ -55,27 +53,45 @@ stm32_dma_alloc_instance(int eligible, void (*cb)(stm32_dma_instance_t instance,
       continue;
 
     dma_stream_t *ds = malloc(sizeof(dma_stream_t));
-    task_waitable_init(&ds->waitq, name);
-    if(cb == NULL) {
-      cb = wakeup_cb;
-      arg = ds;
-      irq_level = IRQ_LEVEL_SCHED;
-    }
-    ds->cb = cb;
-    ds->arg = arg;
-    ds->err = 1; // Waiting
     clk_enable(i >= 8 ? CLK_DMA2 : CLK_DMA1);
     g_streams[i] = ds;
-    if(irq_level != IRQ_LEVEL_NONE) {
-      irq_enable(irqmap[i], irq_level);
-      reg_wr(DMA_SCR(i), 0b10110);
-    }
     irq_permit(q);
     printf("%s: Using DMA #%d/%d\n", name, i >> 3, i & 7);
     return i;
   }
   panic("Out of DMA channels");
 }
+
+
+void
+stm32_dma_set_callback(stm32_dma_instance_t i,
+                       void (*cb)(stm32_dma_instance_t instance,
+                                  void *arg, error_t err),
+                       void *arg,
+                       int irq_level)
+{
+  dma_stream_t *ds = g_streams[i];
+  ds->cb = cb;
+  ds->arg = arg;
+  irq_enable(irqmap[i], irq_level);
+  reg_wr(DMA_SCR(i), 0b10110);
+}
+
+
+void
+stm32_dma_make_waitable(stm32_dma_instance_t i, const char *name)
+{
+  dma_stream_t *ds = g_streams[i];
+  task_waitable_init(&ds->waitq, name);
+  ds->err = 1;
+  ds->cb = wakeup_cb;
+  ds->arg = ds;
+
+  irq_enable(irqmap[i], IRQ_LEVEL_SCHED);
+  reg_wr(DMA_SCR(i), 0b10110);
+}
+
+
 
 void
 stm32_dma_set_paddr(stm32_dma_instance_t instance, uint32_t paddr)
@@ -115,6 +131,7 @@ stm32_dma_config(stm32_dma_instance_t instance,
                  stm32_dma_data_size_t psize,
                  stm32_dma_incr_mode_t minc,
                  stm32_dma_incr_mode_t pinc,
+                 stm32_dma_circular_t circular,
                  stm32_dma_direction_t direction)
 {
   uint32_t reg = 0;

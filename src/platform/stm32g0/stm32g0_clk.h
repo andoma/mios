@@ -20,6 +20,8 @@
 
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 
+#define CLK_DMA1 CLK_ID(RCC_AHBENR, 0)
+#define CLK_DMA2 CLK_ID(RCC_AHBENR, 1)
 #define CLK_CRC CLK_ID(RCC_AHBENR, 12)
 
 #define CLK_GPIO(x) CLK_ID(RCC_IOPENR, (x))

@@ -36,6 +36,11 @@ typedef enum {
   STM32_DMA_M_TO_P = 1,
 } stm32_dma_direction_t;
 
+typedef enum {
+  STM32_DMA_SINGLE = 0,
+  STM32_DMA_CIRCULAR = 1,
+} stm32_dma_circular_t;
+
 void stm32_dma_config(stm32_dma_instance_t instance,
                       stm32_dma_burst_t mburst,
                       stm32_dma_burst_t pburst,
@@ -44,6 +49,7 @@ void stm32_dma_config(stm32_dma_instance_t instance,
                       stm32_dma_data_size_t psize,
                       stm32_dma_incr_mode_t minc,
                       stm32_dma_incr_mode_t pinc,
+                      stm32_dma_circular_t circular,
                       stm32_dma_direction_t direction);
 
 void stm32_dma_set_paddr(stm32_dma_instance_t instance, uint32_t paddr);
@@ -61,7 +67,13 @@ void stm32_dma_stop(stm32_dma_instance_t instance);
 error_t stm32_dma_wait(stm32_dma_instance_t instance);
 
 stm32_dma_instance_t stm32_dma_alloc(uint32_t resource_id,
-                                     void (*cb)(stm32_dma_instance_t,
-                                                void *arg, error_t err),
-                                     void *arg, const char *name,
-                                     int irq_level);
+                                     const char *name);
+
+void stm32_dma_set_callback(stm32_dma_instance_t i,
+                            void (*cb)(stm32_dma_instance_t instance,
+                                       void *arg, error_t err),
+                            void *arg,
+                            int irq_level);
+
+void stm32_dma_make_waitable(stm32_dma_instance_t i, const char *name);
+

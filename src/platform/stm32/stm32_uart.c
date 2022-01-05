@@ -221,10 +221,6 @@ stm32_uart_write_dma(stream_t *s, const void *buf, size_t size)
 
 
 
-static void
-uart_irq_tx_dma(stm32_dma_instance_t instance, void *arg, error_t err)
-{
-}
 
 
 #endif
@@ -259,8 +255,7 @@ stm32_uart_init(stm32_uart_t *u, int reg_base, int baudrate,
 
   if(flags & UART_TXDMA) {
 
-    u->tx_dma = stm32_dma_alloc(tx_dma_resouce_id,
-                                uart_irq_tx_dma, u, "uart", IRQ_LEVEL_NONE);
+    u->tx_dma = stm32_dma_alloc(tx_dma_resouce_id, "uart");
 
     stm32_dma_config(u->tx_dma,
                      STM32_DMA_BURST_NONE,
@@ -270,6 +265,7 @@ stm32_uart_init(stm32_uart_t *u, int reg_base, int baudrate,
                      STM32_DMA_8BIT,
                      STM32_DMA_INCREMENT,
                      STM32_DMA_FIXED,
+                     STM32_DMA_SINGLE,
                      STM32_DMA_M_TO_P);
 
     stm32_dma_set_paddr(u->tx_dma, u->reg_base + USART_TDR);
