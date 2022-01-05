@@ -2,6 +2,11 @@
 
 #include "net/netif.h"
 
+#ifdef ENABLE_NET_PCS
+#include <mios/timer.h>
+#include "net/pcs/pcs.h"
+#endif
+
 typedef struct mbus_netif {
   netif_t mni_ni;
 
@@ -21,11 +26,16 @@ typedef struct mbus_netif {
   uint32_t mni_tx_packets;
   uint32_t mni_tx_bytes;
 
+#ifdef ENABLE_NET_PCS
+  pcs_iface_t *mni_pcs;
+#endif
+
 } mbus_netif_t;
 
-void mbus_netif_attach(mbus_netif_t *mni, const char *name,
-                       uint8_t local_addr);
+#define MBUS_NETIF_ENABLE_PCS 0x1
 
+void mbus_netif_attach(mbus_netif_t *mni, const char *name,
+                       uint8_t local_addr, int flags);
 
 void mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 

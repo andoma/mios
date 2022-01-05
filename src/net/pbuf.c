@@ -33,8 +33,9 @@ pbuf_pool_put(pbuf_pool_t *pp, void *item)
   assert(((uint32_t)item & 0x3) == 0);
   SLIST_INSERT_HEAD(&pp->pp_items, pi, pi_link);
 
-  if(pp->pp_avail == 0) {
+  if(pp->pp_avail < 2)
     task_wakeup(&pp->pp_wait, 0);
+  if(pp->pp_avail == 0) {
     net_buffers_available();
   }
   pp->pp_avail++;
@@ -43,19 +44,23 @@ pbuf_pool_put(pbuf_pool_t *pp, void *item)
 static void *
 pbuf_pool_get(pbuf_pool_t *pp, int wait)
 {
-  while(1) {
+  if(!wait) {
     pbuf_item_t *pi = SLIST_FIRST(&pp->pp_items);
     if(pi != NULL) {
       SLIST_REMOVE_HEAD(&pp->pp_items, pi_link);
       pp->pp_avail--;
-      return pi;
     }
+    return pi;
+  }
 
-    if(!wait)
-      return NULL;
-
+  while(pp->pp_avail < 2) {
     task_sleep(&pp->pp_wait);
   }
+
+  pbuf_item_t *pi = SLIST_FIRST(&pp->pp_items);
+  SLIST_REMOVE_HEAD(&pp->pp_items, pi_link);
+  pp->pp_avail--;
+  return pi;
 }
 
 

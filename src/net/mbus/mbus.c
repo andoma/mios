@@ -7,9 +7,14 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "mbus_rpc.h"
 #include "mbus_dsig.h"
+
+#ifdef ENABLE_NET_PCS
+#include "net/pcs_shell.h"
+#endif
 
 SLIST_HEAD(mbus_netif_list, mbus_netif);
 
@@ -102,6 +107,17 @@ struct pbuf *
 mbus_local(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
 {
   const uint8_t *pkt = pbuf_cdata(pb, 0);
+  if(pkt[0] & 0x80) {
+    pb = pbuf_pullup(pb, pb->pb_pktlen);
+    if(pb) {
+#ifdef ENABLE_NET_PCS
+      if(mni->mni_pcs != NULL)
+        pcs_input(mni->mni_pcs, pbuf_cdata(pb, 0), pb->pb_pktlen, clock_get(),
+                  src_addr);
+#endif
+    }
+    return pb;
+  }
   const uint8_t opcode = pkt[0] & 0xf;
   return ophandlers[opcode](mni, pb, src_addr);
 }
@@ -157,11 +173,62 @@ mbus_print_info(struct device *d, struct stream *st)
            mni->mni_rx_unknown_opcode);
   stprintf(st, "\tTX %u packets  %u bytes\n",
            mni->mni_tx_packets, mni->mni_tx_bytes);
+#if 0
+  extern void pcs_dump(pcs_iface_t *pi, struct stream *st);
+  pcs_dump(mni->mni_pcs, st);
+#endif
 }
 
 
+#ifdef ENABLE_NET_PCS
+
+
+static int
+mbus_pcs_accept(void *opaque, pcs_t *pcs, uint8_t channel)
+{
+  switch(channel) {
+  case 0x80:
+    return pcs_shell_create(pcs);
+  }
+  return -1;
+}
+
+static int64_t
+mbus_pcs_wait_helper(cond_t *c, mutex_t *m, int64_t deadline)
+{
+  if(deadline == INT64_MAX) {
+    cond_wait(c, m);
+  } else {
+    if(cond_wait_timeout(c, m, deadline, 0)) {}
+  }
+  return clock_get();
+}
+
+
+__attribute__((noreturn))
+static void *
+mbus_pcs_thread(void *arg)
+{
+  mbus_netif_t *mni = arg;
+  const size_t mtu = mni->mni_ni.ni_mtu - mni->mni_hdr_len - 4;
+
+  while(1) {
+
+    pbuf_t *pb = pbuf_make(mni->mni_hdr_len, 1);
+
+    pcs_poll_result_t ppr = pcs_wait(mni->mni_pcs, pbuf_data(pb, 0), mtu,
+                                     clock_get(), mbus_pcs_wait_helper);
+
+    pb->pb_pktlen = ppr.len;
+    pb->pb_buflen = ppr.len;
+    mbus_output(mni, pb, ppr.addr);
+  }
+}
+#endif
+
 void
-mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr)
+mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr,
+                  int flags)
 {
   mni->mni_ni.ni_local_addr = addr;
   mni->mni_ni.ni_input = mbus_input;
@@ -171,6 +238,13 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr)
   netif_attach(&mni->mni_ni, name);
 
   SLIST_INSERT_HEAD(&mbus_netifs, mni, mni_global_link);
+
+#ifdef ENABLE_NET_PCS
+  if(flags & MBUS_NETIF_ENABLE_PCS) {
+    mni->mni_pcs = pcs_iface_create(mni, 64, mbus_pcs_accept);
+    task_create(mbus_pcs_thread, mni, 384, "pcs", 0, 4);
+  }
+#endif
 }
 
 

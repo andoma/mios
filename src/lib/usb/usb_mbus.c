@@ -190,6 +190,7 @@ usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr)
   um->um_mni.mni_hdr_len = 1;
   um->um_mni.mni_output = usb_mbus_output;
   um->um_mni.mni_ni.ni_buffers_avail = buffers_avail;
+  um->um_mni.mni_ni.ni_mtu = 32;
 
-  mbus_netif_attach(&um->um_mni, "usbmbus", local_addr);
+  mbus_netif_attach(&um->um_mni, "usbmbus", local_addr, 0);
 }
