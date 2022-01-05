@@ -4,8 +4,6 @@ PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
 
-OPTLEVEL ?= 2
-
 T := $(shell realpath --relative-to ${CURDIR} $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 GLOBALDEPS += ${T}/Makefile
@@ -18,6 +16,8 @@ MO := ${O}/${T}
 # Include platform- (which in turn include CPU-) specific things
 #
 include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
+
+OPTLEVEL ?= 2
 
 CFLAGS += -Wframe-larger-than=128
 
