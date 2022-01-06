@@ -25,6 +25,8 @@ typedef struct stm32_spi {
 #define SPI_SR   0x08
 #define SPI_DR   0x0c
 
+#define CR2_VALUE (1 << 12) // Should be set for 8 bit wide transfers
+
 static error_t
 spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
         uint32_t config)
@@ -35,29 +37,40 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
   if(rx != NULL) {
     stm32_dma_set_mem0(spi->rx_dma, rx);
     stm32_dma_set_nitems(spi->rx_dma, len);
+    reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE | 1);
   }
 
-  reg_wr(spi->base_addr + SPI_CR2, 1 | (1 << 12));
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+
   stm32_dma_start(spi->tx_dma);
   if(rx != NULL) {
     stm32_dma_start(spi->rx_dma);
   }
 
-  reg_wr(spi->base_addr + SPI_CR2, 3 | (1 << 12));
-  reg_wr(spi->base_addr + SPI_CR1, config | (1 << 6));
-  error_t err;
+  reg_wr(spi->base_addr + SPI_CR2,
+         CR2_VALUE |
+         (1 << 1) |
+         (rx ? 1 : 0));
 
+  error_t err;
   err = rx != NULL ? stm32_dma_wait(spi->rx_dma) : 0;
-  if(!err)
+  if(!err) {
     err = stm32_dma_wait(spi->tx_dma);
+  }
 
   stm32_dma_stop(spi->tx_dma);
-  if(rx != NULL)
+  if(rx != NULL) {
     stm32_dma_stop(spi->rx_dma);
+  }
+  irq_permit(q);
 
-  reg_wr(spi->base_addr + SPI_CR1, config);
+  if(rx == NULL) {
+    while(reg_rd(spi->base_addr + SPI_SR) != 2) {
+      (void)reg_rd(spi->base_addr + SPI_DR);
+    }
+  }
 
-  reg_wr(spi->base_addr + SPI_CR2, 0);
+  reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE);
 
   return err;
 }
@@ -74,9 +87,7 @@ spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
   gpio_set_output(nss, 0);
   reg_wr(spi->base_addr + SPI_CR1, config);
 
-  int s = irq_forbid(IRQ_LEVEL_IO);
   error_t err = spi_dma(spi, tx, rx, len, config);
-  irq_permit(s);
 
   gpio_set_output(nss, 1);
   return err;
@@ -116,6 +127,7 @@ spi_get_config(spi_t *dev, int clock_flags, int baudrate)
   int config =
     (1 << 9) | // SSM
     (1 << 8) | // SSI
+    (1 << 6) | // Enable
     (1 << 2);  // Master configuration
 
   if(clock_flags & SPI_CPHA)
