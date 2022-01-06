@@ -103,3 +103,5 @@ float MATH_MANGLE(atanf)(float)  __attribute__ ((const));
 float MATH_MANGLE(atan2f)(float, float)  __attribute__ ((const));
 
 float MATH_MANGLE(asinf)(float)  __attribute__ ((const));
+
+float fmodf(float x, float y) __attribute__ ((const));

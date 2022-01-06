@@ -5,6 +5,9 @@
 float
 MATH_MANGLE(sinf)(float x)
 {
+  const float spi = x < 0 ? -M_PIf : M_PIf;
+  x = fmodf(x + spi, (2 * M_PIf)) - spi;
+
   if(x > M_HALF_PIf)
     x = -x + M_PIf;
   else if(x < -M_HALF_PIf)
@@ -23,4 +26,3 @@ MATH_MANGLE(cosf)(float x)
 {
   return MATH_MANGLE(sinf)(x + M_HALF_PIf);
 }
-

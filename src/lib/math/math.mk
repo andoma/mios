@@ -9,5 +9,6 @@ SRCS-${ENABLE_MATH} += \
 	${SRC}/lib/math/asinf.c \
 	${SRC}/lib/math/atanf.c \
 	${SRC}/lib/math/atan2f.c \
+	${SRC}/lib/math/fmodf.c \
 	${SRC}/lib/math/math_string.c \
 	${SRC}/lib/math/math_diag.c \
