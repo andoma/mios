@@ -115,8 +115,6 @@ gpio_get_input(gpio_t gpio)
 }
 
 
-#if 0
-
 typedef struct {
   void (*cb)(void *arg);
   void *arg;
@@ -125,20 +123,24 @@ typedef struct {
 static gpio_irq_t gpio_irqs[16];
 static uint8_t gpio_irq_level[7];
 
-#define SYSCFG_EXTICR(x) (0x40013808 + (4 * x))
+#define SYSCFG_BASE       0x40010000
 
-#define EXTI_IMR          0x40013c00
-#define EXTI_RTSR         0x40013c08
-#define EXTI_FTSR         0x40013c0c
-#define EXTI_PR           0x40013c14
+#define SYSCFG_EXTICR(x) (SYSCFG_BASE + 0x08 + (4 * x))
+
+#define EXTI_BASE        0x58000800
+
+
+// Only the CPU1 versions
+#define EXTI_RTSR        (EXTI_BASE + 0x00)
+#define EXTI_FTSR        (EXTI_BASE + 0x04)
+#define EXTI_PR          (EXTI_BASE + 0x0c)
+#define EXTI_IMR         (EXTI_BASE + 0x80)
 
 
 void
 gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
               gpio_edge_t edge, int level)
 {
-  clk_enable(CLK_SYSCFG);
-
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
 
@@ -247,4 +249,3 @@ irq_40(void)
     if((1 << i) & pr)
       gpio_irq(i);
 }
-#endif
