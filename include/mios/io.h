@@ -55,9 +55,12 @@ i2c_t *i2c_get_bus(unsigned int bus_id);
 
 // SPI
 
+struct iovec;
+
 typedef struct spi {
   error_t (*rw)(struct spi *bus, const uint8_t *tx, uint8_t *rx, size_t len,
                 gpio_t nss, int config);
+  error_t (*txv)(struct spi *bus, struct iovec *txiov, size_t count, gpio_t nss, int config);
   error_t (*rw_locked)(struct spi *bus, const uint8_t *tx, uint8_t *rx,
                        size_t len, gpio_t nss, int mode);
   void (*lock)(struct spi *bus, int acquire);

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <assert.h>
 
+#include <sys/uio.h>
 #include <mios/io.h>
 #include <mios/task.h>
 
@@ -107,6 +108,29 @@ spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss,
 }
 
 
+static error_t
+spi_txv(struct spi *bus, struct iovec *txiov, size_t count, gpio_t nss, int config)
+{
+  struct stm32_spi *spi = (struct stm32_spi *)bus;
+  error_t err = 0;
+  mutex_lock(&spi->mutex);
+
+  gpio_set_output(nss, 0);
+  reg_wr(spi->base_addr + SPI_CR1, config);
+
+  for(size_t i = 0; i < count; i++) {
+    err = spi_dma(spi, txiov[i].iov_base, NULL, txiov[i].iov_len, config);
+    if(err)
+      break;
+  }
+  gpio_set_output(nss, 1);
+
+  mutex_unlock(&spi->mutex);
+  return err;
+
+}
+
+
 static void
 spi_lock(spi_t *dev, int acquire)
 {
@@ -198,9 +222,9 @@ stm32_spi_create(int reg_base, int clkid,
 
 
   spi->spi.rw = spi_rw;
+  spi->spi.txv = spi_txv;
   spi->spi.rw_locked = spi_rw_locked;
   spi->spi.lock = spi_lock;
   spi->spi.get_config = spi_get_config;
   return &spi->spi;
 }
-
