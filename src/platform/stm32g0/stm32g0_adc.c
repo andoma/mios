@@ -103,13 +103,6 @@ cmd_vref(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("vref", cmd_vref);
 
 
-static void
-adc_dma_done(stm32_dma_instance_t i, void *arg, error_t err)
-{
-  panic("%s", __FUNCTION__);
-}
-
-
 void
 stm32g0_adc_multi(uint32_t channels,
                   uint16_t *output,
@@ -134,9 +127,6 @@ stm32g0_adc_multi(uint32_t channels,
 
   stm32_dma_instance_t dmainst = stm32_dma_alloc(5, "adc");
 
-  if(0)
-    stm32_dma_set_callback(dmainst, adc_dma_done, NULL, IRQ_LEVEL_IO);
-
   stm32_dma_config(dmainst,
                    STM32_DMA_BURST_NONE,
                    STM32_DMA_BURST_NONE,
@@ -145,7 +135,7 @@ stm32g0_adc_multi(uint32_t channels,
                    STM32_DMA_16BIT,
                    STM32_DMA_INCREMENT,
                    STM32_DMA_FIXED,
-                   STM32_DMA_SINGLE,
+                   STM32_DMA_CIRCULAR,
                    STM32_DMA_P_TO_M);
 
   stm32_dma_set_paddr(dmainst, ADC_DR);
