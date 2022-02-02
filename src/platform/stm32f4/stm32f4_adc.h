@@ -33,6 +33,7 @@
 
 
 
+#define ADCx_BASE(x) (0x40012000 + (x) * 0x100)
 
 #define ADC1_BASE 0x40012000
 #define ADC2_BASE 0x40012100
@@ -66,3 +67,10 @@ int stm32f4_adc_vref(void); // Return vref in mV
 
 void stm32f4_adc_set_smpr(uint32_t adc_base, uint32_t channel, uint32_t value);
 
+uint32_t stm32f4_adc_init(int unit, int mode);
+
+uint16_t adc_read_channel(int channel);
+
+uint32_t stm32f4_adc_init_dma(int unit, uint32_t mask);
+
+error_t stm32f4_adc_dma_transfer(int unit, uint32_t dmainst, uint16_t *output);

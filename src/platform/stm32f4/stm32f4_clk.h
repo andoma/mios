@@ -26,6 +26,8 @@
 #define CLK_ADC2  CLK_ID(CLK_APB2, 9)
 #define CLK_ADC3  CLK_ID(CLK_APB2, 10)
 
+#define CLK_ADCx(x) CLK_ID(CLK_APB2, 8 + (x))
+
 #define CLK_TIM1  CLK_ID(CLK_APB2, 0)
 #define CLK_TIM2  CLK_ID(CLK_APB1, 0)
 #define CLK_TIM3  CLK_ID(CLK_APB1, 1)
