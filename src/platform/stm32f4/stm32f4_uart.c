@@ -1,6 +1,7 @@
 #include "stm32f4_clk.h"
 #include "stm32f4_uart.h"
 #include "stm32f4_dma.h"
+#include "stm32f4_tim.h"
 
 #define USART_SR    0x00
 #define USART_TDR   0x04
@@ -16,9 +17,7 @@
 
 
 #include "platform/stm32/stm32_uart.c"
-
-
-
+#include "platform/stm32/stm32_mbus_uart.c"
 
 static const struct {
   uint16_t base;
@@ -71,3 +70,30 @@ void irq_39(void) { uart_irq(uarts[2]); }
 void irq_52(void) { uart_irq(uarts[3]); }
 void irq_53(void) { uart_irq(uarts[4]); }
 void irq_71(void) { uart_irq(uarts[5]); }
+
+
+void
+stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
+                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr,
+                         const stm32_timer_info_t *timer)
+{
+  instance--;
+
+  if(instance > ARRAYSIZE(uart_config))
+    return;
+
+  const int af = uart_config[instance].af;
+
+  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
+  gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
+  stm32_mbus_uart_create((uart_config[instance].base << 8) + 0x40000000,
+                         baudrate,
+                         uart_config[instance].clkid,
+                         uart_config[instance].irq,
+                         0, txe,
+                         local_addr,
+                         timer,
+                         10, 0);
+}

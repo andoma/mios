@@ -256,8 +256,9 @@ uart_mbus_irq(void *arg)
 
     int err = sr & 6;
     const uint8_t c = reg_rd(um->uart_reg_base + USART_RDR);
+#ifdef USART_ICR
     reg_wr(um->uart_reg_base + USART_ICR, (1 << 11) | err);
-
+#endif
     if(!err) {
       uart_mbus_rxbyte(um, c);
       if(um->tim_reg_base)
@@ -270,6 +271,16 @@ uart_mbus_irq(void *arg)
     uart_mbus_txirq(um);
   }
 
+#ifdef USART_ICR
+  if(sr & (1 << 1)) {
+    sr &= ~(1 << 1);
+    reg_wr(um->uart_reg_base + USART_ICR, (1 << 1));
+  }
+
+  if(sr & (1 << 2)) {
+    sr &= ~(1 << 2);
+    reg_wr(um->uart_reg_base + USART_ICR, (1 << 2));
+  }
   if(sr & (1 << 3)) {
     reg_wr(um->uart_reg_base + USART_ICR, (1 << 3));
     sr &= ~(1 << 3);
@@ -278,6 +289,7 @@ uart_mbus_irq(void *arg)
     reg_wr(um->uart_reg_base + USART_ICR, (1 << 20));
     sr &= ~(1 << 20);
   }
+#endif
 }
 
 
