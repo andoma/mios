@@ -185,11 +185,11 @@ usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
 
   usb_init_endpoint(&um->iface->ui_endpoints[0],
                     um, mbus_rx, NULL,
-                    USB_ENDPOINT_BULK, 0x0, 0x1, PBUF_DATA_SIZE);
+                    USB_ENDPOINT_BULK, 0x0, 0x1, 32);
 
   usb_init_endpoint(&um->iface->ui_endpoints[1],
                     um, mbus_txco, mbus_tx_reset,
-                    USB_ENDPOINT_BULK, 0x80, 0x1, PBUF_DATA_SIZE);
+                    USB_ENDPOINT_BULK, 0x80, 0x1, 32);
 
   um->um_mni.mni_hdr_len = 1;
   um->um_mni.mni_output = usb_mbus_output;
