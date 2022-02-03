@@ -920,7 +920,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
   int num_interfaces = 0;
 
   STAILQ_FOREACH(ui, q, ui_link) {
-    total_desc_size += ui->ui_gen_desc(NULL, 0);
+    total_desc_size += ui->ui_gen_desc(NULL, ui->ui_opaque, 0);
     total_desc_size +=
       ui->ui_num_endpoints * sizeof(struct usb_endpoint_descriptor);
     num_interfaces++;
@@ -946,7 +946,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 
   STAILQ_FOREACH(ui, q, ui_link) {
 
-    o += ui->ui_gen_desc(o, iface_index);
+    o += ui->ui_gen_desc(o, ui->ui_opaque, iface_index);
     iface_index++;
 
     for(size_t j = 0; j < ui->ui_num_endpoints; j++)  {

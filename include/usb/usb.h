@@ -63,7 +63,7 @@ struct usb_ep {
   uint16_t ue_max_packet_size;
 };
 
-typedef size_t (usb_gen_desc_t)(void *buf, int iface_index);
+typedef size_t (usb_gen_desc_t)(void *buf, void *opaque, int iface_index);
 
 
 STAILQ_HEAD(usb_interface_queue, usb_interface);
@@ -73,6 +73,7 @@ typedef struct usb_interface {
   STAILQ_ENTRY(usb_interface) ui_link;
 
   usb_gen_desc_t *ui_gen_desc;
+  void *ui_opaque;
 
   size_t ui_num_endpoints;
   usb_ep_t ui_endpoints[0];
@@ -87,6 +88,7 @@ usb_gen_iface_desc(void *ptr, int iface_index, int num_endpoints,
 
 usb_interface_t *usb_alloc_interface(struct usb_interface_queue *q,
                                      usb_gen_desc_t *gen_desc,
+                                     void *opaque,
                                      size_t num_endpoints);
 
 
@@ -112,4 +114,5 @@ usb_init_endpoint(usb_ep_t *ue, void *aux,
 
 void usb_cdc_create(struct usb_interface_queue *q);
 
-void usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr);
+void usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
+                     uint8_t usb_sub_class);

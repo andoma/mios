@@ -24,6 +24,7 @@ typedef struct usb_mbus {
 
   uint8_t rx_nak;
   uint8_t tx_on;
+  uint8_t um_usb_sub_class;
 
   usb_interface_t *iface;
 
@@ -36,9 +37,10 @@ typedef struct usb_mbus {
 
 
 static size_t
-mbus_gen_desc(void *ptr, int iface_index)
+mbus_gen_desc(void *ptr, void *opaque, int iface_index)
 {
-  return usb_gen_iface_desc(ptr, iface_index, 2, 255, 0);
+  usb_mbus_t *um = opaque;
+  return usb_gen_iface_desc(ptr, iface_index, 2, 255, um->um_usb_sub_class);
 }
 
 
@@ -171,13 +173,15 @@ buffers_avail(struct netif *ni)
 
 
 void
-usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr)
+usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
+                uint8_t usb_sub_class)
 {
   usb_mbus_t *um = calloc(1, sizeof(usb_mbus_t));
+  um->um_usb_sub_class = usb_sub_class;
 
   STAILQ_INIT(&um->tx_queue);
 
-  um->iface = usb_alloc_interface(q, mbus_gen_desc, 2);
+  um->iface = usb_alloc_interface(q, mbus_gen_desc, um, 2);
 
   usb_init_endpoint(&um->iface->ui_endpoints[0],
                     um, mbus_rx, NULL,
