@@ -34,11 +34,10 @@ mbus_crc32(struct pbuf *pb)
 }
 
 
-void
+pbuf_t *
 mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
 {
   pb = pbuf_prepend(pb, mni->mni_hdr_len);
-
   uint8_t *hdr = pbuf_data(pb, 0);
 
   const uint8_t addr = (dst_addr & 0xf) | (mni->mni_ni.ni_local_addr << 4);
@@ -48,8 +47,7 @@ mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
     hdr[0] = addr;
     break;
   default:
-    pbuf_free(pb);
-    return;
+    return pb;
   }
 
   uint32_t crc = mbus_crc32(pb);
@@ -58,9 +56,14 @@ mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
   trailer[1] = crc >> 8;
   trailer[2] = crc >> 16;
   trailer[3] = crc >> 24;
-  mni->mni_tx_packets++;
   mni->mni_tx_bytes += pb->pb_pktlen;
-  mni->mni_output(mni, pb);
+  pb = mni->mni_output(mni, pb);
+  if(pb == NULL) {
+    mni->mni_tx_packets++;
+  } else {
+    mni->mni_tx_drops++;
+  }
+  return pb;
 }
 
 
@@ -77,8 +80,7 @@ mbus_handle_ping(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
 {
   uint8_t *pkt = pbuf_data(pb, 0);
   pkt[0] = MBUS_OP_PONG;
-  mbus_output(mni, pb, src_addr);
-  return NULL;
+  return mbus_output(mni, pb, src_addr);
 }
 
 typedef pbuf_t *(*ophandler_t)(struct mbus_netif *, pbuf_t *, uint8_t);
@@ -166,13 +168,14 @@ static void
 mbus_print_info(struct device *d, struct stream *st)
 {
   mbus_netif_t *mni = (mbus_netif_t *)d;
-  stprintf(st, "\tRX %u packets  %u bytes\n",
-           mni->mni_rx_packets, mni->mni_rx_bytes);
+  stprintf(st, "\tRX %u bytes  %u packets\n",
+           mni->mni_rx_bytes, mni->mni_rx_packets);
   stprintf(st, "\t   %u CRC  %u runts  %u bad opcode\n",
            mni->mni_rx_crc_errors, mni->mni_rx_runts,
            mni->mni_rx_unknown_opcode);
-  stprintf(st, "\tTX %u packets  %u bytes\n",
-           mni->mni_tx_packets, mni->mni_tx_bytes);
+  stprintf(st, "\tTX %u bytes  %u sent  %u drops\n",
+           mni->mni_tx_bytes,  mni->mni_tx_packets,
+           mni->mni_tx_drops);
 #if 0
   extern void pcs_dump(pcs_iface_t *pi, struct stream *st);
   pcs_dump(mni->mni_pcs, st);
@@ -221,7 +224,9 @@ mbus_pcs_thread(void *arg)
 
     pb->pb_pktlen = ppr.len;
     pb->pb_buflen = ppr.len;
-    mbus_output(mni, pb, ppr.addr);
+    pb = mbus_output(mni, pb, ppr.addr);
+    if(pb)
+      pbuf_free(pb);
   }
 }
 #endif

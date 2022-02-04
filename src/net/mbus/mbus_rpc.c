@@ -47,13 +47,11 @@ mbus_handle_rpc_resolve(struct mbus_netif *mni, struct pbuf *pb,
       pb = pbuf_trim(pb, req_namelen);
       uint8_t *u8p = pbuf_append(pb, sizeof(uint32_t));
       wr32_le(u8p, id);
-      mbus_output(mni, pb, remote_addr);
-      return NULL;
+      return mbus_output(mni, pb, remote_addr);
     }
   }
   pb = pbuf_trim(pb, req_namelen);
-  mbus_output(mni, pb, remote_addr);
-  return NULL;
+  return mbus_output(mni, pb, remote_addr);
 }
 
 
@@ -66,8 +64,7 @@ mbus_rpc_error(struct mbus_netif *mni, struct pbuf *pb,
   pkt[0] = MBUS_OP_RPC_ERR;
   uint8_t *errptr = pbuf_append(pb, sizeof(int32_t));
   wr32_le(errptr, err);
-  mbus_output(mni, pb, remote_addr);
-  return NULL;
+  return mbus_output(mni, pb, remote_addr);
 }
 
 
@@ -110,8 +107,7 @@ mbus_handle_rpc_invoke(struct mbus_netif *mni, struct pbuf *pb,
   pkt[0] = MBUS_OP_RPC_REPLY;
   void *outptr = pbuf_append(pb, m->out_size);
   memcpy(outptr, reply, m->out_size);
-  mbus_output(mni, pb, remote_addr);
-  return NULL;
+  return mbus_output(mni, pb, remote_addr);
 }
 
 

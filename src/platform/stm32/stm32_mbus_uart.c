@@ -33,6 +33,7 @@ typedef struct uart_mbus {
   uint8_t prio;
   uint8_t flags;
   uint8_t tx_state;
+  uint8_t tx_queue_len;
 
   gpio_t txe;
 
@@ -179,6 +180,7 @@ uart_mbus_rxbyte(uart_mbus_t *um, uint8_t c)
 
   case MBUS_STATE_TX_EOF:
     if(c == 0x7e) {
+      um->tx_queue_len--;
       pbuf_free_irq_blocked(pbuf_splice(&um->tx_queue));
     }
     stop_tx(um);
@@ -218,6 +220,7 @@ uart_mbus_txirq(uart_mbus_t *um)
 {
   switch(um->tx_state) {
   case MBUS_STATE_TX_EOF:
+    um->tx_queue_len--;
     pbuf_free_irq_blocked(pbuf_splice(&um->tx_queue));
     if(STAILQ_FIRST(&um->tx_queue)) {
       start_tx_fd(um);
@@ -294,30 +297,40 @@ uart_mbus_irq(void *arg)
 
 
 
-static void
+static pbuf_t *
 uart_mbus_output_hd(struct mbus_netif *mni, pbuf_t *pb)
 {
   uart_mbus_t *um = (uart_mbus_t *)mni;
   int q = irq_forbid(IRQ_LEVEL_NET);
-  STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
-  if(um->state == MBUS_STATE_IDLE) {
-    if(um->flags & UART_WAKEUP)
-      wakelock_acquire();
-    start_tx_hd(um);
+  if(um->tx_queue_len < 5) {
+    um->tx_queue_len++;
+    STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
+    pb = NULL;
+    if(um->state == MBUS_STATE_IDLE) {
+      if(um->flags & UART_WAKEUP)
+        wakelock_acquire();
+      start_tx_hd(um);
+    }
   }
   irq_permit(q);
+  return pb;
 }
 
-static void
+static pbuf_t *
 uart_mbus_output_fd(struct mbus_netif *mni, pbuf_t *pb)
 {
   uart_mbus_t *um = (uart_mbus_t *)mni;
   int q = irq_forbid(IRQ_LEVEL_NET);
-  STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
-  if(um->tx_state == MBUS_STATE_IDLE) {
-    start_tx_fd(um);
+  if(um->tx_queue_len < 5) {
+    um->tx_queue_len++;
+    STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
+    pb = NULL;
+    if(um->tx_state == MBUS_STATE_IDLE) {
+      start_tx_fd(um);
+    }
+    irq_permit(q);
   }
-  irq_permit(q);
+  return pb;
 }
 
 

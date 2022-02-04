@@ -189,14 +189,14 @@ ether_periodic(netif_t *ni)
 }
 
 
-static void
+static pbuf_t *
 ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
 
   if(nh == NULL) {
     ether_output(eni, pb, 0x0800, ether_bcast);
-    return;
+    return NULL;
   }
 
   nh->nh_in_use = 5;
@@ -213,10 +213,11 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
     if(nh->nh_pending != NULL)
       pbuf_free(nh->nh_pending);
     nh->nh_pending = pb;
-    return;
+    return NULL;
   }
 
   ether_output(eni, pb, 0x0800, nh->nh_hwaddr);
+  return NULL;
 }
 
 

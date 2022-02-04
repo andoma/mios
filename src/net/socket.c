@@ -45,7 +45,7 @@ socket_init(socket_t *s, uint8_t family, uint8_t proto)
 error_t
 socket_sendv(socket_t *s, const struct iovec *iov, size_t iovcnt, int flags)
 {
-  int wait = !(flags & SOCK_NONBLOCK);
+  int wait = !(flags & SOCK_SEND_NONBLOCK);
   pbuf_t *pb = pbuf_make(s->s_header_size, wait);
   if(pb == NULL)
     return ERR_NO_BUFFER;

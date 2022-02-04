@@ -22,5 +22,6 @@ SRCS-${ENABLE_NET_PCS} += \
 	${SRC}/net/pcs_shell.c
 
 ${MO}/src/net/%.o : CFLAGS += ${NOFPU}
+${MO}/src/net/mbus/%.o : CFLAGS += ${NOFPU}
 ${MO}/src/net/ipv4/%.o : CFLAGS += ${NOFPU}
 ${MO}/src/net/pcs/%.o : CFLAGS += ${NOFPU}

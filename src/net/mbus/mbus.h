@@ -12,7 +12,8 @@ typedef struct mbus_netif {
 
   SLIST_ENTRY(mbus_netif) mni_global_link;
 
-  void (*mni_output)(struct mbus_netif *mni, pbuf_t *pb);
+  // Replace with netif output()?
+  pbuf_t *(*mni_output)(struct mbus_netif *mni, pbuf_t *pb);
 
   uint8_t mni_hdr_len;
 
@@ -25,6 +26,7 @@ typedef struct mbus_netif {
 
   uint32_t mni_tx_packets;
   uint32_t mni_tx_bytes;
+  uint32_t mni_tx_drops;
 
 #ifdef ENABLE_NET_PCS
   pcs_iface_t *mni_pcs;
@@ -37,7 +39,7 @@ typedef struct mbus_netif {
 void mbus_netif_attach(mbus_netif_t *mni, const char *name,
                        uint8_t local_addr, int flags);
 
-void mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
+pbuf_t *mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 
 #define MBUS_OP_PING       0
 #define MBUS_OP_PONG       1

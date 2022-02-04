@@ -74,7 +74,8 @@ error_t socket_send(socket_t *s, const void *data, size_t len, int flags);
 error_t socket_sendv(socket_t *s, const struct iovec *iov,
                      size_t iovcnt, int flags);
 
-#define SOCK_NONBLOCK 0x1
+#define SOCK_SEND_NONBLOCK  0x1
+#define SOCK_SEND_BROADCAST 0x2
 
 typedef struct socket_proto {
   uint8_t sp_family;

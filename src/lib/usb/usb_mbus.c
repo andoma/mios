@@ -25,6 +25,7 @@ typedef struct usb_mbus {
   uint8_t rx_nak;
   uint8_t tx_on;
   uint8_t um_usb_sub_class;
+  uint8_t tx_queue_len;
 
   usb_interface_t *iface;
 
@@ -103,6 +104,8 @@ do_tx(usb_mbus_t *um)
     um->tx_on = 0;
     return;
   }
+  assert(um->tx_queue_len);
+  um->tx_queue_len--;
   usb_ep_t *ue = &um->iface->ui_endpoints[1]; // IN
 
   if(ue->ue_running) {
@@ -133,7 +136,7 @@ mbus_tx_reset(device_t *d, usb_ep_t *ue)
 }
 
 
-static void
+static pbuf_t *
 usb_mbus_output(struct mbus_netif *mni, pbuf_t *pb)
 {
   usb_mbus_t *um = (usb_mbus_t *)mni;
@@ -144,15 +147,19 @@ usb_mbus_output(struct mbus_netif *mni, pbuf_t *pb)
   }
 
   assert((pb->pb_flags & (PBUF_SOP | PBUF_EOP)) == (PBUF_SOP | PBUF_EOP));
-
   int q = irq_forbid(IRQ_LEVEL_NET);
 
-  STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
+  if(um->tx_queue_len < 4) {
+    STAILQ_INSERT_TAIL(&um->tx_queue, pb, pb_link);
+    um->tx_queue_len++;
 
-  if(!um->tx_on)
-    do_tx(um);
-
+    pb = NULL;
+    if(!um->tx_on) {
+      do_tx(um);
+    }
+  }
   irq_permit(q);
+  return pb;
 }
 
 
