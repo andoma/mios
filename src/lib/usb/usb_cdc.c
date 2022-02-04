@@ -329,14 +329,14 @@ usb_cdc_create(struct usb_interface_queue *q)
   task_waitable_init(&cdc->tx_waitq, "cdctx");
 
   cdc->comm_iface =
-    usb_alloc_interface(q, cdc_gen_comm_desc, cdc, 1);
+    usb_alloc_interface(q, cdc_gen_comm_desc, cdc, 1, "cdc-comm");
 
   usb_init_endpoint(&cdc->comm_iface->ui_endpoints[0],
                     NULL, NULL, NULL,
                     USB_ENDPOINT_INTERRUPT, 0x80, 0xff, 8);
 
   cdc->data_iface =
-    usb_alloc_interface(q, cdc_gen_data_desc, cdc, 2);
+    usb_alloc_interface(q, cdc_gen_data_desc, cdc, 2, "cdc-data");
 
   usb_init_endpoint(&cdc->data_iface->ui_endpoints[0],
                     cdc, cdc_txco, cdc_tx_reset,

@@ -23,7 +23,8 @@ usb_gen_iface_desc(void *ptr, int iface_index, int num_endpoints,
 usb_interface_t *
 usb_alloc_interface(struct usb_interface_queue *q,
                     usb_gen_desc_t *gen_desc, void *opaque,
-                    size_t num_endpoints)
+                    size_t num_endpoints,
+                    const char *name)
 {
   usb_interface_t *ui = calloc(1, sizeof(usb_interface_t) +
                                num_endpoints * sizeof(usb_ep_t));
@@ -31,6 +32,7 @@ usb_alloc_interface(struct usb_interface_queue *q,
   ui->ui_gen_desc = gen_desc;
   ui->ui_opaque = opaque;
   ui->ui_num_endpoints = num_endpoints;
+  ui->ui_name = name;
 
   STAILQ_INSERT_TAIL(q, ui, ui_link);
   return ui;

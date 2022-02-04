@@ -181,7 +181,7 @@ usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
 
   STAILQ_INIT(&um->tx_queue);
 
-  um->iface = usb_alloc_interface(q, mbus_gen_desc, um, 2);
+  um->iface = usb_alloc_interface(q, mbus_gen_desc, um, 2, "usb-mbus");
 
   usb_init_endpoint(&um->iface->ui_endpoints[0],
                     um, mbus_rx, NULL,

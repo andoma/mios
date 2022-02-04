@@ -710,6 +710,7 @@ static usb_ctrl_t g_usb_ctrl = {
       .ue_iface_aux = &g_usb_ctrl.uc_ep0_in,
       .ue_completed = ep0_txco,
       .ue_reset = ep0_reset,
+      .ue_name = "ep0",
     }
   },
 
@@ -718,6 +719,7 @@ static usb_ctrl_t g_usb_ctrl = {
       .ue_iface_aux = &g_usb_ctrl.uc_ep0_out,
       .ue_completed = ep0_rx,
       .ue_reset = ep0_reset,
+      .ue_name = "ep0",
     }
   }
 
@@ -952,6 +954,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
       assert(ue->ue_max_packet_size < 2048);
       ue->ue_dev = &uc->uc_dev;
       ue->ue_vtable = &stm32f4_otgfs_vtable;
+      ue->ue_name = ui->ui_name;
 
       if(ue->ue_address & 0x80) {
         if(ep_in_index == uc->uc_num_endpoints)
@@ -990,7 +993,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 static void
 usb_print_info(struct device *d, struct stream *st)
 {
-  //  struct usb_ctrl *uc = (struct usb_ctrl *)d;
+  struct usb_ctrl *uc = (struct usb_ctrl *)d;
 
   const uint32_t dsts = reg_rd(OTG_FS_DSTS);
   stprintf(st, "\tCore status: %s\n", dsts & 0x8 ? "Error" : "OK");
