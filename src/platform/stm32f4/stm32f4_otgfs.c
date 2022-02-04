@@ -280,13 +280,11 @@ stm32f4_ep_write(device_t *dev, usb_ep_t *ue,
   ep_start(ep, len);
 
   size_t i = 0;
-#if 0
   if(((intptr_t)buf & 0x3) == 0) {
     for(; i + 3 < len; i += 4) {
       reg_wr(OTG_FS_FIFO(ep), *(uint32_t *)&buf[i]);
     }
   }
-#endif
 
   uint32_t u32 = 0;
   for(; i < len; i++) {
