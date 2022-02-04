@@ -65,7 +65,7 @@ dsig_emit(uint8_t signal, const void *data, size_t len,
     iov[1].iov_base = (void *)data;
     iov[1].iov_len = len;
 
-    socket_sendv(sock, iov, 2, SOCK_NONBLOCK);
+    socket_sendv(sock, iov, 2, SOCK_SEND_NONBLOCK | SOCK_SEND_BROADCAST);
   }
 #endif
 }

@@ -50,6 +50,9 @@ socket_sendv(socket_t *s, const struct iovec *iov, size_t iovcnt, int flags)
   if(pb == NULL)
     return ERR_NO_BUFFER;
 
+  if(flags & SOCK_SEND_BROADCAST)
+    pb->pb_flags |= PBUF_BCAST;
+
   for(size_t i = 0; i < iovcnt; i++) {
     void *dst = pbuf_append(pb, iov[i].iov_len);
     memcpy(dst, iov[i].iov_base, iov[i].iov_len);

@@ -284,8 +284,26 @@ mbus_control(socket_t *s, socket_ctl_t *sc)
 static pbuf_t *
 mbus_send(socket_t *s, pbuf_t *pb)
 {
-  mbus_output((mbus_netif_t *)s->s_netif, pb, s->s_remote_addr);
-  return NULL;
+  if(pb->pb_flags & PBUF_BCAST) {
+    mbus_netif_t *mni, *n;
+
+    for(mni = SLIST_FIRST(&mbus_netifs); mni != NULL; mni = n) {
+      n = SLIST_NEXT(mni, mni_global_link);
+
+      if(n == NULL)
+        return mbus_output(mni, pb, 7);
+
+      pbuf_t *copy = pbuf_copy(pb, 0);
+      if(copy != NULL) {
+        copy = mbus_output(mni, copy, 7);
+        if(copy != NULL)
+          pbuf_free(copy);
+      }
+    }
+    return pb;
+  }
+
+  return mbus_output((mbus_netif_t *)s->s_netif, pb, s->s_remote_addr);
 }
 
 

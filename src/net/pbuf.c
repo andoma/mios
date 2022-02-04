@@ -260,6 +260,32 @@ pbuf_make(int offset, int wait)
   return pb;
 }
 
+
+pbuf_t *
+pbuf_copy(const pbuf_t *src, int wait)
+{
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  pbuf_t *dst = pbuf_get(wait);
+  if(dst != NULL) {
+    dst->pb_next = NULL;
+    dst->pb_data = pbuf_data_get(wait);
+    if(dst->pb_data == NULL) {
+      pbuf_put(dst);
+    } else {
+      irq_permit(q);
+      dst->pb_flags = src->pb_flags;
+      dst->pb_pktlen = src->pb_pktlen;
+      dst->pb_offset = src->pb_offset;
+      dst->pb_buflen = src->pb_buflen;
+      memcpy(dst->pb_data, src->pb_data, src->pb_buflen);
+      return dst;
+    }
+  }
+  irq_permit(q);
+  return NULL;
+}
+
+
 void
 pbuf_status(void)
 {

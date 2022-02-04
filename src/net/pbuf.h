@@ -52,9 +52,13 @@ void pbuf_free(pbuf_t *pb);
 
 pbuf_t *pbuf_make(int offset, int wait);
 
+pbuf_t *pbuf_copy(const pbuf_t *src, int wait);
+
 void *pbuf_append(pbuf_t *pb, size_t bytes);
 
 pbuf_t *pbuf_splice(struct pbuf_queue *pq);
+
+void pbuf_status(void);
 
 void pbuf_print(const char *prefix, const pbuf_t *pb, int full);
 
