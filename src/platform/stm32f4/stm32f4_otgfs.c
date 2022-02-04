@@ -17,7 +17,7 @@
 #include <usb/usb.h>
 #include <usb/usb_desc.h>
 
-#define NUM_ENDPOINTS 4
+#define MAX_NUM_ENDPOINTS 6
 
 #define OTG_FS_BASE 0x50000000
 
@@ -116,10 +116,12 @@ struct usb_ctrl {
 
   device_t uc_dev;
 
+  int uc_num_endpoints;
+
   struct usb_device_descriptor uc_desc;
 
-  usb_ep_t *uc_in_ue[NUM_ENDPOINTS];
-  usb_ep_t *uc_out_ue[NUM_ENDPOINTS];
+  usb_ep_t *uc_in_ue[MAX_NUM_ENDPOINTS];
+  usb_ep_t *uc_out_ue[MAX_NUM_ENDPOINTS];
 
   const char *uc_manufacturer;
   const char *uc_product;
@@ -422,7 +424,7 @@ handle_get_descriptor(usb_ctrl_t *uc)
 static void
 ep0_handle_set_config(usb_ctrl_t *uc)
 {
-  for(int ep = 1; ep < NUM_ENDPOINTS; ep++) {
+  for(int ep = 1; ep < uc->uc_num_endpoints; ep++) {
 
     if(uc->uc_in_ue[ep] != NULL) {
       usb_ep_t *in = uc->uc_in_ue[ep];
@@ -577,7 +579,7 @@ handle_iepint(usb_ctrl_t *uc)
 {
   uint32_t daint = reg_rd(OTG_FS_DAINT);
 
-  for(int ep = 0; ep < NUM_ENDPOINTS; ep++) {
+  for(int ep = 0; ep < uc->uc_num_endpoints; ep++) {
     if(!((1 << ep) & daint)) // replace with ffs()
       continue;
 
@@ -602,7 +604,7 @@ handle_oepint(usb_ctrl_t *uc)
 {
   uint32_t daint = reg_rd(OTG_FS_DAINT);
 
-  for(int i = 0; i < NUM_ENDPOINTS; i++) {
+  for(int i = 0; i < uc->uc_num_endpoints; i++) {
     if(!((0x10000 << i) & daint))
       continue;
 
@@ -620,7 +622,7 @@ handle_reset(usb_ctrl_t *uc)
 {
   set_address(0);
 
-  for(int ep = 0; ep < NUM_ENDPOINTS; ep++) {
+  for(int ep = 0; ep < uc->uc_num_endpoints; ep++) {
     usb_ep_t *ue;
 
     // Clear all pending IRQs
@@ -784,12 +786,8 @@ usb_fini(void)
 
 
 static void
-stm32f4_otgfs_init_regs(void)
+stm32f4_otgfs_init_regs(int num_endpoints)
 {
-  clk_enable(CLK_OTGFS);
-
-  while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}
-
   reg_wr(OTG_FS_GINTMSK, 0);          // Disable all interrupts
   reg_wr(OTG_FS_DIEPMSK, 0);
   reg_wr(OTG_FS_DOEPMSK, 0);
@@ -831,7 +829,7 @@ stm32f4_otgfs_init_regs(void)
 
   fifo_addr += fifo_words;
 
-  for(int i = 1; i < NUM_ENDPOINTS; i++) {
+  for(int i = 1; i < num_endpoints; i++) {
     reg_wr(OTG_FS_DIEPTXF(i),
          (fifo_words << 16) |
          fifo_addr);
@@ -956,6 +954,8 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
       ue->ue_vtable = &stm32f4_otgfs_vtable;
 
       if(ue->ue_address & 0x80) {
+        if(ep_in_index == uc->uc_num_endpoints)
+          panic("stm32f4_otgfs: Not enough %s endpoints", "IN");
         // IN
         ue->ue_address |= ep_in_index;
         uc->uc_in_ue[ep_in_index] = ue;
@@ -963,6 +963,8 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 
       } else {
         // OUT
+        if(ep_out_index == uc->uc_num_endpoints)
+          panic("stm32f4_otgfs: Not enough %s endpoints", "OUT");
         ue->ue_address |= ep_out_index;
         uc->uc_out_ue[ep_out_index] = ue;
         ep_out_index++;
@@ -999,15 +1001,47 @@ usb_print_info(struct device *d, struct stream *st)
   }
   stprintf(st, "\tAssigned address: %d\n", addr);
   stprintf(st, "\tLast SOF Frame: %d\n", (dsts >> 8) & 0x3fff);
-  for(int i = 0; i < NUM_ENDPOINTS; i++) {
-    stprintf(st, "\t\t[%d] = %3d 0x%08x 0x%08x\n",
+  stprintf(st, "\tIN Endpoints: (TX)\n");
+  for(int i = 0; i < uc->uc_num_endpoints; i++) {
+    uint32_t diepctl = reg_rd(OTG_FS_DIEPCTL(i));
+
+    char status[8];
+
+    status[0] = diepctl & (1 << 31) ? 'E' : ' ';
+    status[1] = diepctl & (1 << 30) ? 'D' : ' ';
+    status[2] = diepctl & (1 << 27) ? 'S' : ' ';
+    status[3] = diepctl & (1 << 26) ? 'C' : ' ';
+    status[4] = diepctl & (1 << 21) ? 'T' : ' ';
+    status[5] = diepctl & (1 << 17) ? 'N' : ' ';
+    status[6] = diepctl & (1 << 15) ? 'A' : ' ';
+    status[7] = 0;
+
+    usb_ep_t *ue = uc->uc_in_ue[i];
+
+    stprintf(st, "\t\t[%d] = %3d 0x%08x 0x%08x %s %d %s\n",
              i,
              reg_rd(OTG_FS_DTXFSTS(i)),
              reg_rd(OTG_FS_DIEPINT(i)),
-             reg_rd(OTG_FS_DIEPCTL(i)));
+             diepctl,
+             status,
+             (diepctl >> 22) & 0xf,
+             ue ? ue->ue_name : "N/A");
   }
 }
 
+
+static void
+probe_endpoints(usb_ctrl_t *uc)
+{
+  uc->uc_num_endpoints = 1;
+  for(int i = 1; i < MAX_NUM_ENDPOINTS; i++) {
+    if(!(reg_rd(OTG_FS_DIEPTXF(i)) & 0xffff))
+      break;
+    uc->uc_num_endpoints++;
+  }
+
+  printf("stm32f4_otgfs: %d endpoints\n", uc->uc_num_endpoints);
+}
 
 void
 stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
@@ -1031,9 +1065,14 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
   uc->uc_desc.idVendor = vid;
   uc->uc_desc.idProduct = pid;
 
+  clk_enable(CLK_OTGFS);
+  while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}
+
+  probe_endpoints(uc);
+
   init_interfaces(uc, q);
 
-  stm32f4_otgfs_init_regs();
+  stm32f4_otgfs_init_regs(uc->uc_num_endpoints);
 
   irq_enable(67, IRQ_LEVEL_NET);
 }
