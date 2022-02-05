@@ -749,7 +749,7 @@ task_init_late(void)
 
 
 
-static int
+static error_t
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
   task_t *t;

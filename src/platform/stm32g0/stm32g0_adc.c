@@ -93,7 +93,7 @@ stm32g0_adc_vref(void)
 }
 
 
-static int
+static error_t
 cmd_vref(cli_t *cli, int argc, char **argv)
 {
   cli_printf(cli, "vref: %dmV\n", stm32g0_adc_vref());

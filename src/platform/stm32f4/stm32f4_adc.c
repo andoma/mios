@@ -117,10 +117,10 @@ stm32f4_adc_vref(void)
 
 
 
-static int
+static error_t
 cmd_vref(cli_t *cli, int argc, char **argv)
 {
-  cli_printf(cli,"ADC Reference voltage: %d mV\n",
+  cli_printf(cli, "ADC Reference voltage: %d mV\n",
              stm32f4_adc_vref());
   return 0;
 }

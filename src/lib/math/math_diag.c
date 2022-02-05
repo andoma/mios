@@ -3,7 +3,7 @@
 #include <mios/cli.h>
 
 
-static int
+static error_t
 cmd_math_test(cli_t *cli, int argc, char **argv)
 {
   float v = argc;

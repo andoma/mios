@@ -9,7 +9,7 @@
 #include <mios/sys.h>
 
 
-static int
+static error_t
 cmd_reset(cli_t *cli, int argc, char **argv)
 {
   reboot();
@@ -19,12 +19,12 @@ cmd_reset(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("reset", cmd_reset);
 
 
-static int
+static error_t
 cmd_md(cli_t *cli, int argc, char **argv)
 {
   if(argc < 3) {
     cli_printf(cli, "md <start> <length>\n");
-    return -1;
+    return ERR_INVALID_ARGS;
   }
 
   const int start = atoix(argv[1]);
@@ -38,12 +38,12 @@ cmd_md(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("md", cmd_md);
 
 
-static int
+static error_t
 cmd_wr32(cli_t *cli, int argc, char **argv)
 {
   if(argc < 3) {
     cli_printf(cli, "wr32 <addr> <value>\n");
-    return -1;
+    return ERR_INVALID_ARGS;
   }
 
   const int addr = atoix(argv[1]);
@@ -60,12 +60,12 @@ CLI_CMD_DEF("wr32", cmd_wr32);
 
 
 
-static int
+static error_t
 cmd_rd32(cli_t *cli, int argc, char **argv)
 {
   if(argc < 2) {
     cli_printf(cli, "rd32 <start> [count]\n");
-    return -1;
+    return ERR_INVALID_ARGS;
   }
 
   const int start = atoix(argv[1]);
@@ -86,7 +86,7 @@ CLI_CMD_DEF("rd32", cmd_rd32);
 
 
 
-static int
+static error_t
 cmd_uptime(cli_t *cli, int argc, char **argv)
 {
   int64_t now = clock_get();
@@ -107,12 +107,12 @@ cmd_uptime(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("uptime", cmd_uptime);
 
 
-static int
+static error_t
 cmd_flash_info(cli_t *cli, int argc, char **argv)
 {
   const flash_iface_t *fi = flash_get_primary();
   if(fi == NULL)
-    return 0;
+    return ERR_NO_DEVICE;
 
   for(int i = 0; ; i++) {
     size_t size = fi->get_sector_size(fi, i);
@@ -130,7 +130,7 @@ cmd_flash_info(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("flash_info", cmd_flash_info);
 
 
-static int
+static error_t
 cmd_settings(cli_t *cli, int argc, char **argv)
 {
   pkv_show(NULL, cli->cl_stream);
@@ -140,7 +140,7 @@ cmd_settings(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("settings", cmd_settings)
 
 
-static int
+static error_t
 cmd_version(cli_t *cli, int argc, char **argv)
 {
   mios_print_version(cli->cl_stream);
@@ -164,7 +164,7 @@ static const char *reset_reasons[8] = {
 
 
 
-static int
+static error_t
 cmd_sysinfo(cli_t *cli, int argc, char **argv)
 {
   const struct serial_number sn = sys_get_serial_number();

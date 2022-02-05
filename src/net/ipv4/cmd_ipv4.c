@@ -3,7 +3,7 @@
 
 #include "net/netif.h"
 
-static int
+static error_t
 cmd_arp(cli_t *cli, int argc, char **argv)
 {
   const netif_t *ni;

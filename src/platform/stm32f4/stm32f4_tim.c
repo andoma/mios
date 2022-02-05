@@ -146,7 +146,7 @@ hrtimer_init(void)
 
 
 
-static int
+static error_t
 cmd_hrt(cli_t *cli, int argc, char **argv)
 {
   int64_t now = clock_get_irq_blocked();

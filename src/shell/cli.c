@@ -2,8 +2,48 @@
 #include <stdio.h>
 
 #include <mios/cli.h>
+#include <mios/mios.h>
 #include <mios/error.h>
 #include <mios/version.h>
+
+
+static const char *errmsg[] = {
+  [-ERR_OK                    ] = "OK",
+  [-ERR_NOT_IMPLEMENTED       ] = "NOT_IMPLEMENTED",
+  [-ERR_TIMEOUT               ] = "TIMEOUT",
+  [-ERR_OPERATION_FAILED      ] = "OPERATION_FAILED",
+  [-ERR_TX                    ] = "TX",
+  [-ERR_RX                    ] = "RX",
+  [-ERR_NOT_READY             ] = "NOT_READY",
+  [-ERR_NO_BUFFER             ] = "NO_BUFFER",
+  [-ERR_MTU_EXCEEDED          ] = "MTU_EXCEEDED",
+  [-ERR_INVALID_ID            ] = "INVALID_ID",
+  [-ERR_DMA_ERROR             ] = "DMA_ERROR",
+  [-ERR_BUS_ERROR             ] = "BUS_ERROR",
+  [-ERR_ARBITRATION_LOST      ] = "ARBITRATION_LOST",
+  [-ERR_BAD_STATE             ] = "BAD_STATE",
+  [-ERR_INVALID_ADDRESS       ] = "INVALID_ADDRESS",
+  [-ERR_NO_DEVICE             ] = "NO_DEVICE",
+  [-ERR_MISMATCH              ] = "MISMATCH",
+  [-ERR_NOT_FOUND             ] = "NOT_FOUND",
+  [-ERR_CHECKSUM_ERROR        ] = "CHECKSUM_ERROR",
+  [-ERR_MALFORMED             ] = "MALFORMED",
+  [-ERR_INVALID_RPC_ID        ] = "INVALID_RPC_ID",
+  [-ERR_INVALID_RPC_ARGS      ] = "INVALID_RPC_ARGS",
+  [-ERR_NO_FLASH_SPACE        ] = "NO_FLASH_SPACE",
+  [-ERR_INVALID_ARGS          ] = "INVALID_ARGS",
+  [-ERR_INVALID_LENGTH        ] = "INVALID_LENGTH",
+};
+
+
+const char *
+error_to_string(error_t e)
+{
+  unsigned int index = -e;
+  if(index >= ARRAYSIZE(errmsg))
+    return "???";
+  return errmsg[index];
+}
 
 static int
 tokenize(char *buf, char **vec, int vecsize)
@@ -29,12 +69,12 @@ tokenize(char *buf, char **vec, int vecsize)
 }
 
 
-int
+static void
 dispatch_command(cli_t *c, char *line)
 {
   int argc = tokenize(line, c->cl_argv, CLI_MAX_ARGC);
   if(argc == 0)
-    return 0;
+    return;
 
   extern unsigned long _clicmd_array_begin;
   extern unsigned long _clicmd_array_end;
@@ -47,16 +87,20 @@ dispatch_command(cli_t *c, char *line)
     for(; clicmd != clicmd_array_end; clicmd++) {
       cli_printf(c, "\t%s\n", clicmd->cmd);
     }
-    return 0;
+    return;
   }
 
   for(; clicmd != clicmd_array_end; clicmd++) {
     if(!strcmp(c->cl_argv[0], clicmd->cmd)) {
-      return clicmd->dispatch(c, argc, c->cl_argv);
+      error_t err = clicmd->dispatch(c, argc, c->cl_argv);
+
+      if(err) {
+        cli_printf(c, "! Error: %s\n", error_to_string(err));
+      }
+      return;
     }
   }
   cli_printf(c, "No such command\n");
-  return 1;
 }
 
 

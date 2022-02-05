@@ -417,7 +417,7 @@ static const char *dhcp_state_str[] = {
   [DHCP_STATE_RENEWING] = "renewing"
 };
 
-static int
+static error_t
 cmd_dhcp(cli_t *cli, int argc, char **argv)
 {
   ether_netif_t *eni;

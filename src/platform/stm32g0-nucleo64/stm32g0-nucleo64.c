@@ -51,7 +51,7 @@ i2c_map_name(char out[static 20], uint8_t instance, gpio_t scl, gpio_t sda)
            'a' + (sda >> 4), sda & 0xf);
 }
 
-static int
+static error_t
 cmd_i2c_makebus(cli_t *cli, int argc, char **argv)
 {
   char tmp[20];
@@ -70,10 +70,11 @@ cmd_i2c_makebus(cli_t *cli, int argc, char **argv)
                              GPIO_PULL_UP);
         if(i2c == NULL) {
           cli_printf(cli, "Valid bus but failed to create (busy?)\n");
+          return ERR_BAD_STATE;
         } else {
           cli_printf(cli, "Created ok\n");
+          return 0;
         }
-        return 0;
       }
     }
   }

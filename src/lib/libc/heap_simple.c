@@ -136,7 +136,7 @@ heap_dump0(heap_block_t *hb)
 
 
 
-static int
+static error_t
 cmd_mem(cli_t *cli, int argc, char **argv)
 {
   mutex_lock(&heap_mutex);

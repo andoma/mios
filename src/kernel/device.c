@@ -18,7 +18,7 @@ device_not_implemented(device_t *d)
 }
 
 
-static int
+static error_t
 cmd_dev(cli_t *cli, int argc, char **argv)
 {
   cli_printf(cli, "\nDevices:\n");

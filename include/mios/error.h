@@ -24,5 +24,7 @@ typedef enum {
   ERR_INVALID_RPC_ID        = -20,
   ERR_INVALID_RPC_ARGS      = -21,
   ERR_NO_FLASH_SPACE        = -22,
+  ERR_INVALID_ARGS          = -23,
+  ERR_INVALID_LENGTH        = -24,
 } error_t;
 

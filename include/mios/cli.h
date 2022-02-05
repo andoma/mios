@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <mios/error.h>
 
 #define CLI_LINE_BUF_SIZE 32
 #define CLI_MAX_ARGC 10
@@ -27,7 +28,7 @@ typedef struct cli {
 
 typedef struct cli_cmd {
   const char *cmd;
-  int (*dispatch)(cli_t *cli, int argc, char **argv);
+  error_t (*dispatch)(cli_t *cli, int argc, char **argv);
 } cli_cmd_t;
 
 #define CLI_GLUE(a, b) a ## b

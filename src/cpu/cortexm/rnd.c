@@ -42,7 +42,7 @@ rand(void)
 
 
 #include <mios/cli.h>
-static int
+static error_t
 cmd_rand(cli_t *cli, int argc, char **argv)
 {
   cli_printf(cli, "%d\n", rand());

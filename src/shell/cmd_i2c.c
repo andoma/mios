@@ -3,18 +3,18 @@
 #include <mios/cli.h>
 #include <mios/io.h>
 
-static int
+static error_t
 cmd_i2c_scan(cli_t *cli, int argc, char **argv)
 {
   if(argc != 2) {
     cli_printf(cli, "i2c-scan <bus>\n");
-    return -1;
+    return ERR_INVALID_ARGS;
   }
   int bus_id = atoi(argv[1]);
   i2c_t *bus = i2c_get_bus(bus_id);
   if(bus == NULL) {
     cli_printf(cli, "i2c bus %d not available\n", bus_id);
-    return 0;
+    return ERR_NO_DEVICE;
   }
 
   for(int i = 0; i < 128; i++) {
@@ -35,12 +35,12 @@ CLI_CMD_DEF("i2c-scan", cmd_i2c_scan);
 
 
 
-static int
+static error_t
 cmd_i2c_read(cli_t *cli, int argc, char **argv)
 {
   if(argc != 5) {
     cli_printf(cli, "i2c-read <bus> <addr> <reg> <length>\n");
-    return -1;
+    return ERR_INVALID_ARGS;
   }
 
   const int bus_id = atoi(argv[1]);
@@ -50,37 +50,35 @@ cmd_i2c_read(cli_t *cli, int argc, char **argv)
   i2c_t *bus = i2c_get_bus(bus_id);
   if(bus == NULL) {
     cli_printf(cli, "i2c bus %d not available\n", bus_id);
-    return 0;
+    return ERR_NO_DEVICE;
   }
 
   if(len > 255) {
     cli_printf(cli, "Bad length:%d\n", len);
-    return 0;
+    return ERR_INVALID_LENGTH;
   }
 
   uint8_t *buf = malloc(len);
 
   error_t err = i2c_read_bytes(bus, addr, reg, buf, len);
 
-  if(err) {
-    cli_printf(cli, "ERR: %d\n", err);
-  } else {
+  if(!err) {
     sthexdump(cli->cl_stream, NULL, buf, len, 0);
   }
   free(buf);
-  return 0;
+  return err;
 }
 
 
 CLI_CMD_DEF("i2c-read", cmd_i2c_read);
 
 
-static int
+static error_t
 cmd_i2c_write(cli_t *cli, int argc, char **argv)
 {
   if(argc < 5) {
     cli_printf(cli, "i2c-read <bus> <addr> <reg> <value> ... \n");
-    return -1;
+    return ERR_INVALID_ARGS;
   }
 
   const int bus_id = atoi(argv[1]);
@@ -89,7 +87,7 @@ cmd_i2c_write(cli_t *cli, int argc, char **argv)
   i2c_t *bus = i2c_get_bus(bus_id);
   if(bus == NULL) {
     cli_printf(cli, "i2c bus %d not available\n", bus_id);
-    return 0;
+    return ERR_NO_DEVICE;
   }
 
   argc -= 4;
@@ -102,12 +100,8 @@ cmd_i2c_write(cli_t *cli, int argc, char **argv)
     buf[1 + i] = atoix(argv[i]);
 
   error_t err = bus->rw(bus, addr, buf, argc + 1, NULL, 0);
-
-  if(err) {
-    cli_printf(cli, "ERR: %d\n", err);
-  }
   free(buf);
-  return 0;
+  return err;
 }
 
 

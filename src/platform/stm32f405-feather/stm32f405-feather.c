@@ -78,11 +78,11 @@ neopix(uint8_t r, uint8_t g, uint8_t b)
 #include <mios/cli.h>
 #include <stdlib.h>
 
-static int
+static error_t
 cmd_neopix(cli_t *c, int argc, char **argv)
 {
   if(argc < 4)
-    return -1;
+    return ERR_INVALID_ARGS;
   neopix(atoi(argv[1]),atoi(argv[2]),atoi(argv[3]));
   return 0;
 }
