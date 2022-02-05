@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mios/error.h>
+
 #define ADC123_IN0   GPIO_PA(0)
 #define ADC123_IN1   GPIO_PA(1)
 #define ADC123_IN2   GPIO_PA(2)
