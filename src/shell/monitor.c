@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <mios/cli.h>
 #include <mios/flash.h>
@@ -133,6 +134,13 @@ CLI_CMD_DEF("flash_info", cmd_flash_info);
 static error_t
 cmd_settings(cli_t *cli, int argc, char **argv)
 {
+  if(argc == 3 && !strcmp(argv[1], "erase")) {
+    return pkv_set(NULL, argv[2], NULL, 0);
+  }
+  if(argc == 2 && !strcmp(argv[1], "erase-all")) {
+    return pkv_clear(NULL);
+  }
+
   pkv_show(NULL, cli->cl_stream);
   return 0;
 }

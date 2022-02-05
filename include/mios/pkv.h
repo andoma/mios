@@ -19,6 +19,7 @@ error_t pkv_gc(struct pkv *pkv);
 
 void pkv_show(struct pkv *pkv, stream_t *out);
 
+error_t pkv_clear(struct pkv *pkv);
 
 
 error_t pkv_get(struct pkv *pkv, const char *key, void *buf, size_t *len);

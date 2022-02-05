@@ -267,6 +267,26 @@ pkv_set_locked(struct pkv *pkv, int type,
 
 
 static error_t
+pkv_clear_locked(pkv_t *pkv)
+{
+  int next_sector;
+
+  if(pkv->sector_a == pkv->active_sector) {
+    next_sector = pkv->sector_b;
+  } else {
+    next_sector = pkv->sector_a;
+  }
+  error_t err = pkv->fif->erase_sector(pkv->fif, next_sector);
+  if(!err) {
+    pkv->active_version++;
+    pkv->active_sector = next_sector;
+    err = write_sector_header(pkv, pkv->active_sector, pkv->active_version);
+  }
+  return err;
+}
+
+
+static error_t
 pkv_gc_locked(pkv_t *pkv, const void *skip_key, size_t skip_keysize)
 {
   error_t err = 0;
@@ -533,8 +553,11 @@ pkv_show(struct pkv *pkv, stream_t *out)
 
   mutex_lock(&pkv->mutex);
 
-  stprintf(out, "Active Sector: %d  Active Version: %d\n",
-           pkv->active_sector, pkv->active_version);
+  stprintf(out, "Active Sector: %d (a:%d b:%d) Active Version: %d\n",
+           pkv->active_sector,
+           pkv->sector_a,
+           pkv->sector_b,
+           pkv->active_version);
 
   size_t offset = 12;
   while(1) {
@@ -587,4 +610,18 @@ pkv_show(struct pkv *pkv, stream_t *out)
   }
   mutex_unlock(&pkv->mutex);
   free(buf);
+}
+
+error_t
+pkv_clear(struct pkv *pkv)
+{
+  pkv = pkv_obtain(pkv);
+
+  if(pkv == NULL)
+    return ERR_NO_DEVICE;
+
+  mutex_lock(&pkv->mutex);
+  error_t err = pkv_clear_locked(pkv);
+  mutex_unlock(&pkv->mutex);
+  return err;
 }
