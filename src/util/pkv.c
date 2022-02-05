@@ -497,11 +497,11 @@ pkv_get_global0(void)
       flash_sector_type_t t = fif->get_sector_type(fif, s);
       if(t == 0)
         return NULL;
+      s++;
       if(t == FLASH_SECTOR_TYPE_PKV) {
-        sectors[i] = s;
+        sectors[i] = s - 1;
         break;
       }
-      s++;
     }
   }
 
