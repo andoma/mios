@@ -28,13 +28,11 @@ tokenize(char *buf, char **vec, int vecsize)
   return n;
 }
 
-#define CLI_MAX_ARGC 8
 
 int
 dispatch_command(cli_t *c, char *line)
 {
-  char *argv[CLI_MAX_ARGC];
-  int argc = tokenize(line, argv, CLI_MAX_ARGC);
+  int argc = tokenize(line, c->cl_argv, CLI_MAX_ARGC);
   if(argc == 0)
     return 0;
 
@@ -44,7 +42,7 @@ dispatch_command(cli_t *c, char *line)
   cli_cmd_t *clicmd = (void *)&_clicmd_array_begin;
   cli_cmd_t *clicmd_array_end = (void *)&_clicmd_array_end;
 
-  if(!strcmp(argv[0], "help")) {
+  if(!strcmp(c->cl_argv[0], "help")) {
     cli_printf(c, "Available commands:\n");
     for(; clicmd != clicmd_array_end; clicmd++) {
       cli_printf(c, "\t%s\n", clicmd->cmd);
@@ -53,8 +51,8 @@ dispatch_command(cli_t *c, char *line)
   }
 
   for(; clicmd != clicmd_array_end; clicmd++) {
-    if(!strcmp(argv[0], clicmd->cmd)) {
-      return clicmd->dispatch(c, argc, argv);
+    if(!strcmp(c->cl_argv[0], clicmd->cmd)) {
+      return clicmd->dispatch(c, argc, c->cl_argv);
     }
   }
   cli_printf(c, "No such command\n");

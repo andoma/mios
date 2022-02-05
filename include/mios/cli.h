@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #define CLI_LINE_BUF_SIZE 32
+#define CLI_MAX_ARGC 10
 
 typedef struct cli {
 
@@ -16,6 +17,8 @@ typedef struct cli {
 
   // This includes a terminating 0 at all times
   char cl_buf[CLI_LINE_BUF_SIZE];
+
+  char *cl_argv[CLI_MAX_ARGC];
 
 } cli_t;
 
