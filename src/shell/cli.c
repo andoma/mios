@@ -33,6 +33,7 @@ static const char *errmsg[] = {
   [-ERR_NO_FLASH_SPACE        ] = "NO_FLASH_SPACE",
   [-ERR_INVALID_ARGS          ] = "INVALID_ARGS",
   [-ERR_INVALID_LENGTH        ] = "INVALID_LENGTH",
+  [-ERR_NOT_IDLE              ] = "NOT_IDLE",
 };
 
 

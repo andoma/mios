@@ -26,5 +26,7 @@ typedef enum {
   ERR_NO_FLASH_SPACE        = -22,
   ERR_INVALID_ARGS          = -23,
   ERR_INVALID_LENGTH        = -24,
+  ERR_NOT_IDLE              = -25,
 } error_t;
 
+const char *error_to_string(error_t e);
