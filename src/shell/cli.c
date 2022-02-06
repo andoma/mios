@@ -34,6 +34,7 @@ static const char *errmsg[] = {
   [-ERR_INVALID_ARGS          ] = "INVALID_ARGS",
   [-ERR_INVALID_LENGTH        ] = "INVALID_LENGTH",
   [-ERR_NOT_IDLE              ] = "NOT_IDLE",
+  [-ERR_BAD_CONFIG            ] = "BAD_CONFIG",
 };
 
 
