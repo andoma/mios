@@ -49,7 +49,7 @@ pendsv:
         isb
         pop {pc}
 
-        .section    .isr_vector,"aw",%progbits
+        .section    .isr_vector,"a",%progbits
         .align      2
         .global     vectors
         .type   vectors, %object
