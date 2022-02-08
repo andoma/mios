@@ -8,6 +8,8 @@ CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm.h
 
 TOOLCHAIN := arm-none-eabi-
 
+GDB ?= ${TOOLCHAIN}gdb
+
 LDFLAGS += -e start
 
 NOFPU := -mgeneral-regs-only
@@ -20,3 +22,6 @@ SRCS += ${C}/isr.s \
 	${C}/rnd.c \
 
 ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}
+
+stlink: ${O}/build.elf
+	${GDB} -ex "target extended-remote localhost:3333" $<

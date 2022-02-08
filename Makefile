@@ -4,6 +4,8 @@ PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
 
+.DEFAULT_GOAL := ${O}/build.elf
+
 -include local.mk
 
 include $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/mk/$(shell uname).mk
@@ -129,9 +131,6 @@ run: build.lm3s811evb/build.elf
 
 builtindefs:
 	${TOOLCHAIN}gcc  ${CFLAGS} -dM -E - < /dev/null
-
-stlink: ${O}/build.elf
-	gdb-multiarch -ex "target extended-remote localhost:3333" $<
 
 include ${SRC}/platform/platforms.mk
 
