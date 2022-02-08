@@ -7,4 +7,4 @@ SRCS += ${SRC}/util/crc32.c \
 	${SRC}/util/dsig.c \
 	${SRC}/util/ntcpoly.c \
 
-${MO}/src/util/%.o : CFLAGS += ${NOFPU}
+${MOS}/util/%.o : CFLAGS += ${NOFPU}

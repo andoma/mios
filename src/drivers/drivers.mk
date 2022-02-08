@@ -15,5 +15,5 @@ SRCS-${ENABLE_SX1280} += \
 SRCS-${ENABLE_HDC1080} += \
 	${SRC}/drivers/hdc1080.c
 
-${MO}/src/drivers/sx1280/%.o : CFLAGS += ${NOFPU}
-${MO}/src/drivers/sx1280_mios.o : CFLAGS += ${NOFPU}
+${MOS}/drivers/sx1280/%.o : CFLAGS += ${NOFPU}
+${MOS}/drivers/sx1280_mios.o : CFLAGS += ${NOFPU}

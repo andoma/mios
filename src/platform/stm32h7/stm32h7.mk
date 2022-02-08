@@ -22,5 +22,5 @@ SRCS-${ENABLE_NET_IPV4} += \
 	${P}/stm32h7_eth.c \
 
 
-${MO}/src/platform/stm32h7/%.o : CFLAGS += ${NOFPU}
+${MOS}/platform/stm32h7/%.o : CFLAGS += ${NOFPU}
 

@@ -3,4 +3,4 @@ SRCS += ${SRC}/kernel/mios.c \
 	${SRC}/kernel/task.c \
 	${SRC}/kernel/device.c \
 
-${MO}/src/kernel/%.o : CFLAGS += ${NOFPU}
+${MOS}/kernel/%.o : CFLAGS += ${NOFPU}

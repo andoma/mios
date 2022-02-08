@@ -12,7 +12,7 @@ GLOBALDEPS += ${T}Makefile
 
 SRC := ${T}src
 
-MO := ${O}/${T}
+MOS := ${O}/${T}src
 
 #
 # Include platform- (which in turn include CPU-) specific things
