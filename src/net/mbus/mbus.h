@@ -63,3 +63,5 @@ pbuf_t *mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 
 #define MBUS_OP_RPC_REPLY           12
 // [u8 txid] [var out-data]
+
+#define MBUS_OP_OTA_XFER            13

@@ -13,9 +13,6 @@ SECTIONS {
                 *(.text.*)
                 *(.rodata)
                 *(.rodata.*)
-                . = ALIGN(4);
-                PROVIDE(_build_id = .);
-                KEEP(*(.note.gnu.build-id))
         } >FLASH
 
         .inits : {
@@ -50,7 +47,14 @@ SECTIONS {
                 . = ALIGN(4);
         } >FLASH
 
+        .build_id : {
+                . = ALIGN(4);
+                PROVIDE(_build_id = .);
+                KEEP(*(.note.gnu.build-id))
+        } >FLASH
+
         .ARM.exidx : {
+                . = ALIGN(4);
                  *(.ARM.exidx*)
                  *(.gnu.linkonce.armexidx.*)
                  _etext = .;

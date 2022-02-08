@@ -1,6 +1,6 @@
 C := ${SRC}/cpu/cortexm
 
-GLOBALDEPS += ${C}/cortexm.mk
+GLOBALDEPS += ${C}/cortexm.mk ${C}/cortexm.ld
 
 CPPFLAGS += -iquote${C}
 

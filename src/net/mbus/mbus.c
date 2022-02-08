@@ -79,6 +79,13 @@ mbus_handle_ping(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
 
 typedef pbuf_t *(*ophandler_t)(struct mbus_netif *, pbuf_t *, uint8_t);
 
+__attribute__((weak))
+pbuf_t *
+mbus_ota_upgrade(struct mbus_netif *ni, pbuf_t *pb, uint8_t src_addr)
+{
+  return pb;
+}
+
 static const ophandler_t ophandlers[16] = {
   [MBUS_OP_PING]        = mbus_handle_ping,
   [MBUS_OP_PONG]        = mbus_handle_none,
@@ -93,7 +100,7 @@ static const ophandler_t ophandlers[16] = {
   [MBUS_OP_RPC_INVOKE]  = mbus_handle_rpc_invoke,
   [MBUS_OP_RPC_ERR]     = mbus_handle_none,
   [MBUS_OP_RPC_REPLY]   = mbus_handle_none,
-  [13]                  = mbus_handle_none,
+  [MBUS_OP_OTA_XFER]    = mbus_ota_upgrade,
   [14]                  = mbus_handle_none,
   [15]                  = mbus_handle_none,
 };
