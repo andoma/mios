@@ -76,11 +76,7 @@ exc_usage_fault(void)
 {
   uint32_t *psp;
   asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
-
   uint16_t ufsr = *UFSR;
-  if(ufsr & 0x2) {
-    panic("Invalid use of EPSR, PSP:%p ", psp);
-  }
 #ifdef __ARM_FP
   if(ufsr & 0x8) {
     // NOCP (ie, tried to use FPU)
@@ -112,6 +108,13 @@ exc_usage_fault(void)
     return;
   }
 #endif
+  if(ufsr & 0x2) {
+    panic("Invalid use of EPSR, PC:0x%x ", psp[6]);
+  }
+  if(ufsr & 0x100) {
+    panic("Unaligned access, PC:0x%x ", psp[6]);
+  }
+
   panic("Usage fault: 0x%x sp=%p", ufsr, __builtin_frame_address(0));
 }
 
