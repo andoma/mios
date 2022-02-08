@@ -155,8 +155,8 @@ task_switch(void *cur_sp)
 }
 
 
-static void
-task_end(void)
+void
+task_exit(void *arg)
 {
   task_t *const curtask = task_current();
 
@@ -267,7 +267,7 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   }
 #endif
 
-  t->t_sp = cpu_stack_init(sp, entry, arg, task_end);
+  t->t_sp = cpu_stack_init(sp, entry, arg, task_exit);
   t->t_sp_bottom = sp_bottom;
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);

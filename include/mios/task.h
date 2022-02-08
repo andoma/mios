@@ -119,6 +119,8 @@ void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                     const char *name, int flags, unsigned int prio);
 
+void task_exit(void *ret) __attribute__((noreturn));
+
 void *task_join(task_t *t);
 
 void task_wakeup(task_waitable_t *waitable, int all);
