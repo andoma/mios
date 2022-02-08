@@ -751,14 +751,17 @@ irq_67(void)
     if(gint & OTG_FS_GINT_RXFLVL) {
       const uint32_t rspr = reg_rd(OTG_FS_GRXSTSP);
       const uint32_t ep = rspr & 0xf;
-      usb_ep_t *ue = uc->uc_out_ue[ep];
-      if(ue == NULL) {
-        // Got packet on uninitialized endpoint, ignore
-        ep_cnak(ep);
-      } else {
-        const uint32_t status = (rspr >> 17) & 0xf;
-        const uint32_t bytes = (rspr >> 4) & 0x7ff;
-        ue->ue_completed(&uc->uc_dev, ue, status, bytes);
+      if(ep < MAX_NUM_ENDPOINTS) {
+        usb_ep_t *ue = uc->uc_out_ue[ep];
+        if(ue == NULL) {
+          // Got packet on uninitialized endpoint, ignore
+          if(ep < uc->uc_num_endpoints)
+            ep_cnak(ep);
+        } else {
+          const uint32_t status = (rspr >> 17) & 0xf;
+          const uint32_t bytes = (rspr >> 4) & 0x7ff;
+          ue->ue_completed(&uc->uc_dev, ue, status, bytes);
+        }
       }
     }
 
