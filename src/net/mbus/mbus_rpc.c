@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "irq.h"
 #include "net/pbuf.h"
 
 extern unsigned long _rpcdef_array_begin;
@@ -59,11 +60,12 @@ struct pbuf *
 mbus_rpc_error(struct mbus_netif *mni, struct pbuf *pb,
                uint8_t remote_addr, error_t err)
 {
-  pb = pbuf_trim(pb, pb->pb_pktlen - 2);
+  const uint8_t txid = *(const uint8_t *)pbuf_cdata(pb, 1);
+  pbuf_reset(pb, 0, 6);
   uint8_t *pkt = pbuf_data(pb, 0);
   pkt[0] = MBUS_OP_RPC_ERR;
-  uint8_t *errptr = pbuf_append(pb, sizeof(int32_t));
-  wr32_le(errptr, err);
+  pkt[1] = txid;
+  wr32_le(pkt + 2, err);
   return mbus_output(mni, pb, remote_addr);
 }
 
@@ -90,23 +92,34 @@ mbus_handle_rpc_invoke(struct mbus_netif *mni, struct pbuf *pb,
 
   const void *in = pkt + 6;
   const size_t in_len = pb->pb_pktlen - 6;
-
   const rpc_method_t *m = rpc_mbase + method_id;
 
   if(m->in_size != 0xffff && m->in_size != in_len) {
     return mbus_rpc_error(mni, pb, remote_addr, ERR_INVALID_RPC_ARGS);
   }
 
-  uint8_t reply[m->out_size]; // FIXME: Avoid VLA
-  error_t err = m->invoke(in, reply, in_len);
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  void *pbc = pbuf_data_get(1);
+  irq_permit(q);
+
+  memcpy(pbc, in, in_len);
+
+  void *reply = pb->pb_data + 8;
+
+  error_t err = m->invoke(pbc, reply, in_len);
+
+  q = irq_forbid(IRQ_LEVEL_NET);
+  pbuf_data_put(pbc);
+  irq_permit(q);
+
   if(err)
     return mbus_rpc_error(mni, pb, remote_addr, err);
 
-  pb = pbuf_trim(pb, pb->pb_pktlen - 2);
+  const uint8_t txid = *(const uint8_t *)pbuf_cdata(pb, 1);
+  pbuf_reset(pb, 6, 2 + m->out_size);
   pkt = pbuf_data(pb, 0);
   pkt[0] = MBUS_OP_RPC_REPLY;
-  void *outptr = pbuf_append(pb, m->out_size);
-  memcpy(outptr, reply, m->out_size);
+  pkt[1] = txid;
   return mbus_output(mni, pb, remote_addr);
 }
 

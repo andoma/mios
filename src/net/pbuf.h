@@ -29,6 +29,11 @@ typedef struct pbuf {
 
 } pbuf_t;
 
+static inline void pbuf_reset(pbuf_t *pb, size_t header_size, size_t len) {
+  pb->pb_offset = header_size;
+  pb->pb_buflen = len;
+  pb->pb_pktlen = len;
+}
 
 static inline void *pbuf_data(pbuf_t *pb, size_t offset) {
   return pb->pb_data + pb->pb_offset + offset;
