@@ -362,7 +362,6 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int baudrate,
 
   uart_mbus_t *um = calloc(1, sizeof(uart_mbus_t));
   STAILQ_INIT(&um->tx_queue);
-  um->um_mni.mni_hdr_len = 1;
 
   const unsigned int freq = clk_get_freq(clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;

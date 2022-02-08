@@ -37,18 +37,12 @@ mbus_crc32(struct pbuf *pb)
 pbuf_t *
 mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
 {
-  pb = pbuf_prepend(pb, mni->mni_hdr_len);
+  pb = pbuf_prepend(pb, 1);
   uint8_t *hdr = pbuf_data(pb, 0);
 
   const uint8_t addr = (dst_addr & 0xf) | (mni->mni_ni.ni_local_addr << 4);
 
-  switch(mni->mni_hdr_len) {
-  case 1:
-    hdr[0] = addr;
-    break;
-  default:
-    return pb;
-  }
+  hdr[0] = addr;
 
   uint32_t crc = mbus_crc32(pb);
   uint8_t *trailer = pbuf_append(pb, sizeof(uint32_t));
@@ -125,6 +119,16 @@ mbus_local(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr)
 }
 
 
+static void
+mbus_add_route(mbus_netif_t *act, uint16_t mask)
+{
+  mbus_netif_t *mni;
+  SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
+    mni->mni_active_hosts &= ~mask;
+  }
+  act->mni_active_hosts |= mask;
+}
+
 struct pbuf *
 mbus_input(struct netif *ni, struct pbuf *pb)
 {
@@ -150,15 +154,21 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   const uint8_t *hdr = pbuf_data(pb, 0);
   uint8_t addr = hdr[0];
-  pb = pbuf_drop(pb, mni->mni_hdr_len);
+  pb = pbuf_drop(pb, 1);
 
-  uint8_t dst_addr = addr & 0xf;
+  const uint8_t dst_addr = addr & 0xf;
+  const uint8_t src_addr = addr >> 4;
+
+  const uint16_t src_mask = 1 << src_addr;
+  if(!(mni->mni_active_hosts & src_mask)) {
+    mbus_add_route(mni, src_mask);
+  }
 
   if(ni->ni_local_addr == dst_addr || dst_addr == 0x7) {
     // Destined for us
-    return mbus_local(mni, pb, addr >> 4);
+    return mbus_local(mni, pb, src_addr);
   }
-  // FIXME: Add routing
+  // FIXME: Add forwarding
   return pb;
 }
 
@@ -256,24 +266,14 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr,
 static error_t
 mbus_control(socket_t *s, socket_ctl_t *sc)
 {
-  mbus_netif_t *mni;
-
   switch(sc->sc_op) {
   case SOCKET_CTL_ATTACH:
-    mni = SLIST_FIRST(&mbus_netifs);
-    if(mni == NULL)
-      return ERR_NO_DEVICE;
-
-    s->s_netif = &mni->mni_ni;
-    s->s_header_size = mni->mni_hdr_len;
+    s->s_header_size = 1;
     s->s_mtu = s->s_netif->ni_mtu - s->s_header_size - 4;
-
-    LIST_INSERT_HEAD(&mni->mni_ni.ni_sockets, s, s_netif_link);
     LIST_INSERT_HEAD(&mbus_sockets, s, s_proto_link);
     return 0;
 
   case SOCKET_CTL_DETACH:
-    LIST_REMOVE(s, s_netif_link);
     LIST_REMOVE(s, s_proto_link);
     return 0;
   }
@@ -284,28 +284,32 @@ mbus_control(socket_t *s, socket_ctl_t *sc)
 static pbuf_t *
 mbus_send(socket_t *s, pbuf_t *pb)
 {
-  if(pb->pb_flags & PBUF_BCAST) {
-    mbus_netif_t *mni, *n;
+  mbus_netif_t *mni, *n;
 
-    for(mni = SLIST_FIRST(&mbus_netifs); mni != NULL; mni = n) {
-      n = SLIST_NEXT(mni, mni_global_link);
+  if(!(pb->pb_flags & PBUF_BCAST)) {
+    const uint16_t m = 1 << s->s_remote_addr;
 
-      if(n == NULL)
-        return mbus_output(mni, pb, 7);
-
-      pbuf_t *copy = pbuf_copy(pb, 0);
-      if(copy != NULL) {
-        copy = mbus_output(mni, copy, 7);
-        if(copy != NULL)
-          pbuf_free(copy);
+    SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
+      if(m & mni->mni_active_hosts) {
+        return mbus_output(mni, pb, s->s_remote_addr);
       }
     }
-    return pb;
   }
 
-  return mbus_output((mbus_netif_t *)s->s_netif, pb, s->s_remote_addr);
+  for(mni = SLIST_FIRST(&mbus_netifs); mni != NULL; mni = n) {
+    n = SLIST_NEXT(mni, mni_global_link);
+
+    if(n == NULL)
+      return mbus_output(mni, pb, 7);
+
+    pbuf_t *copy = pbuf_copy(pb, 0);
+    if(copy != NULL) {
+      copy = mbus_output(mni, copy, 7);
+      if(copy != NULL)
+        pbuf_free(copy);
+    }
+  }
+  return pb;
 }
-
-
 
 NET_SOCKET_PROTO_DEF(AF_MBUS, 0, mbus_control, mbus_send);

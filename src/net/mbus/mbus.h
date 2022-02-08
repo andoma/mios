@@ -15,7 +15,7 @@ typedef struct mbus_netif {
   // Replace with netif output()?
   pbuf_t *(*mni_output)(struct mbus_netif *mni, pbuf_t *pb);
 
-  uint8_t mni_hdr_len;
+  uint16_t mni_active_hosts;
 
   uint32_t mni_rx_packets;
   uint32_t mni_rx_bytes;

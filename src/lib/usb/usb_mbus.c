@@ -199,7 +199,6 @@ usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
                     um, mbus_txco, mbus_tx_reset,
                     USB_ENDPOINT_BULK, 0x80, 0x1, 32);
 
-  um->um_mni.mni_hdr_len = 1;
   um->um_mni.mni_output = usb_mbus_output;
   um->um_mni.mni_ni.ni_buffers_avail = buffers_avail;
   um->um_mni.mni_ni.ni_mtu = 32;
