@@ -138,3 +138,12 @@ rpc_ping(const void *in, void *out, size_t in_size)
 }
 
 RPC_DEF("ping", 0, 0, rpc_ping, 0);
+
+static error_t
+rpc_buildid(const void *in, void *out, size_t in_size)
+{
+  memcpy(out, mios_build_id(), 20);
+  return 0;
+}
+
+RPC_DEF("buildid", 0, 20, rpc_buildid, 0);
