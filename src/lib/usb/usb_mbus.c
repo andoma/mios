@@ -109,7 +109,8 @@ do_tx(usb_mbus_t *um)
   usb_ep_t *ue = &um->iface->ui_endpoints[1]; // IN
 
   if(ue->ue_running) {
-    ue->ue_vtable->write(ue->ue_dev, ue, pb->pb_data, pb->pb_buflen);
+    ue->ue_vtable->write(ue->ue_dev, ue, pb->pb_data + pb->pb_offset,
+                         pb->pb_buflen);
     um->tx_on = 1;
   }
   pbuf_free_irq_blocked(pb);
