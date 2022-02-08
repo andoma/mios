@@ -49,6 +49,8 @@ get_sector_offset(unsigned int sector)
 #define FLASH_SR      (FLASH_BASE + 0x0c)
 #define FLASH_CR      (FLASH_BASE + 0x10)
 
+#define IWDG_KR  0x40003000
+
 static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
 
 static inline void __attribute__((always_inline))
@@ -63,6 +65,7 @@ flash_wait_ready(void)
     if(*SYST_CSR & 0x10000) {
       clock += 1000000 / HZ;
     }
+    reg_wr(IWDG_KR, 0xAAAA);
   }
 }
 
@@ -89,7 +92,7 @@ flash_get_sector_size(const struct flash_iface *fif, int sector)
 }
 
 
-static void __attribute__((section("ramcode")))
+static void __attribute__((section("ramcode"),noinline))
 flash_erase_sector0(int sector)
 {
   reg_wr(FLASH_CR, 0x2 | (sector << 3));
@@ -203,7 +206,7 @@ flash_compare(const struct flash_iface *fif, int sector,
 
 
 
-static void  __attribute__((section("ramcode")))
+static void  __attribute__((section("ramcode"),noinline))
 flash_multi_write0(uint32_t erase_mask,
                    const flash_multi_write_chunks_t *chunks,
                    const void *src_base,
@@ -214,15 +217,25 @@ flash_multi_write0(uint32_t erase_mask,
       flash_erase_sector0(i);
   }
 
+  while(reg_rd(FLASH_SR) & (1 << 16)) {
+  }
+
+  reg_wr(FLASH_CR, 0x1 | (0 << 8));
+
   for(int i = 0; i < chunks->num_chunks; i++) {
     const flash_multi_write_chunk_t *c = &chunks->chunks[i];
 
+    reg_wr(IWDG_KR, 0xAAAA);
+
     const uint8_t *src = c->src_offset + src_base;
     const size_t len = c->length;
-    volatile uint8_t *dst = (uint8_t *)(0x8000000 + c->dst_offset);
+    volatile uint8_t *dst = (uint8_t *)c->dst_offset;
 
     for(size_t i = 0; i < len; i++)
       dst[i] = src[i];
+  }
+
+  while(reg_rd(FLASH_SR) & (1 << 16)) {
   }
 
   if(flags & FLASH_MULTI_WRITE_CPU_REBOOT) {
@@ -248,19 +261,19 @@ flash_multi_write(const struct flash_iface *fif,
     const size_t sec_size = get_sector_size(i);
     if(sec_size == 0)
       break;
-    const size_t sec_off = get_sector_offset(i);
+
+    const size_t sec_off = get_sector_offset(i) + 0x08000000;
+
     for(int j = 0; j < chunks->num_chunks; j++) {
       const flash_multi_write_chunk_t *c = &chunks->chunks[j];
       const size_t start = c->dst_offset;
       const size_t end = start + (c->length - 1);
       if((start >= sec_off && start < sec_off + sec_size) ||
-         (end >= sec_off && end < sec_off + sec_size))
-        erase_mask |= (1 << j);
+         (end >= sec_off && end < sec_off + sec_size)) {
+        erase_mask |= (1 << i);
+      }
     }
   }
-
-  printf("To erase: %x\n", erase_mask);
-  return;
 
   int q = irq_forbid(IRQ_LEVEL_ALL);
   flash_unlock();
