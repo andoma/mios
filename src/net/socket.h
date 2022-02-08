@@ -85,6 +85,6 @@ typedef struct socket_proto {
 } socket_proto_t;
 
 #define NET_SOCKET_PROTO_DEF(family, protocol, ctl, xmit)               \
-  static socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl, xmit };
+  static const socket_proto_t MIOS_JOIN(sockfam, __LINE__) __attribute__ ((used, section("netsock"))) = { family, protocol, ctl, xmit };
 
 void net_wakeup_socket(struct socket *s);

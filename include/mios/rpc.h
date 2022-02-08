@@ -18,4 +18,4 @@ typedef struct rpc_method {
 #define RPC_MAY_BLOCK 0x1
 
 #define RPC_DEF(name, in_size, out_size, fn, flags)                     \
-  static rpc_method_t MIOS_JOIN(rpc, __LINE__) __attribute__ ((used, section("rpcdef"))) = { name, (void *)fn, in_size, out_size, flags};
+  static const rpc_method_t MIOS_JOIN(rpc, __LINE__) __attribute__ ((used, section("rpcdef"))) = { name, (void *)fn, in_size, out_size, flags};
