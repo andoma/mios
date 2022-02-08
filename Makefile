@@ -1,14 +1,16 @@
--include local.mk
+T := $(dir $(lastword $(MAKEFILE_LIST)))
 
 PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
 
-T := $(shell realpath --relative-to ${CURDIR} $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+-include local.mk
 
-GLOBALDEPS += ${T}/Makefile
+include $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/mk/$(shell uname).mk
 
-SRC := ${T}/src
+GLOBALDEPS += ${T}Makefile
+
+SRC := ${T}src
 
 MO := ${O}/${T}
 
@@ -23,7 +25,7 @@ CFLAGS += -Wframe-larger-than=128
 
 CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
-CPPFLAGS += -I${T}/include -I${SRC} -I${O} -include ${O}/include/config.h
+CPPFLAGS += -I${T}include -I${SRC} -I${O} -include ${O}/include/config.h
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 CFLAGS += -ffunction-sections -fdata-sections
@@ -101,9 +103,7 @@ clean:
 	rm -rf "${O}"
 
 
-GITVER_MD5 := md5sum
-
-GITVER_VARGUARD = $(1)_GUARD_$(shell echo $($(1)) $($(2)) $($(3)) | ${GITVER_MD5} | cut -d ' ' -f 1)
+GITVER_VARGUARD = $(1)_GUARD_$(shell echo $($(1)) $($(2)) $($(3)) | ${MD5SUM} | cut -d ' ' -f 1)
 
 GIT_DESC_MIOS_OUTPUT ?= $(shell cd "$(T)" && git describe --always --dirty 2>/dev/null)
 GIT_DESC_APP_OUTPUT  ?= $(shell git describe --always --dirty 2>/dev/null)
