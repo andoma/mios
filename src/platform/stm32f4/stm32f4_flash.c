@@ -4,7 +4,6 @@
 #include <mios/flash.h>
 
 #include "stm32f4_reg.h"
-#include "stm32f4_flash.h"
 
 #include "systick.h"
 #include "irq.h"
