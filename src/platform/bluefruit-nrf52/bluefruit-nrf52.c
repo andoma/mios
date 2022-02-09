@@ -21,6 +21,7 @@ board_init_console(void)
 }
 
 
+__attribute__((noreturn))
 static void *
 blinker(void *arg)
 {
@@ -37,7 +38,6 @@ blinker(void *arg)
     gpio_set_output(LED_BLUE, 0);
     usleep(500000);
   }
-  return NULL;
 }
 
 static void __attribute__((constructor(800)))

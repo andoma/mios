@@ -39,6 +39,7 @@ board_setup_clocks(void)
 }
 
 
+__attribute__((noreturn))
 static void *
 blinker(void *arg)
 {
@@ -49,7 +50,6 @@ blinker(void *arg)
     gpio_set_output(GPIO_PD(12), 0);
     usleep(500000);
   }
-  return NULL;
 }
 
 

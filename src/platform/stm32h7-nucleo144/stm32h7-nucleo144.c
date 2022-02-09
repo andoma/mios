@@ -32,7 +32,7 @@ board_init_console(void)
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 }
 
-
+__attribute__((noreturn))
 static void *
 blinker(void *arg)
 {
@@ -42,7 +42,6 @@ blinker(void *arg)
     usleep(500000);
     gpio_set_output(BLINK_GPIO, 1);
   }
-  return NULL;
 }
 
 static void __attribute__((constructor(800)))

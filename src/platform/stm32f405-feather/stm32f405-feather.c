@@ -89,7 +89,7 @@ cmd_neopix(cli_t *c, int argc, char **argv)
 
 CLI_CMD_DEF("neopix", cmd_neopix);
 
-
+__attribute__((noreturn))
 static void *
 blinker(void *arg)
 {
@@ -108,7 +108,6 @@ blinker(void *arg)
     usleep(500000);
     gpio_set_output(BLINK_GPIO, 1); // Red LED
   }
-  return NULL;
 }
 
 static void __attribute__((constructor(800)))

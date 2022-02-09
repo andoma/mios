@@ -36,6 +36,7 @@ pcs_shell_write(struct stream *s, const void *buf, size_t size)
 }
 
 
+__attribute__((noreturn))
 static void *
 pcs_shell(void *arg)
 {
@@ -46,7 +47,7 @@ pcs_shell(void *arg)
 
   cli_on_stream(&pss.s, '>');
   pcs_close(pss.pcs);
-  return NULL;
+  task_exit(NULL);
 }
 
 

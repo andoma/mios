@@ -149,7 +149,7 @@ net_call_buffers_avail(void)
 }
 
 
-static void __attribute__((noreturn))
+static void *__attribute__((noreturn))
 net_thread(void *arg)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
@@ -274,7 +274,7 @@ net_init(void)
   pbuf_data_add(NULL, NULL);
   irq_permit(q);
 
-  task_create((void *)net_thread, NULL, 768, "net", 0, 5);
+  task_create(net_thread, NULL, 768, "net", 0, 5);
   net_periodic_timer.t_cb = periodic_timer_cb;
 }
 
