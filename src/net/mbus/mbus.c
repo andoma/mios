@@ -37,7 +37,7 @@ mbus_crc32(struct pbuf *pb)
 pbuf_t *
 mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
 {
-  pb = pbuf_prepend(pb, 1);
+  pb = pbuf_prepend(pb, MBUS_HDR_LEN);
   uint8_t *hdr = pbuf_data(pb, 0);
 
   const uint8_t addr = (dst_addr & 0xf) | (mni->mni_ni.ni_local_addr << 4);
@@ -161,7 +161,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   const uint8_t *hdr = pbuf_data(pb, 0);
   uint8_t addr = hdr[0];
-  pb = pbuf_drop(pb, 1);
+  pb = pbuf_drop(pb, MBUS_HDR_LEN);
 
   const uint8_t dst_addr = addr & 0xf;
   const uint8_t src_addr = addr >> 4;
@@ -230,11 +230,11 @@ static void *
 mbus_pcs_thread(void *arg)
 {
   mbus_netif_t *mni = arg;
-  const size_t mtu = mni->mni_ni.ni_mtu - mni->mni_hdr_len - 4;
+  const size_t mtu = mni->mni_ni.ni_mtu - MBUS_HDR_LEN - 4;
 
   while(1) {
 
-    pbuf_t *pb = pbuf_make(mni->mni_hdr_len, 1);
+    pbuf_t *pb = pbuf_make(MBUS_HDR_LEN, 1);
 
     pcs_poll_result_t ppr = pcs_wait(mni->mni_pcs, pbuf_data(pb, 0), mtu,
                                      clock_get(), mbus_pcs_wait_helper);
@@ -275,7 +275,7 @@ mbus_control(socket_t *s, socket_ctl_t *sc)
 {
   switch(sc->sc_op) {
   case SOCKET_CTL_ATTACH:
-    s->s_header_size = 1;
+    s->s_header_size = MBUS_HDR_LEN;
     s->s_mtu = s->s_netif->ni_mtu - s->s_header_size - 4;
     LIST_INSERT_HEAD(&mbus_sockets, s, s_proto_link);
     return 0;

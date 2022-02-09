@@ -7,6 +7,8 @@
 #include "net/pcs/pcs.h"
 #endif
 
+#define MBUS_HDR_LEN 1
+
 typedef struct mbus_netif {
   netif_t mni_ni;
 
