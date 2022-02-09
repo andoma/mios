@@ -61,7 +61,7 @@ mbus_rpc_error(struct mbus_netif *mni, struct pbuf *pb,
                uint8_t remote_addr, error_t err)
 {
   const uint8_t txid = *(const uint8_t *)pbuf_cdata(pb, 1);
-  pbuf_reset(pb, 0, 6);
+  pbuf_reset(pb, MBUS_HDR_LEN, 6);
   uint8_t *pkt = pbuf_data(pb, 0);
   pkt[0] = MBUS_OP_RPC_ERR;
   pkt[1] = txid;
@@ -116,7 +116,7 @@ mbus_handle_rpc_invoke(struct mbus_netif *mni, struct pbuf *pb,
     return mbus_rpc_error(mni, pb, remote_addr, err);
 
   const uint8_t txid = *(const uint8_t *)pbuf_cdata(pb, 1);
-  pbuf_reset(pb, 6, 2 + m->out_size);
+  pbuf_reset(pb, MBUS_HDR_LEN, 2 + m->out_size);
   pkt = pbuf_data(pb, 0);
   pkt[0] = MBUS_OP_RPC_REPLY;
   pkt[1] = txid;
