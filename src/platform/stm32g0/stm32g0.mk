@@ -18,3 +18,4 @@ SRCS += ${P}/stm32g0.c \
 	${P}/stm32g0_info.c \
 	${P}/stm32g0_idle.c \
 	${P}/stm32g0_dma.c \
+	${P}/stm32g0_flash.c \
