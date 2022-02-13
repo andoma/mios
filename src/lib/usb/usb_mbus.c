@@ -112,6 +112,8 @@ do_tx(usb_mbus_t *um)
     ue->ue_vtable->write(ue->ue_dev, ue, pb->pb_data + pb->pb_offset,
                          pb->pb_buflen);
     um->tx_on = 1;
+  } else {
+    um->um_mni.mni_tx_fail++;
   }
   pbuf_free_irq_blocked(pb);
 }
@@ -121,6 +123,7 @@ static error_t
 mbus_txco(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
 {
   usb_mbus_t *um = ue->ue_iface_aux;
+  um->um_mni.mni_tx_packets++;
   do_tx(um);
   return 0;
 }
@@ -158,6 +161,8 @@ usb_mbus_output(struct mbus_netif *mni, pbuf_t *pb)
     if(!um->tx_on) {
       do_tx(um);
     }
+  } else {
+    mni->mni_tx_qdrops++;
   }
   irq_permit(q);
   return pb;
