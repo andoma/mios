@@ -34,6 +34,7 @@ typedef struct uart_mbus {
   uint8_t flags;
   uint8_t tx_state;
   uint8_t tx_queue_len;
+  uint8_t tx_attempts;
 
   gpio_t txe;
 
@@ -75,8 +76,23 @@ tx_byte(uart_mbus_t *um, uint8_t xor)
 
 
 static void
+splice(uart_mbus_t *um)
+{
+  um->tx_queue_len--;
+  um->tx_attempts = 0;
+  pbuf_free_irq_blocked(pbuf_splice(&um->tx_queue));
+}
+
+static void
 start_tx_hd(uart_mbus_t *um)
 {
+  um->tx_attempts++;
+
+  if(um->tx_attempts == 100) {
+    um->um_mni.mni_tx_fail++;
+    splice(um);
+  }
+
   start_timer(um);
   if(reg_rd(um->uart_reg_base + USART_SR) & (1 << 4)) {
     gpio_set_output(um->txe, 1);
@@ -180,8 +196,8 @@ uart_mbus_rxbyte(uart_mbus_t *um, uint8_t c)
 
   case MBUS_STATE_TX_EOF:
     if(c == 0x7e) {
-      um->tx_queue_len--;
-      pbuf_free_irq_blocked(pbuf_splice(&um->tx_queue));
+      um->um_mni.mni_tx_packets++;
+      splice(um);
     }
     stop_tx(um);
     break;
@@ -311,6 +327,8 @@ uart_mbus_output_hd(struct mbus_netif *mni, pbuf_t *pb)
         wakelock_acquire();
       start_tx_hd(um);
     }
+  } else {
+    mni->mni_tx_qdrops++;
   }
   irq_permit(q);
   return pb;
@@ -328,8 +346,10 @@ uart_mbus_output_fd(struct mbus_netif *mni, pbuf_t *pb)
     if(um->tx_state == MBUS_STATE_IDLE) {
       start_tx_fd(um);
     }
-    irq_permit(q);
+  } else {
+    mni->mni_tx_qdrops++;
   }
+  irq_permit(q);
   return pb;
 }
 

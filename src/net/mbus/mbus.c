@@ -51,13 +51,7 @@ mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr)
   trailer[2] = crc >> 16;
   trailer[3] = crc >> 24;
   mni->mni_tx_bytes += pb->pb_pktlen;
-  pb = mni->mni_output(mni, pb);
-  if(pb == NULL) {
-    mni->mni_tx_packets++;
-  } else {
-    mni->mni_tx_drops++;
-  }
-  return pb;
+  return mni->mni_output(mni, pb);
 }
 
 
@@ -190,9 +184,9 @@ mbus_print_info(struct device *d, struct stream *st)
   stprintf(st, "\t   %u CRC  %u runts  %u bad opcode\n",
            mni->mni_rx_crc_errors, mni->mni_rx_runts,
            mni->mni_rx_unknown_opcode);
-  stprintf(st, "\tTX %u bytes  %u sent  %u drops\n",
+  stprintf(st, "\tTX %u bytes  %u sent  %u qdrops  %u failed\n",
            mni->mni_tx_bytes,  mni->mni_tx_packets,
-           mni->mni_tx_drops);
+           mni->mni_tx_qdrops, mni->mni_tx_fail);
 #if 0
   extern void pcs_dump(pcs_iface_t *pi, struct stream *st);
   pcs_dump(mni->mni_pcs, st);

@@ -28,7 +28,8 @@ typedef struct mbus_netif {
 
   uint32_t mni_tx_packets;
   uint32_t mni_tx_bytes;
-  uint32_t mni_tx_drops;
+  uint32_t mni_tx_qdrops;
+  uint32_t mni_tx_fail;
 
 #ifdef ENABLE_NET_PCS
   pcs_iface_t *mni_pcs;
