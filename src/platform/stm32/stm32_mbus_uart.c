@@ -94,12 +94,11 @@ start_tx_hd(uart_mbus_t *um)
   }
 
   start_timer(um);
-  if(reg_rd(um->uart_reg_base + USART_SR) & (1 << 4)) {
-    gpio_set_output(um->txe, 1);
-    um->state = MBUS_STATE_TX_SOF;
-    um->txoff = 0;
-    reg_wr(um->uart_reg_base + USART_TDR, 0x7e);
-  }
+
+  gpio_set_output(um->txe, 1);
+  um->state = MBUS_STATE_TX_SOF;
+  um->txoff = 0;
+  reg_wr(um->uart_reg_base + USART_TDR, 0x7e);
 }
 
 
