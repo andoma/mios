@@ -143,11 +143,6 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     return pb;
   }
 
-  if((pb = pbuf_trim(pb, 4)) == NULL) {
-    mni->mni_rx_runts++;
-    return pb;
-  }
-
   if((pb = pbuf_pullup(pb, pb->pb_pktlen)) == NULL) {
     mni->mni_rx_runts++;
     return pb;
@@ -155,7 +150,6 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   const uint8_t *hdr = pbuf_data(pb, 0);
   uint8_t addr = hdr[0];
-  pb = pbuf_drop(pb, MBUS_HDR_LEN);
 
   const uint8_t dst_addr = addr & 0xf;
   const uint8_t src_addr = addr >> 4;
@@ -167,9 +161,39 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   if(ni->ni_local_addr == dst_addr || dst_addr == 0x7) {
     // Destined for us
+
+    if((pb = pbuf_trim(pb, 4)) == NULL) {
+      mni->mni_rx_runts++;
+      return pb;
+    }
+
+    pb = pbuf_drop(pb, MBUS_HDR_LEN);
+
     return mbus_local(mni, pb, src_addr);
   }
-  // FIXME: Add forwarding
+
+  mbus_netif_t *n;
+  SLIST_FOREACH(n, &mbus_netifs, mni_global_link) {
+    if(mni == n)
+      continue;
+    if(n->mni_active_hosts & (1 << dst_addr)) {
+      n->mni_tx_bytes += pb->pb_pktlen;
+      return n->mni_output(n, pb);
+    }
+  }
+
+  SLIST_FOREACH(n, &mbus_netifs, mni_global_link) {
+    if(mni == n)
+      continue;
+
+    pbuf_t *copy = pbuf_copy(pb, 0);
+    n->mni_tx_bytes += copy->pb_pktlen;
+    pbuf_print("FWDB", copy, 1);
+    copy = n->mni_output(n, copy);
+    if(copy != NULL)
+      pbuf_free(copy);
+  }
+
   return pb;
 }
 
@@ -187,10 +211,13 @@ mbus_print_info(struct device *d, struct stream *st)
   stprintf(st, "\tTX %u bytes  %u sent  %u qdrops  %u failed\n",
            mni->mni_tx_bytes,  mni->mni_tx_packets,
            mni->mni_tx_qdrops, mni->mni_tx_fail);
-#if 0
-  extern void pcs_dump(pcs_iface_t *pi, struct stream *st);
-  pcs_dump(mni->mni_pcs, st);
-#endif
+  stprintf(st, "\tActive hosts:");
+  for(int i = 0; i < 16; i++) {
+    if((1 << i) & mni->mni_active_hosts) {
+      stprintf(st, "%x ", i);
+    }
+  }
+  stprintf(st, "\n");
 }
 
 
