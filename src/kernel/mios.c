@@ -55,12 +55,7 @@ init(void)
 
   call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
 
-  int flags = TASK_DETACHED;
-#ifdef HAVE_FPU
-  flags |= TASK_FPU;
-#endif
-
-  task_create((void *)&main, NULL, 1024, "main", flags, 2);
+  task_create_shell((void *)&main, NULL, "main");
 }
 
 

@@ -55,11 +55,7 @@ pcs_shell(void *arg)
 int
 pcs_shell_create(pcs_t *pcs)
 {
-  int flags = TASK_DETACHED;
-#ifdef HAVE_FPU
-  flags |= TASK_FPU;
-#endif
-  return !task_create(pcs_shell, pcs, 1024, "remotecli", flags, 0);
+  return task_create_shell(pcs_shell, pcs, "remotecli");
 }
 
 

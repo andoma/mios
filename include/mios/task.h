@@ -231,3 +231,6 @@ void cond_wait(cond_t *c, mutex_t *m);
 int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
   __attribute__((warn_unused_result));
 
+// Helper for constructing a task used for cli/shell activities
+
+int task_create_shell(void *(*entry)(void *arg), void *arg, const char *name);

@@ -306,15 +306,14 @@ cdc_write(struct stream *s, const void *buf, size_t size)
 }
 
 
+__attribute__((noreturn))
 static void *
 cdc_shell_thread(void *arg)
 {
   usb_cdc_t *cdc = arg;
   while(1) {
-    if(cli_on_stream(&cdc->s, '>') < 0)
-      break;
+    cli_on_stream(&cdc->s, '>');
   }
-  return NULL;
 }
 
 
@@ -346,10 +345,5 @@ usb_cdc_create(struct usb_interface_queue *q)
                     cdc, cdc_rx, NULL,
                     USB_ENDPOINT_BULK, 0, 1, 32);
 
-  int flags = TASK_DETACHED;
-#ifdef HAVE_FPU
-  flags |= TASK_FPU;
-#endif
-
-  task_create(cdc_shell_thread, cdc, 1024, "cdc-cli", flags, 1);
+  task_create_shell(cdc_shell_thread, cdc, "cdc-cli");
 }

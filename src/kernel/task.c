@@ -786,3 +786,16 @@ cmd_ps(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("ps", cmd_ps);
+
+
+int
+task_create_shell(void *(*entry)(void *arg), void *arg, const char *name)
+{
+  int flags = TASK_DETACHED;
+  int stack_size = 768;
+#ifdef HAVE_FPU
+  flags |= TASK_FPU;
+  stack_size = 1024;
+#endif
+  return !task_create(entry, arg, stack_size, name,  flags, 2);
+}
