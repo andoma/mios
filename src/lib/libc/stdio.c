@@ -11,6 +11,8 @@
 #include <net/net.h>
 #endif
 
+typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
+
 extern va_list fmt_double(va_list ap, char *buf, size_t buflen);
 
 va_list  __attribute__((weak))
@@ -30,7 +32,7 @@ typedef struct {
 } fmtparam_t;
 
 
-static size_t
+static size_t __attribute__((noinline))
 emit_repeated_char(fmtcb_t *cb, void *aux, ssize_t len, char c)
 {
   if(len < 0)
@@ -182,7 +184,7 @@ emit_x32(fmtcb_t *cb, void *aux, unsigned int x,
 }
 
 
-static int  __attribute__((noinline))
+static int __attribute__((noinline))
 parse_dec(const char **fmt, int defval)
 {
   int c = **fmt;
@@ -200,7 +202,7 @@ parse_dec(const char **fmt, int defval)
   }
 }
 
-size_t
+static size_t __attribute__((noinline))
 fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 {
   const char *s = fmt;
