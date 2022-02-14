@@ -61,12 +61,13 @@ crc32(uint32_t in, const void *data, size_t len)
   reg_wr(CRC_BASE + CRC_INIT, in);
   reg_wr(CRC_BASE + CRC_CR, 0xa1);
 
-  for(i = 0; i + 4 <= len; i += 4)
-    reg_wr(CRC_BASE + CRC_DR, __builtin_bswap32(*(uint32_t *)&d8[i]));
+  if(((intptr_t)data & 3) == 0) {
+    for(i = 0; i + 4 <= len; i += 4)
+      reg_wr(CRC_BASE + CRC_DR, __builtin_bswap32(*(uint32_t *)&d8[i]));
 
-  for(; i + 2 <= len; i += 2)
-    reg_wr16(CRC_BASE + CRC_DR, __builtin_bswap16(*(uint16_t *)&d8[i]));
-
+    for(; i + 2 <= len; i += 2)
+      reg_wr16(CRC_BASE + CRC_DR, __builtin_bswap16(*(uint16_t *)&d8[i]));
+  }
   for(; i < len; i++)
     reg_wr8(CRC_BASE + CRC_DR, d8[i]);
 
