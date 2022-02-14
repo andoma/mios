@@ -9,17 +9,14 @@
 
 typedef struct cli {
 
-  void (*cl_printf)(struct cli *cli, const char *fmt, ...);
-  int (*cl_getc)(struct cli *cli, int wait);
-
   struct stream *cl_stream;
+
+  char *cl_argv[CLI_MAX_ARGC];
 
   int16_t cl_pos;
 
   // This includes a terminating 0 at all times
   char cl_buf[CLI_LINE_BUF_SIZE];
-
-  char *cl_argv[CLI_MAX_ARGC];
 
 } cli_t;
 
