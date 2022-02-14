@@ -213,8 +213,12 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
     if(c != '%')
       continue;
 
-    if(s != fmt)
-      total += cb(aux, s, fmt - s - 1);
+    if(s != fmt) {
+      size_t l = fmt - s - 1;
+      if(l) {
+        total += cb(aux, s, fmt - s - 1);
+      }
+    }
 
     fmtparam_t fp = {};
 
