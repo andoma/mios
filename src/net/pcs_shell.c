@@ -29,10 +29,11 @@ static void
 pcs_shell_write(struct stream *s, const void *buf, size_t size)
 {
   pcs_shell_stream_t *pss = (pcs_shell_stream_t *)s;
-  if(size)
-    pcs_send(pss->pcs, buf, size);
-  else
+
+  if(buf == NULL)
     pcs_flush(pss->pcs);
+  else if(size)
+    pcs_send(pss->pcs, buf, size);
 }
 
 
