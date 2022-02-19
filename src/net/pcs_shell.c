@@ -2,6 +2,7 @@
 
 #include <mios/cli.h>
 #include <mios/error.h>
+#include <mios/suspend.h>
 #include <stdio.h>
 #include <malloc.h>
 
@@ -48,6 +49,7 @@ pcs_shell(void *arg)
 
   cli_on_stream(&pss.s, '>');
   pcs_close(pss.pcs);
+  wakelock_release();
   task_exit(NULL);
 }
 
@@ -55,7 +57,11 @@ pcs_shell(void *arg)
 int
 pcs_shell_create(pcs_t *pcs)
 {
-  return task_create_shell(pcs_shell, pcs, "remotecli");
+  wakelock_acquire();
+  error_t r = task_create_shell(pcs_shell, pcs, "remotecli");
+  if(r)
+    wakelock_release();
+  return r;
 }
 
 
