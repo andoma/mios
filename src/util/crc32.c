@@ -85,7 +85,7 @@ crc32(uint32_t crc, const void *data, size_t n_bytes)
 
 #if 0
 // Some testcode which can be useful when testing new CRC accelerators
-static int
+static error_t
 cmd_crcbytes(cli_t *cli, int argc, char **argv)
 {
   uint8_t buf[8];
@@ -108,7 +108,7 @@ CLI_CMD_DEF("crcbytes", cmd_crcbytes);
 
 
 
-static int
+static error_t
 cmd_crc(cli_t *cli, int argc, char **argv)
 {
   uint32_t crc = crc32(0, argv[1], strlen(argv[1]));
@@ -123,7 +123,7 @@ CLI_CMD_DEF("crc", cmd_crc);
 
 
 
-static int
+static error_t
 cmd_crc_test(cli_t *cli, int argc, char **argv)
 {
   const char *s = "abcdefgh";
