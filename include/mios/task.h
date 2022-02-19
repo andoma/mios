@@ -5,6 +5,7 @@
 #include <sys/queue.h>
 
 #include "timer.h"
+#include "error.h"
 
 STAILQ_HEAD(task_queue, task);
 LIST_HEAD(task_list, task);
@@ -233,4 +234,4 @@ int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
 
 // Helper for constructing a task used for cli/shell activities
 
-int task_create_shell(void *(*entry)(void *arg), void *arg, const char *name);
+error_t task_create_shell(void *(*entry)(void *arg), void *arg, const char *name);
