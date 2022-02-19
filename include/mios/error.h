@@ -28,6 +28,9 @@ typedef enum {
   ERR_INVALID_LENGTH        = -24,
   ERR_NOT_IDLE              = -25,
   ERR_BAD_CONFIG            = -26,
+  ERR_FLASH_HW_ERROR        = -27,
+  ERR_FLASH_TIMEOUT         = -28,
+  ERR_NO_MEMORY             = -29,
 } error_t;
 
 const char *error_to_string(error_t e);

@@ -35,6 +35,9 @@ static const char *errmsg[] = {
   [-ERR_INVALID_LENGTH        ] = "INVALID_LENGTH",
   [-ERR_NOT_IDLE              ] = "NOT_IDLE",
   [-ERR_BAD_CONFIG            ] = "BAD_CONFIG",
+  [-ERR_FLASH_HW_ERROR        ] = "FLASH_HW_ERROR",
+  [-ERR_FLASH_TIMEOUT         ] = "FLASH_TIMEOUT",
+  [-ERR_NO_MEMORY             ] = "NO_MEMORY",
 };
 
 
