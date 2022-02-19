@@ -163,6 +163,7 @@ stm32g0_p13n_put(const void *data, size_t len)
         if(err)
           break;
         dst += 8;
+        data += 8;
         len -= csize;
       }
     }
