@@ -1,5 +1,6 @@
-#include <net/pbuf.h>
+#include <mios/ota.h>
 
+#include <net/pbuf.h>
 
 #include <stdio.h>
 #include <net/mbus/mbus.h>
@@ -196,18 +197,8 @@ ota_task(void *arg)
 }
 
 
-typedef struct {
-  uint32_t blocks;
-  uint32_t crc;
-  uint8_t hostaddr;
-  char type;
-} ota_req_t;
-
-typedef struct {
-
-} ota_reply_t;
-
-static error_t
+__attribute__((weak))
+error_t
 rpc_ota(const ota_req_t *in, void *out, size_t in_size)
 {
   const flash_iface_t *fif = flash_get_primary();
@@ -215,7 +206,7 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
   int num_sectors = 0;
   size_t consecutive_size = 0;
 
-  if(in->type != 's')
+  if(in->type != OTA_TYPE_SECTIONS)
     return ERR_MISMATCH;
 
   mutex_lock(&ota_mutex);
@@ -276,13 +267,13 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
 
 
 
-RPC_DEF("ota", sizeof(ota_req_t), sizeof(ota_reply_t), rpc_ota, 0);
+RPC_DEF("ota", sizeof(ota_req_t), 0, rpc_ota, 0);
 
-
-static error_t
+__attribute__((weak))
+error_t
 rpc_otamode(const void *in, uint8_t *out, size_t in_size)
 {
-  out[0] = 's';
+  out[0] = OTA_TYPE_SECTIONS;
   return 0;
 }
 

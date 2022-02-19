@@ -19,3 +19,5 @@ SRCS += ${P}/stm32g0.c \
 	${P}/stm32g0_idle.c \
 	${P}/stm32g0_dma.c \
 	${P}/stm32g0_flash.c \
+
+SRCS-${ENABLE_OTA} += ${P}/stm32g0_ota.c

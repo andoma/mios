@@ -40,20 +40,21 @@ get_p13n_addr(void)
 
 static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
 
-static inline void __attribute__((always_inline))
+static inline error_t __attribute__((always_inline))
 flash_wait_ready(void)
 {
-  // All interrupts are off, and we need to check if systick
-  // wraps since a flash erase of a 128k sector takes as much
-  // as 2 seconds
-
+  int timeout = 0;
   extern uint64_t clock;
   while(reg_rd(FLASH_SR) & (1 << 16)) {
     if(*SYST_CSR & 0x10000) {
       clock += 1000000 / HZ;
+
+      if(timeout > 20)
+        return ERR_FLASH_TIMEOUT;
     }
     reg_wr(IWDG_KR, 0xAAAA);
   }
+  return 0;
 }
 
 static void
@@ -70,12 +71,12 @@ flash_lock(void)
 }
 
 
-static void __attribute__((section("ramcode"),noinline))
-flash_erase_sector0(int sector)
+error_t __attribute__((section("ramcode"),noinline))
+stm32g0_flash_erase_sector_ramcode(int sector)
 {
   reg_wr(FLASH_CR, 0x2 | (sector << 3));
   reg_set_bit(FLASH_CR, 16);
-  flash_wait_ready();
+  return flash_wait_ready();
 }
 
 
@@ -84,10 +85,10 @@ flash_erase_sector(int sector)
 {
   int q = irq_forbid(IRQ_LEVEL_ALL);
   flash_unlock();
-  flash_erase_sector0(sector);
+  error_t err = stm32g0_flash_erase_sector_ramcode(sector);
   flash_lock();
   irq_permit(q);
-  return 0;
+  return err;
 }
 
 

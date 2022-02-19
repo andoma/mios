@@ -2,6 +2,10 @@
 #include "stm32g0_uart.h"
 #include "stm32g0_tim.h"
 
+#ifdef ENABLE_OTA
+#include "stm32g0_ota.h"
+#endif
+
 #define USART_CR1  0x00
 #define USART_CR2  0x04
 #define USART_CR3  0x08
@@ -87,7 +91,15 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
     reg_set_bits(RCC_CCIPR, 2 * instance, 2, 2);
   }
 
-  stm32_mbus_uart_create((uart_config[instance].base << 8) + 0x40000000,
+  uint32_t baseaddr = (uart_config[instance].base << 8) + 0x40000000;
+
+#ifdef ENABLE_OTA
+  if(flags & UART_MBUS_OTA) {
+    stm32g0_ota_configure(baseaddr, local_addr, txe);
+  }
+#endif
+
+  stm32_mbus_uart_create(baseaddr,
                          baudrate,
                          uart_config[instance].clkid,
                          uart_config[instance].irq,

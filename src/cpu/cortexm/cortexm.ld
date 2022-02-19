@@ -13,6 +13,10 @@ SECTIONS {
                 *(.text.*)
                 *(.rodata)
                 *(.rodata.*)
+                . = ALIGN(4);
+                _ota_flasher_begin = .;
+                KEEP(*(ota_flasher))
+                _ota_flasher_end = .;
         } >FLASH
 
         .inits : {

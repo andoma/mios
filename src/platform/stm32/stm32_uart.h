@@ -35,5 +35,8 @@ typedef struct stm32_uart {
 #define UART_HALF_DUPLEX    0x1
 #define UART_TXDMA          0x2
 #define UART_WAKEUP         0x4
+#ifdef ENABLE_OTA
+#define UART_MBUS_OTA       0x8
+#endif
 
 #define UART_CTRLD_IS_PANIC 0x80
