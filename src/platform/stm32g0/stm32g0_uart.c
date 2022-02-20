@@ -86,12 +86,18 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
   if(txe != GPIO_UNUSED)
     gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
+
+  unsigned int freq = clk_get_freq(uart_config[instance].clkid);
+
   if(flags & UART_WAKEUP) {
     // Run USART from HSI16 so it can resume us from STOP
     reg_set_bits(RCC_CCIPR, 2 * instance, 2, 2);
+    freq = 16000000;
   }
 
-  uint32_t baseaddr = (uart_config[instance].base << 8) + 0x40000000;
+  const unsigned int bbr = (freq + baudrate - 1) / baudrate;
+
+  const uint32_t baseaddr = (uart_config[instance].base << 8) + 0x40000000;
 
 #ifdef ENABLE_OTA
   if(flags & UART_MBUS_OTA) {
@@ -100,7 +106,7 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
 #endif
 
   stm32_mbus_uart_create(baseaddr,
-                         baudrate,
+                         bbr,
                          uart_config[instance].clkid,
                          uart_config[instance].irq,
                          0, txe,

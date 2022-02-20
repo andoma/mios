@@ -370,8 +370,8 @@ timer_irq(void *arg)
 }
 
 
-void
-stm32_mbus_uart_create(uint32_t uart_reg_base, int baudrate,
+static void
+stm32_mbus_uart_create(uint32_t uart_reg_base, int bbr,
                        int clkid, int uart_irq, uint32_t tx_dma_resouce_id,
                        gpio_t txe, uint8_t local_addr,
                        const stm32_timer_info_t *tim,
@@ -381,9 +381,6 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int baudrate,
 
   uart_mbus_t *um = calloc(1, sizeof(uart_mbus_t));
   STAILQ_INIT(&um->tx_queue);
-
-  const unsigned int freq = clk_get_freq(clkid);
-  const unsigned int bbr = (freq + baudrate - 1) / baudrate;
 
   um->uart_reg_base = uart_reg_base;
   reg_wr(um->uart_reg_base + USART_BBR, bbr);

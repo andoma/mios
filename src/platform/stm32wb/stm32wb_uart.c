@@ -64,38 +64,3 @@ stm32wb_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
 
 void irq_36(void) { uart_irq(uarts[0]); }
 void irq_37(void) { uart_irq(uarts[1]); }
-
-
-#if 0
-void
-stm32wb_mbus_uart_create(unsigned int instance, int baudrate,
-                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr,
-                         const stm32_timer_info_t *timer,
-                         uint8_t prio, int flags)
-{
-  instance--;
-
-  if(instance > ARRAYSIZE(uart_config))
-    return;
-
-  const int af = uart_config[instance].af;
-
-  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
-  gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-
-  if(flags & UART_WAKEUP) {
-    // Run USART from HSI16 so it can resume us from STOP
-    reg_set_bits(RCC_CCIPR, 2 * instance, 2, 2);
-  }
-
-  stm32_mbus_uart_create((uart_config[instance].base << 8) + 0x40000000,
-                         baudrate,
-                         uart_config[instance].clkid,
-                         uart_config[instance].irq,
-                         0, txe,
-                         local_addr,
-                         timer,
-                         prio, flags);
-}
-#endif
