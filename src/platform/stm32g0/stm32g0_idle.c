@@ -61,6 +61,7 @@ cpu_idle(void)
       *SCR = 0x4;
       asm("wfi");
       *SCR = 0x0;
+      stm32g0_init_pll();
     } else {
       asm("wfi");
     }
