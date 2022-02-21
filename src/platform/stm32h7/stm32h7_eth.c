@@ -155,6 +155,9 @@ rx_desc_give(desc_t *rx, void *buf)
 }
 
 
+static const device_class_t stm32h7_eth_device_class = {};
+
+
 static void
 stm32h7_eth_init(stm32h7_eth_t *se)
 {
@@ -244,7 +247,7 @@ stm32h7_eth_init(stm32h7_eth_t *se)
   reg_set_bit(ETH_DMACRXCR, 0);
   reg_set_bit(ETH_DMACTXCR, 0);
 
-  ether_netif_init(&se->se_eni, "eth0");
+  ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
   irq_enable(61, IRQ_LEVEL_NET);
 }
 

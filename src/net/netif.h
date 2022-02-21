@@ -67,6 +67,7 @@ typedef struct nexthop {
 
 void netif_wakeup(netif_t *ni);
 
-void netif_attach(netif_t *ni, const char *name);
+void netif_attach(netif_t *ni, const char *name,
+                  const device_class_t *dc);
 
 extern mutex_t netif_mutex;

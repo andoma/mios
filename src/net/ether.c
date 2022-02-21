@@ -223,13 +223,14 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
 
 
 void
-ether_netif_init(ether_netif_t *eni, const char *name)
+ether_netif_init(ether_netif_t *eni, const char *name,
+                 const device_class_t *dc)
 {
   eni->eni_ni.ni_output = ether_ipv4_output;
   eni->eni_ni.ni_periodic = ether_periodic;
   eni->eni_ni.ni_input = ether_input;
 
-  netif_attach(&eni->eni_ni, name);
+  netif_attach(&eni->eni_ni, name, dc);
 
   SLIST_INSERT_HEAD(&ether_netifs, eni, eni_global_link);
 }

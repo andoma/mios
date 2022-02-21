@@ -371,6 +371,29 @@ timer_irq(void *arg)
 
 
 static void
+stm32_mbus_uart_print_info(struct device *dev, struct stream *st)
+{
+  uart_mbus_t *um = (uart_mbus_t *)dev;
+  mbus_print_info(&um->um_mni, st);
+}
+
+
+static void
+stm32_mbus_uart_power_state(struct device *dev, device_power_state_t state)
+{
+  uart_mbus_t *um = (uart_mbus_t *)dev;
+  if(state == DEVICE_POWER_STATE_SUSPEND) {
+    // Make sure we are silent on bus when suspended
+    gpio_set_output(um->txe, 0);
+  }
+}
+
+static const device_class_t stm32_mbus_uart_device_class = {
+  .dc_print_info = stm32_mbus_uart_print_info,
+  .dc_power_state = stm32_mbus_uart_power_state,
+};
+
+static void
 stm32_mbus_uart_create(uint32_t uart_reg_base, int bbr,
                        int clkid, int uart_irq, uint32_t tx_dma_resouce_id,
                        gpio_t txe, uint8_t local_addr,
@@ -427,6 +450,7 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int bbr,
   }
 
   um->um_mni.mni_ni.ni_mtu = 32;
-  mbus_netif_attach(&um->um_mni, "uartmbus", local_addr,
-                    MBUS_NETIF_ENABLE_PCS);
+
+  mbus_netif_attach(&um->um_mni, "uartmbus", &stm32_mbus_uart_device_class,
+                    local_addr, MBUS_NETIF_ENABLE_PCS);
 }

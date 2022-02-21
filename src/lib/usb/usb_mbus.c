@@ -183,6 +183,18 @@ buffers_avail(struct netif *ni)
 }
 
 
+static void
+usb_mbus_print_info(struct device *dev, struct stream *st)
+{
+  usb_mbus_t *um = (usb_mbus_t *)dev;
+  mbus_print_info(&um->um_mni, st);
+}
+
+
+static const device_class_t usb_mbus_device_class = {
+  .dc_print_info = usb_mbus_print_info
+};
+
 
 
 void
@@ -208,5 +220,6 @@ usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
   um->um_mni.mni_ni.ni_buffers_avail = buffers_avail;
   um->um_mni.mni_ni.ni_mtu = 32;
 
-  mbus_netif_attach(&um->um_mni, "usbmbus", local_addr, 0);
+  mbus_netif_attach(&um->um_mni, "usbmbus",
+                    &usb_mbus_device_class, local_addr, 0);
 }

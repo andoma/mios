@@ -39,8 +39,10 @@ typedef struct mbus_netif {
 
 #define MBUS_NETIF_ENABLE_PCS 0x1
 
+void mbus_print_info(mbus_netif_t *mni, struct stream *st);
+
 void mbus_netif_attach(mbus_netif_t *mni, const char *name,
-                       uint8_t local_addr, int flags);
+                       const device_class_t *dc, uint8_t local_addr, int flags);
 
 pbuf_t *mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 

@@ -25,7 +25,8 @@ typedef struct ether_netif {
 } ether_netif_t;
 
 
-void ether_netif_init(ether_netif_t *eni, const char *name);
+void ether_netif_init(ether_netif_t *eni, const char *name,
+                      const device_class_t *dc);
 
 SLIST_HEAD(ether_netif_list, ether_netif);
 

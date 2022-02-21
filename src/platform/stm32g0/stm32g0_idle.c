@@ -1,5 +1,6 @@
 #include "irq.h"
-#include <mios/cli.h>
+
+#include <mios/device.h>
 
 #include "stm32g0_reg.h"
 #include "stm32g0_clk.h"
@@ -58,10 +59,15 @@ cpu_idle(void)
 
   while(1) {
     if(!wakelock) {
+
+      asm volatile ("cpsid i");
       *SCR = 0x4;
+      device_power_state(DEVICE_POWER_STATE_SUSPEND);
       asm("wfi");
       *SCR = 0x0;
       stm32g0_init_pll();
+      device_power_state(DEVICE_POWER_STATE_RESUME);
+      asm volatile ("cpsie i");
     } else {
       asm("wfi");
     }

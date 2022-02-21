@@ -1047,6 +1047,12 @@ probe_endpoints(usb_ctrl_t *uc)
   printf("stm32f4_otgfs: %d endpoints\n", uc->uc_num_endpoints);
 }
 
+
+static const device_class_t stm32f4_otgfs_class = {
+  .dc_print_info = usb_print_info
+};
+
+
 void
 stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
                      const char *manfacturer_string,
@@ -1060,7 +1066,7 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
 
   usb_ctrl_t *uc = &g_usb_ctrl;
 
-  uc->uc_dev.d_print_info = usb_print_info;
+  uc->uc_dev.d_class = &stm32f4_otgfs_class;
   uc->uc_dev.d_name = "usb";
   device_register(&uc->uc_dev);
 

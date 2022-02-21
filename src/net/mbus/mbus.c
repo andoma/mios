@@ -199,10 +199,9 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
 
 
-static void
-mbus_print_info(struct device *d, struct stream *st)
+void
+mbus_print_info(mbus_netif_t *mni, struct stream *st)
 {
-  mbus_netif_t *mni = (mbus_netif_t *)d;
   stprintf(st, "\tRX %u bytes  %u packets\n",
            mni->mni_rx_bytes, mni->mni_rx_packets);
   stprintf(st, "\t   %u CRC  %u runts  %u bad opcode\n",
@@ -270,15 +269,13 @@ mbus_pcs_thread(void *arg)
 #endif
 
 void
-mbus_netif_attach(mbus_netif_t *mni, const char *name, uint8_t addr,
-                  int flags)
+mbus_netif_attach(mbus_netif_t *mni, const char *name,
+                  const device_class_t *dc, uint8_t addr, int flags)
 {
   mni->mni_ni.ni_local_addr = addr;
   mni->mni_ni.ni_input = mbus_input;
 
-  mni->mni_ni.ni_dev.d_print_info = mbus_print_info;
-
-  netif_attach(&mni->mni_ni, name);
+  netif_attach(&mni->mni_ni, name, dc);
 
   SLIST_INSERT_HEAD(&mbus_netifs, mni, mni_global_link);
 
