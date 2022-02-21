@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
+#include "stm32g0_dma.h"
 
 #define ADC_BASE  0x40012400
 
@@ -22,8 +24,14 @@ int stm32g0_adc_vref(void); // Return vref in mV
 int adc_read_channel(int channel);
 
 void stm32g0_adc_multi(uint32_t channels,
+                       int smpr,
                        uint16_t *output,
-                       uint8_t trig);
+                       size_t num_buffers,
+                       uint8_t trig,
+                       int oversampling,
+                       void (*cb)(stm32_dma_instance_t instance,
+                                  void *arg, error_t err),
+                       void *arg);
 
 #define ADC_TRG_TIM1_TRGO2 0
 #define ADC_TRG_TIM1_CC4   1

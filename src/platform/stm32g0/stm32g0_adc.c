@@ -7,6 +7,7 @@
 #include <mios/task.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "irq.h"
 #include "stm32g0_reg.h"
@@ -28,8 +29,14 @@ adc_init(int how)
   reg_wr(ADC_CR, (1 << 28));
   udelay(20);
 
+  int presc = 0;
+  if(CPU_SYSCLK_MHZ > 35)
+    presc = 1;
+
   // Enable VREFEN
-  reg_set_bit(ADC_CCR, 22);
+  reg_wr(ADC_CCR,
+         (1 << 22) |
+         (presc << 18));
   udelay(20);
 
   // Calibrate ADC
@@ -105,16 +112,33 @@ CLI_CMD_DEF("vref", cmd_vref);
 
 void
 stm32g0_adc_multi(uint32_t channels,
+                  int smpr,
                   uint16_t *output,
-                  uint8_t trig)
+                  size_t num_buffers,
+                  uint8_t trig,
+                  int oversampling,
+                  void (*cb)(stm32_dma_instance_t instance,
+                             void *arg, error_t err),
+                  void *arg)
 {
   int q = irq_forbid(IRQ_LEVEL_SWITCH);
 
   int num_channels = __builtin_popcount(channels);
 
   adc_init(2);
-  reg_wr(ADC_SMPR, 7);
+  reg_wr(ADC_SMPR, smpr);
   set_channel_mask(channels);
+
+  if(oversampling) {
+    assert(oversampling <= 8);
+    const int ovss = 0; // oversampling;
+    const int ovsr = oversampling - 1;
+
+    reg_wr(ADC_CFGR2,
+           (ovsr << 2) |
+           (ovss << 5) |
+           (1 << 0));
+  }
 
   reg_wr(ADC_CFGR1,
          (0b01 << 10) | // Trig on rising edge
@@ -126,6 +150,10 @@ stm32g0_adc_multi(uint32_t channels,
   reg_wr(ADC_CR, (1 << 28) | (1 << 0) | (1 << 2));
 
   stm32_dma_instance_t dmainst = stm32_dma_alloc(5, "adc");
+
+  if(cb) {
+    stm32_dma_set_callback(dmainst, cb, arg, IRQ_LEVEL_IO);
+  }
 
   stm32_dma_config(dmainst,
                    STM32_DMA_BURST_NONE,
@@ -140,7 +168,7 @@ stm32g0_adc_multi(uint32_t channels,
 
   stm32_dma_set_paddr(dmainst, ADC_DR);
   stm32_dma_set_mem0(dmainst, output);
-  stm32_dma_set_nitems(dmainst, num_channels);
+  stm32_dma_set_nitems(dmainst, num_channels * num_buffers);
   stm32_dma_start(dmainst);
 
   irq_permit(q);
