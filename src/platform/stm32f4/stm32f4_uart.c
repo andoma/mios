@@ -88,11 +88,11 @@ stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
-  const unsigned int freq = clk_get_freq(clkid);
+  const unsigned int freq = clk_get_freq(uart_config[instance].clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;
 
   stm32_mbus_uart_create((uart_config[instance].base << 8) + 0x40000000,
-                         baudrate,
+                         bbr,
                          uart_config[instance].clkid,
                          uart_config[instance].irq,
                          0, txe,
