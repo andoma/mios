@@ -4,3 +4,6 @@
 [submodule "src/net/pcs"]
 	path = src/net/pcs
 	url = git@github.com:andoma/pcs
+[submodule "src/lib/libfixmath"]
+	path = src/lib/libfixmath
+	url = https://github.com/PetteriAimonen/libfixmath.git

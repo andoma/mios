@@ -25,6 +25,8 @@ OPTLEVEL ?= 2
 
 CFLAGS += -Wframe-larger-than=128
 
+CFLAGS += ${CFLAGS-yes}
+
 CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
 CPPFLAGS += -I${T}include -I${SRC} -I${O} -include ${O}/include/config.h
@@ -61,7 +63,7 @@ include ${SRC}/kernel/kernel.mk
 include ${SRC}/shell/shell.mk
 include ${SRC}/lib/libc/libc.mk
 include ${SRC}/lib/math/math.mk
-include ${SRC}/lib/fixedpoint/fixedpoint.mk
+include ${SRC}/lib/fixmath.mk
 include ${SRC}/lib/usb/usb.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk

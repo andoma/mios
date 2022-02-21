@@ -4,6 +4,7 @@ typedef __UINT64_TYPE__  uint64_t;
 typedef unsigned int     uint32_t;
 typedef unsigned short   uint16_t;
 typedef unsigned char    uint8_t;
+typedef unsigned char    uint_fast8_t;
 
 typedef __INT64_TYPE__   int64_t;
 typedef signed int       int32_t;

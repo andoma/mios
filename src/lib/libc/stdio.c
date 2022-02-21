@@ -11,6 +11,10 @@
 #include <net/net.h>
 #endif
 
+#ifdef ENABLE_FIXMATH
+#include <fixmath.h>
+#endif
+
 typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
 
 extern va_list fmt_double(va_list ap, char *buf, size_t buflen);
@@ -24,6 +28,7 @@ fmt_double(va_list ap, char *buf, size_t buflen)
 
 typedef struct {
   int16_t width;
+  int16_t decimals;
   unsigned char lz:1;
   unsigned char la:1;
 #ifdef ENABLE_IPV4
@@ -147,6 +152,17 @@ emit_s32(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
 }
 
 
+
+#ifdef ENABLE_FIXMATH
+static size_t  __attribute__((noinline))
+emit_fix16(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
+{
+  char buf[13];
+  fix16_to_str(x, buf, fp->decimals != -1 ? fp->decimals : 5);
+  return emit_str(cb, aux, buf, fp);
+}
+#endif
+
 #ifndef DISABLE_FMT_64BIT
 static size_t  __attribute__((noinline))
 emit_s64(fmtcb_t *cb, void *aux,
@@ -234,6 +250,13 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     fp.width = parse_dec(&fmt, -1);
 
+    if(fmt[0] == '.') {
+      fmt++;
+      fp.decimals = parse_dec(&fmt, -1);
+    } else {
+      fp.decimals = -1;
+    }
+
 #ifdef ENABLE_IPV4
     fp.ipv4 = fmt[0] == 'I';
     if(fp.ipv4)
@@ -282,6 +305,11 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += cb(aux, "0x", 2);
       total += emit_x32(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
       break;
+#ifdef ENABLE_FIXMATH
+    case 'o':
+      total += emit_fix16(cb, aux, &fp, (int)va_arg(ap, int));
+      break;
+#endif
     }
     s = fmt;
   }
