@@ -23,6 +23,8 @@ typedef unsigned char gpio_t;
 void gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
                   gpio_output_speed_t speed, gpio_pull_t pull);
 
+void gpio_conf_standby(gpio_t gpio, gpio_pull_t pull);
+
 typedef struct {
   gpio_t gpio;
   uint8_t af;
