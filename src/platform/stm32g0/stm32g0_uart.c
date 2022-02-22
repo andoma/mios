@@ -93,6 +93,8 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
     // Run USART from HSI16 so it can resume us from STOP
     reg_set_bits(RCC_CCIPR, 2 * instance, 2, 2);
     freq = 16000000;
+    if(txe != GPIO_UNUSED)
+      gpio_conf_standby(txe, GPIO_PULL_DOWN);
   }
 
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;
