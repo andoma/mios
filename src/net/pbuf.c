@@ -277,7 +277,8 @@ pbuf_copy(const pbuf_t *src, int wait)
       dst->pb_pktlen = src->pb_pktlen;
       dst->pb_offset = src->pb_offset;
       dst->pb_buflen = src->pb_buflen;
-      memcpy(dst->pb_data, src->pb_data, src->pb_buflen);
+      memcpy(dst->pb_data + dst->pb_offset, src->pb_data + dst->pb_offset,
+             src->pb_buflen);
       return dst;
     }
   }
