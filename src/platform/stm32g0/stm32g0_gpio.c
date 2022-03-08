@@ -151,7 +151,7 @@ static uint8_t gpio_irq_level[3];
 #define EXTI_RPR1         0x4002180c
 #define EXTI_FPR1         0x40021810
 
-#define EXTI_EXTICR(x)   (0x40021860 + (4 * x))
+#define EXTI_EXTICR(x)   (0x40021860 + 4 * (x))
 #define EXTI_IMR          0x40021880
 
 
@@ -186,7 +186,7 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   reg_set_bit(EXTI_IMR, bit);
 
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-  reg_set_bits(EXTI_EXTICR(icr), slice * 4, 4, port);
+  reg_set_bits(EXTI_EXTICR(icr), slice * 8, 8, port);
   irq_permit(s);
 
   int irq;
