@@ -6,6 +6,7 @@
 #include <mios/mios.h>
 #include <mios/task.h>
 #include <mios/cli.h>
+#include <mios/suspend.h>
 
 #include "irq.h"
 
@@ -111,9 +112,44 @@ blinker(void *arg)
 
 
 
+
+
+static int suspend_enabled;
+
+static void
+user_button(void *arg)
+{
+  if(suspend_enabled) {
+    wakelock_acquire();
+    suspend_enabled = 0;
+  }
+}
+
+
+static error_t
+cmd_suspend(cli_t *cli, int argc, char **argv)
+{
+  if(suspend_enabled)
+    return ERR_BAD_STATE;
+
+  suspend_enabled = 1;
+  wakelock_release();
+
+  return 0;
+}
+
+CLI_CMD_DEF("suspend", cmd_suspend);
+
+
+
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
+  gpio_conf_irq(GPIO_PC(13), GPIO_PULL_UP, user_button, NULL,
+                GPIO_RISING_EDGE, IRQ_LEVEL_IO);
+  suspend_enable();
+  wakelock_acquire();
+
   gpio_conf_output(BLINK_GPIO, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_set_output(BLINK_GPIO, 1);
@@ -128,4 +164,3 @@ platform_init_late(void)
                            10, NULL, 1, 0);
 #endif
 }
-
