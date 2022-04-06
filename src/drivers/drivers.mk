@@ -12,8 +12,11 @@ SRCS-${ENABLE_SX1280} += \
 	${SRC}/drivers/sx1280/sx1280_tdma.c \
 	${SRC}/drivers/sx1280_mios.c
 
+${MOS}/drivers/sx1280/%.o : CFLAGS += ${NOFPU}
+${MOS}/drivers/sx1280_mios.o : CFLAGS += ${NOFPU}
+
 SRCS-${ENABLE_HDC1080} += \
 	${SRC}/drivers/hdc1080.c
 
-${MOS}/drivers/sx1280/%.o : CFLAGS += ${NOFPU}
-${MOS}/drivers/sx1280_mios.o : CFLAGS += ${NOFPU}
+SRCS-${ENABLE_BT81X} += \
+	${SRC}/drivers/gpu/bt81x/bt81x.c
