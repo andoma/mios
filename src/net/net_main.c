@@ -275,7 +275,12 @@ net_init(void)
   pbuf_data_add(NULL, NULL);
   irq_permit(q);
 
-  task_create(net_thread, NULL, 768, "net", 0, 5);
+  int flags = 0;
+#ifdef ENABLE_NET_FPU_USAGE
+  flags |= TASK_FPU;
+#endif
+
+  task_create(net_thread, NULL, 768, "net", flags, 5);
   net_periodic_timer.t_cb = periodic_timer_cb;
 }
 
