@@ -68,6 +68,7 @@ include ${SRC}/lib/usb/usb.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
+include ${SRC}/gui/gui.mk
 
 SRCS += ${SRC}/version.c
 

@@ -139,6 +139,22 @@ struct qm_trace {
 #define	TRASHIT(x)
 #endif	/* QUEUE_MACRO_DEBUG */
 
+
+
+
+
+
+#ifndef	__DEQUALIFY
+#define	__DEQUALIFY(type, var)	((type)(uintptr_t)(const volatile void *)(var))
+#endif
+
+
+#define	__containerof(x, s, m) ({					\
+	const volatile __typeof__(((s *)0)->m) *__x = (x);		\
+	__DEQUALIFY(s *, (const volatile char *)__x - offsetof(s, m));\
+})
+
+
 /*
  * Singly-linked List declarations.
  */
