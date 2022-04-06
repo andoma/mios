@@ -130,6 +130,25 @@ mbus_add_route(mbus_netif_t *act, uint16_t mask)
   act->mni_active_hosts |= mask;
 }
 
+
+static pbuf_t *
+mbus_bcast(pbuf_t *pb, mbus_netif_t *src)
+{
+  mbus_netif_t *mni;
+  SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
+    if(mni == src)
+      continue;
+
+    pbuf_t *copy = pbuf_copy(pb, 0);
+    mni->mni_tx_bytes += copy->pb_pktlen;
+    copy = mni->mni_output(mni, copy);
+    if(copy != NULL)
+      pbuf_free(copy);
+  }
+  return pb;
+}
+
+
 struct pbuf *
 mbus_input(struct netif *ni, struct pbuf *pb)
 {
@@ -159,9 +178,15 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     mbus_add_route(mni, src_mask);
   }
 
-  if(ni->ni_local_addr == dst_addr || dst_addr == 0x7) {
-    // Destined for us
+  if(ni->ni_local_addr == dst_addr || dst_addr == 7) {
+    // Destined for us or broadcast
 
+    if(dst_addr == 0x7) {
+      // Broadcast
+      pb = mbus_bcast(pb, mni);
+    }
+
+    // Trim off CRC
     if((pb = pbuf_trim(pb, 4)) == NULL) {
       mni->mni_rx_runts++;
       return pb;
@@ -182,19 +207,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     }
   }
 
-  SLIST_FOREACH(n, &mbus_netifs, mni_global_link) {
-    if(mni == n)
-      continue;
-
-    pbuf_t *copy = pbuf_copy(pb, 0);
-    n->mni_tx_bytes += copy->pb_pktlen;
-    pbuf_print("FWDB", copy, 1);
-    copy = n->mni_output(n, copy);
-    if(copy != NULL)
-      pbuf_free(copy);
-  }
-
-  return pb;
+  return mbus_bcast(pb, mni);
 }
 
 
