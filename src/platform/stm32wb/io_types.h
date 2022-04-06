@@ -8,6 +8,7 @@
 #define GPIO_PB(x)  GPIO(1, x)
 #define GPIO_PC(x)  GPIO(2, x)
 #define GPIO_PE(x)  GPIO(4, x)
+#define GPIO_PH(x)  GPIO(7, x)
 
 #define GPIO_UNUSED 0xff
 
