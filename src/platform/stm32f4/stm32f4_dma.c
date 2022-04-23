@@ -29,6 +29,6 @@ stm32_dma_alloc(uint32_t resource_id, const char *name)
 
   int channel = inst == sa ? resource_id >> 24 : (resource_id >> 8) & 0xff;
   assert(channel < 8);
-  reg_set_bits(DMA_SCR(inst), 25, 3, channel);
+  reg_wr(DMA_SCR(inst), channel << 25);
   return inst;
 }

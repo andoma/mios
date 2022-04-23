@@ -74,7 +74,7 @@ stm32_dma_set_callback(stm32_dma_instance_t i,
   ds->cb = cb;
   ds->arg = arg;
   irq_enable(irqmap[i], irq_level);
-  reg_wr(DMA_SCR(i), 0b10110);
+  reg_set_bits(DMA_SCR(i), 0, 5, 0b10110);
 }
 
 
@@ -88,7 +88,7 @@ stm32_dma_make_waitable(stm32_dma_instance_t i, const char *name)
   ds->arg = ds;
 
   irq_enable(irqmap[i], IRQ_LEVEL_SCHED);
-  reg_wr(DMA_SCR(i), 0b10110);
+  reg_set_bits(DMA_SCR(i), 0, 5, 0b10110);
 }
 
 
