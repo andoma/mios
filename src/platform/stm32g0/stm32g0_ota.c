@@ -147,6 +147,9 @@ ota_putc(const ota_state_t *os, uint8_t c)
 static void OTA_HELPER
 ota_xmit(const ota_state_t *os, const uint8_t *pkt, size_t len)
 {
+  while(reg_rd(os->os_mbus_uart + USART_SR) & (1 << 16)) {
+    reg_wr(IWDG_KR, 0xAAAA);
+  }
   ota_gpio_set_output(os->os_txe, 1);
   ota_putc(os, 0x7e);
   for(size_t i = 0; i < len; i++) {
@@ -196,6 +199,16 @@ ota_recv_pkt(ota_state_t *os, uint32_t expected_block)
     return 4;
 
   uint32_t block = rx[2] | (rx[3] << 8) | (rx[4] << 16);
+
+  if(block < expected_block) {
+    // Old block, delay a bit
+    for(int i = 0; i < 10; i++) {
+      while(!(*SYST_CSR & 0x10000)) {
+      }
+      reg_wr(IWDG_KR, 0xAAAA);
+    }
+  }
+
   if(block != expected_block)
     return 5;
 
@@ -279,9 +292,10 @@ ota_loop(void *arg, uint64_t expire)
   irq_forbid(IRQ_LEVEL_ALL);
   clk_enable(CLK_CRC);
 
+  reg_wr(os->os_mbus_uart + USART_CR1, 0);
+  reg_wr(os->os_mbus_uart + USART_CR3, (1 << 12)); // OVRDIS);
   reg_wr(os->os_mbus_uart + USART_CR1, (1 << 0) | (1 << 3));
   reg_wr(os->os_mbus_uart + USART_CR2, 0);
-  reg_wr(os->os_mbus_uart + USART_CR3, (1 << 12)); // OVRDIS);
   reg_wr(os->os_mbus_uart + USART_ICR, 0xffffffff);
 
   ota_gpio_set_output(os->os_txe, 0);
