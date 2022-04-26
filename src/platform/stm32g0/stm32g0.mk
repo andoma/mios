@@ -4,8 +4,6 @@ GLOBALDEPS += ${P}/stm32g0.mk
 
 CPPFLAGS += -iquote${P} -include ${P}/stm32g0.h
 
-CPPFLAGS += -DHAVE_HRTIMER
-
 LDSCRIPT = ${P}/stm32g0.ld
 
 include ${SRC}/cpu/cortexm/cortexm0plus.mk
@@ -22,6 +20,8 @@ SRCS += ${P}/stm32g0.c \
 	${P}/stm32g0_idle.c \
 	${P}/stm32g0_dma.c \
 	${P}/stm32g0_flash.c \
-	${P}/stm32g0_tim.c \
 
 SRCS-${ENABLE_OTA} += ${P}/stm32g0_ota.c
+
+SRCS-${ENABLE_HRTIMER} += ${P}/stm32g0_hrtim.c
+

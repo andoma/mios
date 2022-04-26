@@ -171,7 +171,7 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
 
   error_t err;
   while((err = i2c->result) == 1) {
-    if(task_sleep_deadline(&i2c->wait, deadline, 0)) {
+    if(task_sleep_deadline(&i2c->wait, deadline)) {
       i2c->result = 0;
       i2c->read_len = 0;
       i2c->write_len = 0;

@@ -8,6 +8,8 @@
 #include "systick.h"
 #include "cpu.h"
 
+_Static_assert(TICKS_PER_HZ < 0xffffff);
+
 static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
 static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
 static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
@@ -24,18 +26,7 @@ exc_systick(void)
   }
 
   const uint64_t now = clock;
-
-  while(1) {
-    timer_t *t = LIST_FIRST(&timers);
-    if(t == NULL)
-      break;
-    uint64_t expire = t->t_expire;
-    if(expire > now)
-      break;
-    LIST_REMOVE(t, t_link);
-    t->t_expire = 0;
-    t->t_cb(t->t_opaque, expire);
-  }
+  timer_dispatch(&timers, now);
 }
 
 
@@ -64,31 +55,16 @@ timer_cmp(const timer_t *a, const timer_t *b)
 }
 
 // IRQ_LEVEL_CLOCK must be blocked
+__attribute__((weak))
 void
-timer_arm_abs(timer_t *t, uint64_t expire, int flags)
+timer_arm_abs(timer_t *t, uint64_t expire)
 {
   if(t->t_expire)
     LIST_REMOVE(t, t_link);
 
   t->t_expire = expire;
 
-#ifdef HAVE_HRTIMER
-  if(flags & TIMER_HIGHRES && !hrtimer_arm(t, expire))
-    return;
-#endif
   LIST_INSERT_SORTED(&timers, t, t_link, timer_cmp);
-}
-
-
-// IRQ_LEVEL_CLOCK must be blocked
-int
-timer_disarm(timer_t *t)
-{
-  if(!t->t_expire)
-    return 1;
-  LIST_REMOVE(t, t_link);
-  t->t_expire = 0;
-  return 0;
 }
 
 

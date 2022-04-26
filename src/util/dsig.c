@@ -35,7 +35,7 @@ dsig_emit(uint8_t signal, const void *data, size_t len,
     SLIST_FOREACH(ds, &dsig_subs, ds_link) {
       if(ds->ds_signal == signal) {
         int64_t deadline = clock_get_irq_blocked() + ttl * 100000;
-        timer_arm_abs(&ds->ds_timer, deadline, 0);
+        timer_arm_abs(&ds->ds_timer, deadline);
         ds->ds_cb(ds->ds_opaque, data, len);
       }
     }

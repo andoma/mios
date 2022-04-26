@@ -13,11 +13,13 @@ typedef struct timer {
   const char *t_name;
 } timer_t;
 
-#define TIMER_HIGHRES 0x1
-
 // IRQ_LEVEL_CLOCK must be blocked
-void timer_arm_abs(timer_t *t, uint64_t deadline, int flags);
+void timer_arm_abs(timer_t *t, uint64_t deadline);
 
 // Return 1 if timer was NOT armed, return 0 if we managed to disarm
 // IRQ_LEVEL_CLOCK must be blocked
 int timer_disarm(timer_t *t);
+
+void timer_arm_on_queue(timer_t *t, uint64_t deadline, struct timer_list *tl);
+
+void timer_dispatch(struct timer_list *tl, uint64_t now);

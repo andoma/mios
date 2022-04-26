@@ -252,7 +252,7 @@ mbus_pcs_wait_helper(cond_t *c, mutex_t *m, int64_t deadline)
   if(deadline == INT64_MAX) {
     cond_wait(c, m);
   } else {
-    if(cond_wait_timeout(c, m, deadline, 0)) {}
+    if(cond_wait_timeout(c, m, deadline)) {}
   }
   return clock_get();
 }

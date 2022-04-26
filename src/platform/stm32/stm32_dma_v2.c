@@ -158,7 +158,7 @@ stm32_dma_wait(stm32_dma_instance_t instance)
   dma_stream_t *ds = g_streams[instance];
   while(1) {
     if(ds->err == 1) {
-      if(task_sleep_deadline(&ds->waitq, deadline, 0)) {
+      if(task_sleep_deadline(&ds->waitq, deadline)) {
         reg_clr_bit(DMA_CCRx(instance), 0);
         return ERR_TIMEOUT;
       }

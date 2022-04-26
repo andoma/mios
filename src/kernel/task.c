@@ -365,7 +365,7 @@ task_sleep_abs_sched_locked_timeout(void *opaque, uint64_t expire)
 
 static int
 task_sleep_abs_sched_locked(task_waitable_t *waitable,
-                            int64_t deadline, int flags)
+                            int64_t deadline)
 {
   task_t *const curtask = task_current();
 
@@ -390,7 +390,7 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
   timer.t_opaque = curtask;
   timer.t_expire = 0;
   timer.t_name = curtask->t_name;
-  timer_arm_abs(&timer, deadline, flags);
+  timer_arm_abs(&timer, deadline);
 
   task_insert_wait_list(waitable, curtask);
 
@@ -443,20 +443,20 @@ task_sleep(task_waitable_t *waitable)
 
 
 int
-task_sleep_delta(task_waitable_t *waitable, int useconds, int flags)
+task_sleep_delta(task_waitable_t *waitable, int useconds)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   const int64_t deadline = clock_get_irq_blocked() + useconds;
-  const int r = task_sleep_abs_sched_locked(waitable, deadline, flags);
+  const int r = task_sleep_abs_sched_locked(waitable, deadline);
   irq_permit(s);
   return r;
 }
 
 int
-task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
+task_sleep_deadline(task_waitable_t *waitable, int64_t deadline)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  const int r = task_sleep_abs_sched_locked(waitable, deadline, flags);
+  const int r = task_sleep_abs_sched_locked(waitable, deadline);
   irq_permit(s);
   return r;
 }
@@ -480,7 +480,7 @@ task_sleep_until_timeout(void *opaque, uint64_t expire)
 
 
 static void
-task_sleep_until(uint64_t deadline, int flags, const char *wchan)
+task_sleep_until(uint64_t deadline, const char *wchan)
 {
   task_t *const curtask = task_current();
 
@@ -496,7 +496,7 @@ task_sleep_until(uint64_t deadline, int flags, const char *wchan)
   timer.t_opaque = curtask;
   timer.t_expire = 0;
   timer.t_name = curtask->t_name;
-  timer_arm_abs(&timer, deadline, flags);
+  timer_arm_abs(&timer, deadline);
 
   while(curtask->t_state == TASK_STATE_SLEEPING) {
     schedule();
@@ -509,15 +509,7 @@ void
 sleep_until(uint64_t deadline)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(deadline, 0, "sleep_until");
-  irq_permit(s);
-}
-
-void
-sleep_until_hr(uint64_t deadline)
-{
-  const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(deadline, TIMER_HIGHRES, "sleep_until_hr");
+  task_sleep_until(deadline, "sleep_until");
   irq_permit(s);
 }
 
@@ -526,19 +518,9 @@ void
 usleep(unsigned int useconds)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(clock_get_irq_blocked() + useconds, 0, "usleep");
+  task_sleep_until(clock_get_irq_blocked() + useconds, "usleep");
   irq_permit(s);
 }
-
-void
-usleep_hr(unsigned int useconds)
-{
-  const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(clock_get_irq_blocked() + useconds, TIMER_HIGHRES,
-                   "usleep_hr");
-  irq_permit(s);
-}
-
 
 void
 sleep(unsigned int sec)
@@ -666,11 +648,11 @@ cond_wait(cond_t *c, mutex_t *m)
 
 
 int
-cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
+cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);
-  int r = task_sleep_abs_sched_locked(c, deadline, flags);
+  int r = task_sleep_abs_sched_locked(c, deadline);
   mutex_lock_sched_locked(m, task_current());
   irq_permit(s);
   return r;
@@ -710,7 +692,7 @@ task_mgmt_thread(void *arg)
 #ifdef ENABLE_TASK_ACCOUNTING
     ts += 1000000;
     int do_accounting =
-      cond_wait_timeout(&task_mgmt_cond, &alltasks_mutex, ts, 0);
+      cond_wait_timeout(&task_mgmt_cond, &alltasks_mutex, ts);
     uint32_t cc = cpu_cycle_counter();
     uint32_t cc_delta = (cc - prev_cc) / 10000;
     prev_cc = cc;

@@ -50,8 +50,6 @@ get_sector_offset(unsigned int sector)
 
 #define IWDG_KR  0x40003000
 
-static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
-
 static inline void __attribute__((always_inline))
 flash_wait_ready(void)
 {
@@ -59,11 +57,8 @@ flash_wait_ready(void)
   // wraps since a flash erase of a 128k sector takes as much
   // as 2 seconds
 
-  extern uint64_t clock;
   while(reg_rd(FLASH_SR) & (1 << 16)) {
-    if(*SYST_CSR & 0x10000) {
-      clock += 1000000 / HZ;
-    }
+    clock_unwrap();
     reg_wr(IWDG_KR, 0xAAAA);
   }
 }

@@ -43,6 +43,7 @@ LDFLAGS += -L${SRC}
 # Set defaults for all variables
 #
 
+ENABLE_HRTIMER ?= no
 ENABLE_MATH ?= yes
 ENABLE_TASK_WCHAN ?= yes
 ENABLE_TASK_DEBUG ?= no

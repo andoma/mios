@@ -155,7 +155,7 @@ net_thread(void *arg)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
 
-  timer_arm_abs(&net_periodic_timer, clock_get() + 1000000, 0);
+  timer_arm_abs(&net_periodic_timer, clock_get() + 1000000);
 
   while(1) {
 
@@ -262,7 +262,7 @@ periodic_timer_cb(void *opaque, uint64_t expire)
   net_wakeup(NET_WORK_PERIODIC);
   irq_permit(q);
 
-  timer_arm_abs(&net_periodic_timer, expire + 1000000, 0);
+  timer_arm_abs(&net_periodic_timer, expire + 1000000);
 }
 
 

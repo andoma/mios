@@ -132,11 +132,11 @@ void task_wakeup_sched_locked(task_waitable_t *waitable, int all);
 void task_sleep(task_waitable_t *waitable);
 
 // Returns 1 if deadline expired
-int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline, int flags)
+int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline)
   __attribute__((warn_unused_result));
 
 // Returns 1 if deadline expired
-int task_sleep_delta(task_waitable_t *waitable, int useconds, int flags)
+int task_sleep_delta(task_waitable_t *waitable, int useconds)
   __attribute__((warn_unused_result));
 
 
@@ -229,7 +229,7 @@ void cond_broadcast(cond_t *c);
 
 void cond_wait(cond_t *c, mutex_t *m);
 
-int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline, int flags)
+int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
   __attribute__((warn_unused_result));
 
 // Helper for constructing a task used for cli/shell activities

@@ -4,8 +4,6 @@ GLOBALDEPS += ${P}/stm32h7.mk
 
 CPPFLAGS += -iquote${P} -include ${P}/stm32h7.h
 
-#CPPFLAGS += -DHAVE_HRTIMER
-
 LDSCRIPT = ${P}/stm32h7.ld
 
 include ${SRC}/cpu/cortexm/cortexm7.mk

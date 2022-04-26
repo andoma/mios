@@ -163,7 +163,7 @@ ota_task(void *arg)
           }
         }
 
-        if(cond_wait_timeout(&os->cond, &ota_mutex, clock_get() + 100000, 0)) {
+        if(cond_wait_timeout(&os->cond, &ota_mutex, clock_get() + 100000)) {
           ota_xfer_xmit(os);
         }
       }

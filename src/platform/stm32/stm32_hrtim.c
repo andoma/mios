@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <sys/queue.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,19 +11,23 @@
 
 #include "systick.h"
 
+
 static struct timer_list hr_timers;
 
 // #define HRTIMER_TRACE 16
 
 #ifdef HRTIMER_TRACE
 
-#define HRTIMER_TRACE_FIRE 1
-#define HRTIMER_TRACE_ARM  2
-#define HRTIMER_TRACE_IRQ  3
+static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
+
+#define HRTIMER_TRACE_FIRE  1
+#define HRTIMER_TRACE_ARM   2
+#define HRTIMER_TRACE_IRQ   3
 
 typedef struct {
   uint64_t when;
   timer_t *t;
+  uint32_t syst_val;
   uint16_t arr;
   uint8_t op;
 } hrtimer_trace_t;
@@ -37,10 +42,57 @@ hrtimer_trace_add(uint64_t when, timer_t *t,
   int idx = traceptr & (HRTIMER_TRACE - 1);
   tracebuf[idx].when = when;
   tracebuf[idx].t    = t;
+  tracebuf[idx].syst_val = *SYST_VAL;
   tracebuf[idx].arr  = arr;
   tracebuf[idx].op   = op;
   traceptr++;
 }
+
+
+static void
+hrtimer_dump_trace(stream_t *s)
+{
+  int64_t now = clock_get_irq_blocked();
+
+  stprintf(s, "%d trace events in total\n", traceptr);
+
+  for(int i = 0; i < HRTIMER_TRACE; i++) {
+    int idx = (traceptr + i) & (HRTIMER_TRACE - 1);
+    hrtimer_trace_t *ht = &tracebuf[idx];
+    stprintf(s, "%08x\t", ht->syst_val);
+    switch(ht->op) {
+    default:
+      continue;
+    case HRTIMER_TRACE_FIRE:
+      stprintf(s, "FIRE\t\t");
+      break;
+    case HRTIMER_TRACE_ARM:
+      stprintf(s, "ARM\t%d\t", ht->arr);
+      break;
+    case HRTIMER_TRACE_IRQ:
+      stprintf(s, "IRQ\t\t%15d %15d\n",
+                 (int)ht->when, (int)(now - ht->when));
+      continue;
+    }
+    stprintf(s, "%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
+               ht->t);
+  }
+
+  const timer_t *t;
+  LIST_FOREACH(t, &hr_timers, t_link) {
+    stprintf(s, "%p %p %p %15d %15d %s\n",
+               t, t->t_cb, t->t_opaque,
+               (int)t->t_expire,
+               (int)(t->t_expire - now),
+               t->t_name);
+  }
+}
+
+
+
+
+
+
 
 #endif
 
@@ -52,8 +104,8 @@ hrtimer_rearm(timer_t *t, int64_t now)
   uint32_t arr;
   if(delta < 2) {
     arr = 2;
-  } else if(delta > 65535) {
-    arr = 65535;
+  } else if(delta > 65534) {
+    arr = 65534;
   } else {
     arr = delta;
   }
@@ -80,11 +132,11 @@ hrtim_irq(void)
   while(1) {
     timer_t *t = LIST_FIRST(&hr_timers);
     if(t == NULL)
-      return;
+      break;
 
     if(t->t_expire > now) {
       hrtimer_rearm(t, now);
-      return;
+      break;
     }
 
 #ifdef HRTIMER_TRACE
@@ -92,6 +144,7 @@ hrtim_irq(void)
 
     int64_t miss = now - t->t_expire;
     if(miss > 500) {
+      hrtimer_dump_trace(stdio);
       panic("Timer %p \"%s\"  missed with %d",
             t, t->t_name, (int)miss);
     }
@@ -111,13 +164,15 @@ hrtimer_cmp(const timer_t *a, const timer_t *b)
 }
 
 
-int
-hrtimer_arm(timer_t *t, uint64_t expire)
+void
+timer_arm_abs(timer_t *t, uint64_t deadline)
 {
+  timer_disarm(t);
+
+  t->t_expire = deadline;
   LIST_INSERT_SORTED(&hr_timers, t, t_link, hrtimer_cmp);
   if(t == LIST_FIRST(&hr_timers))
     hrtimer_rearm(t, clock_get_irq_blocked());
-  return 0;
 }
 
 
@@ -127,51 +182,16 @@ hrtimer_init(uint16_t clkid)
   clk_enable(clkid);
   reg_wr(HRTIM_BASE + TIMx_PSC, clk_get_freq(clkid) / 1000000 - 1);
   reg_wr(HRTIM_BASE + TIMx_DIER, 0x1);
-  reg_wr(HRTIM_BASE + TIMx_CR1, 0x8);
+  reg_wr(HRTIM_BASE + TIMx_CR1, 0x0);
 }
 
 #ifdef HRTIMER_TRACE
 
-
-
-static int
+static error_t
 cmd_hrt(cli_t *cli, int argc, char **argv)
 {
-  int64_t now = clock_get_irq_blocked();
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
-
-  cli_printf(cli, "%d trace events in total\n", traceptr);
-
-  for(int i = 0; i < HRTIMER_TRACE; i++) {
-    int idx = (traceptr + i) & (HRTIMER_TRACE - 1);
-    hrtimer_trace_t *ht = &tracebuf[idx];
-    switch(ht->op) {
-    default:
-      continue;
-    case HRTIMER_TRACE_FIRE:
-      cli_printf(cli, "FIRE\t\t");
-      break;
-    case HRTIMER_TRACE_ARM:
-      cli_printf(cli, "ARM\t%d\t", ht->arr);
-      break;
-    case HRTIMER_TRACE_IRQ:
-      cli_printf(cli, "IRQ\t\t%15d %15d\n",
-                 (int)ht->when, (int)(now - ht->when));
-      continue;
-    }
-    cli_printf(cli, "%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
-               ht->t);
-  }
-
-  const timer_t *t;
-  LIST_FOREACH(t, &hr_timers, t_link) {
-    cli_printf(cli, "%p %p %p %15d %15d %s\n",
-               t, t->t_cb, t->t_opaque,
-               (int)t->t_expire,
-               (int)(t->t_expire - now),
-               t->t_name);
-  }
-
+  hrtimer_dump_trace(cli->cl_stream);
   irq_permit(q);
   return 0;
 }

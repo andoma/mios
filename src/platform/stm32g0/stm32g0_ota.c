@@ -428,7 +428,7 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
       dst += 8;
     }
     reg_wr(FLASH_CR, 0x80000000);
-    timer_arm_abs(&os->os_launcher, clock_get() + 100000, 0);
+    timer_arm_abs(&os->os_launcher, clock_get() + 100000);
   } else {
     wakelock_release();
   }
