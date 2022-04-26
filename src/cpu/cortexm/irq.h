@@ -88,7 +88,27 @@ can_sleep(void)
 
 #else
 
-#define irq_ensure(l)
+inline void  __attribute__((always_inline))
+irq_ensure0(unsigned int level, const char *file, int line)
+{
+  unsigned int control;
+  asm volatile ("mrs %0, control\n\t" : "=r" (control));
+
+  if(!(control & 2))
+    return;
+
+  unsigned int primask;
+  asm volatile ("mrs %0, primask\n\t" : "=r" (primask));
+
+  if(primask)
+    return;
+
+  panic("Insuficient IRQ blocking at %s:%d\n",
+        file, line);
+}
+
+
+#define irq_ensure(l) irq_ensure0(l, __FILE__, __LINE__)
 
 inline unsigned int  __attribute__((always_inline))
 irq_forbid(int not_used)
