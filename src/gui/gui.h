@@ -173,6 +173,9 @@ void gui_touch_press(gui_display_t *gd, const gui_position_t *p);
 
 // ==========================================================
 
+void *gui_create_from_classdef(gui_widget_t *p,
+                               const gui_widget_class_t *gwc);
+
 gui_widget_t *gui_create_list(gui_widget_t *p);
 
 gui_widget_t *gui_create_vbox(gui_widget_t *p);

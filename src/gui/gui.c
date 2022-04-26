@@ -225,12 +225,30 @@ gui_container_draw(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_container_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_container_update_req(gui_container_t *gc, gui_display_t *gd, int mask)
 {
-  gui_container_t *gc = (gui_container_t *)w;
   gui_widget_t *c;
+
+  gc->gw.gw_req_size.width = 0;
+  gc->gw.gw_req_size.height = 0;
+  gc->gw.gw_flags &= ~(GUI_WIDGET_CONSTRAIN_X | GUI_WIDGET_CONSTRAIN_Y);
+
   STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
     gui_update_req(c, gd);
+
+    if((c->gw_flags & mask) & GUI_WIDGET_CONSTRAIN_X) {
+      const int w =
+        c->gw_margin_left + c->gw_margin_right + c->gw_req_size.width;
+      gc->gw.gw_req_size.width = MAX(gc->gw.gw_req_size.width, w);
+      gc->gw.gw_flags |= GUI_WIDGET_CONSTRAIN_X;
+    }
+
+    if((c->gw_flags & mask) & GUI_WIDGET_CONSTRAIN_Y) {
+      const int h =
+        c->gw_margin_top + c->gw_margin_bottom + c->gw_req_size.height;
+      gc->gw.gw_req_size.height = MAX(gc->gw.gw_req_size.height, h);
+      gc->gw.gw_flags |= GUI_WIDGET_CONSTRAIN_Y;
+    }
   }
 }
 
@@ -340,9 +358,25 @@ gui_vbox_layout(gui_widget_t *w, gui_display_t *gd)
   }
 }
 
+
+static void
+gui_hbox_update_req(gui_widget_t *w, gui_display_t *gd)
+{
+  gui_container_t *gc = (gui_container_t *)w;
+  gui_container_update_req(gc, gd, GUI_WIDGET_CONSTRAIN_Y);
+}
+
+static void
+gui_vbox_update_req(gui_widget_t *w, gui_display_t *gd)
+{
+  gui_container_t *gc = (gui_container_t *)w;
+  gui_container_update_req(gc, gd, GUI_WIDGET_CONSTRAIN_X);
+}
+
+
 static const gui_widget_class_t gui_hbox_class = {
   .instance_size = sizeof(gui_container_t),
-  .update_req = gui_container_update_req,
+  .update_req = gui_hbox_update_req,
   .layout = gui_hbox_layout,
   .draw = gui_container_draw,
   .add_child = gui_container_add_child,
@@ -351,7 +385,7 @@ static const gui_widget_class_t gui_hbox_class = {
 
 static const gui_widget_class_t gui_vbox_class = {
   .instance_size = sizeof(gui_container_t),
-  .update_req = gui_container_update_req,
+  .update_req = gui_vbox_update_req,
   .layout = gui_vbox_layout,
   .draw = gui_container_draw,
   .add_child = gui_container_add_child,
@@ -476,9 +510,18 @@ gui_list_release(gui_widget_t *w, gui_display_t *gd)
 }
 
 
+
+static void
+gui_list_update_req(gui_widget_t *w, gui_display_t *gd)
+{
+  gui_container_t *gc = (gui_container_t *)w;
+  gui_container_update_req(gc, gd, 0);
+}
+
+
 static const gui_widget_class_t gui_list_class = {
   .instance_size = sizeof(gui_list_t),
-  .update_req = gui_container_update_req,
+  .update_req = gui_list_update_req,
   .layout = gui_list_layout,
   .draw = gui_list_draw,
   .add_child = gui_container_add_child,
@@ -540,10 +583,18 @@ gui_abox_grab(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p,
   return c ? c->gw_class->grab(c, gd, p, descend) : NULL;
 }
 
+static void
+gui_zbox_update_req(gui_widget_t *w, gui_display_t *gd)
+{
+  gui_container_t *gc = (gui_container_t *)w;
+  gui_container_update_req(gc, gd,
+                           GUI_WIDGET_CONSTRAIN_X | GUI_WIDGET_CONSTRAIN_Y);
+}
+
 
 static const gui_widget_class_t gui_zbox_class = {
   .instance_size = sizeof(gui_container_t),
-  .update_req = gui_container_update_req,
+  .update_req = gui_zbox_update_req,
   .layout = gui_container_layout,
   .draw = gui_container_draw,
   .add_child = gui_container_add_child,
@@ -552,7 +603,7 @@ static const gui_widget_class_t gui_zbox_class = {
 
 static const gui_widget_class_t gui_abox_class = {
   .instance_size = sizeof(gui_container_t),
-  .update_req = gui_container_update_req,
+  .update_req = gui_zbox_update_req,
   .layout = gui_container_layout,
   .draw = gui_abox_draw,
   .add_child = gui_container_add_child,
