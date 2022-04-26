@@ -25,3 +25,4 @@ SRCS-${ENABLE_OTA} += ${P}/stm32g0_ota.c
 
 SRCS-${ENABLE_HRTIMER} += ${P}/stm32g0_hrtim.c
 
+${MOS}/platform/stm32g0/stm32g0_ota.o : OPTLEVEL = s

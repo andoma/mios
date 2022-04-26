@@ -38,18 +38,14 @@ get_p13n_addr(void)
 #define IWDG_BASE 0x40003000
 #define IWDG_KR  (IWDG_BASE + 0x00)
 
-static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
-
 static inline error_t __attribute__((always_inline))
 flash_wait_ready(void)
 {
   int timeout = 0;
-  extern uint64_t clock;
   while(reg_rd(FLASH_SR) & (1 << 16)) {
-    if(*SYST_CSR & 0x10000) {
-      clock += 1000000 / HZ;
-
-      if(timeout > 20)
+    if(clock_unwrap()) {
+      timeout++;
+      if(timeout == HZ)
         return ERR_FLASH_TIMEOUT;
     }
     reg_wr(IWDG_KR, 0xAAAA);

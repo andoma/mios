@@ -38,6 +38,7 @@ typedef struct {
   ota_req_t os_req;
   uint8_t os_rxptr;
   uint8_t os_rxaddr;
+  uint8_t os_ignore_err;
   gpio_t os_txe;
   timer_t os_launcher;
 } ota_state_t;
@@ -169,6 +170,12 @@ ota_xmit(const ota_state_t *os, const uint8_t *pkt, size_t len)
 static void OTA_HELPER
 ota_req(ota_state_t *os, uint32_t block, uint8_t last_err)
 {
+  if(last_err == 2) {
+    os->os_ignore_err++;
+    if(os->os_ignore_err < 3)
+      return;
+  }
+  os->os_ignore_err = 0;
   os->os_txpkt[2] = block;
   os->os_txpkt[3] = block >> 8;
   os->os_txpkt[4] = block >> 16;
@@ -184,17 +191,18 @@ ota_req(ota_state_t *os, uint32_t block, uint8_t last_err)
 static int OTA_HELPER
 ota_recv_pkt(ota_state_t *os, uint32_t expected_block)
 {
-  if(ota_crc(os->os_rxbuf, os->os_rxptr))
-    return 1;
-
-  const int len = os->os_rxptr - 4;
-  if(len != 2 + 3 + 16)
-    return 2;
-
   const uint8_t *rx = os->os_rxbuf;
 
   if(rx[0] != os->os_rxaddr)
+    return 2;
+
+  if(ota_crc(os->os_rxbuf, os->os_rxptr))
     return 3;
+
+  const int len = os->os_rxptr - 4;
+  if(len != 2 + 3 + 16)
+    return 1;
+
   if(rx[1] != 0xd)
     return 4;
 
@@ -202,11 +210,9 @@ ota_recv_pkt(ota_state_t *os, uint32_t expected_block)
 
   if(block < expected_block) {
     // Old block, delay a bit
-    for(int i = 0; i < 10; i++) {
-      while(!(*SYST_CSR & 0x10000)) {
-      }
-      reg_wr(IWDG_KR, 0xAAAA);
+    while(!(*SYST_CSR & 0x10000)) {
     }
+    reg_wr(IWDG_KR, 0xAAAA);
   }
 
   if(block != expected_block)
@@ -421,7 +427,6 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
   error_t err = stm32g0_flash_erase_sector_ramcode(sector);
   if(!err) {
     void *dst = get_ota_trampoline_addr();
-
     while(src < stop) {
       flash_write_quad(dst, src);
       src += 8;
@@ -433,7 +438,7 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
     wakelock_release();
   }
   irq_permit(q);
-  return 0;
+  return err;
 }
 
 error_t
