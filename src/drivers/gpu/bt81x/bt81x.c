@@ -22,6 +22,8 @@ typedef struct bt81x {
   const bt81x_timings_t *timings;
 
   uint8_t irq;
+  uint8_t enabled;
+  uint8_t backlight;
   task_waitable_t irq_waitq;
 
   // IO
@@ -135,28 +137,25 @@ bt81x_reset(bt81x_t *b)
   bt81x_cmd(b, EVE_CMD_CLKSEL, 0x4 | clock_mul);
   bt81x_cmd(b, EVE_CMD_ACTIVE, 0);
 
-  usleep(40000);
+  usleep(20000);
 
   int retry = 0;
 
   while(bt81x_rd8(b, EVE_REG_ID) != 0x7c) {
     retry++;
-    if(retry == 100)
+    if(retry == 10)
       return ERR_INVALID_ID;
     usleep(10000);
   }
 
-  printf("Display attached\n");
-
   retry = 0;
   while(bt81x_rd8(b, EVE_REG_CPURESET) != 0) {
     retry++;
-    if(retry == 100)
+    if(retry == 10)
       return ERR_NO_DEVICE;
     usleep(10000);
   }
 
-  printf("GPU out of reset\n");
   bt81x_wr32(b, EVE_REG_FREQUENCY, 12000000 * clock_mul);
   return 0;
 }
@@ -351,7 +350,7 @@ bt81x_initialize(bt81x_t *b)
   bt81x_wr8(b, EVE_REG_PCLK, 0);
 
   // Turn off backlight
-  bt81x_wr8(b, EVE_REG_PWM_DUTY, 0);
+  bt81x_wr16(b, EVE_REG_PWM_DUTY, 0);
 
 
   // Initialize scanout
@@ -368,7 +367,6 @@ bt81x_initialize(bt81x_t *b)
   bt81x_wr16(b, EVE_REG_VSYNC1,  t->vsync1);
   bt81x_wr8(b, EVE_REG_SWIZZLE,  t->swizzle);
   bt81x_wr8(b, EVE_REG_PCLK_POL, t->pclk_pol);
-
 
   // FIXME: Add drivestrength?
 
@@ -388,7 +386,7 @@ bt81x_initialize(bt81x_t *b)
   bt81x_wr8(b, EVE_REG_PCLK, 2);
 
   bt81x_wr16(b, EVE_REG_PWM_HZ, 250);
-  bt81x_wr16(b, EVE_REG_PWM_DUTY, 40);
+  bt81x_wr16(b, EVE_REG_PWM_DUTY, b->backlight);
 
   // Enable interrupts
   bt81x_wr16(b, EVE_REG_INT_MASK, 0x81);
@@ -448,19 +446,37 @@ static void *
 bt81x_thread(void *arg)
 {
   bt81x_t *b = arg;
+
   while(1) {
-    bt81x_initialize(b);
-    usleep(100000);
+
+    if(!b->enabled) {
+      bt81x_wr16(b, EVE_REG_PWM_DUTY, 0);
+      usleep(1000);
+      gpio_set_output(b->gpio_pd, 0);
+      task_sleep(&b->irq_waitq);
+      continue;
+    }
+
+    error_t err = bt81x_initialize(b);
+    if(err) {
+      if(task_sleep_delta(&b->irq_waitq, 1000000, 0)) {}
+      continue;
+    }
     int q = irq_forbid(IRQ_LEVEL_CLOCK);
 
-    while(1) {
+    while(b->enabled) {
 
       if(!b->irq) {
-        task_sleep(&b->irq_waitq);
+        if(task_sleep_delta(&b->irq_waitq, 100000, 0)) {
+          break;
+        }
         continue;
       }
 
-      uint8_t intflags = bt81x_rd8(b, EVE_REG_INT_FLAGS);
+      const uint32_t intflags = bt81x_rd32(b, EVE_REG_INT_FLAGS);
+      if(intflags == 0xffffffff)
+        break;
+
       irq_permit(q);
 
       if(intflags & 0x1) {
@@ -473,6 +489,7 @@ bt81x_thread(void *arg)
 
       q = irq_forbid(IRQ_LEVEL_CLOCK);
     }
+    irq_permit(q);
   }
 }
 
@@ -504,7 +521,8 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
 
   b->display_size.siz.width = timings->width;
   b->display_size.siz.height = timings->height;
-
+  b->enabled = 1;
+  b->backlight = 64;
   b->timings = timings;
   b->spi = spi;
   b->gpio_ncs = ncs;
@@ -522,12 +540,31 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
                 GPIO_FALLING_EDGE | GPIO_RISING_EDGE,
                 IRQ_LEVEL_CLOCK);
 
-
   gui_display_init(&b->gui_display);
   b->gui_display.gd_class = &bt81x_gui_ops;
 
   task_create(bt81x_thread, b, 1024, "gpu", TASK_FPU, 3);
   return &b->gui_display;
+}
+
+
+void
+bt81x_enable(gui_display_t *gd, int enabled)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+  int q = irq_forbid(IRQ_LEVEL_CLOCK);
+  b->enabled = enabled;
+  task_wakeup(&b->irq_waitq, 0);
+  irq_permit(q);
+}
+
+
+void
+bt81x_backlight(gui_display_t *gd, uint8_t backlight)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+  b->backlight = backlight;
+  bt81x_wr16(b, EVE_REG_PWM_DUTY, b->backlight);
 }
 
 
@@ -743,6 +780,8 @@ static const gui_display_class_t bt81x_gui_ops = {
   .get_text_size = get_text_size,
 };
 
+#if 0
+
 /************************************************************************
  *
  * MISC debug support
@@ -753,7 +792,7 @@ static const gui_display_class_t bt81x_gui_ops = {
 
 #include <string.h>
 
-static int
+static error_t
 cmd_eve_rd32(cli_t *cli, int argc, char **argv)
 {
   if(g_bt81x == NULL)
@@ -784,42 +823,7 @@ cmd_eve_rd32(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("eve_rd32", cmd_eve_rd32);
 
 
-
-static int
-cmd_backlight(cli_t *cli, int argc, char **argv)
-{
-  if(g_bt81x == NULL)
-    return -1;
-
-  bt81x_t *b = g_bt81x;
-
-  int duty = argc > 1 ? atoi(argv[1]) : 0;
-  bt81x_wr16(b, EVE_REG_PWM_DUTY, duty);
-  return 0;
-}
-
-CLI_CMD_DEF("backlight", cmd_backlight);
-
-
-static int
-cmd_gpu_on(cli_t *cli, int argc, char **argv)
-{
-  if(g_bt81x == NULL)
-    return -1;
-
-  bt81x_t *b = g_bt81x;
-
-  int v = !!(argc > 1 && atoi(argv[1]));
-  printf("pd=%d\n", v);
-  gpio_set_output(b->gpio_pd, v);
-  return 0;
-}
-
-CLI_CMD_DEF("gpu-on", cmd_gpu_on);
-
-
-
-static int
+static error_t
 cmd_font_table(cli_t *cli, int argc, char **argv)
 {
   if(g_bt81x == NULL)
@@ -835,24 +839,22 @@ CLI_CMD_DEF("font-table", cmd_font_table);
 
 
 
-static int
-cmd_touch(cli_t *cli, int argc, char **argv)
+
+
+static error_t
+cmd_gpu_info(cli_t *cli, int argc, char **argv)
 {
   if(g_bt81x == NULL)
     return -1;
 
   bt81x_t *b = g_bt81x;
 
-  while(1) {
-    if(cli_getc(cli, 0) != ERR_NOT_READY)
-      break;
-    uint32_t t0xy = bt81x_rd32(b, EVE_REG_CTOUCH_TOUCH0_XY);
-    uint32_t t1xy = bt81x_rd32(b, EVE_REG_CTOUCH_TOUCH1_XY);
-    uint32_t raw = bt81x_rd32(b, EVE_REG_TOUCH_RAW_XY);
-    printf("t0xy=%08x t1xy=%08x raw=%08x\n", t0xy, t1xy, raw);
-    usleep(100000);
-  }
+  uint32_t intflags = bt81x_rd32(b, EVE_REG_INT_FLAGS);
+  cli_printf(cli, "gpio: %d\n", !gpio_get_input(b->gpio_irq));
+  cli_printf(cli, "b->irq=%d\n", b->irq);
+  cli_printf(cli, "intflags=0x%x\n", intflags);
   return 0;
 }
 
-CLI_CMD_DEF("touch", cmd_touch);
+CLI_CMD_DEF("gpu-info", cmd_gpu_info);
+#endif

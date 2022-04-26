@@ -32,3 +32,7 @@ struct gui_display;
 
 struct gui_display *bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
                                  const bt81x_timings_t *timings);
+
+void bt81x_enable(struct gui_display *, int enabled);
+
+void bt81x_backlight(struct gui_display *, uint8_t backlight);
