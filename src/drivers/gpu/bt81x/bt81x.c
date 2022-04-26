@@ -459,7 +459,7 @@ bt81x_thread(void *arg)
 
     error_t err = bt81x_initialize(b);
     if(err) {
-      if(task_sleep_delta(&b->irq_waitq, 1000000, 0)) {}
+      if(task_sleep_delta(&b->irq_waitq, 1000000)) {}
       continue;
     }
     int q = irq_forbid(IRQ_LEVEL_CLOCK);
@@ -467,7 +467,7 @@ bt81x_thread(void *arg)
     while(b->enabled) {
 
       if(!b->irq) {
-        if(task_sleep_delta(&b->irq_waitq, 100000, 0)) {
+        if(task_sleep_delta(&b->irq_waitq, 100000)) {
           break;
         }
         continue;
