@@ -9,11 +9,11 @@
 #define RCC_CFGR    (RCC_BASE + 0x08)
 #define RCC_PLLCFGR (RCC_BASE + 0x0c)
 
-
 #define RCC_AHB1ENR  (RCC_BASE + 0x48)
 #define RCC_AHB2ENR  (RCC_BASE + 0x4c)
 #define RCC_APB1ENR2 (RCC_BASE + 0x5c)
 #define RCC_APB2ENR  (RCC_BASE + 0x60)
+#define RCC_CCIPR    (RCC_BASE + 0x88)
 
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 
@@ -25,8 +25,12 @@
 #define CLK_GPIOE CLK_GPIO(4)
 #define CLK_GPIOH CLK_GPIO(7)
 
+#define CLK_ADC     CLK_ID(RCC_AHB2ENR, 13)
+
 #define CLK_DMA1    CLK_ID(RCC_AHB1ENR, 0)
+#define CLK_DMA2    CLK_ID(RCC_AHB1ENR, 1)
 #define CLK_DMAMUX1 CLK_ID(RCC_AHB1ENR, 2)
+#define CLK_CRC     CLK_ID(RCC_AHB1ENR, 12)
 
 #define CLK_USART1  CLK_ID(RCC_APB2ENR,  14)
 #define CLK_LPUART1 CLK_ID(RCC_APB1ENR2, 14)
