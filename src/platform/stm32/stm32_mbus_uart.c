@@ -92,9 +92,13 @@ start_tx_hd(uart_mbus_t *um)
     um->um_mni.mni_tx_fail++;
     splice(um);
   }
-
   start_timer(um);
 
+#ifdef USART_SR_BUSY
+  uint32_t sr = reg_rd(um->uart_reg_base + USART_SR);
+  if(sr & USART_SR_BUSY)
+    return;
+#endif
   gpio_set_output(um->txe, 1);
   um->state = MBUS_STATE_TX_SOF;
   um->txoff = 0;
