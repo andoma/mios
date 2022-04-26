@@ -14,5 +14,6 @@ SRCS += ${P}/stm32wb.c \
 	${P}/stm32wb_uart.c \
 	${P}/stm32wb_dma.c \
 	${P}/stm32wb_spi.c \
+	${P}/stm32wb_adc.c \
 
 ${MOS}/platform/stm32wb/%.o : CFLAGS += ${NOFPU}
