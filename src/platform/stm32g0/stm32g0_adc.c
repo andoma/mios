@@ -110,12 +110,22 @@ cmd_vref(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("vref", cmd_vref);
 
 
+#define MULTI_CR ((1 << 28) | (1 << 0))
+
+
+void
+stm32g0_adc_multi_trig(void)
+{
+  reg_wr(ADC_CR, MULTI_CR | (1 << 2));
+}
+
+
 void
 stm32g0_adc_multi(uint32_t channels,
                   int smpr,
                   uint16_t *output,
                   size_t num_buffers,
-                  uint8_t trig,
+                  uint8_t ext_trig,
                   int oversampling,
                   void (*cb)(stm32_dma_instance_t instance,
                              void *arg, error_t err),
@@ -140,14 +150,24 @@ stm32g0_adc_multi(uint32_t channels,
            (1 << 0));
   }
 
-  reg_wr(ADC_CFGR1,
-         (0b01 << 10) | // Trig on rising edge
-         (trig << 6) |
-         (1 << 1) | // DMACFG (Circular mode)
-         (1 << 0) | // DMAEN
-         0);
+  uint32_t cr = MULTI_CR;
 
-  reg_wr(ADC_CR, (1 << 28) | (1 << 0) | (1 << 2));
+  uint32_t cfgr1 =
+    (1 << 1) | // DMACFG (Circular mode)
+    (1 << 0) | // DMAEN
+    0;
+
+  if(ext_trig != 0xff) {
+    // External trig
+    cfgr1 |=
+      (0b01 << 10) | // Trig on rising edge
+      (ext_trig << 6);
+
+    cr |= (1 << 2); // START (but we still wait for external trig)
+  }
+
+  reg_wr(ADC_CFGR1, cfgr1);
+  reg_wr(ADC_CR, cr);
 
   stm32_dma_instance_t dmainst = stm32_dma_alloc(5, "adc");
 

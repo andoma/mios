@@ -41,3 +41,5 @@ void stm32g0_adc_multi(uint32_t channels,
 #define ADC_TRG_TIM6_TRGO  5
 #define ADC_TRG_TIM4_TRGO  6
 #define ADC_TRG_EXTI11     7
+
+void stm32g0_adc_multi_trig(void);
