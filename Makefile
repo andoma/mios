@@ -100,7 +100,7 @@ ${O}/%.o: %.S ${GLOBALDEPS} ${CONFIG_H}
 	${TOOLCHAIN}gcc -MD -MP -DASM ${CPPFLAGS} ${CFLAGS} -c $< -o $@
 
 CONFIG_H_CONTENTS := $(foreach K,$(ALL_ENABLE_VARS), \
-	$(if $(subst no,,${${K}}),"\#define ${K}\n",""))
+	$(if $(subst no,,${${K}}),"#define ${K}\n",""))
 
 ${CONFIG_H}: ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
