@@ -89,7 +89,7 @@ udelay(unsigned int usec)
 
 
 static void __attribute__((constructor(130)))
-timer_init(void)
+systick_init(void)
 {
   *SYST_RVR = TICKS_PER_HZ;
   *SYST_VAL = 0;
