@@ -44,3 +44,14 @@ timer_dispatch(struct timer_list *tl, uint64_t now)
     t->t_cb(t->t_opaque, expire);
   }
 }
+
+
+void
+timer_init(timer_t *t, void (*cb)(void *opaque, uint64_t expire),
+           void *opaque, const char *name, uint64_t deadline)
+{
+  t->t_cb = cb;
+  t->t_opaque = opaque;
+  t->t_name = name;
+  timer_arm_abs(t, deadline);
+}

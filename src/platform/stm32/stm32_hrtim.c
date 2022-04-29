@@ -150,9 +150,10 @@ hrtim_irq(void)
     }
 #endif
 
+    uint64_t expire = t->t_expire;
     LIST_REMOVE(t, t_link);
     t->t_expire = 0;
-    t->t_cb(t->t_opaque, now);
+    t->t_cb(t->t_opaque, expire);
   }
 }
 
