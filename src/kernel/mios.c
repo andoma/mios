@@ -66,13 +66,18 @@ halt(const char *msg)
   while(1) {}
 }
 
+void
+fini(void)
+{
+  call_array_rev((void *)&_fini_array_end, (void *)&_fini_array_begin);
+}
+
 
 void
 panic(const char *fmt, ...)
 {
   irq_forbid(IRQ_LEVEL_ALL);
-
-  call_array_rev((void *)&_fini_array_end, (void *)&_fini_array_begin);
+  fini();
 
   task_t *t = task_current();
   printf("\n\nPANIC in %s: ", t ? t->t_name : "<notask>");

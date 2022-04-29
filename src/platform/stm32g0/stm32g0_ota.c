@@ -31,7 +31,7 @@ stm32g0_ota_configure(uint32_t baseaddr, uint8_t local_addr, gpio_t txe)
   ota_txe = txe;
 }
 
-typedef struct {
+typedef struct ota_state {
   uint8_t os_rxbuf[32];
   uint8_t os_txpkt[10];
   uint32_t os_mbus_uart;
@@ -41,6 +41,7 @@ typedef struct {
   uint8_t os_ignore_err;
   gpio_t os_txe;
   timer_t os_launcher;
+  void (*os_updater)(struct ota_state *os);
 } ota_state_t;
 
 
@@ -291,21 +292,8 @@ ota_maybe_completed(ota_state_t *os)
 
 
 void  __attribute__((section("ota_flasher"),noinline))
-ota_loop(void *arg, uint64_t expire)
+ota_loop(ota_state_t *os)
 {
-  ota_state_t *os = arg;
-
-  irq_forbid(IRQ_LEVEL_ALL);
-  clk_enable(CLK_CRC);
-
-  reg_wr(os->os_mbus_uart + USART_CR1, 0);
-  reg_wr(os->os_mbus_uart + USART_CR3, (1 << 12)); // OVRDIS);
-  reg_wr(os->os_mbus_uart + USART_CR1, (1 << 0) | (1 << 3));
-  reg_wr(os->os_mbus_uart + USART_CR2, 0);
-  reg_wr(os->os_mbus_uart + USART_ICR, 0xffffffff);
-
-  ota_gpio_set_output(os->os_txe, 0);
-
   uint32_t block = 0;
   uint8_t last_err = 0;
 
@@ -350,6 +338,27 @@ ota_loop(void *arg, uint64_t expire)
     reg_wr(os->os_mbus_uart + USART_CR1, (1 << 0) | (1 << 3));
   }
 }
+
+
+static void
+updater_prepare(void *opaque, uint64_t expire)
+{
+  ota_state_t *os = opaque;
+
+  irq_forbid(IRQ_LEVEL_ALL);
+  fini();
+  clk_enable(CLK_CRC);
+
+  reg_wr(os->os_mbus_uart + USART_CR1, 0);
+  reg_wr(os->os_mbus_uart + USART_CR3, (1 << 12)); // OVRDIS);
+  reg_wr(os->os_mbus_uart + USART_CR1, (1 << 0) | (1 << 3));
+  reg_wr(os->os_mbus_uart + USART_CR2, 0);
+  reg_wr(os->os_mbus_uart + USART_ICR, 0xffffffff);
+
+  ota_gpio_set_output(os->os_txe, 0);
+  os->os_updater(os);
+}
+
 
 
 #include <stdio.h>
@@ -404,7 +413,9 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
     return ERR_NO_BUFFER;
   memset(os, 0, sizeof(ota_state_t));
   memcpy(&os->os_req, in, sizeof(ota_req_t));
-  os->os_launcher.t_cb = (void *)((intptr_t)get_ota_trampoline_addr() | (intptr_t)1);
+  os->os_updater = (void *)((intptr_t)get_ota_trampoline_addr() | (intptr_t)1);
+
+  os->os_launcher.t_cb = updater_prepare;
   os->os_launcher.t_opaque = os;
 
   os->os_mbus_uart = ota_uart_addr;

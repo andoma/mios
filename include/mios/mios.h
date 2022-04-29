@@ -2,6 +2,8 @@
 
 void panic(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 
+void fini(void);
+
 void reboot(void);
 
 #define ARRAYSIZE(x) (sizeof(x) / sizeof(x[0]))
