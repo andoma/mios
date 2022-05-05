@@ -171,6 +171,7 @@ static const char *reset_reasons[8] = {
   [RESET_REASON_POWER_ON] = "Power On",
   [RESET_REASON_EXT_RESET] = "External",
   [RESET_REASON_BROWNOUT] = "Brownout",
+  [RESET_REASON_OTHER] = "Other",
 };
 
 
