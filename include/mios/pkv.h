@@ -27,7 +27,7 @@ error_t pkv_get(struct pkv *pkv, const char *key, void *buf, size_t *len);
 int pkv_get_int(struct pkv *pkv, const char *key, int default_value);
 
 
-
+__attribute__((access(read_only, 3, 4)))
 error_t pkv_set(struct pkv *pkv, const char *key, const void *buf, size_t len);
 
 error_t pkv_set_int(struct pkv *pkv, const char *key, int value);

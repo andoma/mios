@@ -109,7 +109,8 @@ spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss,
 
 
 static error_t
-spi_txv(struct spi *bus, struct iovec *txiov, size_t count, gpio_t nss, int config)
+spi_txv(struct spi *bus, const struct iovec *txiov, size_t count,
+        gpio_t nss, int config)
 {
   struct stm32_spi *spi = (struct stm32_spi *)bus;
   error_t err = 0;

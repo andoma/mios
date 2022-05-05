@@ -9,8 +9,13 @@
 
 
 typedef struct stream {
+
+  __attribute__((access(write_only, 2, 3)))
   int (*read)(struct stream *s, void *buf, size_t size, int wait);
+
+  __attribute__((access(read_only, 2, 3)))
   void (*write)(struct stream *s, const void *buf, size_t size);
+
 } stream_t;
 
 
