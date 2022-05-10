@@ -14,6 +14,7 @@ struct dsig_sub {
   void (*ds_cb)(void *opaque, const void *data, size_t len);
   void *ds_opaque;
   uint8_t ds_signal;
+  uint8_t ds_src;
   timer_t ds_timer;
 };
 
@@ -21,8 +22,30 @@ static void
 sub_timeout(void *opaque, uint64_t expire)
 {
   dsig_sub_t *ds = opaque;
+  ds->ds_src = 0;
   ds->ds_cb(ds->ds_opaque, NULL, 0);
 }
+
+
+#include <stdio.h>
+
+void
+dsig_dispatch(uint8_t signal, const void *data, size_t len,
+              uint8_t ttl, uint8_t src)
+{
+  dsig_sub_t *ds;
+  int q = irq_forbid(IRQ_LEVEL_CLOCK);
+  SLIST_FOREACH(ds, &dsig_subs, ds_link) {
+    if(ds->ds_signal == signal && src >= ds->ds_src) {
+      ds->ds_src = src;
+      int64_t deadline = clock_get_irq_blocked() + ttl * 100000;
+      timer_arm_abs(&ds->ds_timer, deadline);
+      ds->ds_cb(ds->ds_opaque, data, len);
+    }
+  }
+  irq_permit(q);
+}
+
 
 
 void
@@ -30,17 +53,9 @@ dsig_emit(uint8_t signal, const void *data, size_t len,
           uint8_t ttl, int flags)
 {
   if(flags & DSIG_EMIT_LOCAL) {
-    dsig_sub_t *ds;
-    int q = irq_forbid(IRQ_LEVEL_CLOCK);
-    SLIST_FOREACH(ds, &dsig_subs, ds_link) {
-      if(ds->ds_signal == signal) {
-        int64_t deadline = clock_get_irq_blocked() + ttl * 100000;
-        timer_arm_abs(&ds->ds_timer, deadline);
-        ds->ds_cb(ds->ds_opaque, data, len);
-      }
-    }
-    irq_permit(q);
+    dsig_dispatch(signal, data, len, ttl, 0);
   }
+
 #ifdef ENABLE_NET_MBUS
   if(flags & DSIG_EMIT_MBUS) {
     static socket_t *sock;
