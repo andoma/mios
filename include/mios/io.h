@@ -63,7 +63,8 @@ typedef struct spi {
   error_t (*rw)(struct spi *bus, const uint8_t *tx, uint8_t *rx, size_t len,
                 gpio_t nss, int config);
   __attribute__((access(read_only, 2, 3)))
-  error_t (*txv)(struct spi *bus, const struct iovec *txiov, size_t count, gpio_t nss, int config);
+  error_t (*txv)(struct spi *bus, const struct iovec *txiov,
+                 size_t count, gpio_t nss, int config);
   error_t (*rw_locked)(struct spi *bus, const uint8_t *tx, uint8_t *rx,
                        size_t len, gpio_t nss, int mode);
   void (*lock)(struct spi *bus, int acquire);
