@@ -29,7 +29,7 @@ CFLAGS += ${CFLAGS-yes}
 
 CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
-CPPFLAGS += -I${T}include -I${SRC} -I${O} -include ${O}/include/config.h
+CPPFLAGS += -I${T}include -I${SRC} -I${O} -I${O}/include -include ${O}/include/config.h
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 CFLAGS += -ffunction-sections -fdata-sections
