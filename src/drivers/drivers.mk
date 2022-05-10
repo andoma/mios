@@ -20,3 +20,6 @@ SRCS-${ENABLE_HDC1080} += \
 
 SRCS-${ENABLE_BT81X} += \
 	${SRC}/drivers/gpu/bt81x/bt81x.c
+
+SRCS-${ENABLE_MCP23008} += \
+	${SRC}/drivers/mcp23008.c
