@@ -11,9 +11,12 @@
 
 #define RCC_AHB1ENR  (RCC_BASE + 0x48)
 #define RCC_AHB2ENR  (RCC_BASE + 0x4c)
+#define RCC_APB1ENR1 (RCC_BASE + 0x58)
 #define RCC_APB1ENR2 (RCC_BASE + 0x5c)
 #define RCC_APB2ENR  (RCC_BASE + 0x60)
 #define RCC_CCIPR    (RCC_BASE + 0x88)
+
+#define RCC_CSR      (RCC_BASE + 0x94)
 
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 
@@ -36,9 +39,12 @@
 #define CLK_I2C3    CLK_ID(RCC_APB1ENR1, 23)
 
 #define CLK_USART1  CLK_ID(RCC_APB2ENR,  14)
-#define CLK_LPUART1 CLK_ID(RCC_APB1ENR2, 14)
+#define CLK_LPUART1 CLK_ID(RCC_APB1ENR2, 0)
 
 #define CLK_SPI1    CLK_ID(RCC_APB2ENR,  12)
+
+#define CLK_TIM16   CLK_ID(RCC_APB2ENR,  17)
+#define CLK_TIM17   CLK_ID(RCC_APB2ENR,  18)
 
 static inline void
 clk_enable(uint16_t id)
