@@ -7,6 +7,7 @@
 #include "stm32wb_pwr.h"
 
 
+static volatile unsigned int * const DBGMCU_CR  = (unsigned int *)0xe0042004;
 static volatile unsigned int * const SCR  = (unsigned int *)0xe000ed10;
 
 static int wakelock = 0x10000000;
@@ -35,6 +36,7 @@ cpu_idle(void)
     if(!wakelock) {
       asm volatile ("cpsid i;isb");
       *SCR = 0x4;
+      *DBGMCU_CR &= ~6;
       device_power_state(DEVICE_POWER_STATE_SUSPEND);
       asm("wfi");
       *SCR = 0x0;
@@ -53,7 +55,7 @@ suspend_enable(void)
 {
   int q = irq_forbid(IRQ_LEVEL_ALL);
   if(wakelock & 0x10000000) {
-    int mode = 1;
+    int mode = 2;
     reg_set_bits(PWR_CR1, 0, 3, mode);
     reg_set_bits(PWR_C2R1, 0, 3, mode);
     wakelock &= ~0x10000000;
