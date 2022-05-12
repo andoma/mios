@@ -39,8 +39,10 @@ i2c_done(stm32_i2c_t *i2c, error_t result)
 
 
 static void
-i2c_irq(stm32_i2c_t *i2c)
+i2c_irq(void *arg)
 {
+  stm32_i2c_t *i2c = arg;
+
   uint32_t isr = reg_rd(i2c->base_addr + I2C_ISR);
 
   if(isr & 0x2 && i2c->write_len) {
