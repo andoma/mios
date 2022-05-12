@@ -367,7 +367,7 @@ timer_irq(void *arg)
     start_tx_hd(um);
   } else {
     um->state = MBUS_STATE_IDLE;
-
+    gpio_set_output(um->txe, 0);
     if(um->flags & UART_WAKEUP)
       wakelock_release();
   }
