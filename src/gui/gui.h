@@ -57,6 +57,10 @@ typedef struct gui_display_class {
                const char *text,
                size_t len);
 
+  void (*bitmap)(gui_display_t *gd,
+                 const gui_position_t *pos,
+                 int bitmap_id);
+
   void (*set_color)(gui_display_t *gd, uint32_t rgb);
 
   void (*set_alpha)(gui_display_t *gd, uint8_t alpha);
@@ -66,6 +70,9 @@ typedef struct gui_display_class {
                               const char *text,
                               size_t len);
 
+  int (*get_font_baseline)(gui_display_t *gd, gui_font_id_t font);
+
+  gui_size_t (*get_bitmap_size)(gui_display_t *gd, int bitmap);
 
 } gui_display_class_t;
 
@@ -124,6 +131,9 @@ struct gui_widget {
 #define GUI_WIDGET_CONSTRAIN_X       0x4
 #define GUI_WIDGET_CONSTRAIN_Y       0x8
 #define GUI_WIDGET_HIDDEN_BY_PARENT  0x10 // Hidden by parent (out of frame)
+#define GUI_WIDGET_BASELINE          0x20
+
+#define GUI_WIDGET_DEBUG             0x8000
 
   // Numpad style alignment
 #define GW_ALIGN_NONE          0
@@ -144,6 +154,7 @@ struct gui_widget {
   int8_t gw_margin_left;
 
   int8_t gw_weight;
+  uint8_t gw_baseline;
 };
 
 
@@ -162,6 +173,8 @@ void gui_set_margin_all(gui_widget_t *gw, int8_t margin);
 void gui_set_margin(gui_widget_t *gw,
                     int8_t top, int8_t right,
                     int8_t bottom, int8_t left);
+
+void gui_set_color(gui_widget_t *w, uint32_t color);
 
 void gui_attrib_changed(gui_widget_t *gw);
 
@@ -192,7 +205,15 @@ gui_widget_t *gui_create_quad(gui_widget_t *p,
                               uint32_t border_linesize);
 
 gui_widget_t *gui_create_cstr(gui_widget_t *p, const char *str,
-                              gui_font_id_t font_id);
+                              gui_font_id_t font_id, uint8_t alignment);
+
+gui_widget_t *gui_create_dstr(gui_widget_t *p, size_t maxlen,
+                              gui_font_id_t font_id, uint8_t alignment);
+
+void gui_set_dstr(gui_widget_t *w, const char *str);
 
 gui_widget_t *gui_create_vsep(gui_widget_t *p, int thickness, int margin);
 
+gui_widget_t *gui_create_hsep(gui_widget_t *p, int thickness, int margin);
+
+gui_widget_t *gui_create_bitmap(gui_widget_t *p, int bitmap);

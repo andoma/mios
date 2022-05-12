@@ -1,8 +1,10 @@
 #include "bt81x.h"
 
+#include <assert.h>
 #include <mios/mios.h>
 #include <mios/task.h>
 #include <sys/uio.h>
+#include <sys/param.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -15,6 +17,18 @@
 
 static const gui_display_class_t bt81x_gui_ops;
 
+
+typedef struct bitmap_header {
+  uint16_t format;
+  uint16_t width;
+  uint16_t height;
+  uint8_t data[0];
+} bitmap_header_t;
+
+
+
+
+
 typedef struct bt81x {
 
   gui_display_t gui_display;
@@ -23,6 +37,7 @@ typedef struct bt81x {
 
   uint8_t irq;
   uint8_t enabled;
+  uint8_t running;
   uint8_t backlight;
   task_waitable_t irq_waitq;
 
@@ -33,6 +48,8 @@ typedef struct bt81x {
   gpio_t gpio_irq;
   uint32_t spi_cfg;
 
+  uint16_t cmd_write;
+
   int dlptr;
   uint8_t pad0;
   uint8_t dladdr0;
@@ -42,6 +59,10 @@ typedef struct bt81x {
 
   gui_rect_t display_size;
 
+  const bt81x_bitmap_t *bitmaps;
+  size_t num_bitmaps;
+
+  uint32_t bitmap_addr[0];
 } bt81x_t;
 
 
@@ -126,6 +147,7 @@ bt81x_wr32(bt81x_t *b, uint32_t addr, uint32_t value)
 static error_t
 bt81x_reset(bt81x_t *b)
 {
+  b->cmd_write = 0;
   gpio_set_output(b->gpio_pd, 0);
   usleep(20000);
   gpio_set_output(b->gpio_pd, 1);
@@ -163,6 +185,7 @@ bt81x_reset(bt81x_t *b)
 struct bt81x_font {
   uint8_t bitmap_handle;
   uint8_t height;
+  uint8_t baseline;
   uint8_t width[96];
 };
 
@@ -171,6 +194,7 @@ static const struct bt81x_font fonts[] = {
   {
     .bitmap_handle = 17,
     .height = 108,
+    .baseline = 22,
     .width = {
       23, 25, 33, 57, 54, 68, 57, 20, 31, 31, 40, 52, 20, 41, 24, 38,
       52, 52, 52, 52, 52, 52, 52, 52, 52, 52, 23, 23, 46, 52, 48, 44,
@@ -182,6 +206,7 @@ static const struct bt81x_font fonts[] = {
   },{
     .bitmap_handle = 19,
     .height = 83,
+    .baseline = 17,
     .width = {
       18, 19, 25, 44, 41, 52, 44, 15, 24, 24, 31, 41, 16, 32, 19, 29,
       40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 18, 18, 36, 40, 37, 34,
@@ -193,6 +218,7 @@ static const struct bt81x_font fonts[] = {
   },{
     .bitmap_handle = 20,
     .height = 63,
+    .baseline = 12,
     .width = {
       13, 15, 19, 33, 31, 40, 34, 11, 18, 18, 24, 30, 12, 24, 14, 22,
       30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 13, 14, 28, 30, 29, 26,
@@ -204,6 +230,7 @@ static const struct bt81x_font fonts[] = {
   },{
     .bitmap_handle = 31,
     .height = 49,
+    .baseline = 10,
     .width = {
       10, 11, 15, 26, 25, 31, 26, 10, 15, 14, 18, 24, 9, 18, 11, 17,
       24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 10, 10, 21, 23, 22, 20,
@@ -215,6 +242,7 @@ static const struct bt81x_font fonts[] = {
   },{
     .bitmap_handle = 30,
     .height = 36,
+    .baseline = 7,
     .width = {
       8, 9, 12, 19, 18, 23, 19, 7, 11, 10, 14, 17, 7, 15, 8, 13,
       17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 7, 8, 16, 18, 16, 15,
@@ -226,6 +254,7 @@ static const struct bt81x_font fonts[] = {
   },{
     .bitmap_handle = 29,
     .height = 28,
+    .baseline = 5,
     .width = {
       6, 6, 8, 15, 15, 17, 15, 5, 9, 8, 11, 14, 5, 11, 7, 10,
       14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 6, 6, 12, 14, 13, 12,
@@ -264,15 +293,98 @@ dump_font_table(bt81x_t *b)
 }
 
 
-
-__attribute__((unused))
-static void
-cop_write(bt81x_t *b, const uint32_t *cmds, size_t len)
+static error_t
+bt81x_cop_writev(bt81x_t *b, const void *data, size_t len)
 {
-  for(size_t i = 0; i < len; i++) {
-    bt81x_wr32(b, EVE_REG_CMDB_WRITE, cmds[i]);
+  uint8_t hdr[3] = {0x80 | 0x30};
+
+  uint8_t zeropad[3] = {0};
+  struct iovec iov[3];
+
+  iov[0].iov_base = hdr;
+  iov[0].iov_len = 3;
+  iov[2].iov_base = zeropad;
+
+  while(len) {
+    const uint16_t cmd_read = bt81x_rd32(b, EVE_REG_CMD_READ);
+    const uint16_t fullness = (b->cmd_write - cmd_read) & 0xfff;
+    const uint16_t free_space = (4096 - 4) - fullness;
+
+    const size_t to_send = MIN(free_space, len);
+
+    if(to_send == 0) {
+      panic("fifo full");
+    }
+
+    int pad = (to_send & 3) ? (4 - (to_send & 3)) : 0;
+
+    iov[1].iov_base = (void *)data;
+    iov[1].iov_len = len;
+    iov[2].iov_len = pad;
+    hdr[1] = 0x80 | (b->cmd_write >> 8);
+    hdr[2] = b->cmd_write;
+
+    error_t err = b->spi->txv(b->spi, iov, 2 + !!pad, b->gpio_ncs, b->spi_cfg);
+    if(err)
+      return err;
+    b->cmd_write = (b->cmd_write + len + pad) & 0xfff;
+    bt81x_wr32(b, EVE_REG_CMD_WRITE, (b->cmd_write - 4) & 0xfff);
+    len -= to_send;
+    data += to_send;
+  }
+  return 0;
+}
+
+
+static uint32_t
+bt81x_bitmap_linesize(const bitmap_header_t *bh)
+{
+  switch(bh->format) {
+  case EVE_FORMAT_L4:
+    return bh->width >> 1;
+  default:
+    panic("%s: Unsupported format %d\n", __FUNCTION__, bh->format);
   }
 }
+
+
+static uint32_t
+bitmap_uncompressed_size(const bitmap_header_t *bh)
+{
+  return bt81x_bitmap_linesize(bh) * bh->height;
+}
+
+
+static error_t
+bt81x_upload_images(bt81x_t *b)
+{
+  uint32_t addr = 0;
+  error_t err;
+
+  const bt81x_bitmap_t *bb = b->bitmaps;
+  for(size_t i = 0; i < b->num_bitmaps; i++) {
+    const uint32_t inflate_cmd[2] = {EVE_ENC_CMD_INFLATE, addr};
+    b->bitmap_addr[i] = addr;
+
+    err = bt81x_cop_writev(b, inflate_cmd, sizeof(inflate_cmd));
+    if(err)
+      return err;
+
+    const bitmap_header_t *bh = bb->data;
+
+    err = bt81x_cop_writev(b, bh->data, bb->size - sizeof(bitmap_header_t));
+    if(err)
+      return err;
+
+    uint32_t ainc = bitmap_uncompressed_size(bh);
+    addr += ainc;
+    bb++;
+  }
+
+  return 0;
+}
+
+
 
 
 static void
@@ -385,12 +497,15 @@ bt81x_initialize(bt81x_t *b)
 
   bt81x_wr8(b, EVE_REG_PCLK, 2);
 
+  // Enable interrupts
+  bt81x_wr16(b, EVE_REG_INT_MASK, 0x81);
+  bt81x_wr16(b, EVE_REG_INT_EN,   0x1);
+
+  bt81x_upload_images(b);
+
   bt81x_wr16(b, EVE_REG_PWM_HZ, 250);
   bt81x_wr16(b, EVE_REG_PWM_DUTY, b->backlight);
 
-  // Enable interrupts
-  bt81x_wr16(b, EVE_REG_INT_MASK, 0x81);
-  bt81x_wr16(b, EVE_REG_INT_EN,   0x81);
   return 0;
 }
 
@@ -463,7 +578,7 @@ bt81x_thread(void *arg)
       continue;
     }
     int q = irq_forbid(IRQ_LEVEL_CLOCK);
-
+    b->running = 1;
     while(b->enabled) {
 
       if(!b->irq) {
@@ -489,6 +604,7 @@ bt81x_thread(void *arg)
 
       q = irq_forbid(IRQ_LEVEL_CLOCK);
     }
+    b->running = 0;
     irq_permit(q);
   }
 }
@@ -510,11 +626,13 @@ bt81x_irq(void *arg)
 
 static bt81x_t *g_bt81x;
 
-gui_display_t *
+struct gui_display *
 bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
-             const bt81x_timings_t *timings)
+             const bt81x_timings_t *timings,
+             const bt81x_bitmap_t bitmaps[],
+             size_t num_bitmaps)
 {
-  bt81x_t *b = calloc(1, sizeof(bt81x_t));
+  bt81x_t *b = calloc(1, sizeof(bt81x_t) + sizeof(uint32_t) * num_bitmaps);
   g_bt81x = b;
 
   task_waitable_init(&b->irq_waitq, "gpu");
@@ -531,6 +649,9 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
   b->spi_cfg = spi->get_config(spi, 0, 16000000);
 
   b->dladdr0 = 0x80 | 0x30;
+
+  b->bitmaps = bitmaps;
+  b->num_bitmaps = num_bitmaps;
 
   gpio_conf_output(b->gpio_ncs, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_set_output(b->gpio_ncs, 1);
@@ -564,7 +685,8 @@ bt81x_backlight(gui_display_t *gd, uint8_t backlight)
 {
   bt81x_t *b = (bt81x_t *)gd;
   b->backlight = backlight;
-  bt81x_wr16(b, EVE_REG_PWM_DUTY, b->backlight);
+  if(b->running)
+    bt81x_wr16(b, EVE_REG_PWM_DUTY, b->backlight);
 }
 
 
@@ -698,13 +820,14 @@ draw_text(gui_display_t *gd,
   if(!ensure_display_list(b, 2 + 4 + len + 1))
     return;
 
+  const struct bt81x_font *f = &fonts[font];
+
   b->dl[b->dlptr++] = EVE_ENC_SAVE_CONTEXT();
   b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X(pos->x << 4);
   b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_Y(pos->y << 4);
 
   b->dl[b->dlptr++] = EVE_ENC_BEGIN(EVE_BEGIN_BITMAPS);
 
-  const struct bt81x_font *f = &fonts[font];
   int handle = f->bitmap_handle;
 
   int x = 0;
@@ -721,6 +844,39 @@ draw_text(gui_display_t *gd,
     }
   }
   b->dl[b->dlptr++] = EVE_ENC_END();
+  b->dl[b->dlptr++] = EVE_ENC_RESTORE_CONTEXT();
+}
+
+
+static void
+draw_bitmap(gui_display_t *gd,
+            const gui_position_t *pos,
+            int bitmap)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+
+  if(!ensure_display_list(b, 3 + 3 + 3 + 1))
+    return;
+
+  b->dl[b->dlptr++] = EVE_ENC_SAVE_CONTEXT();
+  b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X(pos->x << 4);
+  b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_Y(pos->y << 4);
+
+  assert(bitmap < b->num_bitmaps);
+
+  const bt81x_bitmap_t *bb = &b->bitmaps[bitmap];
+  const bitmap_header_t *bh = bb->data;
+
+  int linesize = bt81x_bitmap_linesize(bh);
+
+  b->dl[b->dlptr++] = EVE_ENC_BITMAP_LAYOUT(2, linesize, bh->height);
+  b->dl[b->dlptr++] = EVE_ENC_BITMAP_SIZE(0, 0, 0, bh->width, bh->height);
+  b->dl[b->dlptr++] = EVE_ENC_BITMAP_SOURCE(b->bitmap_addr[bitmap]);
+
+  b->dl[b->dlptr++] = EVE_ENC_BEGIN(EVE_BEGIN_BITMAPS);
+  b->dl[b->dlptr++] = EVE_ENC_VERTEX2II(0, 0, 0, 0);
+  b->dl[b->dlptr++] = EVE_ENC_END();
+
   b->dl[b->dlptr++] = EVE_ENC_RESTORE_CONTEXT();
 }
 
@@ -767,6 +923,24 @@ get_text_size(gui_display_t *gd,
 }
 
 
+static int
+get_font_baseline(gui_display_t *gd, gui_font_id_t font)
+{
+  const struct bt81x_font *f = &fonts[font];
+  return f->height - f->baseline;
+}
+
+static gui_size_t
+get_bitmap_size(gui_display_t *gd, int bitmap)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+  assert(bitmap < b->num_bitmaps);
+  const bt81x_bitmap_t *bb = &b->bitmaps[bitmap];
+  const bitmap_header_t *bh = bb->data;
+  return (gui_size_t){bh->width, bh->height};
+}
+
+
 static const gui_display_class_t bt81x_gui_ops = {
   .push_state = push_state,
   .pop_state = pop_state,
@@ -775,12 +949,15 @@ static const gui_display_class_t bt81x_gui_ops = {
   .rect = draw_rect,
   .filled_rect = draw_filled_rect,
   .text = draw_text,
+  .bitmap = draw_bitmap,
   .set_color = set_color,
   .set_alpha = set_alpha,
   .get_text_size = get_text_size,
+  .get_font_baseline = get_font_baseline,
+  .get_bitmap_size = get_bitmap_size,
 };
 
-#if 0
+#if 1
 
 /************************************************************************
  *
@@ -807,6 +984,8 @@ cmd_eve_rd32(cli_t *cli, int argc, char **argv)
 
   if(!strcmp(argv[1], "dl")) {
     start = 0x300000;
+  } else if(!strcmp(argv[1], "cmd")) {
+    start = 0x308000;
   } else {
     start = atoix(argv[1]);
   }
@@ -836,6 +1015,24 @@ cmd_font_table(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("font-table", cmd_font_table);
+
+
+
+static error_t
+cmd_cop(cli_t *cli, int argc, char **argv)
+{
+  if(g_bt81x == NULL)
+    return -1;
+
+  bt81x_t *b = g_bt81x;
+
+  cli_printf(cli, " READ=%x\n", bt81x_rd32(b, EVE_REG_CMD_READ));
+  cli_printf(cli, "WRITE=%x\n", bt81x_rd32(b, EVE_REG_CMD_WRITE));
+
+  return 0;
+}
+
+CLI_CMD_DEF("cop", cmd_cop);
 
 
 

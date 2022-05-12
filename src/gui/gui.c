@@ -48,14 +48,16 @@ gui_display_init(gui_display_t *gd)
 {
   pthread_mutex_init(&gd->gd_mutex, NULL);
   gd->gd_palette[1] = 0xffffff;
+  gd->gd_palette[2] = 0x444444;
 }
 
 
-void *
-gui_create_from_classdef(gui_widget_t *p,
-                         const gui_widget_class_t *gwc)
+static void *
+gui_create_from_classdefv(gui_widget_t *p,
+                          const gui_widget_class_t *gwc,
+                          size_t extra)
 {
-  gui_widget_t *w = calloc(1, gwc->instance_size);
+  gui_widget_t *w = calloc(1, gwc->instance_size + extra);
   w->gw_class = gwc;
   w->gw_weight = 1;
   if(p) {
@@ -64,6 +66,15 @@ gui_create_from_classdef(gui_widget_t *p,
   }
   return w;
 }
+
+
+void *
+gui_create_from_classdef(gui_widget_t *p,
+                         const gui_widget_class_t *gwc)
+{
+  return gui_create_from_classdefv(p, gwc, 0);
+}
+
 
 void
 gui_attrib_changed(gui_widget_t *w)
@@ -86,42 +97,46 @@ gui_set_rect(gui_widget_t *gw, const gui_rect_t *r)
   if(gw->gw_alignment) {
 
     // Horizontal
-    switch(gw->gw_alignment) {
-    case GW_ALIGN_BOTTOM_LEFT:
-    case GW_ALIGN_MID_LEFT:
-    case GW_ALIGN_TOP_LEFT:
-      break;
+    if(gw->gw_req_size.width) {
+      switch(gw->gw_alignment) {
+      case GW_ALIGN_BOTTOM_LEFT:
+      case GW_ALIGN_MID_LEFT:
+      case GW_ALIGN_TOP_LEFT:
+        break;
 
-    case GW_ALIGN_BOTTOM_CENTER:
-    case GW_ALIGN_MID_CENTER:
-    case GW_ALIGN_TOP_CENTER:
-      x += (w - gw->gw_req_size.width) / 2;
-      break;
-    case GW_ALIGN_BOTTOM_RIGHT:
-    case GW_ALIGN_MID_RIGHT:
-    case GW_ALIGN_TOP_RIGHT:
-      x += w - gw->gw_req_size.width;
-      break;
+      case GW_ALIGN_BOTTOM_CENTER:
+      case GW_ALIGN_MID_CENTER:
+      case GW_ALIGN_TOP_CENTER:
+        x += (w - gw->gw_req_size.width) / 2;
+        break;
+      case GW_ALIGN_BOTTOM_RIGHT:
+      case GW_ALIGN_MID_RIGHT:
+      case GW_ALIGN_TOP_RIGHT:
+        x += w - gw->gw_req_size.width;
+        break;
+      }
+      w = gw->gw_req_size.width;
     }
-    w = gw->gw_req_size.width;
 
-    switch(gw->gw_alignment) {
-    case GW_ALIGN_BOTTOM_LEFT:
-    case GW_ALIGN_BOTTOM_CENTER:
-    case GW_ALIGN_BOTTOM_RIGHT:
-      y += h - gw->gw_req_size.height;
-      break;
-    case GW_ALIGN_MID_LEFT:
-    case GW_ALIGN_MID_CENTER:
-    case GW_ALIGN_MID_RIGHT:
-      y += (h - gw->gw_req_size.height) / 2;
-      break;
-    case GW_ALIGN_TOP_LEFT:
-    case GW_ALIGN_TOP_CENTER:
-    case GW_ALIGN_TOP_RIGHT:
-      break;
+    if(gw->gw_req_size.height) {
+      switch(gw->gw_alignment) {
+      case GW_ALIGN_BOTTOM_LEFT:
+      case GW_ALIGN_BOTTOM_CENTER:
+      case GW_ALIGN_BOTTOM_RIGHT:
+        y += h - gw->gw_req_size.height;
+        break;
+      case GW_ALIGN_MID_LEFT:
+      case GW_ALIGN_MID_CENTER:
+      case GW_ALIGN_MID_RIGHT:
+        y += (h - gw->gw_req_size.height) / 2;
+        break;
+      case GW_ALIGN_TOP_LEFT:
+      case GW_ALIGN_TOP_CENTER:
+      case GW_ALIGN_TOP_RIGHT:
+        break;
+      }
+      h = gw->gw_req_size.height;
     }
-    h = gw->gw_req_size.height;
   }
 
   if(x == gw->gw_rect.pos.x &&
@@ -233,6 +248,7 @@ gui_container_update_req(gui_container_t *gc, gui_display_t *gd, int mask)
   gc->gw.gw_req_size.height = 0;
   gc->gw.gw_flags &= ~(GUI_WIDGET_CONSTRAIN_X | GUI_WIDGET_CONSTRAIN_Y);
 
+  int need_layout = 0;
   STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
     gui_update_req(c, gd);
 
@@ -241,6 +257,7 @@ gui_container_update_req(gui_container_t *gc, gui_display_t *gd, int mask)
         c->gw_margin_left + c->gw_margin_right + c->gw_req_size.width;
       gc->gw.gw_req_size.width = MAX(gc->gw.gw_req_size.width, w);
       gc->gw.gw_flags |= GUI_WIDGET_CONSTRAIN_X;
+      need_layout = 1;
     }
 
     if((c->gw_flags & mask) & GUI_WIDGET_CONSTRAIN_Y) {
@@ -248,8 +265,11 @@ gui_container_update_req(gui_container_t *gc, gui_display_t *gd, int mask)
         c->gw_margin_top + c->gw_margin_bottom + c->gw_req_size.height;
       gc->gw.gw_req_size.height = MAX(gc->gw.gw_req_size.height, h);
       gc->gw.gw_flags |= GUI_WIDGET_CONSTRAIN_Y;
+      need_layout = 1;
     }
   }
+  if(need_layout)
+    gc->gw.gw_flags |= GUI_WIDGET_NEED_LAYOUT;
 }
 
 
@@ -299,6 +319,7 @@ gui_hbox_layout(gui_widget_t *w, gui_display_t *gd)
   gui_widget_t *c;
   int wsum = 0;
   int rsum = 0;
+  const gui_widget_t *b = NULL;
 
   STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
     if(c->gw_flags & GUI_WIDGET_CONSTRAIN_X) {
@@ -306,8 +327,11 @@ gui_hbox_layout(gui_widget_t *w, gui_display_t *gd)
     } else {
       wsum += c->gw_weight;
     }
+    if(c->gw_flags & GUI_WIDGET_BASELINE) {
+      if(b == NULL || c->gw_baseline > b->gw_baseline)
+        b = c;
+    }
   }
-
   if(wsum == 0)
     wsum = 1;
 
@@ -323,6 +347,16 @@ gui_hbox_layout(gui_widget_t *w, gui_display_t *gd)
     gui_set_rect(c, &r);
     r.pos.x += r.siz.width;
   }
+
+  if(b != NULL) {
+    STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
+      if(c == b || !(c->gw_flags & GUI_WIDGET_BASELINE))
+        continue;
+
+      c->gw_rect.pos.y =
+        b->gw_rect.pos.y + (int)b->gw_baseline - (int)c->gw_baseline;
+    }
+  }
 }
 
 static void
@@ -333,11 +367,22 @@ gui_vbox_layout(gui_widget_t *w, gui_display_t *gd)
   int wsum = 0;
   int rsum = 0;
 
+  const int debug = !!(w->gw_flags & GUI_WIDGET_DEBUG);
+
   STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
     if(c->gw_flags & GUI_WIDGET_CONSTRAIN_Y) {
       rsum += c->gw_req_size.height + c->gw_margin_top + c->gw_margin_bottom;
+
+      if(debug)
+        printf("vbox@%p: child@%p constrainted y: %d+%d+%d\n",
+               w, c, c->gw_req_size.height, c->gw_margin_top, c->gw_margin_bottom);
+
     } else {
       wsum += c->gw_weight;
+
+      if(debug)
+        printf("vbox@%p: child@%p weight: %d\n",
+               w, c, c->gw_weight);
     }
   }
 
@@ -629,14 +674,25 @@ gui_create_abox(gui_widget_t *p)
 }
 
 
+typedef struct {
+  gui_widget_t w;
+  uint32_t color;
+} gui_colored_widget_t;
+
+
+void
+gui_set_color(gui_widget_t *w, uint32_t color)
+{
+  gui_colored_widget_t *gcw = (gui_colored_widget_t *)w;
+  gcw->color = color;
+}
 
 /*****************************************************************
  * Quad
  */
 
 typedef struct {
-  gui_widget_t w;
-  uint32_t bg_color;
+  gui_colored_widget_t cw;
   uint32_t border_color;
   uint32_t border_linesize;
 } gui_quad_t;
@@ -650,7 +706,7 @@ gui_quad_draw(gui_widget_t *w, gui_display_t *gd)
   const gui_display_class_t *gdc = gd->gd_class;
 
   gdc->push_state(gd);
-  gdc->set_color(gd, gq->bg_color);
+  gdc->set_color(gd, gq->cw.color);
   gdc->filled_rect(gd, &w->gw_rect, 1);
   if(gq->border_linesize) {
     gdc->set_color(gd, gq->border_color);
@@ -672,10 +728,10 @@ gui_create_quad(gui_widget_t *p,
                 uint32_t border_linesize)
 {
   gui_quad_t *gq = gui_create_from_classdef(p, &gui_quad_class);
-  gq->bg_color = background_color;
+  gq->cw.color = background_color;
   gq->border_color = border_color;
   gq->border_linesize = border_linesize;
-  return &gq->w;
+  return &gq->cw.w;
 }
 
 
@@ -692,54 +748,135 @@ gui_widget_t *gui_create_quad_border(gui_widget_t *p,
  */
 
 typedef struct {
-  gui_widget_t w;
-  const char *str;
+  gui_colored_widget_t cw;
   size_t len;
   gui_font_id_t font_id;
-} gui_cstr_t;
+  union {
+    const char *cstr;
+    struct {
+      size_t maxlen;
+      char dstr[0];
+    };
+  };
+} gui_str_t;
+
 
 static const gui_widget_class_t gui_cstr_class;
+static const gui_widget_class_t gui_dstr_class;
+
+
+static void
+gui_str_draw(gui_str_t *gs, gui_display_t *gd, const char *str)
+{
+  const gui_display_class_t *gdc = gd->gd_class;
+
+  if(gs->cw.color != 0xffffffff) {
+    gdc->push_state(gd);
+    gdc->set_color(gd, gs->cw.color);
+  }
+  gdc->text(gd, &gs->cw.w.gw_rect.pos, gs->font_id, str, gs->len);
+  if(gs->cw.color != 0xffffffff) {
+    gdc->pop_state(gd);
+  }
+}
+
 
 static void
 gui_cstr_draw(gui_widget_t *w, gui_display_t *gd)
 {
-  gui_cstr_t *gq = (gui_cstr_t *)w;
-  const gui_display_class_t *gdc = gd->gd_class;
-
-  gdc->text(gd, &w->gw_rect.pos, gq->font_id, gq->str, gq->len);
+  gui_str_t *gs = (gui_str_t *)w;
+  gui_str_draw(gs, gd, gs->cstr);
 }
+
+
+static void
+gui_dstr_draw(gui_widget_t *w, gui_display_t *gd)
+{
+  gui_str_t *gs = (gui_str_t *)w;
+  gui_str_draw(gs, gd, gs->dstr);
+}
+
+
+static void
+gui_str_update_req(gui_str_t *gs, gui_display_t *gd, const char *str)
+{
+  const gui_display_class_t *gdc = gd->gd_class;
+  gs->cw.w.gw_req_size = gdc->get_text_size(gd, gs->font_id, str, gs->len);
+  gs->cw.w.gw_baseline = gdc->get_font_baseline(gd, gs->font_id);
+  gs->cw.w.gw_flags |= GUI_WIDGET_CONSTRAIN_Y | GUI_WIDGET_BASELINE;
+}
+
 
 static void
 gui_cstr_update_req(gui_widget_t *w, gui_display_t *gd)
 {
-  gui_cstr_t *gq = (gui_cstr_t *)w;
-  const gui_display_class_t *gdc = gd->gd_class;
-  w->gw_req_size = gdc->get_text_size(gd, gq->font_id, gq->str, gq->len);
-  w->gw_flags |= GUI_WIDGET_CONSTRAIN_Y;
+  gui_str_t *gs = (gui_str_t *)w;
+  gui_str_update_req(gs, gd, gs->cstr);
 }
 
 
+static void
+gui_dstr_update_req(gui_widget_t *w, gui_display_t *gd)
+{
+  gui_str_t *gs = (gui_str_t *)w;
+  gui_str_update_req(gs, gd, gs->dstr);
+
+}
+
 static const gui_widget_class_t gui_cstr_class = {
-  .instance_size = sizeof(gui_cstr_t),
+  .instance_size = sizeof(gui_str_t),
   .update_req = gui_cstr_update_req,
   .draw = gui_cstr_draw,
 };
 
+static const gui_widget_class_t gui_dstr_class = {
+  .instance_size = sizeof(gui_str_t),
+  .update_req = gui_dstr_update_req,
+  .draw = gui_dstr_draw,
+};
+
+
 gui_widget_t *
-gui_create_cstr(gui_widget_t *p, const char *str, gui_font_id_t font_id)
+gui_create_cstr(gui_widget_t *p, const char *str, gui_font_id_t font_id,
+                uint8_t alignment)
 {
-  gui_cstr_t *gq = gui_create_from_classdef(p, &gui_cstr_class);
-  gq->font_id = font_id;
-  gq->str = str;
-  gq->len = strlen(str);
-  gui_attrib_changed(&gq->w);
-  return &gq->w;
+  gui_str_t *gc = gui_create_from_classdef(p, &gui_cstr_class);
+  gc->font_id = font_id;
+  gc->cstr = str;
+  gc->len = strlen(str);
+  gc->cw.w.gw_alignment = alignment;
+  gc->cw.color = 0xffffffff;
+  gui_attrib_changed(&gc->cw.w);
+  return &gc->cw.w;
+}
+
+
+gui_widget_t *
+gui_create_dstr(gui_widget_t *p, size_t maxlen, gui_font_id_t font_id,
+                uint8_t alignment)
+{
+  gui_str_t *gd = gui_create_from_classdefv(p, &gui_dstr_class, maxlen + 1);
+  gd->font_id = font_id;
+  gd->maxlen = maxlen;
+  gd->len = 0;
+  gd->cw.w.gw_alignment = alignment;
+  gd->cw.color = 0xffffffff;
+  return &gd->cw.w;
+}
+
+
+void
+gui_set_dstr(gui_widget_t *w, const char *str)
+{
+  gui_str_t *gs = (gui_str_t *)w;
+  gs->len = strlcpy(gs->dstr, str, gs->maxlen + 1);
+  gui_attrib_changed(&gs->cw.w);
 }
 
 
 
 /*****************************************************************
- * constant string
+ * vertical separator
  */
 
 static const gui_widget_class_t gui_vsep_class;
@@ -772,4 +909,97 @@ gui_create_vsep(gui_widget_t *p, int thickness, int margin)
   gw->gw_flags |= GUI_WIDGET_CONSTRAIN_Y;
   gui_attrib_changed(gw);
   return gw;
+}
+
+/*****************************************************************
+ * horizontal separator
+ */
+
+static const gui_widget_class_t gui_hsep_class;
+
+static void
+gui_hsep_draw(gui_widget_t *w, gui_display_t *gd)
+{
+  const gui_display_class_t *gdc = gd->gd_class;
+
+  int x = w->gw_rect.pos.x + w->gw_rect.siz.width / 2;
+
+  gdc->line(gd,
+            x, w->gw_rect.pos.y,
+            x, w->gw_rect.pos.y + w->gw_rect.siz.height,
+            w->gw_req_size.width);
+}
+
+static const gui_widget_class_t gui_hsep_class = {
+  .instance_size = sizeof(gui_widget_t),
+  .draw = gui_hsep_draw,
+};
+
+gui_widget_t *
+gui_create_hsep(gui_widget_t *p, int thickness, int margin)
+{
+  gui_widget_t *gw = gui_create_from_classdef(p, &gui_hsep_class);
+  gw->gw_req_size.width = thickness;
+  gw->gw_margin_left = margin;
+  gw->gw_margin_right = margin;
+  gw->gw_flags |= GUI_WIDGET_CONSTRAIN_X;
+  gui_attrib_changed(gw);
+  return gw;
+}
+
+/*****************************************************************
+ * bitmap
+ */
+
+typedef struct {
+  gui_colored_widget_t cw;
+  int bitmap_id;
+} gui_bitmap_t;
+
+
+static const gui_widget_class_t gui_bitmap_class;
+
+static void
+gui_bitmap_draw(gui_widget_t *w, gui_display_t *gd)
+{
+  const gui_display_class_t *gdc = gd->gd_class;
+  gui_bitmap_t *gb = (gui_bitmap_t *)w;
+
+  if(gb->cw.color != 0xffffffff) {
+    gdc->push_state(gd);
+    gdc->set_color(gd, gb->cw.color);
+  }
+
+  gdc->bitmap(gd, &w->gw_rect.pos, gb->bitmap_id);
+
+  if(gb->cw.color != 0xffffffff) {
+    gdc->pop_state(gd);
+  }
+}
+
+static void
+gui_bitmap_update_req(gui_widget_t *w, gui_display_t *gd)
+{
+  const gui_display_class_t *gdc = gd->gd_class;
+  gui_bitmap_t *gb = (gui_bitmap_t *)w;
+
+  w->gw_req_size = gdc->get_bitmap_size(gd, gb->bitmap_id);
+  w->gw_flags |= GUI_WIDGET_CONSTRAIN_Y | GUI_WIDGET_CONSTRAIN_X;
+}
+
+
+static const gui_widget_class_t gui_bitmap_class = {
+  .instance_size = sizeof(gui_bitmap_t),
+  .update_req = gui_bitmap_update_req,
+  .draw = gui_bitmap_draw,
+};
+
+gui_widget_t *
+gui_create_bitmap(gui_widget_t *p, int bitmap)
+{
+  gui_bitmap_t *gb = gui_create_from_classdef(p, &gui_bitmap_class);
+  gb->bitmap_id = bitmap;
+  gb->cw.color = 0xffffffff;
+  gui_attrib_changed(&gb->cw.w);
+  return &gb->cw.w;
 }
