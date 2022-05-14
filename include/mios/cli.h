@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <mios/error.h>
 
-#define CLI_LINE_BUF_SIZE 32
+#define CLI_LINE_BUF_SIZE 48
 #define CLI_MAX_ARGC 10
 
 typedef struct cli {
