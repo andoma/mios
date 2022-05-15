@@ -1,116 +1,44 @@
 #pragma once
 
+#include <mios/gfx.h>
 #include <sys/queue.h>
-#include <stdint.h>
-#include <pthread.h>
+
+
+extern const gfx_display_delegate_t gui_display_delegate;
+
+typedef struct gui_widget gui_widget_t;
 
 STAILQ_HEAD(gui_widget_queue, gui_widget);
 
-typedef struct gui_display gui_display_t;
-typedef struct gui_widget gui_widget_t;
+void gui_display_init(gfx_display_t *gd);
 
-typedef int16_t gui_scalar_t;
-typedef uint8_t gui_font_id_t;
+typedef struct gui_root {
 
-typedef struct {
-  gui_scalar_t x;
-  gui_scalar_t y;
-} gui_position_t;
+  gui_widget_t *gr_root;
+  gui_widget_t *gr_grab;
 
-typedef struct {
-  gui_scalar_t width;
-  gui_scalar_t height;
-} gui_size_t;
-
-typedef struct {
-  gui_position_t pos;
-  gui_size_t siz;
-} gui_rect_t;
-
-
-#define GUI_DISPLAY_PALETTE_SIZE 4
-#define GUI_COLOR_PALETTE(x) (0x80000000 | (x))
-
-typedef struct gui_display_class {
-
-  void (*push_state)(gui_display_t *gd);
-
-  void (*pop_state)(gui_display_t *gd);
-
-  void (*scissor)(gui_display_t *gd, const gui_rect_t *r);
-
-  void (*line)(gui_display_t *gd,
-               int x1, int y1, int x2, int y2,
-               int line_width);
-
-  void (*rect)(gui_display_t *gd,
-               const gui_rect_t *r,
-               int line_width);
-
-  void (*filled_rect)(gui_display_t *gd,
-                      const gui_rect_t *r,
-                      int corner_radius);
-
-  void (*text)(gui_display_t *gd,
-               const gui_position_t *pos,
-               gui_font_id_t font,
-               const char *text,
-               size_t len);
-
-  void (*bitmap)(gui_display_t *gd,
-                 const gui_position_t *pos,
-                 int bitmap_id);
-
-  void (*set_color)(gui_display_t *gd, uint32_t rgb);
-
-  void (*set_alpha)(gui_display_t *gd, uint8_t alpha);
-
-  gui_size_t (*get_text_size)(gui_display_t *gd,
-                              gui_font_id_t font,
-                              const char *text,
-                              size_t len);
-
-  int (*get_font_baseline)(gui_display_t *gd, gui_font_id_t font);
-
-  gui_size_t (*get_bitmap_size)(gui_display_t *gd, int bitmap);
-
-} gui_display_class_t;
-
-
-
-struct gui_display {
-  const gui_display_class_t *gd_class;
-  gui_widget_t *gd_root;
-  gui_widget_t *gd_grab;
-  pthread_mutex_t gd_mutex;
-
-  // Color 0 is always clear color
-  // Color 1 is default text color
-  uint32_t gd_palette[GUI_DISPLAY_PALETTE_SIZE];
-};
-
-void gui_display_init(gui_display_t *gd);
+} gui_root_t;
 
 
 typedef struct gui_widget_class {
 
   size_t instance_size;
 
-  void (*update_req)(gui_widget_t *w, gui_display_t *gd);
+  void (*update_req)(gui_widget_t *w, gfx_display_t *gd);
 
-  void (*layout)(gui_widget_t *w, gui_display_t *gd);
+  void (*layout)(gui_widget_t *w, gfx_display_t *gd);
 
-  void (*draw)(gui_widget_t *w, gui_display_t *gd);
+  void (*draw)(gui_widget_t *w, gfx_display_t *gd);
 
   void (*add_child)(gui_widget_t *w, gui_widget_t *c);
 
-  gui_widget_t *(*grab)(gui_widget_t *w, gui_display_t *gd,
-                        const gui_position_t *p,
+  gui_widget_t *(*grab)(gui_widget_t *w, gfx_display_t *gd,
+                        const gfx_position_t *p,
                         int descend);
 
-  void (*move)(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p);
+  void (*move)(gui_widget_t *w, gfx_display_t *gd, const gfx_position_t *p);
 
-  void (*release)(gui_widget_t *w, gui_display_t *gd);
+  void (*release)(gui_widget_t *w, gfx_display_t *gd);
 
 } gui_widget_class_t;
 
@@ -121,9 +49,9 @@ struct gui_widget {
 
   const gui_widget_class_t *gw_class;
 
-  gui_rect_t gw_rect;
+  gfx_rect_t gw_rect;
 
-  gui_size_t gw_req_size;
+  gfx_size_t gw_req_size;
 
   uint16_t gw_flags;
 #define GUI_WIDGET_NEED_LAYOUT       0x1
@@ -178,12 +106,6 @@ void gui_set_color(gui_widget_t *w, uint32_t color);
 
 void gui_attrib_changed(gui_widget_t *gw);
 
-void gui_draw_display(gui_display_t *gd, const gui_rect_t *r);
-
-void gui_touch_release(gui_display_t *gd);
-
-void gui_touch_press(gui_display_t *gd, const gui_position_t *p);
-
 // ==========================================================
 
 void *gui_create_from_classdef(gui_widget_t *p,
@@ -205,10 +127,10 @@ gui_widget_t *gui_create_quad(gui_widget_t *p,
                               uint32_t border_linesize);
 
 gui_widget_t *gui_create_cstr(gui_widget_t *p, const char *str,
-                              gui_font_id_t font_id, uint8_t alignment);
+                              gfx_font_id_t font_id, uint8_t alignment);
 
 gui_widget_t *gui_create_dstr(gui_widget_t *p, size_t maxlen,
-                              gui_font_id_t font_id, uint8_t alignment);
+                              gfx_font_id_t font_id, uint8_t alignment);
 
 void gui_set_dstr(gui_widget_t *w, const char *str);
 

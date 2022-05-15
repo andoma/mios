@@ -1,6 +1,7 @@
 #pragma once
-#include <mios/io.h>
 
+#include <mios/io.h>
+#include <mios/gfx.h>
 
 typedef struct {
   const void *data;
@@ -35,11 +36,13 @@ struct gui_display;
 
 
 __attribute__((access(read_only, 5), access(read_only, 6, 7)))
-struct gui_display *bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
+struct gfx_display *bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
                                  const bt81x_timings_t *timings,
                                  const bt81x_bitmap_t bitmaps[],
-                                 size_t num_bitmaps);
+                                 size_t num_bitmaps,
+                                 const gfx_display_delegate_t *gdd,
+                                 void *opaque);
 
-void bt81x_enable(struct gui_display *, int enabled);
+void bt81x_enable(struct gfx_display *, int enabled);
 
-void bt81x_backlight(struct gui_display *, uint8_t backlight);
+void bt81x_backlight(struct gfx_display *, uint8_t backlight);

@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <mios/mios.h>
 #include <mios/task.h>
+#include <mios/gfx.h>
 #include <sys/uio.h>
 #include <sys/param.h>
 #include <stdlib.h>
@@ -13,9 +14,7 @@
 #include "bt81x_def.h"
 #include "irq.h"
 
-#include <gui/gui.h>
-
-static const gui_display_class_t bt81x_gui_ops;
+static const gfx_display_class_t bt81x_ops;
 
 
 typedef struct bitmap_header {
@@ -31,7 +30,7 @@ typedef struct bitmap_header {
 
 typedef struct bt81x {
 
-  gui_display_t gui_display;
+  gfx_display_t gfx_display;
 
   const bt81x_timings_t *timings;
 
@@ -57,7 +56,7 @@ typedef struct bt81x {
   uint8_t dladdr2;
   uint32_t dl[2048];
 
-  gui_rect_t display_size;
+  gfx_rect_t display_size;
 
   const bt81x_bitmap_t *bitmaps;
   size_t num_bitmaps;
@@ -514,7 +513,7 @@ bt81x_initialize(bt81x_t *b)
 static void
 draw_gui(bt81x_t *b)
 {
-  gui_display_t *gd = &b->gui_display;
+  gfx_display_t *gd = &b->gfx_display;
   b->dlptr = 0;
 
   b->dl[b->dlptr++] = EVE_ENC_RESTORE_CONTEXT(); // XXX???
@@ -527,9 +526,9 @@ draw_gui(bt81x_t *b)
   b->dl[b->dlptr++] = EVE_ENC_CLEAR(1, 1, 1);
 
   pthread_mutex_lock(&gd->gd_mutex);
-  if(gd->gd_root) {
-    gui_draw_display(gd, &b->display_size);
-  }
+
+  gd->gd_gdd->gdd_draw(gd->gd_opaque, gd, &b->display_size);
+
   pthread_mutex_unlock(&gd->gd_mutex);
   b->dl[b->dlptr++] = EVE_ENC_DISPLAY();
   bt81x_swap(b);
@@ -539,17 +538,19 @@ draw_gui(bt81x_t *b)
 static void
 touch_conversion_completed(bt81x_t *b)
 {
-  gui_display_t *gd = &b->gui_display;
+  gfx_display_t *gd = &b->gfx_display;
 
   const uint32_t xy = bt81x_rd32(b, EVE_REG_TOUCH_RAW_XY);
 
   pthread_mutex_lock(&gd->gd_mutex);
 
   if(xy == 0xffffffff) {
-    gui_touch_release(gd);
+    if(gd->gd_gdd->gdd_touch_release != NULL)
+      gd->gd_gdd->gdd_touch_release(gd->gd_opaque, gd);
   } else {
-    const gui_position_t p = {xy >> 16, xy & 0xffff};
-    gui_touch_press(gd, &p);
+    const gfx_position_t p = {xy >> 16, xy & 0xffff};
+    if(gd->gd_gdd->gdd_touch_press != NULL)
+      gd->gd_gdd->gdd_touch_press(gd->gd_opaque, gd, &p);
   }
   pthread_mutex_unlock(&gd->gd_mutex);
 }
@@ -626,11 +627,13 @@ bt81x_irq(void *arg)
 
 static bt81x_t *g_bt81x;
 
-struct gui_display *
+struct gfx_display *
 bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
              const bt81x_timings_t *timings,
              const bt81x_bitmap_t bitmaps[],
-             size_t num_bitmaps)
+             size_t num_bitmaps,
+             const gfx_display_delegate_t *gdd,
+             void *opaque)
 {
   bt81x_t *b = calloc(1, sizeof(bt81x_t) + sizeof(uint32_t) * num_bitmaps);
   g_bt81x = b;
@@ -661,16 +664,20 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
                 GPIO_FALLING_EDGE | GPIO_RISING_EDGE,
                 IRQ_LEVEL_CLOCK);
 
-  gui_display_init(&b->gui_display);
-  b->gui_display.gd_class = &bt81x_gui_ops;
+  b->gfx_display.gd_class = &bt81x_ops;
+  b->gfx_display.gd_gdd = gdd;
+  b->gfx_display.gd_opaque = opaque;
+
+  pthread_mutex_init(&b->gfx_display.gd_mutex, NULL);
+  b->gfx_display.gd_palette[1] = 0xffffff;
 
   task_create(bt81x_thread, b, 1024, "gpu", TASK_FPU, 3);
-  return &b->gui_display;
+  return &b->gfx_display;
 }
 
 
 void
-bt81x_enable(gui_display_t *gd, int enabled)
+bt81x_enable(gfx_display_t *gd, int enabled)
 {
   bt81x_t *b = (bt81x_t *)gd;
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
@@ -681,7 +688,7 @@ bt81x_enable(gui_display_t *gd, int enabled)
 
 
 void
-bt81x_backlight(gui_display_t *gd, uint8_t backlight)
+bt81x_backlight(gfx_display_t *gd, uint8_t backlight)
 {
   bt81x_t *b = (bt81x_t *)gd;
   b->backlight = backlight;
@@ -707,7 +714,7 @@ ensure_display_list(bt81x_t *b, int need)
 
 
 static void
-push_state(gui_display_t *gd)
+push_state(gfx_display_t *gd)
 {
   bt81x_t *b = (bt81x_t *)gd;
 
@@ -718,7 +725,7 @@ push_state(gui_display_t *gd)
 
 
 static void
-pop_state(gui_display_t *gd)
+pop_state(gfx_display_t *gd)
 {
   bt81x_t *b = (bt81x_t *)gd;
 
@@ -729,7 +736,7 @@ pop_state(gui_display_t *gd)
 
 
 static void
-scissor(gui_display_t *gd, const gui_rect_t *r)
+scissor(gfx_display_t *gd, const gfx_rect_t *r)
 {
   bt81x_t *b = (bt81x_t *)gd;
 
@@ -742,7 +749,7 @@ scissor(gui_display_t *gd, const gui_rect_t *r)
 
 
 static void
-draw_primitive(gui_display_t *gd,
+draw_primitive(gfx_display_t *gd,
                int x1, int y1, int x2, int y2,
                int line_width, int which)
 
@@ -761,7 +768,7 @@ draw_primitive(gui_display_t *gd,
 }
 
 static void
-draw_line(gui_display_t *gd,
+draw_line(gfx_display_t *gd,
           int x1, int y1, int x2, int y2,
           int line_width)
 {
@@ -770,8 +777,8 @@ draw_line(gui_display_t *gd,
 }
 
 static void
-draw_filled_rect(gui_display_t *gd,
-                 const gui_rect_t *r,
+draw_filled_rect(gfx_display_t *gd,
+                 const gfx_rect_t *r,
                  int corner_radius)
 {
   const int x1 = r->pos.x;
@@ -785,8 +792,8 @@ draw_filled_rect(gui_display_t *gd,
 
 
 static void
-draw_rect(gui_display_t *gd,
-                 const gui_rect_t *r,
+draw_rect(gfx_display_t *gd,
+                 const gfx_rect_t *r,
                  int line_width)
 {
   bt81x_t *b = (bt81x_t *)gd;
@@ -810,9 +817,9 @@ draw_rect(gui_display_t *gd,
 }
 
 static void
-draw_text(gui_display_t *gd,
-          const gui_position_t *pos,
-          gui_font_id_t font,
+draw_text(gfx_display_t *gd,
+          const gfx_position_t *pos,
+          gfx_font_id_t font,
           const char *str, size_t len)
 {
   bt81x_t *b = (bt81x_t *)gd;
@@ -849,8 +856,8 @@ draw_text(gui_display_t *gd,
 
 
 static void
-draw_bitmap(gui_display_t *gd,
-            const gui_position_t *pos,
+draw_bitmap(gfx_display_t *gd,
+            const gfx_position_t *pos,
             int bitmap)
 {
   bt81x_t *b = (bt81x_t *)gd;
@@ -882,21 +889,21 @@ draw_bitmap(gui_display_t *gd,
 
 
 static void
-set_color(gui_display_t *gd, uint32_t rgb)
+set_color(gfx_display_t *gd, uint32_t rgb)
 {
   bt81x_t *b = (bt81x_t *)gd;
 
   if(!ensure_display_list(b, 1))
     return;
   if(rgb & 0x80000000) {
-    rgb = gd->gd_palette[rgb & (GUI_DISPLAY_PALETTE_SIZE - 1)];
+    rgb = gd->gd_palette[rgb & (GFX_DISPLAY_PALETTE_SIZE - 1)];
   }
   b->dl[b->dlptr++] = 0x4000000 | (rgb & 0xffffff);
 }
 
 
 static void
-set_alpha(gui_display_t *gd, uint8_t alpha)
+set_alpha(gfx_display_t *gd, uint8_t alpha)
 {
   bt81x_t *b = (bt81x_t *)gd;
 
@@ -906,9 +913,9 @@ set_alpha(gui_display_t *gd, uint8_t alpha)
 }
 
 
-static gui_size_t
-get_text_size(gui_display_t *gd,
-              gui_font_id_t font,
+static gfx_size_t
+get_text_size(gfx_display_t *gd,
+              gfx_font_id_t font,
               const char *str, size_t len)
 {
   const struct bt81x_font *f = &fonts[font];
@@ -919,29 +926,29 @@ get_text_size(gui_display_t *gd,
       x += f->width[c - 32];
     }
   }
-  return (gui_size_t){x, f->height};
+  return (gfx_size_t){x, f->height};
 }
 
 
 static int
-get_font_baseline(gui_display_t *gd, gui_font_id_t font)
+get_font_baseline(gfx_display_t *gd, gfx_font_id_t font)
 {
   const struct bt81x_font *f = &fonts[font];
   return f->height - f->baseline;
 }
 
-static gui_size_t
-get_bitmap_size(gui_display_t *gd, int bitmap)
+static gfx_size_t
+get_bitmap_size(gfx_display_t *gd, int bitmap)
 {
   bt81x_t *b = (bt81x_t *)gd;
   assert(bitmap < b->num_bitmaps);
   const bt81x_bitmap_t *bb = &b->bitmaps[bitmap];
   const bitmap_header_t *bh = bb->data;
-  return (gui_size_t){bh->width, bh->height};
+  return (gfx_size_t){bh->width, bh->height};
 }
 
 
-static const gui_display_class_t bt81x_gui_ops = {
+static const gfx_display_class_t bt81x_ops = {
   .push_state = push_state,
   .pop_state = pop_state,
   .scissor = scissor,

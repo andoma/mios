@@ -8,7 +8,7 @@
 #include <stdio.h>
 
 static int
-gui_pos_inside_rect(const gui_position_t *p, const gui_rect_t *r)
+gui_pos_inside_rect(const gfx_position_t *p, const gfx_rect_t *r)
 {
   return p->x >= r->pos.x && p->x < r->pos.x + r->siz.width &&
     p->y >= r->pos.y && p->y < r->pos.y + r->siz.height;
@@ -44,7 +44,7 @@ gui_set_margin_all(gui_widget_t *gw, int8_t margin)
 
 
 void
-gui_display_init(gui_display_t *gd)
+gui_display_init(gfx_display_t *gd)
 {
   pthread_mutex_init(&gd->gd_mutex, NULL);
   gd->gd_palette[1] = 0xffffff;
@@ -86,7 +86,7 @@ gui_attrib_changed(gui_widget_t *w)
 }
 
 void
-gui_set_rect(gui_widget_t *gw, const gui_rect_t *r)
+gui_set_rect(gui_widget_t *gw, const gfx_rect_t *r)
 {
   int x = r->pos.x + gw->gw_margin_left;
   int y = r->pos.y + gw->gw_margin_top;
@@ -153,7 +153,7 @@ gui_set_rect(gui_widget_t *gw, const gui_rect_t *r)
 
 
 void
-gui_draw(gui_widget_t *w, gui_display_t *gd)
+gui_draw(gui_widget_t *w, gfx_display_t *gd)
 {
   if(w->gw_flags & GUI_WIDGET_NEED_LAYOUT) {
     w->gw_flags &= ~GUI_WIDGET_NEED_LAYOUT;
@@ -165,7 +165,7 @@ gui_draw(gui_widget_t *w, gui_display_t *gd)
 
 
 void
-gui_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   if(w->gw_flags & GUI_WIDGET_NEED_UPDATE_REQ) {
     w->gw_flags &= ~GUI_WIDGET_NEED_UPDATE_REQ;
@@ -174,46 +174,61 @@ gui_update_req(gui_widget_t *w, gui_display_t *gd)
   }
 }
 
-void
-gui_draw_display(gui_display_t *gd, const gui_rect_t *r)
-{
-  gui_update_req(gd->gd_root, gd);
-  gui_set_rect(gd->gd_root, r);
-  gui_draw(gd->gd_root, gd);
-}
 
-
-/*******************************************************
- * When touch starts the currently hit widget gets "grabbed"
+/***********************************************************************
  *
- * All remaining events are sent to it until release
- *
- * Buttons typically doesn't react if release is outside hitbox
+ * GFX delegates
  *
  */
 
-void
-gui_touch_release(gui_display_t *gd)
+
+static void
+gui_draw_display(void *opaque, gfx_display_t *gd, const gfx_rect_t *r)
 {
-  if(gd->gd_grab == NULL)
-    return;
-  gd->gd_grab->gw_class->release(gd->gd_grab, gd);
-  gd->gd_grab = NULL;
+  gui_root_t *gr = opaque;
+
+  gui_update_req(gr->gr_root, gd);
+  gui_set_rect(gr->gr_root, r);
+  gui_draw(gr->gr_root, gd);
 }
 
 
-void
-gui_touch_press(gui_display_t *gd, const gui_position_t *p)
+/*
+ * When touch starts the currently hit widget gets "grabbed".
+ * All remaining events are sent to it until release.
+ * Buttons typically doesn't react if release is outside hitbox.
+ */
+
+static void
+gui_touch_release(void *opaque, gfx_display_t *gd)
 {
-  if(gd->gd_grab == NULL) {
-    gd->gd_grab = gd->gd_root->gw_class->grab(gd->gd_root, gd, p, 1);
-    printf("Grab widget %p\n", gd->gd_grab);
+  gui_root_t *gr = opaque;
+
+  if(gr->gr_grab == NULL)
+    return;
+  gr->gr_grab->gw_class->release(gr->gr_grab, gd);
+  gr->gr_grab = NULL;
+}
+
+
+static void
+gui_touch_press(void *opaque, gfx_display_t *gd, const gfx_position_t *p)
+{
+  gui_root_t *gr = opaque;
+
+  if(gr->gr_grab == NULL) {
+    gr->gr_grab = gr->gr_root->gw_class->grab(gr->gr_root, gd, p, 1);
   } else {
-    gd->gd_grab->gw_class->move(gd->gd_grab, gd, p);
+    gr->gr_grab->gw_class->move(gr->gr_grab, gd, p);
   }
 }
 
 
+const gfx_display_delegate_t gui_display_delegate = {
+  .gdd_draw = gui_draw_display,
+  .gdd_touch_release = gui_touch_release,
+  .gdd_touch_press = gui_touch_press,
+};
 
 /*****************************************************************
  * Container
@@ -229,7 +244,7 @@ gui_container_add_child(gui_widget_t *p, gui_widget_t *c)
 
 
 static void
-gui_container_draw(gui_widget_t *w, gui_display_t *gd)
+gui_container_draw(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_widget_t *c;
@@ -240,7 +255,7 @@ gui_container_draw(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_container_update_req(gui_container_t *gc, gui_display_t *gd, int mask)
+gui_container_update_req(gui_container_t *gc, gfx_display_t *gd, int mask)
 {
   gui_widget_t *c;
 
@@ -274,7 +289,7 @@ gui_container_update_req(gui_container_t *gc, gui_display_t *gd, int mask)
 
 
 static void
-gui_container_layout(gui_widget_t *w, gui_display_t *gd)
+gui_container_layout(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_widget_t *c;
@@ -285,7 +300,7 @@ gui_container_layout(gui_widget_t *w, gui_display_t *gd)
 
 
 static gui_widget_t *
-gui_container_grab(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p,
+gui_container_grab(gui_widget_t *w, gfx_display_t *gd, const gfx_position_t *p,
                    int descend)
 {
   gui_container_t *gc = (gui_container_t *)w;
@@ -313,7 +328,7 @@ static const gui_widget_class_t gui_hbox_class;
 static const gui_widget_class_t gui_vbox_class;
 
 static void
-gui_hbox_layout(gui_widget_t *w, gui_display_t *gd)
+gui_hbox_layout(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_widget_t *c;
@@ -336,7 +351,7 @@ gui_hbox_layout(gui_widget_t *w, gui_display_t *gd)
     wsum = 1;
 
   int wsiz = w->gw_rect.siz.width - rsum;
-  gui_rect_t r = w->gw_rect;
+  gfx_rect_t r = w->gw_rect;
 
   STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
     if(c->gw_flags & GUI_WIDGET_CONSTRAIN_X) {
@@ -360,7 +375,7 @@ gui_hbox_layout(gui_widget_t *w, gui_display_t *gd)
 }
 
 static void
-gui_vbox_layout(gui_widget_t *w, gui_display_t *gd)
+gui_vbox_layout(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_widget_t *c;
@@ -390,7 +405,7 @@ gui_vbox_layout(gui_widget_t *w, gui_display_t *gd)
     wsum = 1;
 
   int hsiz = w->gw_rect.siz.height - rsum;
-  gui_rect_t r = w->gw_rect;
+  gfx_rect_t r = w->gw_rect;
 
   STAILQ_FOREACH(c, &gc->gc_children, gw_parent_link) {
     if(c->gw_flags & GUI_WIDGET_CONSTRAIN_Y) {
@@ -405,14 +420,14 @@ gui_vbox_layout(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_hbox_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_hbox_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_container_update_req(gc, gd, GUI_WIDGET_CONSTRAIN_Y);
 }
 
 static void
-gui_vbox_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_vbox_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_container_update_req(gc, gd, GUI_WIDGET_CONSTRAIN_X);
@@ -462,8 +477,8 @@ gui_create_vbox(gui_widget_t *p)
 
 typedef struct gui_list {
   gui_container_t gc;
-  gui_scalar_t ygrab;
-  gui_scalar_t ypos;
+  gfx_scalar_t ygrab;
+  gfx_scalar_t ypos;
 
   int yspeed;
 
@@ -473,7 +488,7 @@ typedef struct gui_list {
 static const gui_widget_class_t gui_list_class;
 
 static void
-gui_list_layout(gui_widget_t *w, gui_display_t *gd)
+gui_list_layout(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_list_t *gl = (gui_list_t *)w;
   gui_widget_t *c;
@@ -483,7 +498,7 @@ gui_list_layout(gui_widget_t *w, gui_display_t *gd)
   const int y2 = y1 + w->gw_rect.siz.height;
   int ypos = w->gw_rect.pos.y + gl->ypos;
 
-  gui_rect_t r = w->gw_rect;
+  gfx_rect_t r = w->gw_rect;
   STAILQ_FOREACH(c, &gl->gc.gc_children, gw_parent_link) {
     int h;
     if(c->gw_flags & GUI_WIDGET_CONSTRAIN_Y) {
@@ -506,9 +521,9 @@ gui_list_layout(gui_widget_t *w, gui_display_t *gd)
 }
 
 void
-gui_list_draw(gui_widget_t *w, gui_display_t *gd)
+gui_list_draw(gui_widget_t *w, gfx_display_t *gd)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
   gui_container_t *gc = (gui_container_t *)w;
   gui_widget_t *c;
 
@@ -524,8 +539,8 @@ gui_list_draw(gui_widget_t *w, gui_display_t *gd)
 
 
 static gui_widget_t *
-gui_list_grab(gui_widget_t *w, gui_display_t *gd,
-              const gui_position_t *p,
+gui_list_grab(gui_widget_t *w, gfx_display_t *gd,
+              const gfx_position_t *p,
               int descend)
 {
   if(!gui_pos_inside_rect(p, &w->gw_rect))
@@ -537,7 +552,7 @@ gui_list_grab(gui_widget_t *w, gui_display_t *gd,
 }
 
 static void
-gui_list_move(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p)
+gui_list_move(gui_widget_t *w, gfx_display_t *gd, const gfx_position_t *p)
 {
   gui_list_t *gl = (gui_list_t *)w;
 
@@ -549,7 +564,7 @@ gui_list_move(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p)
 }
 
 static void
-gui_list_release(gui_widget_t *w, gui_display_t *gd)
+gui_list_release(gui_widget_t *w, gfx_display_t *gd)
 {
 
 }
@@ -557,7 +572,7 @@ gui_list_release(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_list_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_list_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_container_update_req(gc, gd, 0);
@@ -595,9 +610,9 @@ static const gui_widget_class_t gui_abox_class;
 
 
 static void
-gui_abox_draw(gui_widget_t *w, gui_display_t *gd)
+gui_abox_draw(gui_widget_t *w, gfx_display_t *gd)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
   gui_container_t *gc = (gui_container_t *)w;
 
   gui_widget_t *a = STAILQ_FIRST(&gc->gc_children);
@@ -617,7 +632,7 @@ gui_abox_draw(gui_widget_t *w, gui_display_t *gd)
 }
 
 static gui_widget_t *
-gui_abox_grab(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p,
+gui_abox_grab(gui_widget_t *w, gfx_display_t *gd, const gfx_position_t *p,
               int descend)
 {
   if(!descend)
@@ -629,7 +644,7 @@ gui_abox_grab(gui_widget_t *w, gui_display_t *gd, const gui_position_t *p,
 }
 
 static void
-gui_zbox_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_zbox_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_container_t *gc = (gui_container_t *)w;
   gui_container_update_req(gc, gd,
@@ -700,10 +715,10 @@ typedef struct {
 static const gui_widget_class_t gui_quad_class;
 
 static void
-gui_quad_draw(gui_widget_t *w, gui_display_t *gd)
+gui_quad_draw(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_quad_t *gq = (gui_quad_t *)w;
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
 
   gdc->push_state(gd);
   gdc->set_color(gd, gq->cw.color);
@@ -750,7 +765,7 @@ gui_widget_t *gui_create_quad_border(gui_widget_t *p,
 typedef struct {
   gui_colored_widget_t cw;
   size_t len;
-  gui_font_id_t font_id;
+  gfx_font_id_t font_id;
   union {
     const char *cstr;
     struct {
@@ -766,9 +781,9 @@ static const gui_widget_class_t gui_dstr_class;
 
 
 static void
-gui_str_draw(gui_str_t *gs, gui_display_t *gd, const char *str)
+gui_str_draw(gui_str_t *gs, gfx_display_t *gd, const char *str)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
 
   if(gs->cw.color != 0xffffffff) {
     gdc->push_state(gd);
@@ -782,7 +797,7 @@ gui_str_draw(gui_str_t *gs, gui_display_t *gd, const char *str)
 
 
 static void
-gui_cstr_draw(gui_widget_t *w, gui_display_t *gd)
+gui_cstr_draw(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_str_t *gs = (gui_str_t *)w;
   gui_str_draw(gs, gd, gs->cstr);
@@ -790,7 +805,7 @@ gui_cstr_draw(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_dstr_draw(gui_widget_t *w, gui_display_t *gd)
+gui_dstr_draw(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_str_t *gs = (gui_str_t *)w;
   gui_str_draw(gs, gd, gs->dstr);
@@ -798,9 +813,9 @@ gui_dstr_draw(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_str_update_req(gui_str_t *gs, gui_display_t *gd, const char *str)
+gui_str_update_req(gui_str_t *gs, gfx_display_t *gd, const char *str)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
   gs->cw.w.gw_req_size = gdc->get_text_size(gd, gs->font_id, str, gs->len);
   gs->cw.w.gw_baseline = gdc->get_font_baseline(gd, gs->font_id);
   gs->cw.w.gw_flags |= GUI_WIDGET_CONSTRAIN_Y | GUI_WIDGET_BASELINE;
@@ -808,7 +823,7 @@ gui_str_update_req(gui_str_t *gs, gui_display_t *gd, const char *str)
 
 
 static void
-gui_cstr_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_cstr_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_str_t *gs = (gui_str_t *)w;
   gui_str_update_req(gs, gd, gs->cstr);
@@ -816,7 +831,7 @@ gui_cstr_update_req(gui_widget_t *w, gui_display_t *gd)
 
 
 static void
-gui_dstr_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_dstr_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
   gui_str_t *gs = (gui_str_t *)w;
   gui_str_update_req(gs, gd, gs->dstr);
@@ -837,7 +852,7 @@ static const gui_widget_class_t gui_dstr_class = {
 
 
 gui_widget_t *
-gui_create_cstr(gui_widget_t *p, const char *str, gui_font_id_t font_id,
+gui_create_cstr(gui_widget_t *p, const char *str, gfx_font_id_t font_id,
                 uint8_t alignment)
 {
   gui_str_t *gc = gui_create_from_classdef(p, &gui_cstr_class);
@@ -852,7 +867,7 @@ gui_create_cstr(gui_widget_t *p, const char *str, gui_font_id_t font_id,
 
 
 gui_widget_t *
-gui_create_dstr(gui_widget_t *p, size_t maxlen, gui_font_id_t font_id,
+gui_create_dstr(gui_widget_t *p, size_t maxlen, gfx_font_id_t font_id,
                 uint8_t alignment)
 {
   gui_str_t *gd = gui_create_from_classdefv(p, &gui_dstr_class, maxlen + 1);
@@ -882,9 +897,9 @@ gui_set_dstr(gui_widget_t *w, const char *str)
 static const gui_widget_class_t gui_vsep_class;
 
 static void
-gui_vsep_draw(gui_widget_t *w, gui_display_t *gd)
+gui_vsep_draw(gui_widget_t *w, gfx_display_t *gd)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
 
   int y = w->gw_rect.pos.y + w->gw_rect.siz.height / 2;
 
@@ -918,9 +933,9 @@ gui_create_vsep(gui_widget_t *p, int thickness, int margin)
 static const gui_widget_class_t gui_hsep_class;
 
 static void
-gui_hsep_draw(gui_widget_t *w, gui_display_t *gd)
+gui_hsep_draw(gui_widget_t *w, gfx_display_t *gd)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
 
   int x = w->gw_rect.pos.x + w->gw_rect.siz.width / 2;
 
@@ -960,9 +975,9 @@ typedef struct {
 static const gui_widget_class_t gui_bitmap_class;
 
 static void
-gui_bitmap_draw(gui_widget_t *w, gui_display_t *gd)
+gui_bitmap_draw(gui_widget_t *w, gfx_display_t *gd)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
   gui_bitmap_t *gb = (gui_bitmap_t *)w;
 
   if(gb->cw.color != 0xffffffff) {
@@ -978,9 +993,9 @@ gui_bitmap_draw(gui_widget_t *w, gui_display_t *gd)
 }
 
 static void
-gui_bitmap_update_req(gui_widget_t *w, gui_display_t *gd)
+gui_bitmap_update_req(gui_widget_t *w, gfx_display_t *gd)
 {
-  const gui_display_class_t *gdc = gd->gd_class;
+  const gfx_display_class_t *gdc = gd->gd_class;
   gui_bitmap_t *gb = (gui_bitmap_t *)w;
 
   w->gw_req_size = gdc->get_bitmap_size(gd, gb->bitmap_id);
