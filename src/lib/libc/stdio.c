@@ -526,20 +526,26 @@ snbuf_cb(void *aux, const char *s, size_t len)
   return len;
 }
 
+int
+vsnprintf(char *str, size_t size, const char *format, va_list ap)
+{
+  snbuf_t buf = {str, size};
+
+  int r = fmtv(snbuf_cb, &buf, format, ap);
+
+  if(buf.size > 0)
+    str[buf.used] = 0;
+  return r;
+}
 
 
 int
 snprintf(char *str, size_t size, const char *format, ...)
 {
-  snbuf_t buf = {str, size};
-
   va_list ap;
   va_start(ap, format);
-  int r = fmtv(snbuf_cb, &buf, format, ap);
+  int r = vsnprintf(str, size, format, ap);
   va_end(ap);
-
-  if(buf.size > 0)
-    str[buf.used] = 0;
   return r;
 }
 
