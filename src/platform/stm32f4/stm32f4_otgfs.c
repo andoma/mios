@@ -254,9 +254,6 @@ read_bin2hex_as_desc(void *opaque)
 static void
 tx_start(int ep, tx_ptr_t *tx, int max_packet_size)
 {
-  //  assert(!(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31)));
-  while(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31)) {}
-
   const size_t avail_words = reg_rd(OTG_FS_DTXFSTS(ep));
   if(avail_words == 0) {
     panic("tx_start but fifo full");
