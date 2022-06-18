@@ -141,7 +141,7 @@ stm32g0_adc_multi(uint32_t channels,
 
   if(oversampling) {
     assert(oversampling <= 8);
-    const int ovss = 0; // oversampling;
+    const int ovss = oversampling;
     const int ovsr = oversampling - 1;
 
     reg_wr(ADC_CFGR2,
