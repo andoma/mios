@@ -154,7 +154,8 @@ stm32_dma_stop(stm32_dma_instance_t instance)
 error_t
 stm32_dma_wait(stm32_dma_instance_t instance)
 {
-  const int64_t deadline = clock_get_irq_blocked() + 1000000;
+  const int64_t start = clock_get_irq_blocked();
+  const int64_t deadline = start + 1000000;
   dma_stream_t *ds = g_streams[instance];
   while(1) {
     if(ds->err == 1) {

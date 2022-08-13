@@ -63,6 +63,11 @@ struct usb_ep {
   uint16_t ue_max_packet_size;
 
   const char *ue_name;
+
+  // Stats
+  uint32_t ue_num_packets;
+  uint32_t ue_num_drops;
+
 };
 
 typedef size_t (usb_gen_desc_t)(void *buf, void *opaque, int iface_index);

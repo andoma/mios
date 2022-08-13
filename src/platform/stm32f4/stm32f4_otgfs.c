@@ -254,6 +254,9 @@ read_bin2hex_as_desc(void *opaque)
 static void
 tx_start(int ep, tx_ptr_t *tx, int max_packet_size)
 {
+  if(ep != 0)
+    while(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31)) {}
+
   const size_t avail_words = reg_rd(OTG_FS_DTXFSTS(ep));
   if(avail_words == 0) {
     panic("tx_start but fifo full");
@@ -272,8 +275,11 @@ stm32f4_ep_write(device_t *dev, usb_ep_t *ue,
 {
   const uint32_t ep = ue->ue_address & 0x7f;
 
-  if(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31))
+  if(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31)) {
+    ue->ue_num_drops++;
     return ERR_NOT_READY;
+  }
+  ue->ue_num_packets++;
 
   ep_start(ep, len);
 
@@ -384,12 +390,7 @@ handle_get_descriptor(usb_ctrl_t *uc)
     desclen = desclen * 2 + 2;
     break;
 
-  case USB_DESC_TYPE_QUALIFIER:
-  case USB_DESC_TYPE_DEBUG:
-    break;
-
   default:
-    panic("desc %d/%d NULL response\n", type, index);
     break;
   }
 
@@ -1018,16 +1019,26 @@ usb_print_info(struct device *d, struct stream *st)
     status[6] = diepctl & (1 << 15) ? 'A' : ' ';
     status[7] = 0;
 
-    usb_ep_t *ue = uc->uc_in_ue[i];
 
-    stprintf(st, "\t\t[%d] = %3d 0x%08x 0x%08x %s %d %s\n",
+    stprintf(st, "\t\t[%d] = %3d 0x%08x 0x%08x %s %d ",
              i,
              reg_rd(OTG_FS_DTXFSTS(i)),
              reg_rd(OTG_FS_DIEPINT(i)),
              diepctl,
              status,
-             (diepctl >> 22) & 0xf,
-             ue ? ue->ue_name : "N/A");
+             (diepctl >> 22) & 0xf);
+
+    usb_ep_t *ue = uc->uc_in_ue[i];
+    if(ue != NULL) {
+      stprintf(st, "%-10u %-10u %s\n",
+               ue->ue_num_packets,
+               ue->ue_num_drops,
+               ue->ue_name);
+      ue->ue_num_packets = 0;
+      ue->ue_num_drops = 0;
+    } else {
+      stprintf(st, "\n");
+    }
   }
 }
 
