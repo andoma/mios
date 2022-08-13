@@ -8,7 +8,7 @@ SECTIONS {
         } >VTBL
 
         .text : {
-                . = ALIGN(4);
+                . = ALIGN(8);
                 *(.text)
                 *(.text.*)
                 *(.rodata)
@@ -61,11 +61,12 @@ SECTIONS {
                 . = ALIGN(4);
                  *(.ARM.exidx*)
                  *(.gnu.linkonce.armexidx.*)
+                . = ALIGN(8);
                  _etext = .;
         } >FLASH
 
         .data : AT ( _etext ) {
-                . = ALIGN(4);
+                . = ALIGN(8);
                 _sdata = .;
                 *(ramcode)
                 *(.data)

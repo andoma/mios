@@ -31,6 +31,8 @@ typedef enum {
   ERR_FLASH_HW_ERROR        = -27,
   ERR_FLASH_TIMEOUT         = -28,
   ERR_NO_MEMORY             = -29,
+  ERR_READ_PROTECTED        = -30,
+  ERR_WRITE_PROTECTED       = -31,
 } error_t;
 
 const char *error_to_string(error_t e);
