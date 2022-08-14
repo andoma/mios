@@ -17,3 +17,5 @@ void tig_text(tig_ctx_t *ctx, const char *fmt, ...) __attribute__ ((format(print
 void tig_move_abs(tig_ctx_t *tc, int x, int y);
 
 void tig_move_rel(tig_ctx_t *tc, int x, int y);
+
+int tig_set_font(tig_ctx_t *tc, int id);

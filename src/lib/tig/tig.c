@@ -65,6 +65,13 @@ tig_move_rel(tig_ctx_t *tc, int x, int y)
   tc->tc_pos.y += y;
 }
 
+int
+tig_set_font(tig_ctx_t *tc, int id)
+{
+  int old = tc->tc_font;
+  tc->tc_font = id;
+  return old;
+}
 
 void
 tig_text(tig_ctx_t *tc, const char *fmt, ...)
