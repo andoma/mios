@@ -17,10 +17,10 @@
 
 typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
 
-extern va_list fmt_double(va_list ap, char *buf, size_t buflen);
+extern va_list fmt_double(va_list ap, char *buf, size_t buflen, int prec);
 
 va_list  __attribute__((weak))
-fmt_double(va_list ap, char *buf, size_t buflen)
+fmt_double(va_list ap, char *buf, size_t buflen, int prec)
 {
   strlcpy(buf, "<nomath>", buflen);
   return ap;
@@ -298,7 +298,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
         total += emit_u32(cb, aux, &fp, 0, va_arg(ap, unsigned int));
       break;
     case 'f':
-      ap = fmt_double(ap, tmp, sizeof(tmp));
+      ap = fmt_double(ap, tmp, sizeof(tmp), fp.decimals);
       total += emit_str(cb, aux, tmp, &fp);
       break;
     case 'p':

@@ -174,9 +174,9 @@ dbl2str(char *buf, size_t bufsize, double realvalue, int precision)
 
 
 va_list
-fmt_double(va_list ap, char *buf, size_t buflen)
+fmt_double(va_list ap, char *buf, size_t buflen, int prec)
 {
   double d = va_arg(ap, double);
-  dbl2str(buf, buflen, d, -1);
+  dbl2str(buf, buflen, d, prec);
   return ap;
 }
