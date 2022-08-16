@@ -11,6 +11,7 @@
 
 #include "systick.h"
 
+static uint32_t g_hrtim_regbase;
 
 static struct timer_list hr_timers;
 
@@ -100,7 +101,8 @@ static void
 hrtimer_rearm(timer_t *t, int64_t now)
 {
   const int64_t delta = t->t_expire - now;
-  reg_wr(HRTIM_BASE + TIMx_CR1, 0x0);
+  const uint32_t regbase = g_hrtim_regbase;
+  reg_wr(regbase + TIMx_CR1, 0x0);
   uint32_t arr;
   if(delta < 2) {
     arr = 2;
@@ -113,16 +115,17 @@ hrtimer_rearm(timer_t *t, int64_t now)
 #ifdef HRTIMER_TRACE
   hrtimer_trace_add(now, t, arr, HRTIMER_TRACE_ARM);
 #endif
-  reg_wr(HRTIM_BASE + TIMx_CNT, 0xffff);
-  reg_wr(HRTIM_BASE + TIMx_ARR, arr);
-  reg_wr(HRTIM_BASE + TIMx_CR1, 0x9);
+  reg_wr(regbase + TIMx_CNT, 0xffff);
+  reg_wr(regbase + TIMx_ARR, arr);
+  reg_wr(regbase + TIMx_CR1, 0x9);
 }
 
 
 static void
-hrtim_irq(void)
+hrtimer_irq(void *arg)
 {
-  reg_wr(HRTIM_BASE + TIMx_SR, 0x0);
+  const uint32_t regbase = g_hrtim_regbase;
+  reg_wr(regbase + TIMx_SR, 0x0);
 
   const int64_t now = clock_get_irq_blocked();
 #ifdef HRTIMER_TRACE
@@ -177,13 +180,18 @@ timer_arm_abs(timer_t *t, uint64_t deadline)
 }
 
 
-static void
-hrtimer_init(uint16_t clkid)
+static error_t
+hrtimer_init(uint32_t regbase, uint16_t clkid, int irq)
 {
   clk_enable(clkid);
-  reg_wr(HRTIM_BASE + TIMx_PSC, clk_get_freq(clkid) / 1000000 - 1);
-  reg_wr(HRTIM_BASE + TIMx_DIER, 0x1);
-  reg_wr(HRTIM_BASE + TIMx_CR1, 0x0);
+  if(!clk_is_enabled(clkid))
+    return ERR_NO_DEVICE;
+  g_hrtim_regbase = regbase;
+  reg_wr(regbase + TIMx_PSC, clk_get_freq(clkid) / 1000000 - 1);
+  reg_wr(regbase + TIMx_DIER, 0x1);
+  reg_wr(regbase + TIMx_CR1, 0x0);
+  irq_enable_fn_arg(irq, IRQ_LEVEL_CLOCK, hrtimer_irq, NULL);
+  return 0;
 }
 
 #ifdef HRTIMER_TRACE

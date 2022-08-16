@@ -82,6 +82,12 @@ clk_enable(uint16_t id)
   reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
 
+static inline int
+clk_is_enabled(uint16_t id)
+{
+  return reg_get_bit(RCC_BASE + (id >> 8), id & 0xff);
+}
+
 static inline void
 clk_disable(uint16_t id)
 {

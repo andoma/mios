@@ -2,19 +2,18 @@
 #include "stm32f4_tim.h"
 #include "stm32f4_clk.h"
 
-#define HRTIM_BASE TIM7_BASE
-
 #include "platform/stm32/stm32_hrtim.c"
 
 static void  __attribute__((constructor(131)))
 stm32f4_tim_init(void)
 {
-  hrtimer_init(CLK_TIM7);
-  irq_enable(55, IRQ_LEVEL_CLOCK);
-}
-
-void
-irq_55(void)
-{
-  hrtim_irq();
+  const char *where = "NONE";
+  if(hrtimer_init(TIM7_BASE, CLK_TIM7, 55)) {
+    if(!hrtimer_init(TIM11_BASE, CLK_TIM11, 26)) {
+      where = "tim11";
+    }
+  } else {
+    where = "tim7";
+  }
+  printf("hrtimer: %s\n", where);
 }
