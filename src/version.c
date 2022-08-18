@@ -5,6 +5,8 @@
 
 #include "version_git.h"
 
+char _appname[] __attribute__((section("appname"))) = APPNAME;
+
 const char *
 mios_get_version(void)
 {
@@ -20,7 +22,7 @@ mios_get_app_version(void)
 const char *
 mios_get_app_name(void)
 {
-  return APPNAME;
+  return _appname;
 }
 
 void

@@ -57,6 +57,12 @@ SECTIONS {
                 KEEP(*(.note.gnu.build-id))
         } >FLASH
 
+        .appname : {
+                . = ALIGN(4);
+                PROVIDE(_appname = .);
+                KEEP(*(appname))
+        } >FLASH
+
         .ARM.exidx : {
                 . = ALIGN(4);
                  *(.ARM.exidx*)
