@@ -9,7 +9,7 @@ typedef struct dsig_sub dsig_sub_t;
 #define DSIG_EMIT_MBUS   0x2
 #define DSIG_EMIT_ALL  (DSIG_EMIT_LOCAL | DSIG_EMIT_MBUS)
 
-// TTL is in units of 10ms
+// TTL is in units of 100ms
 
 void dsig_emit(uint8_t signal, const void *data, size_t len,
                uint8_t ttl, int flags);
