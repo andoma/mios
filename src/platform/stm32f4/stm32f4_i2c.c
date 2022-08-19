@@ -87,12 +87,13 @@ stm32f4_i2c_create(int instance, gpio_t scl, uint32_t sda_cfg, gpio_pull_t pull)
   }
 
   const uint16_t clkid = CLK_I2C(instance);
+  const uint16_t rstid = RST_I2C(instance);
   clk_enable(clkid);
 
   gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
   gpio_conf_af(sda, sda_af, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
 
-  stm32_i2c_t *i2c = stm32_i2c_create(I2C_BASE(instance), clkid);
+  stm32_i2c_t *i2c = stm32_i2c_create(I2C_BASE(instance), clkid, rstid);
 
   uint8_t irqbase = (const uint8_t []){31,33,72}[instance];
   irq_enable(irqbase, IRQ_LEVEL_IO);

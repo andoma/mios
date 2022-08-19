@@ -33,6 +33,10 @@ typedef struct stm32_i2c {
 
   mutex_t mutex;
 
+  uint32_t freq_mhz;
+
+  uint16_t clkid;
+  uint16_t rstid;
   uint8_t addr;
 
 } stm32_i2c_t;
@@ -140,8 +144,44 @@ i2c_irq_er(stm32_i2c_t *i2c)
     reg_wr(i2c->base_addr + I2C_SR1, sr1 & ~(1 << 10));
     return i2c_irq_result(i2c, ERR_NO_DEVICE);
   }
-  printf("%s: sr1=%x\n", __FUNCTION__, sr1);
+  if(sr1 & (1 << 8)) {
+    reg_wr(i2c->base_addr + I2C_SR1, sr1 & ~(1 << 8));
+    return i2c_irq_result(i2c, ERR_BUS_ERROR);
+  }
+  panic("%s: sr1=%x\n", __FUNCTION__, sr1);
 }
+
+static void
+i2c_initialize(stm32_i2c_t *i2c)
+{
+  reset_peripheral(i2c->rstid);
+  udelay(100);
+  reg_wr(i2c->base_addr + I2C_CR1, 0);
+  udelay(1000);
+  reg_wr(i2c->base_addr + I2C_CR1, 1);
+  udelay(1000);
+  if(reg_rd(i2c->base_addr + I2C_SR2) & 2) {
+    reg_wr(i2c->base_addr + I2C_CR1, 0x8001);
+    while(reg_rd(i2c->base_addr + I2C_SR2) & 2) {
+    }
+    reg_wr(i2c->base_addr + I2C_CR1, 0x0);
+    udelay(100);
+    reg_wr(i2c->base_addr + I2C_CR1, 0x1);
+    udelay(100);
+  }
+
+  reg_wr(i2c->base_addr + I2C_OAR1, (1 << 14)); // Must be 1 according to DS
+
+  reg_wr(i2c->base_addr + I2C_CCR, i2c->freq_mhz * 5);
+
+  reg_wr(i2c->base_addr + I2C_CR2,
+         (1 << 9) |
+         (1 << 8) |
+         i2c->freq_mhz);
+
+  reg_wr(i2c->base_addr + I2C_TRISE, i2c->freq_mhz + 1);
+}
+
 
 
 static error_t
@@ -160,12 +200,11 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
   i2c->read = read;
   i2c->read_len = read_len;
 
-  const int64_t deadline = clock_get() + 1000000;
+  const int64_t deadline = clock_get() + 100000;
 
   const int q = irq_forbid(IRQ_LEVEL_IO);
 
   i2c->result = 1; // 1 means 'no result yet'
-
 
   reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_START_BIT);
 
@@ -175,6 +214,7 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
       i2c->result = 0;
       i2c->read_len = 0;
       i2c->write_len = 0;
+      i2c_initialize(i2c);
       err = ERR_TIMEOUT;
       break;
     }
@@ -188,39 +228,16 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
 
 
 static stm32_i2c_t *
-stm32_i2c_create(uint32_t base_addr, uint16_t clkid)
+stm32_i2c_create(uint32_t base_addr, uint16_t clkid, uint16_t rstid)
 {
   stm32_i2c_t *i2c = malloc(sizeof(stm32_i2c_t));
+  i2c->clkid = clkid;
+  i2c->rstid = rstid;
   i2c->base_addr = base_addr;
-  printf("i2c at 0x%x\n", base_addr);
+  i2c->freq_mhz = clk_get_freq(clkid) / 1000000;
   i2c->i2c.rw = i2c_rw;
 
-  reg_wr(i2c->base_addr + I2C_CR1, 0);
-  udelay(1000);
-  reg_wr(i2c->base_addr + I2C_CR1, 1);
-  udelay(1000);
-  if(reg_rd(i2c->base_addr + I2C_SR2) & 2) {
-    reg_wr(i2c->base_addr + I2C_CR1, 0x8001);
-    while(reg_rd(i2c->base_addr + I2C_SR2) & 2) {
-    }
-    reg_wr(i2c->base_addr + I2C_CR1, 0x0);
-    udelay(100);
-    reg_wr(i2c->base_addr + I2C_CR1, 0x1);
-  }
-
-  reg_wr(i2c->base_addr + I2C_OAR1, (1 << 14)); // Must be 1 according to DS
-
-  const int freq_mhz = clk_get_freq(clkid) / 1000000;
-
-  reg_wr(i2c->base_addr + I2C_CCR, freq_mhz * 5);
-
-  reg_wr(i2c->base_addr + I2C_CR2,
-         (1 << 9) |
-         (1 << 8) |
-         freq_mhz);
-
-  reg_wr(i2c->base_addr + I2C_TRISE, freq_mhz + 1);
-
+  i2c_initialize(i2c);
   task_waitable_init(&i2c->wait, "i2c");
   mutex_init(&i2c->mutex, "i2cmtx");
   return i2c;

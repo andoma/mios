@@ -2,6 +2,8 @@
 
 #include "stm32f4_reg.h"
 
+#define RST_APB1 0x20
+
 #define CLK_AHB1 0x30
 #define CLK_AHB2 0x34
 #define CLK_APB1 0x40
@@ -50,6 +52,8 @@
 #define CLK_I2C3  CLK_ID(CLK_APB1, 23)
 #define CLK_I2C(x) CLK_ID(CLK_APB1, 21 + (x))
 
+#define RST_I2C(x) CLK_ID(RST_APB1, 21 + (x))
+
 #define CLK_DMA1  CLK_ID(CLK_AHB1, 21)
 #define CLK_DMA2  CLK_ID(CLK_AHB1, 22)
 #define CLK_DMA(x)  CLK_ID(CLK_AHB1, 21 + (x))
@@ -76,6 +80,8 @@
 #define CLK_OTGFS        CLK_ID(CLK_AHB2, 7)
 
 
+void reset_peripheral(uint16_t id);
+
 static inline void
 clk_enable(uint16_t id)
 {
@@ -90,6 +96,12 @@ clk_is_enabled(uint16_t id)
 
 static inline void
 clk_disable(uint16_t id)
+{
+  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
+}
+
+static inline void
+reset_(uint16_t id)
 {
   reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
