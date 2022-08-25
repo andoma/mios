@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <malloc.h>
 
+#include <mios/mios.h>
+
 #include "stm32f4_clk.h"
 #include "cpu.h"
 
@@ -14,6 +16,26 @@ static volatile uint32_t *const SCB_DEMCR    = (volatile uint32_t *)0xE000EDFC;
 
 static volatile uint32_t *const DBGMCU_CR    = (volatile uint32_t *)0xe0042004;
 
+static volatile uint32_t *const DBGMCU_IDCODE= (volatile uint32_t *)0xe0042000;
+
+uint32_t stm32f4_device_mask;
+
+typedef struct {
+  uint16_t idcode;
+  uint8_t bit;
+  uint8_t flags;
+  char name[4];
+} stm32f4_idmap_t;
+
+#define HAVE_CCM 0x1
+
+static const stm32f4_idmap_t stm32f4_idmap[] = {
+  {STM32F4_DEVID_05, STM32F4_BIT_05, HAVE_CCM, "05"},
+  {STM32F4_DEVID_42, STM32F4_BIT_42, 0, "42"},
+  {STM32F4_DEVID_11, STM32F4_BIT_11, 0, "11"},
+  {STM32F4_DEVID_46, STM32F4_BIT_46, 0, "46"}
+};
+
 
 static void  __attribute__((constructor(120)))
 stm32f4_init(void)
@@ -23,7 +45,19 @@ stm32f4_init(void)
   void *SRAM1_start = (void *)&_ebss;
   void *SRAM1_end   = (void *)0x20000000 + 112 * 1024;
 
-  printf("\nSTM32F4 (%d kB Flash)\n", *FLASH_SIZE);
+  uint32_t idcode = *DBGMCU_IDCODE;
+
+  uint32_t dev = idcode & 0xfff;
+  const char *name = "??";
+  for(size_t i = 0; i < ARRAYSIZE(stm32f4_idmap); i++) {
+    if(stm32f4_idmap[i].idcode == dev) {
+      name = stm32f4_idmap[i].name;
+      stm32f4_device_mask = (1 << stm32f4_idmap[i].bit);
+      break;
+    }
+  }
+
+  printf("\nSTM32F4%s (0x%x, %d kB Flash)\n", name, idcode, *FLASH_SIZE);
 
   // SRAM1
   heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
