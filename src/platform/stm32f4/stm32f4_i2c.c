@@ -55,20 +55,74 @@ irq_73(void)
   i2c_irq_er(g_i2c[2]);
 }
 
+
+typedef struct {
+  uint8_t instance;
+  gpio_t gpio;
+  uint8_t af;
+  uint8_t device_mask;
+} i2c_gpio_map_t;
+
+
+static const i2c_gpio_map_t i2c_scl_map[] = {
+  { 3, GPIO_PA(8),  4, STM32F4_11 | STM32F4_46 },
+  { 1, GPIO_PB(6),  4, STM32F4_11 | STM32F4_46 },
+  { 1, GPIO_PB(8),  4, STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PB(10), 4, STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PF(1),  4, STM32F4_46 },
+};
+
+static const i2c_gpio_map_t i2c_sda_map[] = {
+  { 2, GPIO_PB(3),  4, STM32F4_46 },
+  { 2, GPIO_PB(3),  9, STM32F4_11 },
+  { 3, GPIO_PB(4),  4, STM32F4_46 },
+  { 3, GPIO_PB(4),  9, STM32F4_11 },
+  { 3, GPIO_PB(4),  4, STM32F4_46 },
+  { 1, GPIO_PB(7),  4, STM32F4_11 | STM32F4_46 },
+  { 3, GPIO_PB(8),  9, STM32F4_11 },
+
+  { 1, GPIO_PB(9),  4, STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PB(9),  9, STM32F4_11 },
+
+  { 2, GPIO_PB(11), 4, STM32F4_11 | STM32F4_46 },
+  { 3, GPIO_PC(9),  4, STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PC(12), 4, STM32F4_46 },
+  { 2, GPIO_PF(0),  4, STM32F4_46 },
+};
+
+
+extern unsigned int stm32f4_device_mask;
+
+
+static int
+lookup_af(const i2c_gpio_map_t map[], size_t size,
+          int instance, gpio_t gpio, const char *name)
+{
+  for(size_t i = 0; i < size; i++) {
+    if(map[i].instance == instance &&
+       map[i].gpio == gpio &&
+       map[i].device_mask & stm32f4_device_mask) {
+      return map[i].af;
+    }
+  }
+  panic("i2c: Unable to find %s AF (instance:%d gpio:0x%x)", name,
+        instance, gpio);
+}
+
+
+
 i2c_t *
-stm32f4_i2c_create(int instance, gpio_t scl, uint32_t sda_cfg, gpio_pull_t pull)
+stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
 {
   if(instance < 1 || instance > 3) {
     panic("i2c: Invalid instance %d", instance);
   }
 
-  const int sda = sda_cfg & 0xff;
-  const int sda_af = sda_cfg >> 8;
-  if(!sda_af)
-    panic("i2c: Bad sda config");
-
+  int scl_af = lookup_af(i2c_scl_map, ARRAYSIZE(i2c_scl_map), instance, scl,
+                         "scl");
+  int sda_af = lookup_af(i2c_sda_map, ARRAYSIZE(i2c_sda_map), instance, sda,
+                         "sda");
   instance--;
-
 
   // If bus seems to be stuck, toggle SCL until SDA goes high again
   gpio_conf_input(sda, GPIO_PULL_UP);
@@ -90,7 +144,7 @@ stm32f4_i2c_create(int instance, gpio_t scl, uint32_t sda_cfg, gpio_pull_t pull)
   const uint16_t rstid = RST_I2C(instance);
   clk_enable(clkid);
 
-  gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
+  gpio_conf_af(scl, scl_af, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
   gpio_conf_af(sda, sda_af, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
 
   stm32_i2c_t *i2c = stm32_i2c_create(I2C_BASE(instance), clkid, rstid);
