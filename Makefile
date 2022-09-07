@@ -1,5 +1,7 @@
 T := $(dir $(lastword $(MAKEFILE_LIST)))
 
+UNAME_S := $(shell uname -s)
+
 PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
@@ -100,8 +102,17 @@ ${O}/%.o: %.S ${GLOBALDEPS} ${CONFIG_H}
 	@echo "\tASM\t$<"
 	${TOOLCHAIN}gcc -MD -MP -DASM ${CPPFLAGS} ${CFLAGS} -c $< -o $@
 
+ifeq ($(UNAME_S),Darwin)
+
+CONFIG_H_CONTENTS := $(foreach K,$(ALL_ENABLE_VARS), \
+	$(if $(subst no,,${${K}}),"\#define ${K}\n",""))
+
+else
+
 CONFIG_H_CONTENTS := $(foreach K,$(ALL_ENABLE_VARS), \
 	$(if $(subst no,,${${K}}),"#define ${K}\n",""))
+
+endif
 
 ${CONFIG_H}: ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
