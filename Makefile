@@ -34,7 +34,7 @@ CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 CPPFLAGS += -I${T}include -I${SRC} -I${O} -I${O}/include -include ${O}/include/config.h
 
 LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
-CFLAGS += -ffunction-sections -fdata-sections
+CFLAGS += -ffunction-sections -fdata-sections -Wno-attributes
 LDFLAGS += -Wl,--gc-sections -Wl,--build-id=sha1
 
 # Needed for linker script includes
