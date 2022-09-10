@@ -2,7 +2,10 @@
 
 #include "stm32f4_reg.h"
 
+#define RST_AHB1 0x10
+#define RST_AHB2 0x14
 #define RST_APB1 0x20
+#define RST_APB2 0x24
 
 #define CLK_AHB1 0x30
 #define CLK_AHB2 0x34
@@ -77,7 +80,9 @@
 
 #define CLK_CCMDATARAMEN CLK_ID(CLK_AHB1, 20)
 #define CLK_RNG          CLK_ID(CLK_AHB2, 6)
+
 #define CLK_OTGFS        CLK_ID(CLK_AHB2, 7)
+#define RST_OTGFS        CLK_ID(RST_AHB2, 7)
 
 
 void reset_peripheral(uint16_t id);
@@ -99,13 +104,6 @@ clk_disable(uint16_t id)
 {
   reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
-
-static inline void
-reset_(uint16_t id)
-{
-  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
-}
-
 
 int clk_get_freq(uint16_t id);
 

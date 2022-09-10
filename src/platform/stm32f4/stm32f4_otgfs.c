@@ -848,6 +848,7 @@ stm32f4_otgfs_init_regs(int num_endpoints)
 
   // Power up
   reg_set_bits(OTG_FS_GCCFG, 16, 1, 1);
+  udelay(10);
   reg_set_bits(OTG_FS_DCTL, 1, 1, 0); // No soft disconnect
 }
 
@@ -1084,6 +1085,7 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
   uc->uc_desc.idVendor = vid;
   uc->uc_desc.idProduct = pid;
 
+  reset_peripheral(RST_OTGFS);
   clk_enable(CLK_OTGFS);
   while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}
 
