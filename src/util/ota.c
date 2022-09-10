@@ -74,7 +74,7 @@ ota_xfer_done(ota_state_t *os, error_t error)
 }
 
 
-static int
+static error_t
 ota_xfer_recv(ota_state_t *os, pbuf_t *pb, const flash_iface_t *fif)
 {
   const size_t blocksize = 16;
@@ -94,7 +94,10 @@ ota_xfer_recv(ota_state_t *os, pbuf_t *pb, const flash_iface_t *fif)
 
   int r = -1;
   if(os->next_block == block) {
-    fif->write(fif, os->cur_sector, os->cur_offset, u8, blocksize);
+    error_t err =
+      fif->write(fif, os->cur_sector, os->cur_offset, u8, blocksize);
+    if(err)
+      panic("Flash write error: %d", err);
 
     const void *mem = fif->get_addr(fif, os->cur_sector) + os->cur_offset;
     os->crc_acc = crc32(os->crc_acc, mem, blocksize);
@@ -133,9 +136,17 @@ ota_task(void *arg)
       usleep(20000);
 
       const flash_iface_t *fif = flash_get_primary();
+      error_t err;
       for(int i = 0; i < os->num_sectors; i++) {
-        fif->erase_sector(fif, os->first_sector + i);
+        err = fif->erase_sector(fif, os->first_sector + i);
+        if(err) {
+          printf("OTA: Failed to erase sector %d\n", os->first_sector + i);
+          break;
+        }
       }
+
+      if(err)
+        break;
 
       printf("OTA: Ready for transfer, attempt #%d\n", i);
 
