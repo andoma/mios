@@ -307,7 +307,6 @@ mbus_control(socket_t *s, socket_ctl_t *sc)
   switch(sc->sc_op) {
   case SOCKET_CTL_ATTACH:
     s->s_header_size = MBUS_HDR_LEN;
-    s->s_mtu = s->s_netif->ni_mtu - s->s_header_size - 4;
     LIST_INSERT_HEAD(&mbus_sockets, s, s_proto_link);
     return 0;
 

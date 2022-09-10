@@ -57,7 +57,6 @@ typedef struct socket {
 
   uint8_t s_net_state;
   uint8_t s_header_size;
-  uint16_t s_mtu;
 
 } socket_t;
 
