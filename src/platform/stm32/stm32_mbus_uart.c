@@ -46,7 +46,7 @@ start_timer(uart_mbus_t *um)
 {
   reg_wr(um->tim_reg_base + TIMx_CNT, 0);
 
-  int timeout = 2000 + um->prio * 100 + (rand() & 2047);
+  int timeout = 1000 + (rand() & 0x1ff);
   reg_wr(um->tim_reg_base + TIMx_ARR, timeout);
   reg_wr(um->tim_reg_base + TIMx_CR1, 0b1101);
 }
