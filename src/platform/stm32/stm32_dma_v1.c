@@ -143,6 +143,7 @@ stm32_dma_config(stm32_dma_instance_t instance,
   reg |= psize  << 11;
   reg |= minc   << 10;
   reg |= pinc   << 9;
+  reg |= circular << 8;
   reg |= direction << 6;
   stm32_dma_config_u32(instance, reg);
 }
