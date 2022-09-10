@@ -23,5 +23,7 @@ SRCS += ${C}/isr.s \
 
 ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}
 
+GDB_PORT ?= 3333
+
 stlink: ${O}/build.elf
-	${GDB} -ex "target extended-remote localhost:3333" $<
+	${GDB} -ex "target extended-remote localhost:${GDB_PORT}" $<
