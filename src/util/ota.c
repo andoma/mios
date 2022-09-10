@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #include "util/crc32.h"
-
+#include "irq.h"
 
 typedef struct {
   uint32_t blocks;
@@ -191,6 +191,10 @@ ota_task(void *arg)
         }
 
         const void *src = fif->get_addr(fif, os->first_sector);
+
+        irq_forbid(IRQ_LEVEL_ALL);
+        fini();
+
         fif->multi_write(fif, src, src, FLASH_MULTI_WRITE_CPU_REBOOT);
         reboot();
       }
