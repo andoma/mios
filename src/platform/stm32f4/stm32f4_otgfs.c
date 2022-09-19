@@ -279,6 +279,15 @@ stm32f4_ep_write(device_t *dev, usb_ep_t *ue,
     ue->ue_num_drops++;
     return ERR_NOT_READY;
   }
+
+  const int avail_words = reg_rd(OTG_FS_DTXFSTS(ep));
+  const int avail_bytes = avail_words * 4;
+
+  if(len + 4 > avail_bytes) {
+    ue->ue_num_drops++;
+    return ERR_NOT_READY;
+  }
+
   ue->ue_num_packets++;
 
   ep_start(ep, len);
