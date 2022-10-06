@@ -116,8 +116,8 @@ struct usb_ctrl {
 
   device_t uc_dev;
 
-  int uc_num_endpoints;
-
+  uint8_t uc_num_endpoints;
+  uint8_t uc_assigned_addr;
   struct usb_device_descriptor uc_desc;
 
   usb_ep_t *uc_in_ue[MAX_NUM_ENDPOINTS];
@@ -491,6 +491,7 @@ ep0_handle_setup(usb_ctrl_t *uc)
       break;
 
     case USB_REQ_SET_ADDRESS:
+      uc->uc_assigned_addr = uc->uc_ep0_out.setup_pkt.value;
       set_address(uc->uc_ep0_out.setup_pkt.value);
       send_zlp(0);
       break;
@@ -633,6 +634,10 @@ handle_reset(usb_ctrl_t *uc)
     // Turn off active endpoint bits
     reg_clr_bit(OTG_FS_DIEPCTL(ep), 15);
     reg_clr_bit(OTG_FS_DOEPCTL(ep), 15);
+
+    // Clear all pending IRQs
+    reg_wr(OTG_FS_DIEPINT(ep), 0xffffffff);
+    reg_wr(OTG_FS_DOEPINT(ep), 0xffffffff);
 
     // Set SNAK bit
     reg_wr(OTG_FS_DOEPCTL(ep), (1 << 27));
@@ -1007,9 +1012,8 @@ usb_print_info(struct device *d, struct stream *st)
            ((dsts >> 23) & 1));
 
   if(!(dsts & 1)) {
-    const uint32_t addr = (reg_rd(OTG_FS_DCFG) >> 4) & 0x7f;
     stprintf(st, "\tAssigned address: %d   Last SOF Frame: %d\n",
-             addr,
+             uc->uc_assigned_addr,
              (dsts >> 8) & 0x3fff);
   } else {
     stprintf(st, "\tDisconnected\n");
