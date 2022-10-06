@@ -1001,14 +1001,20 @@ usb_print_info(struct device *d, struct stream *st)
   struct usb_ctrl *uc = (struct usb_ctrl *)d;
 
   const uint32_t dsts = reg_rd(OTG_FS_DSTS);
-  stprintf(st, "\tCore status: %s\n", dsts & 0x8 ? "Error" : "OK");
-  const uint32_t addr = (reg_rd(OTG_FS_DCFG) >> 4) & 0xff;
-  if(addr == 0) {
-    stprintf(st, "\tNot connected to host\n");
-    return;
+  stprintf(st, "\tCore status: %s   D-:%d  D+:%d\n",
+           dsts & 0x8 ? "Error" : "OK",
+           ((dsts >> 22) & 1),
+           ((dsts >> 23) & 1));
+
+  if(!(dsts & 1)) {
+    const uint32_t addr = (reg_rd(OTG_FS_DCFG) >> 4) & 0x7f;
+    stprintf(st, "\tAssigned address: %d   Last SOF Frame: %d\n",
+             addr,
+             (dsts >> 8) & 0x3fff);
+  } else {
+    stprintf(st, "\tDisconnected\n");
   }
-  stprintf(st, "\tAssigned address: %d\n", addr);
-  stprintf(st, "\tLast SOF Frame: %d\n", (dsts >> 8) & 0x3fff);
+
   stprintf(st, "\tIN Endpoints: (TX)\n");
   for(int i = 0; i < uc->uc_num_endpoints; i++) {
     uint32_t diepctl = reg_rd(OTG_FS_DIEPCTL(i));
