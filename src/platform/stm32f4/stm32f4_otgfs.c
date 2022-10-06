@@ -342,9 +342,8 @@ ep_cnak(int ep)
 static void
 set_address(uint8_t addr)
 {
-  reg_set_bits(OTG_FS_DCFG, 4, 8, addr);
+  reg_set_bits(OTG_FS_DCFG, 4, 7, addr);
 }
-
 
 
 static void
