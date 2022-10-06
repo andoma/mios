@@ -630,16 +630,12 @@ handle_reset(usb_ctrl_t *uc)
   for(int ep = 0; ep < uc->uc_num_endpoints; ep++) {
     usb_ep_t *ue;
 
-    // Clear all pending IRQs
-    reg_wr(OTG_FS_DIEPINT(ep), 0xffffffff);
-    reg_wr(OTG_FS_DOEPINT(ep), 0xffffffff);
+    // Turn off active endpoint bits
+    reg_clr_bit(OTG_FS_DIEPCTL(ep), 15);
+    reg_clr_bit(OTG_FS_DOEPCTL(ep), 15);
+
     // Set SNAK bit
     reg_wr(OTG_FS_DOEPCTL(ep), (1 << 27));
-
-    // Disable endpoint
-    reg_or(OTG_FS_DIEPCTL(ep),
-           (1 << 30) |
-           (1 << 27));
 
     ue = uc->uc_in_ue[ep];
     if(ue != NULL) {
