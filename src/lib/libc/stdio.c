@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include <mios/stream.h>
+#include <mios/fmt.h>
 
 #ifdef ENABLE_IPV4
 #include <net/net.h>
@@ -14,8 +15,6 @@
 #ifdef ENABLE_FIXMATH
 #include <fixmath.h>
 #endif
-
-typedef size_t (fmtcb_t)(void *aux, const char *s, size_t len);
 
 extern va_list fmt_double(va_list ap, char *buf, size_t buflen, int prec);
 
@@ -218,7 +217,7 @@ parse_dec(const char **fmt, int defval)
   }
 }
 
-static size_t __attribute__((noinline))
+size_t __attribute__((noinline))
 fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 {
   const char *s = fmt;
