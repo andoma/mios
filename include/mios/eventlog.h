@@ -11,4 +11,6 @@ typedef enum {
   LOG_DEBUG,
 } event_level_t;
 
-void evlog(event_level_t level, const char *fmt, ...);
+void evlog0(event_level_t level, const char *fmt, ...);
+
+#define evlog(level, fmt...) evlog0(level, fmt)
