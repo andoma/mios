@@ -20,3 +20,7 @@ void dsig_dispatch(uint8_t signal, const void *data, size_t len,
 dsig_sub_t *dsig_sub(uint8_t signal,
                      void (*cb)(void *opaque, const void *data, size_t len),
                      void *opaque);
+
+dsig_sub_t *dsig_sub_all(void (*cb)(void *opaque, const void *data, size_t len,
+                                    uint8_t signal,uint8_t ttl, uint8_t src),
+                         void *opaque);

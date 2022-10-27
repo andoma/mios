@@ -11,9 +11,13 @@ static SLIST_HEAD(, dsig_sub) dsig_subs;
 
 struct dsig_sub {
   SLIST_ENTRY(dsig_sub) ds_link;
-  void (*ds_cb)(void *opaque, const void *data, size_t len);
+  union {
+    void (*ds_cb)(void *opaque, const void *data, size_t len);
+    void (*ds_cbg)(void *opaque, const void *data, size_t len,
+                   uint8_t signal, uint8_t ttl, uint8_t src);
+  };
   void *ds_opaque;
-  uint8_t ds_signal;
+  int16_t ds_signal;
   uint8_t ds_src;
   timer_t ds_timer;
 };
@@ -36,7 +40,9 @@ dsig_dispatch(uint8_t signal, const void *data, size_t len,
   dsig_sub_t *ds;
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
   SLIST_FOREACH(ds, &dsig_subs, ds_link) {
-    if(ds->ds_signal == signal && src >= ds->ds_src) {
+    if(ds->ds_signal == -1) {
+      ds->ds_cbg(ds->ds_opaque, data, len, signal, ttl, src);
+    } else if(ds->ds_signal == signal && src >= ds->ds_src) {
       ds->ds_src = src;
       int64_t deadline = clock_get_irq_blocked() + ttl * 100000;
       timer_arm_abs(&ds->ds_timer, deadline);
@@ -98,6 +104,21 @@ dsig_sub(uint8_t signal,
   ds->ds_signal = signal;
   ds->ds_timer.t_cb = sub_timeout;
   ds->ds_timer.t_opaque = ds;
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  SLIST_INSERT_HEAD(&dsig_subs, ds, ds_link);
+  irq_permit(q);
+  return ds;
+}
+
+dsig_sub_t *
+dsig_sub_all(void (*cb)(void *opaque, const void *data, size_t len,
+                        uint8_t signal,uint8_t ttl, uint8_t src),
+             void *opaque)
+{
+  dsig_sub_t *ds = calloc(1, sizeof(dsig_sub_t));
+  ds->ds_cbg = cb;
+  ds->ds_opaque = opaque;
+  ds->ds_signal = -1;
   int q = irq_forbid(IRQ_LEVEL_SWITCH);
   SLIST_INSERT_HEAD(&dsig_subs, ds, ds_link);
   irq_permit(q);
