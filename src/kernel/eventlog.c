@@ -1,4 +1,5 @@
 #include <mios/eventlog.h>
+#if EVENTLOG_SIZE
 #include <mios/fmt.h>
 #include <mios/cli.h>
 #include <mios/task.h>
@@ -11,9 +12,6 @@
 #include <unistd.h>
 #include <stdarg.h>
 
-#ifndef EVENTLOG_SIZE
-#define EVENTLOG_SIZE 256
-#endif
 
 typedef struct {
   uint64_t ts_tail;
@@ -223,3 +221,5 @@ cmd_log(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("log", cmd_log);
+
+#endif

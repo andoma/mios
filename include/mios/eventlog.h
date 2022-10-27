@@ -1,5 +1,11 @@
 #pragma once
 
+#ifndef EVENTLOG_SIZE
+#define EVENTLOG_SIZE 256
+#endif
+
+#if EVENTLOG_SIZE
+
 typedef enum {
   LOG_EMERG,
   LOG_ALERT,
@@ -14,3 +20,9 @@ typedef enum {
 void evlog0(event_level_t level, const char *fmt, ...);
 
 #define evlog(level, fmt...) evlog0(level, fmt)
+
+#else
+
+#define evlog(level, fmt...)
+
+#endif
