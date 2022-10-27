@@ -81,22 +81,22 @@ mbus_ota_upgrade(struct mbus_netif *ni, pbuf_t *pb, uint8_t src_addr)
 }
 
 static const ophandler_t ophandlers[16] = {
-  [MBUS_OP_PING]        = mbus_handle_ping,
-  [MBUS_OP_PONG]        = mbus_handle_none,
-  [MBUS_OP_PUB_META]    = mbus_handle_none,
-  [MBUS_OP_PUB_DATA]    = mbus_handle_none,
-  [4]                   = mbus_handle_none,
-  [5]                   = mbus_handle_none,
-  [6]                   = mbus_handle_none,
-  [MBUS_OP_DSIG_EMIT]   = mbus_dsig_input,
-  [MBUS_OP_RPC_RESOLVE] = mbus_handle_rpc_resolve,
-  [MBUS_OP_RPC_RESOLVE_REPLY] = mbus_handle_none,
-  [MBUS_OP_RPC_INVOKE]  = mbus_handle_rpc_invoke,
-  [MBUS_OP_RPC_ERR]     = mbus_handle_none,
-  [MBUS_OP_RPC_REPLY]   = mbus_handle_none,
-  [MBUS_OP_OTA_XFER]    = mbus_ota_upgrade,
-  [14]                  = mbus_handle_none,
-  [15]                  = mbus_handle_none,
+  [MBUS_OP_PING]              = mbus_handle_ping,
+  [MBUS_OP_PONG]              = mbus_handle_none,
+  [MBUS_OP_PUB_META]          = mbus_handle_none,
+  [MBUS_OP_PUB_DATA]          = mbus_handle_none,
+  [4]                         = mbus_handle_none,
+  [5]                         = mbus_handle_none,
+  [6]                         = mbus_handle_none,
+  [MBUS_OP_DSIG_EMIT]         = mbus_dsig_input,
+  [MBUS_OP_RPC_RESOLVE]       = mbus_handle_rpc_resolve,
+  [MBUS_OP_RPC_RESOLVE_REPLY] = mbus_handle_rpc_response,
+  [MBUS_OP_RPC_INVOKE]        = mbus_handle_rpc_invoke,
+  [MBUS_OP_RPC_ERR]           = mbus_handle_rpc_response,
+  [MBUS_OP_RPC_REPLY]         = mbus_handle_rpc_response,
+  [MBUS_OP_OTA_XFER]          = mbus_ota_upgrade,
+  [14]                        = mbus_handle_none,
+  [15]                        = mbus_handle_none,
 };
 
 
@@ -318,17 +318,17 @@ mbus_control(socket_t *s, socket_ctl_t *sc)
 }
 
 
-static pbuf_t *
-mbus_send(socket_t *s, pbuf_t *pb)
+pbuf_t *
+mbus_xmit(uint8_t remote_addr, pbuf_t *pb)
 {
   mbus_netif_t *mni, *n;
 
   if(!(pb->pb_flags & PBUF_BCAST)) {
-    const uint16_t m = 1 << s->s_remote_addr;
+    const uint16_t mask = 1 << remote_addr;
 
     SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
-      if(m & mni->mni_active_hosts) {
-        return mbus_output(mni, pb, s->s_remote_addr);
+      if(mask & mni->mni_active_hosts) {
+        return mbus_output(mni, pb, remote_addr);
       }
     }
   }
@@ -347,6 +347,12 @@ mbus_send(socket_t *s, pbuf_t *pb)
     }
   }
   return pb;
+}
+
+static pbuf_t *
+mbus_send(socket_t *s, pbuf_t *pb)
+{
+  return mbus_xmit(s->s_remote_addr, pb);
 }
 
 NET_SOCKET_PROTO_DEF(AF_MBUS, 0, mbus_control, mbus_send);

@@ -46,6 +46,17 @@ void mbus_netif_attach(mbus_netif_t *mni, const char *name,
 
 pbuf_t *mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 
+pbuf_t *mbus_xmit(uint8_t remote_addr, pbuf_t *pb);
+
+pbuf_t *mbus_handle_rpc_resolve(mbus_netif_t *mni, pbuf_t *pb,
+                                uint8_t remote_addr);
+
+pbuf_t *mbus_handle_rpc_invoke(mbus_netif_t *mni, pbuf_t *pb,
+                               uint8_t remote_addr);
+
+pbuf_t *mbus_handle_rpc_response(mbus_netif_t *mni, pbuf_t *pb,
+                                 uint8_t remote_addr);
+
 #define MBUS_OP_PING       0
 #define MBUS_OP_PONG       1
 #define MBUS_OP_PUB_META   2

@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "irq.h"
 #include "net/pbuf.h"
@@ -24,6 +25,12 @@ wr32_le(uint8_t *ptr, uint32_t u32)
   ptr[1] = u32 >> 8;
   ptr[2] = u32 >> 16;
   ptr[3] = u32 >> 24;
+}
+
+static uint32_t
+rd32_le(const uint8_t *ptr)
+{
+  return ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
 }
 
 
@@ -157,3 +164,149 @@ rpc_appname(const void *in, void *out, size_t in_size)
 }
 
 RPC_DEF("appname", 0, 24, rpc_appname, 0);
+
+
+
+
+typedef struct mbus_pending_rpc {
+  LIST_ENTRY(mbus_pending_rpc) mpr_link;
+  pbuf_t *mpr_pbuf;
+  uint32_t mpr_key;
+} mbus_pending_rpc_t;
+
+static LIST_HEAD(, mbus_pending_rpc) mbus_pending_rpcs;
+
+typedef struct {
+  const char *method;
+  uint32_t id;
+  uint8_t target;
+} mbus_rpc_cache_entry_t;
+
+//#define MBUS_RPC_CACHE_SIZE 4
+//static mbus_rpc_cache_entry_t mbus_rpc_cache[MBUS_RPC_CACHE_SIZE];
+
+
+static mutex_t mbus_rpc_mutex = MUTEX_INITIALIZER("rpc");
+static cond_t mbus_rpc_cond = COND_INITIALIZER("rpc");
+
+static uint8_t mbus_rpc_txid;
+
+static pbuf_t *
+mbus_wakeup(uint32_t key, pbuf_t *pb)
+{
+  if(pb->pb_pktlen < 2)
+    return pb;
+
+  const uint8_t *u8 = pbuf_data(pb, 0);
+  const uint8_t txid = u8[1];
+  key |= txid;
+
+  mutex_lock(&mbus_rpc_mutex);
+  mbus_pending_rpc_t *mpr;
+  LIST_FOREACH(mpr, &mbus_pending_rpcs, mpr_link) {
+    if(mpr->mpr_key == key) {
+      mpr->mpr_pbuf = pb;
+      pb = NULL;
+      cond_broadcast(&mbus_rpc_cond);
+    }
+  }
+  mutex_unlock(&mbus_rpc_mutex);
+  return pb;
+}
+
+
+struct pbuf *
+mbus_handle_rpc_response(struct mbus_netif *mni,
+                         struct pbuf *pb,
+                         uint8_t remote_addr)
+{
+  return mbus_wakeup((remote_addr << 8), pb);
+}
+
+static pbuf_t *
+mbus_rpc_xmit(uint8_t remote_addr, pbuf_t *pb)
+{
+  uint8_t *u8 = pbuf_data(pb, 0);
+  mbus_pending_rpc_t mpr;
+  mpr.mpr_pbuf = NULL;
+  mutex_lock(&mbus_rpc_mutex);
+  uint8_t txid = ++mbus_rpc_txid;
+
+  mpr.mpr_key = (remote_addr << 8) | txid;
+  LIST_INSERT_HEAD(&mbus_pending_rpcs, &mpr, mpr_link);
+  u8[1] = mbus_rpc_txid++;
+  pbuf_free(mbus_xmit(remote_addr, pb));
+
+  uint64_t deadline = clock_get() + 250000;
+
+  while(mpr.mpr_pbuf == NULL) {
+    if(cond_wait_timeout(&mbus_rpc_cond, &mbus_rpc_mutex, deadline)) {
+      // Timeout
+      break;
+    }
+  }
+  LIST_REMOVE(&mpr, mpr_link);
+  mutex_unlock(&mbus_rpc_mutex);
+  return mpr.mpr_pbuf;
+}
+
+
+static pbuf_t *
+resolve_rpc_id(uint8_t remote_addr, const char *method, error_t *errp)
+{
+  pbuf_t *pb = pbuf_make(MBUS_HDR_LEN, 1);
+  size_t mlen = strlen(method);
+
+  uint8_t *outdata = pbuf_append(pb, 2 + mlen);
+  outdata[0] = MBUS_OP_RPC_RESOLVE;
+  memcpy(outdata + 2, method, mlen);
+
+  pb = mbus_rpc_xmit(remote_addr, pb);
+  if(pb == NULL) {
+    *errp = ERR_TIMEOUT;
+    return pb;
+  }
+
+  if(pb->pb_pktlen < 6) {
+    *errp = ERR_INVALID_RPC_ID;
+    pbuf_free(pb);
+    return NULL;
+  }
+  return pb;
+}
+
+
+pbuf_t *
+mbus_rpc(uint8_t remote_addr, const char *method, const uint8_t *data,
+         size_t len, error_t *errp)
+{
+  error_t err;
+  if(errp == NULL)
+    errp = &err;
+
+  pbuf_t *pb = resolve_rpc_id(remote_addr, method, errp);
+  if(pb == NULL)
+    return NULL;
+
+  void *reqdata = pbuf_append(pb, len);
+  memcpy(reqdata, data, len);
+  uint8_t *d8 = pbuf_data(pb, 0);
+  d8[0] = MBUS_OP_RPC_INVOKE;
+  pb = mbus_rpc_xmit(remote_addr, pb);
+  if(pb == NULL) {
+    *errp = ERR_TIMEOUT;
+    return NULL;
+  }
+
+  const uint8_t *u8 = pbuf_data(pb, 0);
+  if(u8[0] == MBUS_OP_RPC_ERR) {
+    if(pb->pb_pktlen < 6) {
+      *errp = ERR_MALFORMED;
+    } else {
+      *errp = rd32_le(u8 + 2);
+    }
+    pbuf_free(pb);
+    return NULL;
+  }
+  return pbuf_drop(pb, 2);
+}

@@ -163,7 +163,7 @@ pbuf_t *
 pbuf_drop(pbuf_t *pb, size_t bytes)
 {
   while(pb) {
-    assert(bytes < pb->pb_buflen); // Fix this case
+    assert(bytes <= pb->pb_buflen); // Fix this case
 
     pb->pb_offset += bytes;
     pb->pb_buflen -= bytes;
