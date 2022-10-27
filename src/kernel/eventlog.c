@@ -1,8 +1,11 @@
 #include <mios/eventlog.h>
 #include <mios/fmt.h>
 #include <mios/cli.h>
-#include <sys/param.h>
+#include <mios/task.h>
 #include <mios/mios.h>
+
+#include <sys/param.h>
+
 #include <stdint.h>
 #include <stddef.h>
 #include <unistd.h>
@@ -15,6 +18,7 @@
 typedef struct {
   uint64_t ts_tail;
   uint64_t ts_head;
+  mutex_t mutex;
   uint16_t head;
   uint16_t tail;
   uint8_t data[EVENTLOG_SIZE];
@@ -108,6 +112,8 @@ evlog(event_level_t level, const char *fmt, ...)
   evlogfifo_t *ef = &ef0;
   int64_t now = clock_get();
 
+  mutex_lock(&ef->mutex);
+
   evl_ensure(ef, 2);
 
   if(ef->head == ef->tail) {
@@ -141,6 +147,7 @@ evlog(event_level_t level, const char *fmt, ...)
   ef->data[(head + 0) & (EVENTLOG_SIZE - 1)] = msg_len + ts_len;
   ef->data[(head + 1) & (EVENTLOG_SIZE - 1)] = level | (ts_len << 3);
   ef->head += msg_len + ts_len;
+  mutex_unlock(&ef->mutex);
 }
 
 const char level2str[8][7] = {
@@ -160,12 +167,14 @@ show_log(cli_t *cli)
 {
   evlogfifo_t  *ef = &ef0;
 
+  const int64_t now = clock_get();
+
+  mutex_lock(&ef->mutex);
+
   uint16_t ptr = ef->tail;
   const uint16_t head = ef->head;
 
   int64_t ts = ef->ts_tail;
-
-  int64_t now = clock_get();
 
   while(ptr != head) {
     const uint8_t len = ef->data[(ptr + 0) & (EVENTLOG_SIZE - 1)];
@@ -183,8 +192,8 @@ show_log(cli_t *cli)
 
     int ms_ago = (now - ts) / 1000;
 
-    cli_printf(cli, "%5d.%-3d %s : ",
-               -ms_ago / 1000, ms_ago % 1000,  level2str[level]);
+    cli_printf(cli, "%5d.%03d %s : ",
+               -(ms_ago / 1000), ms_ago % 1000,  level2str[level]);
 
     if(msgend >= msgstart) {
       cli->cl_stream->write(cli->cl_stream, ef->data + msgstart,
@@ -198,6 +207,7 @@ show_log(cli_t *cli)
 
     ptr += len;
   }
+  mutex_unlock(&ef->mutex);
 }
 
 static error_t
