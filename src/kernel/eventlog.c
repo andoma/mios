@@ -14,10 +14,17 @@
 
 #define EVENTLOG_MASK (EVENTLOG_SIZE - 1)
 
+typedef struct follower {
+  LIST_ENTRY(follower) link;
+  uint16_t ptr;
+} follower_t;
+
 typedef struct {
   uint64_t ts_tail;
   uint64_t ts_head;
   mutex_t mutex;
+  cond_t cond;
+  LIST_HEAD(, follower) followers;
   uint16_t head;
   uint16_t tail;
   uint8_t data[EVENTLOG_SIZE];
@@ -73,6 +80,11 @@ evl_erase_tail(evlogfifo_t *ef)
     return;
   ef->ts_tail += evl_read_delta_ts(ef, ef->tail);
   int len = ef->data[ef->tail & EVENTLOG_MASK];
+  follower_t *f;
+  LIST_FOREACH(f, &ef->followers, link) {
+    if(f->ptr == ef->tail)
+      f->ptr += len;
+  }
   ef->tail += len;
 }
 
@@ -162,62 +174,70 @@ const char level2str[8][7] = {
 
 
 static void
-show_log(cli_t *cli)
+dump_log(evlogfifo_t *ef, stream_t *st, int follow)
 {
-  evlogfifo_t  *ef = &ef0;
 
-  const int64_t now = clock_get();
+  if(st->read == NULL)
+    follow = 0;
 
   mutex_lock(&ef->mutex);
 
-  uint16_t ptr = ef->tail;
-  const uint16_t head = ef->head;
+  follower_t f;
+  f.ptr = ef->tail;
+
+  LIST_INSERT_HEAD(&ef->followers, &f, link);
 
   int64_t ts = ef->ts_tail;
 
-  while(ptr != head) {
-    const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
+  while(1) {
 
+    uint16_t ptr = f.ptr;
+
+    if(ptr == ef->head) {
+      if(!follow)
+        break;
+
+      if(cond_wait_timeout(&ef->cond, &ef->mutex, clock_get() + 100000)) {}
+      uint8_t dummy;
+      int r = st->read(st, &dummy, 1, STREAM_READ_WAIT_NONE);
+      if(r)
+        break;
+      continue;
+    }
+
+    const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
     const uint8_t flags = ef->data[(ptr + 1) & EVENTLOG_MASK];
     const uint8_t level = flags & 7;
     const uint8_t tlen = (flags >> 3) & 7;
-
-    int64_t delta = evl_read_delta_ts(ef, ptr);
-
-    ts += delta;
     const uint16_t msglen = len - 2 - tlen;
     const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
     const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
 
-    int ms_ago = (now - ts) / 1000;
+    ts += evl_read_delta_ts(ef, ptr);
 
-    cli_printf(cli, "%5d.%03d %s : ",
-               -(ms_ago / 1000), ms_ago % 1000,  level2str[level]);
+    const int ms_ago = (clock_get() - ts) / 1000;
+
+    stprintf(st, "%5d.%03d %s : ",
+             -(ms_ago / 1000), ms_ago % 1000,  level2str[level]);
 
     if(msgend >= msgstart) {
-      cli->cl_stream->write(cli->cl_stream, ef->data + msgstart,
-                            msglen);
+      st->write(st, ef->data + msgstart, msglen);
     } else {
-      cli->cl_stream->write(cli->cl_stream, ef->data + msgstart,
-                            EVENTLOG_SIZE - msgstart);
-      cli->cl_stream->write(cli->cl_stream, ef->data, msgend);
+      st->write(st, ef->data + msgstart, EVENTLOG_SIZE - msgstart);
+      st->write(st, ef->data, msgend);
     }
-    cli_printf(cli, "\n");
+    st->write(st, "\n", 1);
 
-    ptr += len;
+    f.ptr = ptr + len;
   }
+  LIST_REMOVE(&f, link);
   mutex_unlock(&ef->mutex);
 }
 
 static error_t
 cmd_log(cli_t *cli, int argc, char **argv)
 {
-  if(argc > 1) {
-    evlog(LOG_INFO, "CLI: %s", argv[1]);
-    return 0;
-  }
-
-  show_log(cli);
+  dump_log(&ef0, cli->cl_stream, argc > 1);
   return 0;
 }
 
