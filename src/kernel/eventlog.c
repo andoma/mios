@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 
+#define EVENTLOG_MASK (EVENTLOG_SIZE - 1)
 
 typedef struct {
   uint64_t ts_tail;
@@ -53,13 +54,13 @@ evl_avail(const evlogfifo_t *ef)
 static int64_t
 evl_read_delta_ts(evlogfifo_t *ef, uint16_t ptr)
 {
-  const int len = ef->data[ptr & (EVENTLOG_SIZE - 1)];
-  const int tlen = (ef->data[(ptr + 1) & (EVENTLOG_SIZE - 1)] >> 3) & 7;
+  const int len = ef->data[ptr & EVENTLOG_MASK];
+  const int tlen = (ef->data[(ptr + 1) & EVENTLOG_MASK] >> 3) & 7;
   ptr += len - tlen;
 
   int64_t r = 0;
   for(int i = tlen - 1; i >= 0; i--) {
-    r = (r << 8) | ef->data[(ptr + i) & (EVENTLOG_SIZE - 1)];
+    r = (r << 8) | ef->data[(ptr + i) & EVENTLOG_MASK];
   }
   return r;
 }
@@ -71,7 +72,7 @@ evl_erase_tail(evlogfifo_t *ef)
   if(ef->head == ef->tail)
     return;
   ef->ts_tail += evl_read_delta_ts(ef, ef->tail);
-  int len = ef->data[ef->tail & (EVENTLOG_SIZE - 1)];
+  int len = ef->data[ef->tail & EVENTLOG_MASK];
   ef->tail += len;
 }
 
@@ -91,15 +92,15 @@ evl_fmt_cb(void *aux, const char *s, size_t len)
   evlogfifo_t *ef = aux;
 
   const int head = ef->head;
-  const int curlen = ef->data[head & (EVENTLOG_SIZE - 1)];
+  const int curlen = ef->data[head & EVENTLOG_MASK];
   const int to_copy = MAX(MIN(len, 128 - curlen), 0);
 
   evl_ensure(ef, curlen + to_copy);
 
   for(int i = 0; i < to_copy; i++) {
-    ef->data[(head + curlen + i) & (EVENTLOG_SIZE - 1)] = s[i];
+    ef->data[(head + curlen + i) & EVENTLOG_MASK] = s[i];
   }
-  ef->data[head & (EVENTLOG_SIZE - 1)] = curlen + to_copy;
+  ef->data[head & EVENTLOG_MASK] = curlen + to_copy;
   return to_copy;
 }
 
@@ -120,13 +121,13 @@ evlog(event_level_t level, const char *fmt, ...)
   }
 
   const int head = ef->head;
-  ef->data[(head + 0) & (EVENTLOG_SIZE - 1)] = 2;
+  ef->data[(head + 0) & EVENTLOG_MASK] = 2;
   va_list ap;
   va_start(ap, fmt);
   fmtv(evl_fmt_cb, ef, fmt, ap);
   va_end(ap);
 
-  int msg_len = ef->data[(head + 0) & (EVENTLOG_SIZE - 1)];
+  int msg_len = ef->data[(head + 0) & EVENTLOG_MASK];
   int64_t delta_ts = now - ef->ts_head;
   int64_t dts = delta_ts;
   int ts_len = 0;
@@ -137,13 +138,13 @@ evlog(event_level_t level, const char *fmt, ...)
 
   evl_ensure(ef, msg_len + ts_len);
   for(int i = 0; i < ts_len; i++) {
-    ef->data[(head + msg_len + i) & (EVENTLOG_SIZE - 1)] = delta_ts;
+    ef->data[(head + msg_len + i) & EVENTLOG_MASK] = delta_ts;
     delta_ts >>= 8;
   }
 
   ef->ts_head = now;
-  ef->data[(head + 0) & (EVENTLOG_SIZE - 1)] = msg_len + ts_len;
-  ef->data[(head + 1) & (EVENTLOG_SIZE - 1)] = level | (ts_len << 3);
+  ef->data[(head + 0) & EVENTLOG_MASK] = msg_len + ts_len;
+  ef->data[(head + 1) & EVENTLOG_MASK] = level | (ts_len << 3);
   ef->head += msg_len + ts_len;
   mutex_unlock(&ef->mutex);
 }
@@ -175,9 +176,9 @@ show_log(cli_t *cli)
   int64_t ts = ef->ts_tail;
 
   while(ptr != head) {
-    const uint8_t len = ef->data[(ptr + 0) & (EVENTLOG_SIZE - 1)];
+    const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
 
-    const uint8_t flags = ef->data[(ptr + 1) & (EVENTLOG_SIZE - 1)];
+    const uint8_t flags = ef->data[(ptr + 1) & EVENTLOG_MASK];
     const uint8_t level = flags & 7;
     const uint8_t tlen = (flags >> 3) & 7;
 
@@ -185,8 +186,8 @@ show_log(cli_t *cli)
 
     ts += delta;
     const uint16_t msglen = len - 2 - tlen;
-    const uint16_t msgstart = (ptr + 2) & (EVENTLOG_SIZE - 1);
-    const uint16_t msgend = (msgstart + msglen) & (EVENTLOG_SIZE - 1);
+    const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
+    const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
 
     int ms_ago = (now - ts) / 1000;
 
