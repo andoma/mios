@@ -14,6 +14,8 @@
 #define CR1_IDLE       (1 << 0) | (1 << 5) | (1 << 3) | (1 << 2)
 #define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
 
+#define USART_SR_BUSY  (1 << 16)
+
 #include "platform/stm32/stm32_uart.c"
 #include "platform/stm32/stm32_mbus_uart.c"
 
