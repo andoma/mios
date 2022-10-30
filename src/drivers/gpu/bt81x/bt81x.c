@@ -514,6 +514,7 @@ static void
 draw_gui(bt81x_t *b)
 {
   gfx_display_t *gd = &b->gfx_display;
+  gd->gd_tab_offsets_size = 0;
   b->dlptr = 0;
 
   b->dl[b->dlptr++] = EVE_ENC_RESTORE_CONTEXT(); // XXX???
@@ -832,17 +833,21 @@ draw_text(gfx_display_t *gd,
   b->dl[b->dlptr++] = EVE_ENC_SAVE_CONTEXT();
   b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X(pos->x << 4);
   b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_Y(pos->y << 4);
-
   b->dl[b->dlptr++] = EVE_ENC_BEGIN(EVE_BEGIN_BITMAPS);
 
   int handle = f->bitmap_handle;
 
   int x = 0;
+  int absx = 0;
+  size_t ti = 0;
   for(size_t i = 0; i < len; i++) {
     uint8_t c = str[i];
-    if(c >= 32 && c < 128) {
+    if(c == '\t' && ti < gd->gd_tab_offsets_size) {
+      x = gd->gd_tab_offsets[ti++] - absx;
+    } else if(c >= 32 && c < 128) {
       if(x > 512) {
         b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X((x + pos->x) << 4);
+        absx = x;
         x = 0;
       }
 
@@ -920,9 +925,12 @@ get_text_size(gfx_display_t *gd,
 {
   const struct bt81x_font *f = &fonts[font];
   int x = 0;
+  size_t ti = 0;
   for(size_t i = 0; i < len; i++) {
     uint8_t c = str[i];
-    if(c >= 32 && c < 128) {
+    if(c == '\t' && ti < gd->gd_tab_offsets_size) {
+      x = gd->gd_tab_offsets[ti++];
+    } else if(c >= 32 && c < 128) {
       x += f->width[c - 32];
     }
   }

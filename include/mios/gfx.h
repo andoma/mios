@@ -100,4 +100,8 @@ struct gfx_display {
   // Color 0 is always clear color
   // Color 1 is default text color
   uint32_t gd_palette[GFX_DISPLAY_PALETTE_SIZE];
+
+  // Controlls where \t jumps in text
+  const int *gd_tab_offsets;
+  size_t gd_tab_offsets_size;
 };
