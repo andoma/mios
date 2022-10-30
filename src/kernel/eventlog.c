@@ -196,7 +196,7 @@ dump_log(evlogfifo_t *ef, stream_t *st, int follow)
     if(ptr == ef->head) {
       if(!follow)
         break;
-
+      st->write(st, NULL, 0);
       if(cond_wait_timeout(&ef->cond, &ef->mutex, clock_get() + 100000)) {}
       uint8_t dummy;
       int r = st->read(st, &dummy, 1, STREAM_READ_WAIT_NONE);
