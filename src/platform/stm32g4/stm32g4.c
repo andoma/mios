@@ -1,0 +1,64 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <malloc.h>
+
+#include <net/pbuf.h>
+
+#include "cpu.h"
+
+static volatile uint16_t *const FLASH_SIZE = (volatile uint16_t *)0x1fff75e0;
+static volatile uint32_t *const DBGMCU_IDCODE = (volatile uint32_t *)0xe0042000;
+
+static struct {
+  uint16_t id;
+  uint8_t sram1_size;
+  uint8_t sram2_size;
+  uint8_t ccm_size;
+  char category;
+} devicemap[] = {
+  { 0x468, 16,  6, 10, '2' },
+  { 0x469, 80, 16, 16, '3' },
+  { 0x479, 80, 16, 16, '4' },
+};
+
+
+static void  __attribute__((constructor(120)))
+stm32g4_init(void)
+{
+  extern unsigned long _ebss;
+
+  uint32_t chipid = *DBGMCU_IDCODE;
+  uint16_t deviceid = chipid & 0xfff;
+
+  uint8_t sram1_size = 16;
+  uint8_t sram2_size = 6;
+  uint8_t ccm_size   = 10;
+  uint8_t category = '?';
+
+  for(size_t i = 0; i < sizeof(devicemap) / sizeof(devicemap[0]); i++) {
+    if(devicemap[i].id == deviceid) {
+      sram1_size = devicemap[i].sram1_size;
+      sram2_size = devicemap[i].sram2_size;
+      ccm_size   = devicemap[i].ccm_size;
+      category = devicemap[i].category;
+      break;
+    }
+  }
+
+  printf("\nSTM32G4 (%d kB Flash) Cat:%c (SRAM: %d + %d + %d kB) ID:0x%08x\n",
+         *FLASH_SIZE, category, sram1_size, sram2_size, ccm_size, chipid);
+
+  void *SRAM1_start = (void *)&_ebss;
+  void *SRAM1_end   = (void *)0x20000000 + sram1_size * 1024;
+  heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
+
+  void *SRAM2_start = (void *)0x20014000;
+  void *SRAM2_end   = (void *)0x20014000 + sram2_size * 1024;
+  pbuf_data_add(SRAM2_start, SRAM2_end);
+
+  void *CCM_start = (void *)0x10000000 + sizeof(cpu_t);
+  void *CCM_end = (void *)0x10000000 + ccm_size * 1024;
+  heap_add_mem((long)CCM_start, (long)CCM_end, MEM_TYPE_LOCAL);
+
+}
+
