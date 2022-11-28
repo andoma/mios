@@ -258,13 +258,15 @@ cdc_read(struct stream *s, void *buf, size_t size, int wait)
 
   for(size_t i = 0; i < size; i++) {
     while(fifo_is_empty(&uc->rx_fifo)) {
-      if(stream_wait_is_done(wait, i, size)) {
-        irq_permit(q);
-        return i;
-      }
+
       if(uc->rx_nak) {
         uc->rx_nak = 0;
         ue->ue_vtable->cnak(ue->ue_dev, ue);
+      }
+
+      if(stream_wait_is_done(wait, i, size)) {
+        irq_permit(q);
+        return i;
       }
       task_sleep(&uc->rx_waitq);
     }
