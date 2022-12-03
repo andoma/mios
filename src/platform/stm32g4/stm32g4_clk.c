@@ -6,26 +6,24 @@ static uint32_t apb1clock;
 static uint32_t apb2clock;
 
 #define FLASH_ACR   0x40022000
-#define RCC_CR      0x40021000
-#define RCC_CFGR    0x40021008
-#define RCC_PLLCFGR 0x4002100c
 
 
 int
 clk_get_freq(uint16_t id)
 {
   uint32_t r;
+
   switch(id >> 8) {
   default:
     panic("clk_get_speed() invalid id: 0x%x", id);
-  case RCC_APB1ENR1:
-  case RCC_APB1ENR2:
+  case RCC_APB1ENR1 & 0xff:
+  case RCC_APB1ENR2 & 0xff:
     r = apb1clock;
     break;
-  case RCC_APB2ENR:
+  case RCC_APB2ENR & 0xff:
     r = apb2clock;
     break;
-  case RCC_AHB2ENR:
+  case RCC_AHB2ENR & 0xff:
     return CPU_SYSTICK_RVR;
   }
   if(!r)
@@ -76,4 +74,57 @@ stm32g4_init_pll(int hse_freq)
   reg_set_bits(RCC_CFGR, 0, 2, 3); // Use PLL as system clock
 
   while((reg_rd(RCC_CFGR) & 0xc) != 0xc) {}
+}
+
+
+void
+clk_enable_hsi48(void)
+{
+  reg_wr(RCC_CRRCR, 1);
+  while(!(reg_rd(RCC_CRRCR) & (1 << 1))) {} // Wait for clock to become ready
+}
+
+
+
+void
+stm32g4_deinit_clk(void)
+{
+  // Reset all peripheral (except flash)
+  reg_wr(RCC_AHB1RSTR, 0x101f);
+  reg_wr(RCC_AHB2RSTR, 0x50f607f);
+  reg_wr(RCC_AHB3RSTR, 0x101);
+  reg_wr(RCC_APB1RSTR1, 0xd2fec13f);
+  reg_wr(RCC_APB1RSTR2, 0x103);
+  reg_wr(RCC_APB2RSTR, 0x437f801);
+
+  // Disable all peripheral clocks (write reset values to registers)
+  reg_wr(RCC_AHB1ENR, 0x100);
+  reg_wr(RCC_AHB2ENR, 0x1); // Keep SYSCFG on
+  reg_wr(RCC_AHB3ENR, 0x0);
+  reg_wr(RCC_APB1ENR1, 0x400);
+  reg_wr(RCC_APB1ENR2, 0x0);
+  reg_wr(RCC_APB2ENR, 0x0);
+
+  // Release resets
+  reg_wr(RCC_AHB1RSTR, 0);
+  reg_wr(RCC_AHB2RSTR, 0);
+  reg_wr(RCC_AHB3RSTR, 0);
+  reg_wr(RCC_APB1RSTR1, 0);
+  reg_wr(RCC_APB1RSTR2, 0);
+  reg_wr(RCC_APB2RSTR, 0);
+
+  // Turn off HSI48
+  reg_wr(RCC_CRRCR, 0);
+  while((reg_rd(RCC_CRRCR) & (1 << 1))) {} // Wait for clock to stop
+
+  // Use HSI16 as system clock
+  reg_set_bits(RCC_CFGR, 0, 2, 1);
+  while((reg_rd(RCC_CFGR) & 0x4) != 0x4) {}
+
+  reg_clr_bit(RCC_CR, 24);
+  while((reg_rd(RCC_CR) & (1 << 25))) {} // Wait for pll to stop
+
+  reg_wr(RCC_CFGR, 0x5); // Reset value (all prescalers reset)
+  reg_wr(RCC_PLLCFGR, 0x1000);
+  reg_wr(RCC_CCIPR, 0x0);
 }

@@ -97,3 +97,11 @@ systick_init(void)
 }
 
 
+void
+systick_deinit(void)
+{
+  *SYST_RVR = 0;
+  *SYST_VAL = 0;
+  *SYST_CSR = 0;
+}
+

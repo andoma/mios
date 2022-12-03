@@ -49,6 +49,19 @@ pendsv:
         isb
         pop {pc}
 
+        .global cpu_softreset
+cpu_softreset:
+        movs r0, #0
+        msr control, r0
+        msr primask, r0
+        msr faultmask, r0
+        msr basepri, r0
+        isb
+        ldr r1, [r0]
+        ldr r2, [r0, #4]
+        msr msp, r1
+        bx r2
+
         .section    .isr_vector,"a",%progbits
         .align      2
         .global     vectors

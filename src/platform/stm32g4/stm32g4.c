@@ -5,9 +5,17 @@
 #include <net/pbuf.h>
 
 #include "cpu.h"
+#include "irq.h"
+
+#include "stm32g4_clk.h"
+
+static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
+static volatile uint32_t *const DWT_LAR      = (volatile uint32_t *)0xE0001FB0;
+static volatile uint32_t *const SCB_DEMCR    = (volatile uint32_t *)0xE000EDFC;
 
 static volatile uint16_t *const FLASH_SIZE = (volatile uint16_t *)0x1fff75e0;
 static volatile uint32_t *const DBGMCU_IDCODE = (volatile uint32_t *)0xe0042000;
+static volatile uint32_t *const SYSCFG_MEMRMP = (volatile uint32_t *)0x40010000;
 
 static struct {
   uint16_t id;
@@ -60,5 +68,21 @@ stm32g4_init(void)
   void *CCM_end = (void *)0x10000000 + ccm_size * 1024;
   heap_add_mem((long)CCM_start, (long)CCM_end, MEM_TYPE_LOCAL);
 
+  // Enable cycle counter
+  *SCB_DEMCR |= 0x01000000;
+  *DWT_LAR = 0xC5ACCE55; // unlock
+  *DWT_CONTROL = 1;
+
+}
+
+
+void
+dfu(void)
+{
+  irq_forbid(IRQ_LEVEL_ALL);
+  *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
+  stm32g4_deinit_clk();
+  systick_deinit();
+  softreset();
 }
 

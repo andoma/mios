@@ -27,3 +27,6 @@ GDB_PORT ?= 3333
 
 stlink: ${O}/build.elf
 	${GDB} -ex "target extended-remote localhost:${GDB_PORT}" $<
+
+dfu: ${O}/build.bin
+	dfu-util -a 0 -D $< -s 0x08000000:leave

@@ -163,3 +163,6 @@ irq_ack(int irq)
   NVIC_ICPR[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
 }
 
+void systick_deinit(void);
+
+void softreset(void) __attribute__((noreturn));
