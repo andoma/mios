@@ -7,6 +7,9 @@ SRCS-${ENABLE_MS5611} += \
 SRCS-${ENABLE_MPU9250} += \
 	${SRC}/drivers/mpu9250.c
 
+SRCS-${ENABLE_BMI120} += \
+	${SRC}/drivers/bmi120.c
+
 SRCS-${ENABLE_SX1280} += \
 	${SRC}/drivers/sx1280/sx1280.c \
 	${SRC}/drivers/sx1280/sx1280_tdma.c \
