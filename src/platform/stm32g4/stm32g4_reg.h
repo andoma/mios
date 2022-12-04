@@ -30,6 +30,13 @@ reg_rd(uint32_t addr)
   return *ptr;
 }
 
+static inline uint16_t
+reg_rd16(uint32_t addr)
+{
+  volatile uint16_t *ptr = (uint16_t *)addr;
+  return *ptr;
+}
+
 static inline void
 reg_set(uint32_t addr, uint32_t mask)
 {
