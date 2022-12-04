@@ -8,6 +8,7 @@
 #include "irq.h"
 
 #include "stm32g4_clk.h"
+#include "stm32g4_usb.h"
 
 static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
 static volatile uint32_t *const DWT_LAR      = (volatile uint32_t *)0xE0001FB0;
@@ -81,6 +82,7 @@ dfu(void)
 {
   irq_forbid(IRQ_LEVEL_ALL);
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
+  stm32g4_usb_stop();
   stm32g4_deinit_clk();
   systick_deinit();
   softreset();

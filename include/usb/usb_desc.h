@@ -22,6 +22,14 @@
 #define USB_REQ_GET_DESCRIPTOR          6
 #define USB_REQ_SET_CONFIG              9
 
+struct usb_setup_packet {
+  uint8_t request_type;
+  uint8_t request;
+  uint16_t value;
+  uint16_t index;
+  uint16_t length;
+};
+
 struct usb_device_descriptor {
   uint8_t  bLength;
   uint8_t  bDescriptorType;

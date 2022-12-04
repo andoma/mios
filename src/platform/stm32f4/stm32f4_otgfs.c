@@ -518,43 +518,33 @@ ep0_handle_setup(usb_ctrl_t *uc)
 
 
 
-static error_t
-ep0_rx(device_t *d, usb_ep_t *ue,
-       uint32_t status, uint32_t bytes)
+static void
+ep0_rx(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   usb_ctrl_t *uc = (usb_ctrl_t *)d;
   int ep = 0;
 
-  switch(status) {
-  case 2:
-    drop_packet(ep, bytes);
-    return 0;
-  case 3:  // OUT completed
-    ep_cnak(ep);
-    return 0;
-  case 4:  // SETUP completed
-    return 0;
-  case 6: // SETUP packet
+  if(flags & USB_COMPLETED_IS_SETUP) {
     uc->uc_ep0_out.setup_words[0] = reg_rd(OTG_FS_FIFO(0));
     uc->uc_ep0_out.setup_words[1] = reg_rd(OTG_FS_FIFO(0));
     ep0_handle_setup(uc);
-    ep_cnak(ep);
-    return 0;
-  default:
-    return ERR_NOT_IMPLEMENTED;
+  } else {
+    drop_packet(ep, bytes);
   }
+  ep_cnak(ep);
 }
 
 
 
-static error_t
-ep0_txco(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
+
+static void
+ep0_txco(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   usb_ctrl_t *uc = (usb_ctrl_t *)d;
 
   tx_ptr_t *tp = &uc->uc_ep0_in.tx_ptr;
   if(tp->ptr == NULL)
-    return ERR_OK;
+    return;
 
   if(tp->offset != tp->total) {
     tx_start(0, tp, 8);
@@ -564,7 +554,6 @@ ep0_txco(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
   } else {
     tp->ptr = NULL;
   }
-  return ERR_OK;
 }
 
 
@@ -768,7 +757,15 @@ irq_67(void)
         } else {
           const uint32_t status = (rspr >> 17) & 0xf;
           const uint32_t bytes = (rspr >> 4) & 0x7ff;
-          ue->ue_completed(&uc->uc_dev, ue, status, bytes);
+
+          switch(status) {
+          case 2:
+            ue->ue_completed(&uc->uc_dev, ue, bytes, 0);
+            break;
+          case 6:
+            ue->ue_completed(&uc->uc_dev, ue, bytes, USB_COMPLETED_IS_SETUP);
+            break;
+          }
         }
       }
     }

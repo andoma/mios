@@ -178,21 +178,15 @@ cdc_rx_pkt(device_t *d, usb_ep_t *ue, usb_cdc_t *uc, int bytes)
 }
 
 
-static error_t
-cdc_rx(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
+static void
+cdc_rx(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
+  if(flags)
+    panic("cdc_rx_pkt: flags:%x", flags);
   usb_cdc_t *uc = ue->ue_iface_aux;
-  switch(status) {
-  case 2:
-    cdc_rx_pkt(d, ue, uc, bytes);
-    return 0;
-  case 3:  // OUT completed
-    uc->rx_nak = 1;
-    task_wakeup(&uc->rx_waitq, 0);
-    return 0;
-  default:
-    return ERR_NOT_IMPLEMENTED;
-  }
+  cdc_rx_pkt(d, ue, uc, bytes);
+  uc->rx_nak = 1;
+  task_wakeup(&uc->rx_waitq, 0);
 }
 
 
@@ -225,11 +219,10 @@ cdc_tx(device_t *d, usb_ep_t *ue, usb_cdc_t *uc)
 
 
 
-static error_t
-cdc_txco(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
+static void
+cdc_txco(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   cdc_tx(d, ue, ue->ue_iface_aux);
-  return 0;
 }
 
 

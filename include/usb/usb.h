@@ -27,6 +27,8 @@ typedef struct {
 
 
 
+#define USB_COMPLETED_IS_SETUP 0x1
+
 struct usb_ep {
 
   // Initialized by interface
@@ -34,8 +36,8 @@ struct usb_ep {
 
   // Initialized by interface
   // Called by controller when RX happens or TX is done
-  error_t (*ue_completed)(device_t *d, struct usb_ep *ep,
-                          uint32_t status, uint32_t bytes);
+  void (*ue_completed)(device_t *d, struct usb_ep *ep,
+                       uint32_t bytes, uint32_t flags);
 
   // Initialized by interface
   void (*ue_reset)(device_t *d, struct usb_ep *ep);
@@ -103,8 +105,8 @@ usb_interface_t *usb_alloc_interface(struct usb_interface_queue *q,
 
 static inline void
 usb_init_endpoint(usb_ep_t *ue, void *aux,
-                  error_t (*completed)(device_t *d, struct usb_ep *ep,
-                                          uint32_t status, uint32_t bytes),
+                  void (*completed)(device_t *d, struct usb_ep *ep,
+                                    uint32_t bytes, uint32_t flags),
                   void (*reset)(device_t *d, struct usb_ep *ep),
                   int type,
                   int address,

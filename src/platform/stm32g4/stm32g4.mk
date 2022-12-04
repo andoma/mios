@@ -20,5 +20,6 @@ SRCS += ${P}/stm32g4.c \
 	${P}/stm32g4_spi.c \
 	${P}/stm32g4_dma.c \
 	${P}/stm32g4_i2c.c \
+	${P}/stm32g4_usb.c \
 
 ${MO}/src/platform/stm32g4/%.o : CFLAGS += ${NOFPU}
