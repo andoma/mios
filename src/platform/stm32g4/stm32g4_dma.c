@@ -9,6 +9,7 @@
 #include "stm32g4.h"
 #include "platform/stm32/stm32_dma.h"
 #include "stm32g4_clk.h"
+#include "stm32g4_dma.h"
 
 #define DMAMUX1_BASE 0x40020800
 #define DMAMUX1_CxCR(x) (DMAMUX1_BASE + 4 * (x))
