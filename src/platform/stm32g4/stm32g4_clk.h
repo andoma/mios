@@ -64,6 +64,8 @@
 #define CLK_DMA2    CLK_ID(RCC_AHB1ENR, 1)
 #define CLK_DMAMUX1 CLK_ID(RCC_AHB1ENR, 2)
 
+#define CLK_SAI1    CLK_ID(RCC_APB2ENR, 21)
+
 
 static inline void
 clk_enable(uint16_t id)
