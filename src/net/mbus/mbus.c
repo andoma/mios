@@ -14,6 +14,7 @@
 
 #ifdef ENABLE_NET_PCS
 #include "net/pcs_shell.h"
+#include <mios/eventlog.h>
 #endif
 
 SLIST_HEAD(mbus_netif_list, mbus_netif);
@@ -242,9 +243,24 @@ mbus_pcs_accept(void *opaque, pcs_t *pcs, uint8_t channel)
   switch(channel) {
   case 0x80:
     return pcs_shell_create(pcs);
+  case 0x81:
+    return evlog_to_pcs(pcs);
   }
   return -1;
 }
+
+static pcs_fifo_sizes_t
+mbus_pcs_fifosize(void *opaque, uint8_t channel)
+{
+  switch(channel) {
+  case 0x80:
+    return (pcs_fifo_sizes_t){.tx = 64, .rx = 64};
+  case 0x81:
+    return (pcs_fifo_sizes_t){.rx = 0, .tx = 128};
+  }
+  return (pcs_fifo_sizes_t){};
+}
+
 
 static int64_t
 mbus_pcs_wait_helper(cond_t *c, mutex_t *m, int64_t deadline)
@@ -281,6 +297,8 @@ mbus_pcs_thread(void *arg)
 }
 #endif
 
+
+
 void
 mbus_netif_attach(mbus_netif_t *mni, const char *name,
                   const device_class_t *dc, uint8_t addr, int flags)
@@ -294,7 +312,7 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name,
 
 #ifdef ENABLE_NET_PCS
   if(flags & MBUS_NETIF_ENABLE_PCS) {
-    mni->mni_pcs = pcs_iface_create(mni, 64, mbus_pcs_accept);
+    mni->mni_pcs = pcs_iface_create(mni, mbus_pcs_fifosize, mbus_pcs_accept);
     task_create(mbus_pcs_thread, mni, 384, "pcs", 0, 4);
   }
 #endif
