@@ -46,7 +46,7 @@ stm32g0_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
   if(flags & UART_HALF_DUPLEX) {
     gpio_conf_af(tx.gpio, tx.af, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   } else {
-    gpio_conf_af(tx.gpio, tx.af, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_UP);
+    gpio_conf_af(tx.gpio, tx.af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
     gpio_conf_af(rx.gpio, rx.af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   }
 
@@ -83,7 +83,7 @@ stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
   if(instance > ARRAYSIZE(uart_config))
     return;
 
-  gpio_conf_af(tx.gpio, tx.af, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_UP);
+  gpio_conf_af(tx.gpio, tx.af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   gpio_conf_af(rx.gpio, rx.af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   if(txe != GPIO_UNUSED)
     gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
