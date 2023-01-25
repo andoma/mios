@@ -312,7 +312,7 @@ typedef struct {
 static void
 evlog_to_pcs_fill(void *arg, size_t avail,
                   void (*wrfn)(pcs_t *pcs, const void *buf,
-                              size_t len))
+                               size_t len))
 {
   evlog_pcs_follower_t *epf = arg;
   evlogfifo_t *ef = &ef0;
