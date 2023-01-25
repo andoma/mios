@@ -71,13 +71,10 @@ buffer_alloc(usb_mbus_t *um)
 
 
 
-static error_t
-mbus_rx(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
+static void
+mbus_rx(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   usb_mbus_t *um = ue->ue_iface_aux;
-
-  if(status != 2)
-    return 0;
 
   pbuf_t *pb = um->rx_pbuf;
   assert(pb != NULL);
@@ -92,7 +89,6 @@ mbus_rx(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
   netif_wakeup(&um->um_mni.mni_ni);
 
   buffer_alloc(um);
-  return 0;
 }
 
 
@@ -119,13 +115,12 @@ do_tx(usb_mbus_t *um)
 }
 
 
-static error_t
-mbus_txco(device_t *d, usb_ep_t *ue, uint32_t status, uint32_t bytes)
+static void
+mbus_txco(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   usb_mbus_t *um = ue->ue_iface_aux;
   um->um_mni.mni_tx_packets++;
   do_tx(um);
-  return 0;
 }
 
 
