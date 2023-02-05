@@ -1,4 +1,5 @@
 #include <mios/mios.h>
+#include <assert.h>
 
 #include "stm32g4_clk.h"
 
@@ -34,7 +35,7 @@ clk_get_freq(uint16_t id)
 
 
 void
-stm32g4_init_pll(int hse_freq)
+stm32g4_init_pll(int hse_freq, int p_freq)
 {
   int pll_m = 4; // Internal 16MHz / 4
   uint32_t pllcfgr = 2;
@@ -56,16 +57,23 @@ stm32g4_init_pll(int hse_freq)
     pllcfgr = 3;
   }
 
-  // Clock for USB should be 48MHz
-  const uint32_t pll_q = CPU_SYSCLK_MHZ * 2 / 48;
+  if(p_freq) {
+    pllcfgr |= (1 << 16); // PLLP Enable
+
+    const int fvco = CPU_SYSCLK_MHZ * 2;
+    int pdiv = fvco / p_freq;
+    assert(pdiv >= 2 && pdiv < 32);
+    pllcfgr |= (pdiv << 27);
+  }
+
 
   reg_wr(RCC_PLLCFGR,
-         (1 << 24) | // PLLR enable
+         (1 << 24) |                   // PLLR enable
          pllcfgr |
          ((pll_m - 1) << 4) |          // input division
          ((CPU_SYSCLK_MHZ / 2) << 8) | // PLL multiplication
-         (0 << 25) |             // PLL sys clock division (0 == /2)
-         (pll_q << 21));         // PLL usb clock division
+         (0 << 25)                     // PLL sys clock division (0 == /2)
+         );
 
   reg_set_bit(RCC_CR, 24);
 

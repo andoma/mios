@@ -66,3 +66,10 @@ reg_clr_bit(uint32_t addr, uint32_t bit)
   reg_set_bits(addr, bit, 1, 0);
 }
 
+
+static inline int
+reg_get_bit(uint32_t addr, int bit)
+{
+  return (reg_rd(addr) >> bit) & 1;
+}
+

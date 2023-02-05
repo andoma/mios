@@ -92,7 +92,7 @@ clk_disable(uint16_t id)
 
 int clk_get_freq(uint16_t id);
 
-void stm32g4_init_pll(int hse_freq);
+void stm32g4_init_pll(int hse_freq, int p_freq_mhz);
 
 void clk_enable_hsi48(void);
 
