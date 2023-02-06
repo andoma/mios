@@ -47,7 +47,7 @@ exc_mm_fault(void)
 
   uint32_t addr = *MMFAR;
 #ifdef CPU_STACK_REDZONE_SIZE
-  task_t *const t = task_current();
+  thread_t *const t = thread_current();
   if(t && ((addr & ~(CPU_STACK_REDZONE_SIZE - 1)) == (intptr_t)t->t_sp_bottom)) {
     panic("REDZONE HIT task:\"%s\" MFSR:0x%x address:0x%x PC:0x%x",
           t->t_name, *MMFSR, addr, psp[6]);
@@ -81,7 +81,7 @@ exc_usage_fault(void)
   if(ufsr & 0x8) {
     // NOCP (ie, tried to use FPU)
 
-    task_t *const t = task_current();
+    thread_t *const t = thread_current();
 
     if(t == NULL || t->t_fpuctx == NULL) {
       panic("Task %s tries to use FPU but is not allowed. pc:0x%x",

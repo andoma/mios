@@ -85,7 +85,7 @@ platform_init_late(void)
   gpio_conf_output(LED_RED, GPIO_PUSH_PULL,
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
-  task_create(blinker, NULL, 512, "blinker", 0, 0);
+  thread_create(blinker, NULL, 512, "blinker", 0, 0);
 }
 
 

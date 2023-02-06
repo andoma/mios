@@ -208,7 +208,7 @@ ota_task(void *arg)
   ota_state = NULL;
   free(os);
   mutex_unlock(&ota_mutex);
-  task_exit(NULL);
+  thread_exit(NULL);
 }
 
 
@@ -269,7 +269,7 @@ rpc_ota(const ota_req_t *in, void *out, size_t in_size)
   socket_init(&os->sock, AF_MBUS, 0);
   os->sock.s_remote_addr = in->hostaddr;
 
-  task_t *t = task_create(ota_task, os, 768, "ota", TASK_DETACHED, 3);
+  thread_t *t = thread_create(ota_task, os, 768, "ota", TASK_DETACHED, 3);
   if(t == NULL) {
     free(os);
     mutex_unlock(&ota_mutex);

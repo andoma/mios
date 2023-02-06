@@ -1,7 +1,9 @@
 #include <assert.h>
 #include <stdio.h>
 #include <unistd.h>
+
 #include <mios/task.h>
+#include <mios/timer.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -280,7 +282,7 @@ net_init(void)
   flags |= TASK_FPU;
 #endif
 
-  task_create(net_thread, NULL, 768, "net", flags, 5);
+  thread_create(net_thread, NULL, 768, "net", flags, 5);
   net_periodic_timer.t_cb = periodic_timer_cb;
 }
 

@@ -79,8 +79,8 @@ panic(const char *fmt, ...)
   irq_forbid(IRQ_LEVEL_ALL);
   fini();
 
-  task_t *t = task_current();
-  printf("\n\nPANIC in %s: ", t ? t->t_name : "<notask>");
+  thread_t *t = thread_current();
+  printf("\n\nPANIC in %s: ", t ? t->t_name : "<nothread>");
   va_list ap;
   va_start(ap, fmt);
   vprintf(fmt, ap);

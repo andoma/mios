@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <sys/queue.h>
 
-#include "timer.h"
 #include "error.h"
 
 STAILQ_HEAD(task_queue, task);
@@ -14,13 +13,31 @@ LIST_HEAD(task_list, task);
 #define TASK_PRIO_MASK (TASK_PRIOS - 1)
 
 
-#define TASK_STATE_RUNNING  0
-#define TASK_STATE_SLEEPING 1
-#define TASK_STATE_ZOMBIE   2
+#define TASK_STATE_NONE     0
+#define TASK_STATE_RUNNING  1
+#define TASK_STATE_SLEEPING 2
+#define TASK_STATE_ZOMBIE   3
+
+typedef struct task {
+  union {
+    struct {
+      STAILQ_ENTRY(task) t_ready_link;
+      void (*t_run)(struct task *t);
+    };
+    LIST_ENTRY(task) t_wait_link;
+  };
+
+  uint8_t t_flags;
+  uint8_t t_prio;
+  uint16_t t_state;
+
+} task_t;
 
 
-/*
- * Per task memory block
+void softirq_trig(task_t *t);
+
+ /*
+ * Per thread memory block
  *
  * ----------------- <- sp_bottom
  * | REDZONE       |
@@ -34,11 +51,9 @@ LIST_HEAD(task_list, task);
  *
  */
 
-typedef struct task {
-  union {
-    STAILQ_ENTRY(task) t_ready_link;
-    LIST_ENTRY(task) t_wait_link;
-  };
+
+typedef struct thread {
+  task_t t_task;
 
   void *t_sp_bottom;
   void *t_sp;
@@ -58,27 +73,26 @@ typedef struct task {
   uint32_t t_ctx_switches;
 #endif
 
-  SLIST_ENTRY(task) t_global_link;
-  char t_name[13];
-  uint8_t t_flags;
-  uint8_t t_prio;
-  uint8_t t_state;
-} task_t;
+  SLIST_ENTRY(thread) t_global_link;
+
+  char t_name[12];
+
+} thread_t;
 
 typedef struct sched_cpu {
-  task_t *current;
+  thread_t *current;
   task_t *idle;
   uint32_t active_queues;
   struct task_queue readyqueue[TASK_PRIOS];
 
 #ifdef HAVE_FPU
-  task_t *current_fpu;
+  thread_t *current_fpu;
 #endif
 
 } sched_cpu_t;
 
 
-void sched_cpu_init(sched_cpu_t *sc, task_t *idle);
+void sched_cpu_init(sched_cpu_t *sc, thread_t *idle);
 
 typedef struct {
   struct task_list list;
@@ -107,22 +121,26 @@ typedef struct {
 
 typedef task_waitable_t cond_t;
 
-void task_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
+void thread_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 
+
+// Flag bits 0-7 is stored in task->t_flags
+#define TASK_THREAD    0x1  // A full thread with stack
+#define TASK_DETACHED  0x2  // Should be auto-joined by system on thread_exit
+
+// Remaining flags are used during thread_create
 #ifdef HAVE_FPU
-#define TASK_FPU       0x1
+#define TASK_FPU       0x100
 #endif
-
-#define TASK_DMA_STACK 0x2
-#define TASK_DETACHED  0x4
+#define TASK_DMA_STACK 0x200
 
 
-task_t *task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
-                    const char *name, int flags, unsigned int prio);
+thread_t *thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
+                        const char *name, int flags, unsigned int prio);
 
-void task_exit(void *ret) __attribute__((noreturn));
+void thread_exit(void *ret) __attribute__((noreturn));
 
-void *task_join(task_t *t);
+void *thread_join(thread_t *t);
 
 void task_wakeup(task_waitable_t *waitable, int all);
 
@@ -139,8 +157,7 @@ int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline)
 int task_sleep_delta(task_waitable_t *waitable, int useconds)
   __attribute__((warn_unused_result));
 
-
-task_t *task_current(void);
+thread_t *thread_current(void);
 
 #ifdef ENABLE_TASK_WCHAN
 #define MUTEX_INITIALIZER(n) { .waiters = {.name = (n)}}

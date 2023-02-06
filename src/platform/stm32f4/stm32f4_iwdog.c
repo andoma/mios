@@ -41,5 +41,5 @@ sys_watchdog_start(gpio_t blink)
   reg_wr(IWDG_KR, 0xAAAA);
   reg_wr(IWDG_KR, 0xCCCC);
 
-  task_create(wdog_thread, (void *)(intptr_t)blink, 256, "wdog", 0, 0);
+  thread_create(wdog_thread, (void *)(intptr_t)blink, 256, "wdog", 0, 0);
 }

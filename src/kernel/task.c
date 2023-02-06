@@ -13,27 +13,35 @@
 #include <mios/task.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
+#include <mios/timer.h>
 
 #include "sys.h"
 #include "irq.h"
 #include "cpu.h"
 
-SLIST_HEAD(task_slist, task);
+SLIST_HEAD(thread_slist, thread);
 
 int task_trace;
 
 
-static struct task_slist alltasks;
+static struct thread_slist allthreads;
 
-static mutex_t alltasks_mutex = MUTEX_INITIALIZER("alltasks");
-static cond_t task_mgmt_cond = COND_INITIALIZER("taskmgmt");
+static mutex_t allthreads_mutex = MUTEX_INITIALIZER("alltasks");
+static cond_t thread_mgmt_cond = COND_INITIALIZER("taskmgmt");
 
 static task_waitable_t join_wait;
+
+
+inline thread_t *
+thread_current(void)
+{
+  return curcpu()->sched.current;
+}
 
 inline task_t *
 task_current(void)
 {
-  return curcpu()->sched.current;
+  return &thread_current()->t_task;
 }
 
 
@@ -94,45 +102,62 @@ void *
 task_switch(void *cur_sp)
 {
   cpu_t *cpu = curcpu();
-  task_t *const curtask = task_current();
-  curtask->t_sp = cur_sp;
+  thread_t *const curthread = thread_current();
+  curthread->t_sp = cur_sp;
 
 #ifdef ENABLE_TASK_ACCOUNTING
-  curtask->t_cycle_acc += cpu_cycle_counter() - curtask->t_cycle_enter;
+  curthread->t_cycle_acc += cpu_cycle_counter() - curthread->t_cycle_enter;
 #endif
 
   int q = irq_forbid(IRQ_LEVEL_SCHED);
 
-  if(curtask->t_state == TASK_STATE_RUNNING) {
+  if(curthread->t_task.t_state == TASK_STATE_RUNNING) {
     // Task should be running, re-insert in readyqueue
-    readyqueue_insert(cpu, curtask, "task_switch");
+    readyqueue_insert(cpu, &curthread->t_task, "task_switch");
   }
 
-  task_t *t;
-  int which = __builtin_clz(cpu->sched.active_queues);
-  if(which == 32) {
-    t = cpu->sched.idle;
-  } else {
-    which = 31 - which;
-    t = STAILQ_FIRST(&cpu->sched.readyqueue[which]);
+  thread_t *t;
+
+  while(1) {
+    task_t *task;
+    int which = __builtin_clz(cpu->sched.active_queues);
+
+    if(which == 32) {
+
+      task = cpu->sched.idle;
+
+    } else {
+
+      which = 31 - which;
+      task = STAILQ_FIRST(&cpu->sched.readyqueue[which]);
 #ifdef ENABLE_TASK_DEBUG
-    if(t == NULL)
-      panic("No task on queue %d", which);
+      if(task == NULL)
+        panic("No task on queue %d", which);
 #endif
-    STAILQ_REMOVE_HEAD(&cpu->sched.readyqueue[which], t_ready_link);
+      STAILQ_REMOVE_HEAD(&cpu->sched.readyqueue[which], t_ready_link);
 
-    if(STAILQ_FIRST(&cpu->sched.readyqueue[which]) == NULL) {
-      cpu->sched.active_queues &= ~(1 << t->t_prio);
+      if(STAILQ_FIRST(&cpu->sched.readyqueue[which]) == NULL) {
+        cpu->sched.active_queues &= ~(1 << task->t_prio);
+      }
     }
-    assert(t->t_state == TASK_STATE_RUNNING);
+
+    if(likely(task->t_flags & TASK_THREAD)) {
+      t = (thread_t *)task;
+      break;
+    }
+
+    task->t_state = TASK_STATE_NONE;
+    irq_permit(q);
+    task->t_run(task);
+    q = irq_forbid(IRQ_LEVEL_SCHED);
   }
 
-#ifdef ENABLE_TASK_DEBUG
+#ifdef ENABLE_TASK_ACCOUNTING
   if(task_trace) {
+    printf("Switch to %p : ", t);
     uint32_t *sp = t->t_sp;
-    printf("Switch from %p:%s [sp:%p] to %p:%s [sp:%p PC:%x]\n",
-           curtask, curtask->t_name, curtask->t_sp,
-           t, t->t_name, t->t_sp, sp[14]);
+    printf("%s [sp:%p PC:%x]\n",
+           t->t_name, t->t_sp, sp[14]);
 
   }
 #endif
@@ -156,23 +181,37 @@ task_switch(void *cur_sp)
 
 
 void
-task_exit(void *arg)
+softirq_trig(task_t *t)
 {
-  task_t *const curtask = task_current();
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+  if(likely(t->t_state == TASK_STATE_NONE)) {
+    t->t_state = TASK_STATE_RUNNING;
+    readyqueue_insert(curcpu(), t, "softirq");
+  }
+  irq_permit(q);
+  schedule();
+}
+
+
+
+void
+thread_exit(void *arg)
+{
+  thread_t *const curthread = thread_current();
 
   int s = irq_forbid(IRQ_LEVEL_SWITCH);
 
 #ifdef HAVE_FPU
   cpu_t *cpu = curcpu();
-  if(cpu->sched.current_fpu == curtask) {
+  if(cpu->sched.current_fpu == curthread) {
     cpu->sched.current_fpu = NULL;
     cpu_fpu_enable(0);
   }
 #endif
-  curtask->t_state = TASK_STATE_ZOMBIE;
+  curthread->t_task.t_state = TASK_STATE_ZOMBIE;
 
-  if(curtask->t_flags & TASK_DETACHED) {
-    cond_signal(&task_mgmt_cond);
+  if(curthread->t_task.t_flags & TASK_DETACHED) {
+    cond_signal(&thread_mgmt_cond);
   } else {
     task_wakeup(&join_wait, 1);
   }
@@ -186,35 +225,35 @@ task_exit(void *arg)
 
 
 static void
-task_destroy(task_t *t)
+thread_destroy(thread_t *t)
 {
-  SLIST_REMOVE(&alltasks, t, task, t_global_link);
+  SLIST_REMOVE(&allthreads, t, thread, t_global_link);
   free(t->t_sp_bottom);
 }
 
 void *
-task_join(task_t *t)
+thread_join(thread_t *t)
 {
   int s = irq_forbid(IRQ_LEVEL_SWITCH);
 
-  assert((t->t_flags & TASK_DETACHED) == 0);
+  assert((t->t_task.t_flags & TASK_DETACHED) == 0);
 
-  while(t->t_state != TASK_STATE_ZOMBIE)
+  while(t->t_task.t_state != TASK_STATE_ZOMBIE)
     task_sleep(&join_wait);
 
   irq_permit(s);
 
-  mutex_lock(&alltasks_mutex);
-  task_destroy(t);
-  mutex_unlock(&alltasks_mutex);
+  mutex_lock(&allthreads_mutex);
+  thread_destroy(t);
+  mutex_unlock(&allthreads_mutex);
 
   return NULL;
 }
 
 
-task_t *
-task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
-            const char *name, int flags, unsigned int prio)
+thread_t *
+thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
+              const char *name, int flags, unsigned int prio)
 {
   cpu_t *cpu = curcpu();
 
@@ -230,15 +269,15 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   }
 #endif
 
-  void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(task_t),
+  void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(thread_t),
                            CPU_STACK_ALIGNMENT, MEM_MAY_FAIL |
                            (flags & TASK_DMA_STACK ? MEM_TYPE_DMA : 0));
   if(sp_bottom == NULL)
     return NULL;
 
-  memset(sp_bottom, 0xbb, stack_size + fpu_ctx_size + sizeof(task_t));
+  memset(sp_bottom, 0xbb, stack_size + fpu_ctx_size + sizeof(thread_t));
   void *sp = sp_bottom + stack_size;
-  task_t *t = sp + fpu_ctx_size;
+  thread_t *t = sp + fpu_ctx_size;
 
 #if 0
   printf("Created new task sp_bottom:%p sp:%p t:%p flags:0x%x %s\n",
@@ -247,9 +286,6 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   strlcpy(t->t_name, name, sizeof(t->t_name));
 
-  t->t_state = 0;
-  t->t_prio = prio;
-  t->t_flags = flags;
 
 #ifdef ENABLE_TASK_ACCOUNTING
   t->t_cycle_acc = 0;
@@ -267,17 +303,23 @@ task_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   }
 #endif
 
-  t->t_sp = cpu_stack_init(sp, entry, arg, task_exit);
+  t->t_sp = cpu_stack_init(sp, entry, arg, thread_exit);
   t->t_sp_bottom = sp_bottom;
 
+  task_t *task = &t->t_task;
+  task->t_state = TASK_STATE_RUNNING;
+  task->t_prio = prio;
+  task->t_flags = flags | TASK_THREAD;
+  task->t_run = NULL;
+
   int s = irq_forbid(IRQ_LEVEL_SCHED);
-  STAILQ_INSERT_TAIL(&cpu->sched.readyqueue[t->t_prio], t, t_ready_link);
-  cpu->sched.active_queues |= 1 << t->t_prio;
+  STAILQ_INSERT_TAIL(&cpu->sched.readyqueue[task->t_prio], task, t_ready_link);
+  cpu->sched.active_queues |= 1 << task->t_prio;
   irq_permit(s);
 
-  mutex_lock(&alltasks_mutex);
-  SLIST_INSERT_HEAD(&alltasks, t, t_global_link);
-  mutex_unlock(&alltasks_mutex);
+  mutex_lock(&allthreads_mutex);
+  SLIST_INSERT_HEAD(&allthreads, t, t_global_link);
+  mutex_unlock(&allthreads_mutex);
 
   schedule();
   return t;
@@ -295,8 +337,8 @@ task_wakeup_sched_locked(task_waitable_t *waitable, int all)
     t->t_state = TASK_STATE_RUNNING;
     cpu_t *cpu = curcpu();
 
-    if(t != cpu->sched.current) {
-      if(t->t_prio >= cpu->sched.current->t_prio)
+    if(t != &cpu->sched.current->t_task) {
+      if(t->t_prio >= cpu->sched.current->t_task.t_prio)
         do_sched = 1;
       readyqueue_insert(cpu, t, "wakeup");
     } else {
@@ -355,7 +397,7 @@ task_sleep_abs_sched_locked_timeout(void *opaque, uint64_t expire)
 
     t->t_state = TASK_STATE_RUNNING;
     cpu_t *cpu = curcpu();
-    if(t != cpu->sched.current)
+    if(t != &cpu->sched.current->t_task)
       readyqueue_insert(cpu, t, "sleep-timo");
     schedule();
   }
@@ -367,34 +409,34 @@ static int
 task_sleep_abs_sched_locked(task_waitable_t *waitable,
                             int64_t deadline)
 {
-  task_t *const curtask = task_current();
+  thread_t *const cur = thread_current();
 
   timer_t timer;
 
   assert(waitable != NULL);
-  assert(curtask->t_state == TASK_STATE_RUNNING);
-  curtask->t_state = TASK_STATE_SLEEPING;
+  assert(cur->t_task.t_state == TASK_STATE_RUNNING);
+  cur->t_task.t_state = TASK_STATE_SLEEPING;
 
 #ifdef ENABLE_TASK_WCHAN
-  curtask->t_wchan = waitable->name ?: __FUNCTION__;
+  cur->t_wchan = waitable->name ?: __FUNCTION__;
 #endif
 
 #ifdef ENABLE_TASK_DEBUG
-  if(task_is_on_readyqueue(curcpu(), curtask)) {
+  if(task_is_on_readyqueue(curcpu(), &cur->t_task)) {
     panic("%s: Task %p is on readyqueue",
-          __FUNCTION__, curtask);
+          __FUNCTION__, cur);
   }
 #endif
 
   timer.t_cb = task_sleep_abs_sched_locked_timeout;
-  timer.t_opaque = curtask;
+  timer.t_opaque = cur;
   timer.t_expire = 0;
-  timer.t_name = curtask->t_name;
+  timer.t_name = cur->t_name;
   timer_arm_abs(&timer, deadline);
 
-  task_insert_wait_list(waitable, curtask);
+  task_insert_wait_list(waitable, &cur->t_task);
 
-  while(curtask->t_state == TASK_STATE_SLEEPING) {
+  while(cur->t_task.t_state == TASK_STATE_SLEEPING) {
     schedule();
     irq_permit(irq_lower());
   }
@@ -404,27 +446,27 @@ task_sleep_abs_sched_locked(task_waitable_t *waitable,
 
 
 static void
-task_sleep_sched_locked(task_waitable_t *waitable)
+thread_sleep_sched_locked(task_waitable_t *waitable)
 {
-  task_t *const curtask = task_current();
+  thread_t *const cur = thread_current();
 
   assert(waitable != NULL);
-  assert(curtask->t_state == TASK_STATE_RUNNING);
-  curtask->t_state = TASK_STATE_SLEEPING;
+  assert(cur->t_task.t_state == TASK_STATE_RUNNING);
+  cur->t_task.t_state = TASK_STATE_SLEEPING;
 #ifdef ENABLE_TASK_WCHAN
-  curtask->t_wchan = waitable->name ?: __FUNCTION__;
+  cur->t_wchan = waitable->name ?: __FUNCTION__;
 #endif
 
 #ifdef ENABLE_TASK_DEBUG
-  if(task_is_on_readyqueue(curcpu(), curtask)) {
+  if(task_is_on_readyqueue(curcpu(), &cur->t_task)) {
     panic("%s: Task %p is on readyqueue",
-          __FUNCTION__, curtask);
+          __FUNCTION__, cur);
   }
 #endif
 
-  task_insert_wait_list(waitable, curtask);
+  task_insert_wait_list(waitable, &cur->t_task);
 
-  while(curtask->t_state == TASK_STATE_SLEEPING) {
+  while(cur->t_task.t_state == TASK_STATE_SLEEPING) {
     schedule();
     irq_permit(irq_lower());
   }
@@ -437,7 +479,7 @@ void
 task_sleep(task_waitable_t *waitable)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_sched_locked(waitable);
+  thread_sleep_sched_locked(waitable);
   irq_permit(s);
 }
 
@@ -472,7 +514,7 @@ task_sleep_until_timeout(void *opaque, uint64_t expire)
   assert(t->t_state == TASK_STATE_SLEEPING);
   t->t_state = TASK_STATE_RUNNING;
   cpu_t *cpu = curcpu();
-  if(t != cpu->sched.current)
+  if(t != &cpu->sched.current->t_task)
     readyqueue_insert(cpu, t, "sleep-timo2");
   schedule();
   irq_permit(s);
@@ -480,25 +522,25 @@ task_sleep_until_timeout(void *opaque, uint64_t expire)
 
 
 static void
-task_sleep_until(uint64_t deadline, const char *wchan)
+thread_sleep_until(uint64_t deadline, const char *wchan)
 {
-  task_t *const curtask = task_current();
+  thread_t *const cur = thread_current();
 
   timer_t timer;
 
-  assert(curtask->t_state == TASK_STATE_RUNNING);
-  curtask->t_state = TASK_STATE_SLEEPING;
+  assert(cur->t_task.t_state == TASK_STATE_RUNNING);
+  cur->t_task.t_state = TASK_STATE_SLEEPING;
 #ifdef ENABLE_TASK_WCHAN
-  curtask->t_wchan = wchan;
+  cur->t_wchan = wchan;
 #endif
 
   timer.t_cb = task_sleep_until_timeout;
-  timer.t_opaque = curtask;
+  timer.t_opaque = cur;
   timer.t_expire = 0;
-  timer.t_name = curtask->t_name;
+  timer.t_name = cur->t_name;
   timer_arm_abs(&timer, deadline);
 
-  while(curtask->t_state == TASK_STATE_SLEEPING) {
+  while(cur->t_task.t_state == TASK_STATE_SLEEPING) {
     schedule();
     irq_permit(irq_lower());
   }
@@ -509,7 +551,7 @@ void
 sleep_until(uint64_t deadline)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(deadline, "sleep_until");
+  thread_sleep_until(deadline, "sleep_until");
   irq_permit(s);
 }
 
@@ -518,7 +560,7 @@ void
 usleep(unsigned int useconds)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
-  task_sleep_until(clock_get_irq_blocked() + useconds, "usleep");
+  thread_sleep_until(clock_get_irq_blocked() + useconds, "usleep");
   irq_permit(s);
 }
 
@@ -602,7 +644,7 @@ mutex_unlock_sched_locked(mutex_t *m)
   task_t *t = LIST_FIRST(&m->waiters.list);
   if(t != NULL) {
     cpu_t *const cpu = curcpu();
-    task_t *const cur = cpu->sched.current;
+    task_t *const cur = &cpu->sched.current->t_task;
 
     LIST_REMOVE(t, t_wait_link);
     t->t_state = TASK_STATE_RUNNING;
@@ -641,7 +683,7 @@ cond_wait(cond_t *c, mutex_t *m)
 {
   const int s = irq_forbid(IRQ_LEVEL_SCHED);
   mutex_unlock_sched_locked(m);
-  task_sleep_sched_locked(c);
+  thread_sleep_sched_locked(c);
   mutex_lock_sched_locked(m, task_current());
   irq_permit(s);
 }
@@ -660,9 +702,10 @@ cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
 
 
 void
-sched_cpu_init(sched_cpu_t *sc, task_t *idle)
+sched_cpu_init(sched_cpu_t *sc, thread_t *idle)
 {
-  sc->idle = idle;
+  idle->t_task.t_flags = TASK_THREAD;
+  sc->idle = &idle->t_task;
   sc->current = idle;
 #ifdef HAVE_FPU
   sc->current_fpu = NULL;
@@ -684,7 +727,7 @@ task_mgmt_thread(void *arg)
   uint32_t prev_cc = cpu_cycle_counter();
 #endif
 
-  mutex_lock(&alltasks_mutex);
+  mutex_lock(&allthreads_mutex);
 
   while(1) {
 
@@ -692,21 +735,22 @@ task_mgmt_thread(void *arg)
 #ifdef ENABLE_TASK_ACCOUNTING
     ts += 1000000;
     int do_accounting =
-      cond_wait_timeout(&task_mgmt_cond, &alltasks_mutex, ts);
+      cond_wait_timeout(&thread_mgmt_cond, &allthreads_mutex, ts);
     uint32_t cc = cpu_cycle_counter();
     uint32_t cc_delta = (cc - prev_cc) / 10000;
     prev_cc = cc;
 #else
-    cond_wait(&task_mgmt_cond, &alltasks_mutex);
+    cond_wait(&thread_mgmt_cond, &allthreads_mutex);
 #endif
 
     int s = irq_forbid(IRQ_LEVEL_SWITCH);
-    task_t *t, *n;
-    for(t = SLIST_FIRST(&alltasks); t != NULL; t = n) {
+    thread_t *t, *n;
+    for(t = SLIST_FIRST(&allthreads); t != NULL; t = n) {
       n = SLIST_NEXT(t, t_global_link);
 
-      if(t->t_state == TASK_STATE_ZOMBIE && t->t_flags & TASK_DETACHED) {
-        task_destroy(t);
+      if(t->t_task.t_state == TASK_STATE_ZOMBIE &&
+         t->t_task.t_flags & TASK_DETACHED) {
+        thread_destroy(t);
         continue;
       }
 
@@ -726,7 +770,7 @@ task_mgmt_thread(void *arg)
 static void __attribute__((constructor(900)))
 task_init_late(void)
 {
-  task_create(task_mgmt_thread, NULL, 256, "taskmgmt", 0, 3);
+  thread_create(task_mgmt_thread, NULL, 256, "taskmgmt", 0, 3);
 }
 
 
@@ -734,9 +778,9 @@ task_init_late(void)
 static error_t
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  task_t *t;
+  thread_t *t;
   cli_printf(cli, " Name           Stack      Sp         Pri Sta CtxSwch Load\n");
-  SLIST_FOREACH(t, &alltasks, t_global_link) {
+  SLIST_FOREACH(t, &allthreads, t_global_link) {
     cli_printf(cli, " %-14s %p %p %3d %c%c%c "
 #ifdef ENABLE_TASK_ACCOUNTING
                "%-6d %3d.%-2d "
@@ -746,21 +790,21 @@ cmd_ps(cli_t *cli, int argc, char **argv)
 #endif
                "\n",
                t->t_name, t->t_sp_bottom, t->t_sp,
-               t->t_prio,
-               "RSZ"[t->t_state],
+               t->t_task.t_prio,
+               "_RSZ"[t->t_task.t_state],
 #ifdef HAVE_FPU
                t->t_fpuctx ? 'F' : ' ',
 #else
                ' ',
 #endif
-               (t->t_flags & TASK_DETACHED) ? 'd' : ' '
+               (t->t_task.t_flags & TASK_DETACHED) ? 'd' : ' '
 #ifdef ENABLE_TASK_ACCOUNTING
                ,t->t_ctx_switches,
                t->t_load / 100,
                t->t_load % 100
 #endif
 #ifdef ENABLE_TASK_WCHAN
-               ,t->t_state == TASK_STATE_SLEEPING ? t->t_wchan : ""
+               ,t->t_task.t_state == TASK_STATE_SLEEPING ? t->t_wchan : ""
 #endif
                );
   }
@@ -779,7 +823,7 @@ task_create_shell(void *(*entry)(void *arg), void *arg, const char *name)
   flags |= TASK_FPU;
   stack_size = 1024;
 #endif
-  if(!task_create(entry, arg, stack_size, name,  flags, 2))
+  if(!thread_create(entry, arg, stack_size, name,  flags, 2))
     return ERR_NO_MEMORY;
   return 0;
 }

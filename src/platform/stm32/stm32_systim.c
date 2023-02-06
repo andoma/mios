@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <mios/mios.h>
+#include <mios/timer.h>
 #include <mios/cli.h>
 
 #include "irq.h"

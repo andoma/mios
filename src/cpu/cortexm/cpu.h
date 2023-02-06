@@ -30,7 +30,7 @@ cpu_fpu_enable(int on)
 
 
 static inline void
-cpu_stack_redzone(task_t *t)
+cpu_stack_redzone(thread_t *t)
 {
   static volatile unsigned int * const MPU_RBAR = (unsigned int *)0xe000ed9c;
   *MPU_RBAR = (intptr_t)t->t_sp_bottom | 0x17;

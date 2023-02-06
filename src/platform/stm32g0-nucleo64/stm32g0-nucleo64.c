@@ -154,7 +154,7 @@ platform_init_late(void)
                    GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_set_output(BLINK_GPIO, 1);
 
-  task_create(blinker, NULL, 256, "blinker", 0, 0);
+  thread_create(blinker, NULL, 256, "blinker", 0, 0);
 
 #if 0 // Uncomment to start full duplex mbus on USART1
   stm32g0_mbus_uart_create(1, 115200,

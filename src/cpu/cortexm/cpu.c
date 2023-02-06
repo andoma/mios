@@ -18,17 +18,17 @@ cpu_init(void)
   const size_t stack_size = 128;
 
   // Create idle task
-  void *sp_bottom = xalloc(stack_size + sizeof(task_t),
-                                CPU_STACK_ALIGNMENT, 0);
+  void *sp_bottom = xalloc(stack_size + sizeof(thread_t),
+                           CPU_STACK_ALIGNMENT, 0);
   void *sp = sp_bottom + stack_size;
   asm volatile ("msr psp, %0" : : "r" (sp));
 
-  task_t *t = sp;
+  thread_t *t = sp;
   strlcpy(t->t_name, "idle", sizeof(t->t_name));
   t->t_sp_bottom = sp_bottom;
 
-  t->t_state = TASK_STATE_ZOMBIE;
-  t->t_prio = 0;
+  t->t_task.t_state = TASK_STATE_ZOMBIE;
+  t->t_task.t_prio = 0;
   sched_cpu_init(&curcpu()->sched, t);
 
 }

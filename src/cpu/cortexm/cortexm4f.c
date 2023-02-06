@@ -17,7 +17,7 @@ cortexm4f_init(void)
   if(CPU_STACK_REDZONE_SIZE == 32) {
     // MPU region 7 is used as 32 byte stack redzone
 
-    void *idle_stack = curcpu()->sched.idle->t_sp_bottom;
+    void *idle_stack = ((thread_t *)(curcpu()->sched.idle))->t_sp_bottom;
     *MPU_RBAR = (intptr_t)idle_stack | 0x17; // Set MPU to region 7
     *MPU_RASR = (4 << 1) | 1; // 2^(4 + 1) = 32 byte + enable
     *MPU_CTRL = 5; // Enable MPU
