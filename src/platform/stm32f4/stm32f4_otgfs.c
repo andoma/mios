@@ -7,6 +7,8 @@
 
 #include <mios/io.h>
 #include <mios/device.h>
+#include <mios/task.h>
+#include <mios/timer.h>
 
 #include "irq.h"
 
@@ -131,6 +133,14 @@ struct usb_ctrl {
 
   uint8_t *uc_config_desc;
   size_t uc_config_desc_size;
+
+  task_t uc_softirq;
+  timer_t uc_reconnect;
+
+  uint32_t uc_resets;
+  uint32_t uc_enumerations;
+  uint32_t uc_erratic_errors;
+
 };
 
 
@@ -723,6 +733,7 @@ static usb_ctrl_t g_usb_ctrl = {
 
 
 
+
 void
 irq_67(void)
 {
@@ -737,11 +748,13 @@ irq_67(void)
     if(gint & OTG_FS_GINT_USBRST) {
       handle_reset(uc);
       reg_wr(OTG_FS_GINTSTS, OTG_FS_GINT_USBRST);
+      uc->uc_resets++;
     }
 
     if(gint & OTG_FS_GINT_ENUMDNE) {
       handle_enum_done(uc);
       reg_wr(OTG_FS_GINTSTS, OTG_FS_GINT_ENUMDNE);
+      uc->uc_enumerations++;
     }
 
     // Read from FIFO
@@ -777,11 +790,20 @@ irq_67(void)
     if(gint & OTG_FS_GINT_IEPINT) {
       handle_iepint(uc);
     }
+
+
+    if(gint & OTG_FS_GINT_ESUSP) {
+      // Early suspend
+      reg_wr(OTG_FS_GINTSTS, OTG_FS_GINT_ESUSP);
+
+      if(reg_rd(OTG_FS_DSTS) & 8) {
+        // Erratic error, trig reset
+        softirq_trig(&g_usb_ctrl.uc_softirq);
+        uc->uc_erratic_errors++;
+      }
+    }
   }
 }
-
-
-
 
 
 static void  __attribute__((destructor(900)))
@@ -790,11 +812,8 @@ usb_fini(void)
   reg_set_bits(OTG_FS_DCTL, 1, 1, 1); // Soft disconnect
 }
 
-
-
-
 static void
-stm32f4_otgfs_init_regs(int num_endpoints)
+stm32f4_otgfs_init_regs(usb_ctrl_t *uc)
 {
   reg_wr(OTG_FS_GINTMSK, 0);          // Disable all interrupts
   reg_wr(OTG_FS_DIEPMSK, 0);
@@ -837,7 +856,7 @@ stm32f4_otgfs_init_regs(int num_endpoints)
 
   fifo_addr += fifo_words;
 
-  for(int i = 1; i < num_endpoints; i++) {
+  for(int i = 1; i < uc->uc_num_endpoints; i++) {
     reg_wr(OTG_FS_DIEPTXF(i),
          (fifo_words << 16) |
          fifo_addr);
@@ -850,12 +869,17 @@ stm32f4_otgfs_init_regs(int num_endpoints)
          OTG_FS_GINT_RXFLVL |
          OTG_FS_GINT_IEPINT |
          OTG_FS_GINT_OEPINT |
+         OTG_FS_GINT_OEPINT |
+         OTG_FS_GINT_ESUSP |
          0);
 
   // Power up
   reg_set_bits(OTG_FS_GCCFG, 16, 1, 1);
-  udelay(10);
-  reg_set_bits(OTG_FS_DCTL, 1, 1, 0); // No soft disconnect
+
+  // Disconnect for 5ms
+  int q = irq_forbid(IRQ_LEVEL_CLOCK);
+  timer_arm_abs(&uc->uc_reconnect, clock_get_irq_blocked() + 500000);
+  irq_permit(q);
 }
 
 
@@ -897,7 +921,8 @@ static int
 stm32f4_ep_avail_bytes(device_t *dev, usb_ep_t *ue)
 {
   const uint32_t ep = ue->ue_address & 0x7f;
-  assert(!(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31)));
+  if(reg_rd(OTG_FS_DIEPCTL(ep)) & (1 << 31))
+    return 0;
   const int avail_words = reg_rd(OTG_FS_DTXFSTS(ep));
   const int avail_bytes = avail_words * 4;
   return avail_bytes;
@@ -1003,10 +1028,16 @@ usb_print_info(struct device *d, struct stream *st)
   struct usb_ctrl *uc = (struct usb_ctrl *)d;
 
   const uint32_t dsts = reg_rd(OTG_FS_DSTS);
-  stprintf(st, "\tCore status: %s   D-:%d  D+:%d\n",
+  stprintf(st, "\tCore status: %s   D-:%d  D+:%d  Suspend:%d\n",
            dsts & 0x8 ? "Error" : "OK",
            ((dsts >> 22) & 1),
-           ((dsts >> 23) & 1));
+           ((dsts >> 23) & 1),
+           dsts & 1);
+
+  stprintf(st, "\tResets: %d  Enumerations: %d  Core errors: %d\n",
+           uc->uc_resets,
+           uc->uc_enumerations,
+           uc->uc_erratic_errors);
 
   if(!(dsts & 1)) {
     stprintf(st, "\tAssigned address: %d   Last SOF Frame: %d\n",
@@ -1074,6 +1105,23 @@ static const device_class_t stm32f4_otgfs_class = {
 };
 
 
+static void
+disconnect(task_t *t)
+{
+  usb_ctrl_t *uc = &g_usb_ctrl;
+  reset_peripheral(RST_OTGFS);
+  while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}
+  stm32f4_otgfs_init_regs(uc);
+}
+
+
+static void
+reconnect(void *opaque, uint64_t expire)
+{
+  reg_set_bits(OTG_FS_DCTL, 1, 1, 0); // No soft disconnect
+}
+
+
 void
 stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
                      const char *manfacturer_string,
@@ -1096,15 +1144,30 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
   uc->uc_desc.idVendor = vid;
   uc->uc_desc.idProduct = pid;
 
-  reset_peripheral(RST_OTGFS);
   clk_enable(CLK_OTGFS);
-  while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}
-
-  probe_endpoints(uc);
 
   init_interfaces(uc, q);
 
-  stm32f4_otgfs_init_regs(uc->uc_num_endpoints);
+  reset_peripheral(RST_OTGFS);
+  while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}
+  probe_endpoints(uc);
+  stm32f4_otgfs_init_regs(uc);
+
+  uc->uc_reconnect.t_cb = reconnect;
+
+  uc->uc_softirq.t_run = disconnect;
 
   irq_enable(67, IRQ_LEVEL_NET);
 }
+
+
+#include <mios/cli.h>
+
+static error_t
+usbreset(cli_t *cli, int argc, char **argv)
+{
+  softirq_trig(&g_usb_ctrl.uc_softirq);
+  return 0;
+}
+
+CLI_CMD_DEF("usbreset", usbreset);
