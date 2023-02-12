@@ -672,7 +672,7 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
   pthread_mutex_init(&b->gfx_display.gd_mutex, NULL);
   b->gfx_display.gd_palette[1] = 0xffffff;
 
-  task_create(bt81x_thread, b, 1024, "gpu", TASK_FPU, 3);
+  thread_create(bt81x_thread, b, 1024, "gpu", TASK_FPU, 3);
   return &b->gfx_display;
 }
 
