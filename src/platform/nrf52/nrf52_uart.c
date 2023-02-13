@@ -5,6 +5,7 @@
 #include <mios/io.h>
 
 #include "nrf52_reg.h"
+#include "nrf52_uart.h"
 
 #include "irq.h"
 
@@ -40,6 +41,7 @@ static uint8_t tx_fifo[TX_FIFO_SIZE];
 static uint8_t rx_fifo[RX_FIFO_SIZE];
 
 static uint8_t tx_busy;
+static uint8_t uart_flags;
 
 static void
 nrf52_uart_write(stream_t *s, const void *buf, size_t size)
@@ -101,7 +103,12 @@ irq_2(void)
 {
   if(reg_rd(UART_RX_RDY)) {
     reg_wr(UART_RX_RDY, 0);
-    rx_fifo[rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = reg_rd(UART_RXD);
+    char c = reg_rd(UART_RXD);
+
+    if(c == 4) {
+      panic("Halted from console");
+    }
+    rx_fifo[rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
     rx_fifo_wrptr++;
     task_wakeup(&uart_rx, 1);
   }
@@ -121,31 +128,6 @@ irq_2(void)
     }
   }
 }
-
-
-#if 0
-static void *
-console_echo_task(void *arg)
-{
-  int s = irq_forbid(IRQ_LEVEL_CONSOLE);
-
-  while(1) {
-
-    uint8_t avail = rx_fifo_wrptr - rx_fifo_rdptr;
-    if(avail == 0) {
-      task_sleep(&uart_rx);
-      continue;
-    }
-
-    char c = rx_fifo[rx_fifo_rdptr & (RX_FIFO_SIZE - 1)];
-    rx_fifo_rdptr++;
-    uart_putc(NULL, c);
-    irq_permit(s);
-    s = irq_forbid(IRQ_LEVEL_CONSOLE);
-  }
-  return NULL;
-}
-#endif
 
 
 static int
@@ -181,6 +163,7 @@ static stream_t uart_stream = {
 struct stream *
 nrf52_uart_init(int baudrate, gpio_t txpin, gpio_t rxpin, int flags)
 {
+  uart_flags = flags;
   reg_wr(UART_PSELTXD, txpin);
   reg_wr(UART_PSELRXD, rxpin);
   reg_wr(UART_ENABLE, 4);
