@@ -78,7 +78,6 @@ stm32g4_set_seq_channel(uint32_t base, uint32_t seq, uint32_t channel)
 {
   const uint32_t reg = seq / 5;
   const uint32_t bo = seq % 5;
-  printf("seq%d = %d\n", seq, channel);
   reg_set_bits(base + ADCx_SQRx(reg), bo * 6, 6, channel);
 }
 
