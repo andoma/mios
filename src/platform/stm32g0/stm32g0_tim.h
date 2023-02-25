@@ -35,6 +35,9 @@
 
 
 #define TIMx_BDTR  0x44
+#define TIMx_DCR   0x48
+#define TIMx_DMAR  0x4c
+
 #define TIMx_CCMR3 0x54
 #define TIMx_CCR5  0x58
 #define TIMx_CCR6  0x5c
