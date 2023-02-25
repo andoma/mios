@@ -44,3 +44,16 @@ void irq_10(void)
   if(isr & 0x100)
     dma_irq(2);
 }
+
+void irq_11(void)
+{
+  const uint32_t isr = reg_rd(DMA_ISR(0));
+  if(isr & 0x1000)
+    dma_irq(3);
+  if(isr & 0x10000)
+    dma_irq(4);
+  if(isr & 0x100000)
+    dma_irq(5);
+  if(isr & 0x1000000)
+    dma_irq(6);
+}
