@@ -2,13 +2,13 @@ T := $(dir $(lastword $(MAKEFILE_LIST)))
 
 UNAME_S := $(shell uname -s)
 
+-include local.mk
+
 PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
 
 .DEFAULT_GOAL := ${O}/build.elf
-
--include local.mk
 
 include $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/mk/$(shell uname).mk
 
