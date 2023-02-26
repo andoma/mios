@@ -135,6 +135,24 @@ nrf52_uart_read(struct stream *s, void *buf, size_t size, int mode)
 {
   uint8_t *d = buf;
 
+  const int busy_wait = !can_sleep();
+
+  if(busy_wait) {
+
+    for(size_t i = 0; i < size; i++) {
+
+      while(!reg_rd(UART_RX_RDY)) {
+        if(stream_wait_is_done(mode, i, size)) {
+          return i;
+        }
+      }
+      reg_wr(UART_RX_RDY, 0);
+      char c = reg_rd(UART_RXD);
+      d[i] = c;
+    }
+    return size;
+  }
+
   int q = irq_forbid(IRQ_LEVEL_CONSOLE);
 
   for(size_t i = 0; i < size; i++) {
