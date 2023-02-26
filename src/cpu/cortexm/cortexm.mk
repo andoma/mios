@@ -18,7 +18,6 @@ SRCS += ${C}/isr.s \
 	${C}/irq.c \
 	${C}/exc.c \
 	${C}/cpu.c \
-	${C}/systick.c \
 	${C}/rnd.c \
 
 ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}

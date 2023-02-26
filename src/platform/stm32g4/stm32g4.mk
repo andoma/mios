@@ -6,13 +6,12 @@ CPPFLAGS += -iquote${P}
 
 CPPFLAGS += -include stm32g4.h
 
-#CPPFLAGS += -DHAVE_HRTIMER
-
 LDSCRIPT = ${P}/stm32g4.ld
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
-SRCS += ${P}/stm32g4.c \
+SRCS += ${C}/systick.c \
+	${P}/stm32g4.c \
 	${P}/stm32g4_idle.c \
 	${P}/stm32g4_clk.c \
 	${P}/stm32g4_gpio.c \

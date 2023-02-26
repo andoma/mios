@@ -15,5 +15,6 @@ SRCS += ${P}/nrf52.c \
 	${P}/nrf52_rng.c \
 	${P}/nrf52_spi.c \
 	${P}/nrf52_systim.c \
+	${P}/nrf52_rtc.c \
 
 ${MOS}/platform/nrf52/%.o : CFLAGS += ${NOFPU}

@@ -13,6 +13,7 @@ CFLAGS += -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
-SRCS += ${P}/lm3s811evb.c \
+SRCS += ${C}/systick.c \
+	${P}/lm3s811evb.c \
 	${P}/console.c \
 

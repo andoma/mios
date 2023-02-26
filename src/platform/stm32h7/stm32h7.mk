@@ -8,7 +8,8 @@ LDSCRIPT = ${P}/stm32h7.ld
 
 include ${SRC}/cpu/cortexm/cortexm7.mk
 
-SRCS += ${P}/stm32h7.c \
+SRCS += ${C}/systick.c \
+	${P}/stm32h7.c \
 	${P}/stm32h7_clk.c \
 	${P}/stm32h7_crc.c \
 	${P}/stm32h7_gpio.c \

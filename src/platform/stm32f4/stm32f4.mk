@@ -8,7 +8,8 @@ LDSCRIPT = ${P}/stm32f4.ld
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
-SRCS += ${P}/stm32f4.c \
+SRCS += ${C}/systick.c \
+	${P}/stm32f4.c \
 	${P}/stm32f4_info.c \
 	${P}/stm32f4_gpio.c \
 	${P}/stm32f4_iwdog.c \
