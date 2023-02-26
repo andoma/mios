@@ -12,6 +12,9 @@
 
 #define ALIGN(a, b) (((a) + (b) - 1) & ~((b) - 1))
 
+extern unsigned long _ebss;
+static const unsigned long ebss_start = (long)&_ebss;
+
 static mutex_t heap_mutex = MUTEX_INITIALIZER("heap");
 
 SLIST_HEAD(heap_header_slist, heap_header);
@@ -52,9 +55,14 @@ hb_size(const heap_block_t *hb)
 }
 
 
+
 void
 heap_add_mem(long start, long end, int type)
 {
+  if(start == HEAP_START_EBSS) {
+    start = ebss_start;
+  }
+
   heap_header_t *hh = (void *)start;
 
   heap_block_t *hb = (void *)ALIGN((intptr_t)(hh + 1), sizeof(heap_block_t));
@@ -75,9 +83,6 @@ heap_add_mem(long start, long end, int type)
   mutex_lock(&heap_mutex);
   SLIST_INSERT_HEAD(&heaps, hh, link);
   mutex_unlock(&heap_mutex);
-
-  printf("Memory 0x%x - 0x%x (%d kB) type 0x%x\n", (int)start, (int)end,
-         (int)(end - start) / 1024, type);
 }
 
 

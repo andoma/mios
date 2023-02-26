@@ -48,10 +48,8 @@ stm32h7_init(void)
 
 
   // DTCM
-  extern unsigned long _ebss;
-  void *DTCM_start = (void *)&_ebss;
   void *DTCM_end   = (void *)0x20000000 + 128 * 1024;
-  heap_add_mem((long)DTCM_start, (long)DTCM_end, 0);
+  heap_add_mem(HEAP_START_EBSS, (long)DTCM_end, 0);
 
   // Packet buffers from SRAM2
   pbuf_data_add((void *)0x30020000, (void *)0x30020000 + 32 * 1024);

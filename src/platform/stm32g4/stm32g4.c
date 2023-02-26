@@ -34,8 +34,6 @@ static struct {
 static void  __attribute__((constructor(120)))
 stm32g4_init(void)
 {
-  extern unsigned long _ebss;
-
   uint32_t chipid = *DBGMCU_IDCODE;
   uint16_t deviceid = chipid & 0xfff;
 
@@ -57,9 +55,8 @@ stm32g4_init(void)
   printf("\nSTM32G4 (%d kB Flash) Cat:%c (SRAM: %d + %d + %d kB) ID:0x%08x\n",
          *FLASH_SIZE, category, sram1_size, sram2_size, ccm_size, chipid);
 
-  void *SRAM1_start = (void *)&_ebss;
   void *SRAM1_end   = (void *)0x20000000 + sram1_size * 1024;
-  heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
+  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end, MEM_TYPE_DMA);
 
   void *SRAM2_start = (void *)0x20014000;
   void *SRAM2_end   = (void *)0x20014000 + sram2_size * 1024;

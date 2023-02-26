@@ -10,4 +10,6 @@ void *xalloc(size_t size, size_t alignment, unsigned int type_flags)
 
 #define MEM_MAY_FAIL   0x80000000
 
+#define HEAP_START_EBSS 0xffffffff
+
 void heap_add_mem(long start, long end, int type);

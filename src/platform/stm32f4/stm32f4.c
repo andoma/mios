@@ -40,9 +40,6 @@ static const stm32f4_idmap_t stm32f4_idmap[] = {
 static void  __attribute__((constructor(120)))
 stm32f4_init(void)
 {
-  extern unsigned long _ebss;
-
-  void *SRAM1_start = (void *)&_ebss;
   void *SRAM1_end   = (void *)0x20000000 + 112 * 1024;
 
   uint32_t idcode = *DBGMCU_IDCODE;
@@ -60,7 +57,7 @@ stm32f4_init(void)
   printf("\nSTM32F4%s (0x%x, %d kB Flash)\n", name, idcode, *FLASH_SIZE);
 
   // SRAM1
-  heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
+  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end, MEM_TYPE_DMA);
 
   pbuf_data_add((void *)0x20000000 + 112 * 1024,
                 (void *)0x20000000 + 128 * 1024);
