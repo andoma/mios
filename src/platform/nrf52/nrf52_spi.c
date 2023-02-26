@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
 
+#include <sys/param.h>
 #include <sys/uio.h>
 #include <mios/io.h>
 #include <mios/task.h>
@@ -41,6 +43,7 @@ typedef struct nrf52_spi {
   mutex_t mutex;
   task_waitable_t waitq;
   int done;
+  uint8_t bounce_buffer[32];
 } nrf52_spi_t;
 
 
@@ -61,19 +64,45 @@ spi_xfer_fini(nrf52_spi_t *spi, gpio_t nss)
 static void
 spi_xfer(nrf52_spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len)
 {
-  reg_wr(spi->base_addr + SPIM_RXD_PTR, (intptr_t)rx);
-  reg_wr(spi->base_addr + SPIM_RXD_MAXCNT, rx ? len : 0);
+  // Transfer from FLASH is not possible with EASYDMA
+  // We need to use a bounce buffer
+  const int bounce = tx && (intptr_t)tx < 0x20000000;
 
-  reg_wr(spi->base_addr + SPIM_TXD_PTR, (intptr_t)tx);
-  reg_wr(spi->base_addr + SPIM_TXD_MAXCNT, tx ? len : 0);
+  while(len) {
 
-  reg_wr(spi->base_addr + SPIM_TASKS_START, 1);
+    size_t chunk;
 
-  while(!spi->done) {
-    task_sleep(&spi->waitq);
+    if(bounce) {
+      chunk = MIN(len, sizeof(spi->bounce_buffer));
+      // Transfer from FLASH is not possible with EASYDMA
+      // Copy to bounce buffer
+      memcpy(spi->bounce_buffer, tx, chunk);
+      reg_wr(spi->base_addr + SPIM_TXD_PTR, (intptr_t)spi->bounce_buffer);
+    } else {
+      chunk = MIN(len, 0xff);
+
+      reg_wr(spi->base_addr + SPIM_TXD_PTR, (intptr_t)tx);
+    }
+
+    reg_wr(spi->base_addr + SPIM_RXD_PTR, (intptr_t)rx);
+
+    reg_wr(spi->base_addr + SPIM_RXD_MAXCNT, rx ? chunk : 0);
+    reg_wr(spi->base_addr + SPIM_TXD_MAXCNT, tx ? chunk : 0);
+
+    reg_wr(spi->base_addr + SPIM_TASKS_START, 1);
+
+    while(!spi->done) {
+      task_sleep(&spi->waitq);
+    }
+
+    spi->done = 0;
+
+    if(rx)
+      rx += chunk;
+    if(tx)
+      tx += chunk;
+    len -= chunk;
   }
-
-  spi->done = 0;
 }
 
 
@@ -134,7 +163,6 @@ spi_get_config(spi_t *dev, int clock_flags, int baudrate)
   if(clock_flags & SPI_CPHA)
     r |= 0x2;
 
-  printf("config=0x%08x\n", r);
   return r;
 }
 
