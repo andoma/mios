@@ -4,6 +4,7 @@
 #include <mios/mios.h>
 #include <mios/task.h>
 #include <mios/gfx.h>
+#include <mios/eventlog.h>
 #include <sys/uio.h>
 #include <sys/param.h>
 #include <stdlib.h>
@@ -454,8 +455,12 @@ static error_t
 bt81x_initialize(bt81x_t *b)
 {
   error_t err = bt81x_reset(b);
-  if(err)
+  if(err) {
+    evlog(LOG_ERR, "bt81x: Failed to initialize, err=%d", err);
     return err;
+  }
+
+  evlog(LOG_DEBUG, "bt81x: Initialized");
 
   // Disable pixel clock
   bt81x_wr8(b, EVE_REG_PCLK, 0);
@@ -486,6 +491,9 @@ bt81x_initialize(bt81x_t *b)
 
   bt81x_wr8(b, EVE_REG_TOUCH_MODE, 3);
   bt81x_wr8(b, EVE_REG_CTOUCH_EXTENDED, EVE_CTOUCH_MODE_COMPATIBILITY);
+
+  // Clear pending interrupts
+  bt81x_rd32(b, EVE_REG_INT_FLAGS);
 
   err = load_initial_displaylist(b);
   if(err)
@@ -585,6 +593,7 @@ bt81x_thread(void *arg)
 
       if(!b->irq) {
         if(task_sleep_delta(&b->irq_waitq, 100000)) {
+          evlog(LOG_WARNING, "bt81x: timeout");
           break;
         }
         continue;
