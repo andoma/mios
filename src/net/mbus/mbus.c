@@ -216,14 +216,16 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 void
 mbus_print_info(mbus_netif_t *mni, struct stream *st)
 {
-  stprintf(st, "\tRX %u bytes  %u packets\n",
+  stprintf(st, "\tPacket interface:\n");
+  stprintf(st, "\t\tRX %u bytes  %u packets\n",
            mni->mni_rx_bytes, mni->mni_rx_packets);
-  stprintf(st, "\t   %u CRC  %u runts  %u bad opcode\n",
+  stprintf(st, "\t\t   %u CRC  %u runts  %u bad opcode\n",
            mni->mni_rx_crc_errors, mni->mni_rx_runts,
            mni->mni_rx_unknown_opcode);
-  stprintf(st, "\tTX %u bytes  %u sent  %u qdrops  %u failed\n",
+  stprintf(st, "\t\tTX %u bytes  %u sent  %u qdrops  %u failed\n",
            mni->mni_tx_bytes,  mni->mni_tx_packets,
            mni->mni_tx_qdrops, mni->mni_tx_fail);
+  stprintf(st, "\tLocal address: %x\n", mni->mni_ni.ni_local_addr);
   stprintf(st, "\tActive hosts:");
   for(int i = 0; i < 16; i++) {
     if((1 << i) & mni->mni_active_hosts) {

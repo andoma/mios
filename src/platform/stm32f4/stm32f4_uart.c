@@ -74,8 +74,7 @@ void irq_71(void) { uart_irq(uarts[5]); }
 
 void
 stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
-                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr,
-                         const stm32_timer_info_t *timer)
+                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr)
 {
   instance--;
 
@@ -97,6 +96,5 @@ stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
                          uart_config[instance].irq,
                          0, txe,
                          local_addr,
-                         timer,
                          10, 0);
 }

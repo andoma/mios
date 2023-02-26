@@ -12,7 +12,6 @@ stream_t *stm32g0_uart_init(stm32_uart_t *u, unsigned int instance,
 void stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
                               gpio_af_t tx, gpio_af_t rx, gpio_t txe,
                               uint8_t local_addr,
-                              const stm32_timer_info_t *timer,
                               uint8_t prio, int flags);
 
 

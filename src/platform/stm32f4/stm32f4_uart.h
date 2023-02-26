@@ -10,5 +10,4 @@ stream_t *stm32f4_uart_init(struct stm32_uart *uart,
 
 void stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
                               gpio_t tx, gpio_t rx, gpio_t txe,
-                              uint8_t local_addr,
-                              const stm32_timer_info_t *timer);
+                              uint8_t local_addr);

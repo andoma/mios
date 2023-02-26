@@ -75,7 +75,6 @@ void
 stm32wb_mbus_uart_create(unsigned int instance, int baudrate,
                          gpio_t tx, gpio_t rx, gpio_t txe,
                          uint8_t local_addr,
-                         const stm32_timer_info_t *timer,
                          uint8_t prio, int flags)
 {
   if(instance > ARRAYSIZE(uart_config))
@@ -113,6 +112,5 @@ stm32wb_mbus_uart_create(unsigned int instance, int baudrate,
                          uart_config[instance].irq,
                          0, txe,
                          local_addr,
-                         timer,
                          prio, flags);
 }
