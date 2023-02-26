@@ -314,7 +314,7 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name,
   if(flags & MBUS_NETIF_ENABLE_PCS) {
     mni->mni_pcs = pcs_iface_create(mni, mbus_pcs_fifosize, mbus_pcs_accept,
                                     NULL);
-    task_create(mbus_pcs_thread, mni, 384, "pcs", 0, 4);
+    thread_create(mbus_pcs_thread, mni, 384, "pcs", 0, 4);
   }
 #endif
 }

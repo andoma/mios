@@ -50,7 +50,7 @@ pcs_shell(void *arg)
   cli_on_stream(&pss.s, '>');
   pcs_close(pss.pcs);
   wakelock_release();
-  task_exit(NULL);
+  thread_exit(NULL);
 }
 
 
