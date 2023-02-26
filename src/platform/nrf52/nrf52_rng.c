@@ -5,6 +5,7 @@
 
 #include "nrf52_reg.h"
 #include "nrf52_rng.h"
+#include "nrf52_rtc.h"
 
 static void  __attribute__((constructor(120)))
 nrf52_rng_init(void)
@@ -16,7 +17,7 @@ nrf52_rng_init(void)
 int
 rand(void)
 {
-  static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
   static prng_t state;
-  return prng_get(&state, reg_rd(RNG_VALUE) ^ *SYST_VAL) & RAND_MAX;
+  uint32_t seed = (reg_rd(RNG_VALUE) << 24) | reg_rd(RTC2_BASE + RTC_COUNTER);
+  return prng_get(&state, seed) & RAND_MAX;
 }
