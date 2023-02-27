@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mios/io.h>
+
 #define UART_BASE 0x40002000
 
 #define UART_INTENSET (UART_BASE + 0x304)
@@ -23,3 +25,7 @@ struct stream *nrf52_uart_init(int baudrate, gpio_t txpin, gpio_t rxpin,
                                int flags);
 
 #define UART_CTRLD_IS_PANIC 0x80
+
+void nrf52_mbus_uart_init(gpio_t txpin, gpio_t rxpin, gpio_t txe,
+                          uint8_t local_addr, uint8_t prio, int flags);
+
