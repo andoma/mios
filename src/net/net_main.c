@@ -1,9 +1,11 @@
 #include <assert.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <mios/task.h>
 #include <mios/timer.h>
+#include <mios/eventlog.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -11,11 +13,11 @@
 #include "netif.h"
 #include "socket.h"
 
-#define NET_WORK_PERIODIC  0
-#define NET_WORK_SOCKET_OP 1
-#define NET_WORK_SOCKET_TX 2
-#define NET_WORK_BUFFERS_AVAIL 3
-#define NET_WORK_NETIF_RX  8
+#define NET_WORK_SOCKET_OP     0
+#define NET_WORK_SOCKET_TX     1
+#define NET_WORK_BUFFERS_AVAIL 2
+#define NET_WORK_NETLOG        3
+#define NET_WORK_NETIF_RX      8
 
 _Static_assert(NET_WORK_NETIF_RX + NET_MAX_INTERFACES <= 32);
 
@@ -24,9 +26,9 @@ mutex_t netif_mutex = MUTEX_INITIALIZER("netifs");
 
 static task_waitable_t net_waitq = WAITABLE_INITIALIZER("net");
 static uint32_t net_work_bits;
-static timer_t net_periodic_timer;
 static netif_t *interfaces[NET_MAX_INTERFACES];
 
+static struct timer_list net_timers;
 
 struct socket_list sockets;
 static struct socket_queue socket_op_queue =
@@ -35,6 +37,9 @@ static struct socket_queue socket_op_queue =
 static void net_init(void);
 
 static char net_initialized;
+
+static struct pbuf_queue netlog_queue =
+  STAILQ_HEAD_INITIALIZER(netlog_queue);
 
 static void
 net_wakeup(int bit)
@@ -122,22 +127,6 @@ netif_attach(netif_t *ni, const char *name, const device_class_t *dc)
 }
 
 
-
-
-static void
-net_periodic(void)
-{
-  netif_t *ni;
-
-  mutex_lock(&netif_mutex);
-  SLIST_FOREACH(ni, &netifs, ni_global_link) {
-    if(ni->ni_periodic != NULL)
-      ni->ni_periodic(ni);
-  }
-  mutex_unlock(&netif_mutex);
-}
-
-
 static void
 net_call_buffers_avail(void)
 {
@@ -157,13 +146,19 @@ net_thread(void *arg)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
 
-  timer_arm_abs(&net_periodic_timer, clock_get() + 1000000);
-
   while(1) {
 
     int bits = net_work_bits;
     if(bits == 0) {
-      task_sleep(&net_waitq);
+      const timer_t *t = LIST_FIRST(&net_timers);
+      if(t == NULL) {
+        task_sleep(&net_waitq);
+      } else if(task_sleep_deadline(&net_waitq, t->t_expire)) {
+        uint64_t now = clock_get_irq_blocked();
+        irq_permit(q);
+        timer_dispatch(&net_timers, now);
+        q = irq_forbid(IRQ_LEVEL_NET);
+      }
       continue;
     }
 
@@ -171,13 +166,7 @@ net_thread(void *arg)
     while(bits) {
       int which = 31 - __builtin_clz(bits);
 
-      if(unlikely(which == NET_WORK_PERIODIC)) {
-
-        irq_permit(q);
-        net_periodic();
-        q = irq_forbid(IRQ_LEVEL_NET);
-
-      } else if(which == NET_WORK_SOCKET_OP) {
+      if(which == NET_WORK_SOCKET_OP) {
 
         while(1) {
           socket_t *s = STAILQ_FIRST(&socket_op_queue);
@@ -213,10 +202,33 @@ net_thread(void *arg)
           task_wakeup(&sc->sc_waitq, 0);
         }
 
+      } else if(which == NET_WORK_NETLOG) {
+
+        while(1) {
+          pbuf_t *pb = pbuf_splice(&netlog_queue);
+          if(pb == NULL)
+            break;
+          irq_permit(q);
+          evlog(LOG_DEBUG, "%s", (const char *)pbuf_cdata(pb, 0));
+          q = irq_forbid(IRQ_LEVEL_NET);
+          pbuf_free_irq_blocked(pb);
+        }
+
       } else if(which >= NET_WORK_NETIF_RX) {
 
         int ifindex = which - NET_WORK_NETIF_RX;
         netif_t *ni = interfaces[ifindex];
+
+        if(ni->ni_pending_signals) {
+          uint32_t signals = ni->ni_pending_signals;
+          ni->ni_pending_signals = 0;
+          irq_permit(q);
+          ni->ni_signals(ni, signals);
+          q = irq_forbid(IRQ_LEVEL_NET);
+          if(ni->ni_pending_signals)
+            net_work_bits |= (1 << which);
+        }
+
         pbuf_t *pb = pbuf_splice(&ni->ni_rx_queue);
         if(pb != NULL) {
           if(STAILQ_FIRST(&ni->ni_rx_queue) != NULL)
@@ -257,15 +269,79 @@ net_buffers_available(void)
 }
 
 
-static void
-periodic_timer_cb(void *opaque, uint64_t expire)
+void
+net_timer_arm(timer_t *t, uint64_t deadline)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
-  net_wakeup(NET_WORK_PERIODIC);
+  timer_arm_on_queue(t, deadline, &net_timers);
+  irq_forbid(IRQ_LEVEL_SCHED);
+  task_wakeup_sched_locked(&net_waitq, 0);
   irq_permit(q);
-
-  timer_arm_abs(&net_periodic_timer, expire + 1000000);
 }
+
+
+void
+netlog(const char *fmt, ...)
+{
+  va_list ap;
+
+  pbuf_t *pb = pbuf_make_irq_blocked(0,0);
+  if(pb == NULL)
+    return;
+
+  va_start(ap, fmt);
+  pb->pb_pktlen = vsnprintf(pbuf_data(pb, 0), PBUF_DATA_SIZE, fmt, ap);
+  va_end(ap);
+  pb->pb_flags = PBUF_SOP | PBUF_EOP;
+  pb->pb_buflen = pb->pb_pktlen;
+  STAILQ_INSERT_TAIL(&netlog_queue, pb, pb_link);
+  net_wakeup(NET_WORK_NETLOG);
+}
+
+
+void
+netlog_hexdump(const char *prefix, const uint8_t *buf, size_t len)
+{
+  const size_t prefixlen = strlen(prefix);
+  while(len > 0) {
+
+    pbuf_t *pb = pbuf_make_irq_blocked(0,0);
+    if(pb == NULL)
+      break;
+
+    char *dst = pbuf_data(pb, 0);
+    memcpy(dst, prefix, prefixlen);
+
+    size_t off = prefixlen;
+    dst[off++] = ':';
+    dst[off++] = ' ';
+
+    for(size_t i = 0; i < 16 && len > 0; i++) {
+      uint8_t b = *buf++;
+      dst[off++] = "0123456789abcdef"[b >> 4];
+      dst[off++] = "0123456789abcdef"[b & 0xf];
+      dst[off++] = ' ';
+      len--;
+    }
+    dst[off] = 0;
+    pb->pb_flags = PBUF_SOP | PBUF_EOP;
+    pb->pb_buflen = off;
+    STAILQ_INSERT_TAIL(&netlog_queue, pb, pb_link);
+  }
+  net_wakeup(NET_WORK_NETLOG);
+}
+
+int
+netif_deliver_signal(netif_t *ni, uint32_t signals)
+{
+  if(ni->ni_pending_signals & signals)
+    return 0; // Previous signal(s) not yet delivered?
+
+  ni->ni_pending_signals |= signals;
+  netif_wakeup(ni);
+  return 1;
+}
+
 
 
 static void
@@ -283,6 +359,5 @@ net_init(void)
 #endif
 
   thread_create(net_thread, NULL, 768, "net", flags, 5);
-  net_periodic_timer.t_cb = periodic_timer_cb;
 }
 

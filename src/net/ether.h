@@ -22,6 +22,8 @@ typedef struct ether_netif {
   uint32_t eni_dhcp_requested_ip;
   uint64_t eni_dhcp_timeout;
 
+  timer_t eni_periodic;
+
 } ether_netif_t;
 
 

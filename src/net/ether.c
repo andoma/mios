@@ -180,10 +180,12 @@ ether_nexthop_periodic(ether_netif_t *eni)
 
 
 
+
 static void
-ether_periodic(netif_t *ni)
+ether_periodic(void *opaque, uint64_t expire)
 {
-  ether_netif_t *eni = (ether_netif_t *)ni;
+  ether_netif_t *eni = opaque;
+  net_timer_arm(&eni->eni_periodic, expire + 1000000);
   ether_nexthop_periodic(eni);
   dhcpv4_periodic(eni);
 }
@@ -227,10 +229,14 @@ ether_netif_init(ether_netif_t *eni, const char *name,
                  const device_class_t *dc)
 {
   eni->eni_ni.ni_output = ether_ipv4_output;
-  eni->eni_ni.ni_periodic = ether_periodic;
   eni->eni_ni.ni_input = ether_input;
 
   netif_attach(&eni->eni_ni, name, dc);
 
   SLIST_INSERT_HEAD(&ether_netifs, eni, eni_global_link);
+  eni->eni_periodic.t_opaque = eni;
+  eni->eni_periodic.t_cb = ether_periodic;
+  eni->eni_periodic.t_name = name;
+
+  net_timer_arm(&eni->eni_periodic, clock_get() + 1000000);
 }

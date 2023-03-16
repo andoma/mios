@@ -2,6 +2,7 @@
 
 #include <mios/device.h>
 #include <mios/task.h>
+#include <mios/timer.h>
 
 #include "pbuf.h"
 #include "socket.h"
@@ -29,13 +30,16 @@ typedef struct netif {
   uint8_t ni_local_prefixlen;
   uint8_t ni_ifindex;
   uint16_t ni_mtu;
-  pbuf_t *(*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 
-  void (*ni_periodic)(struct netif *ni);
+  uint32_t ni_pending_signals;
+
+  pbuf_t *(*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 
   void (*ni_buffers_avail)(struct netif *ni);
 
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
+
+  void (*ni_signals)(struct netif *ni, uint32_t signals);
 
   SLIST_ENTRY(netif) ni_global_link;
 
@@ -67,7 +71,14 @@ typedef struct nexthop {
 
 void netif_wakeup(netif_t *ni);
 
-void netif_attach(netif_t *ni, const char *name,
-                  const device_class_t *dc);
+void netif_attach(netif_t *ni, const char *name, const device_class_t *dc);
+
+int netif_deliver_signal(netif_t *ni, uint32_t signals);
 
 extern mutex_t netif_mutex;
+
+void net_timer_arm(timer_t *t, uint64_t deadline);
+
+void netlog(const char *fmt, ...);
+
+void netlog_hexdump(const char *prefix, const uint8_t *buf, size_t len);
