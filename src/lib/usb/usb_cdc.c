@@ -334,11 +334,11 @@ usb_cdc_create(struct usb_interface_queue *q)
 
   usb_init_endpoint(&cdc->data_iface->ui_endpoints[0],
                     cdc, cdc_txco, cdc_tx_reset,
-                    USB_ENDPOINT_BULK, 0x80, 1, 32);
+                    USB_ENDPOINT_BULK, 0x80, 1, 64);
 
   usb_init_endpoint(&cdc->data_iface->ui_endpoints[1],
                     cdc, cdc_rx, NULL,
-                    USB_ENDPOINT_BULK, 0, 1, 32);
+                    USB_ENDPOINT_BULK, 0, 1, 64);
 
   task_create_shell(cdc_shell_thread, cdc, "cdc-cli");
 }

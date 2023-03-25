@@ -1,3 +1,4 @@
+#if 0
 #include "socket.h"
 
 #include <string.h>
@@ -71,3 +72,4 @@ socket_send(socket_t *s, const void *data, size_t len, int flags)
   struct iovec iov = {(void *)data, len};
   return socket_sendv(s, &iov, 1, flags);
 }
+#endif

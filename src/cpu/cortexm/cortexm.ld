@@ -49,6 +49,12 @@ SECTIONS {
                 KEEP(*(rpcdef))
                 _rpcdef_array_end = .;
                 . = ALIGN(4);
+
+                . = ALIGN(4);
+                _servicedef_array_begin = .;
+                KEEP(*(servicedef))
+                _servicedef_array_end = .;
+                . = ALIGN(4);
         } >FLASH
 
         .build_id : {

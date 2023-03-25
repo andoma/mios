@@ -33,6 +33,9 @@ typedef enum {
   ERR_NO_MEMORY             = -29,
   ERR_READ_PROTECTED        = -30,
   ERR_WRITE_PROTECTED       = -31,
+  ERR_AGAIN                 = -32,
+  ERR_NOT_CONNECTED         = -33,
+  ERR_BAD_PKT_SIZE          = -34,
 } error_t;
 
 const char *error_to_string(error_t e);

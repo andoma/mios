@@ -4,8 +4,11 @@
 #include <mios/cli.h>
 #include <mios/task.h>
 #include <mios/mios.h>
+#include <mios/service.h>
 
 #include <sys/param.h>
+
+#include "net/pbuf.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -219,6 +222,7 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
   stream_follower_t sf;
   sf.f.ptr = ef->tail;
   sf.f.cb = stream_follower_wakeup;
+  cond_init(&sf.c, "log");
 
   LIST_INSERT_HEAD(&ef->followers, &sf.f, link);
 
@@ -294,135 +298,159 @@ CLI_CMD_DEF("mark", cmd_mark);
 
 
 
-#ifdef ENABLE_NET_PCS
-
-#include "net/pcs/pcs.h"
-#include "net/pcs_shell.h"
 
 typedef struct {
   follower_t f;
-  pcs_t *pcs;
-  pcs_iface_t *pi;
   uint64_t ts;
   uint32_t seq;
-} evlog_pcs_follower_t;
+
+  void *opaque;
+  service_event_cb_t *cb;
+  size_t max_fragment_size;
+
+} evlog_svc_follower_t;
 
 
 
-static void
-evlog_to_pcs_fill(void *arg, size_t avail,
-                  void (*wrfn)(pcs_t *pcs, const void *buf,
-                               size_t len))
+/**
+ * Framing;
+ *
+ *   rDTT_TLLL
+ *                r = reserved
+ *                D = Discontinuity
+ *                T = Size of timestamp delta
+ *                L = Log level (0 - 7)
+ *
+ *    [4 byte sequence, if D is set]
+ *    [Timestamp Delta, up to 8 bytes]
+ *    [Message]
+ *
+ */
+
+
+static pbuf_t *
+evlog_svc_pull(void *opaque)
 {
-  evlog_pcs_follower_t *epf = arg;
+  evlog_svc_follower_t *esf = opaque;
   evlogfifo_t *ef = &ef0;
 
-  if(avail < 6)
-    return;
-
+  pbuf_t *pb = NULL;
   mutex_lock(&ef->mutex);
 
-  if(wrfn == NULL) {
-    // EOS
-    LIST_REMOVE(&epf->f, link);
-    free(epf);
-  } else {
+  uint16_t ptr = esf->f.ptr;
 
-    uint16_t ptr = epf->f.ptr;
+  if(ptr != ef->head) {
 
-    if(ptr != ef->head) {
+    uint8_t hdr = 0;
 
-      if(ptr == ef->tail) {
-        epf->ts = ef->ts_tail;
-        epf->seq = ef->seq_tail;
-        uint8_t hdr[2 + 4];
-        hdr[0] = 6;
-        hdr[1] = 0x80;
-        hdr[2] = epf->seq;
-        hdr[3] = epf->seq >> 8;
-        hdr[4] = epf->seq >> 16;
-        hdr[5] = epf->seq >> 24;
-        wrfn(epf->pcs, hdr, 6);
-        avail -= 6;
+    uint64_t ts = esf->ts;
+    if(ptr == ef->tail) {
+      ts = ef->ts_tail;
+      hdr = 0x40;
+    }
+
+    const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
+    const uint8_t flags = ef->data[(ptr + 1) & EVENTLOG_MASK];
+    const uint8_t level = flags & 7;
+    const uint8_t tlen = (flags >> 3) & 7;
+    const uint16_t msglen = len - 2 - tlen;
+
+    const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
+    const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
+
+    ts += evl_read_delta_ts(ef, ptr);
+    uint64_t ms_ago = (clock_get() - ts) / 1000;
+
+    uint8_t tsbuf[8];
+    int tslen = 0;
+    for(uint32_t i = 0; i < 8; i++) {
+      if(ms_ago == 0)
+        break;
+      tsbuf[i] = ms_ago;
+      ms_ago >>= 8;
+      tslen++;
+    }
+
+    hdr |= level;
+    hdr |= tslen << 3;
+
+    pb = pbuf_make(0, 0);
+    if(pb != NULL) {
+      pb = pbuf_write(pb, &hdr, 1, esf->max_fragment_size);
+
+      if(hdr & 0x40) {
+        pb = pbuf_write(pb, &ef->seq_tail, 4, esf->max_fragment_size);
       }
+      pb = pbuf_write(pb, tsbuf, tslen, esf->max_fragment_size);
 
-      const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
-      const uint8_t flags = ef->data[(ptr + 1) & EVENTLOG_MASK];
-      const uint8_t level = flags & 7;
-      const uint8_t tlen = (flags >> 3) & 7;
-      const uint16_t msglen = len - 2 - tlen;
-
-      if(msglen + 10 <= avail) {
-
-        const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
-        const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
-
-        epf->ts += evl_read_delta_ts(ef, ptr);
-
-        uint64_t ms_ago = (clock_get() - epf->ts) / 1000;
-
-        uint8_t hdr[2 + 8];
-        int tslen = 0;
-        for(uint32_t i = 0; i < 8; i++) {
-          if(ms_ago == 0)
-            break;
-          hdr[2 + i] = ms_ago;
-          ms_ago >>= 8;
-          tslen++;
-        }
-        hdr[0] = 2 + tslen + msglen;
-        hdr[1] = (tslen << 3) | level;
-        pcs_t *pcs = epf->pcs;
-        wrfn(pcs, hdr, tslen + 2);
-        if(msgend >= msgstart) {
-          wrfn(pcs, ef->data + msgstart, msglen);
-        } else {
-          wrfn(pcs, ef->data + msgstart, EVENTLOG_SIZE - msgstart);
-          wrfn(pcs, ef->data, msgend);
-        }
-        wrfn(pcs, NULL, 0); // flush
-        epf->f.ptr += len;
+      if(msgend >= msgstart) {
+        pb = pbuf_write(pb, ef->data + msgstart, msglen,
+                        esf->max_fragment_size);
+      } else {
+        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart,
+                        esf->max_fragment_size);
+        pb = pbuf_write(pb, ef->data, msgend, esf->max_fragment_size);
       }
     }
+    if(pb != NULL) {
+      esf->ts = ts;
+      esf->f.ptr += len;
+    }
   }
+
   mutex_unlock(&ef->mutex);
+  return pb;
 }
 
 
 static void
-evlog_to_pcs_wakeup(follower_t *f)
+evlog_svc_wakeup(follower_t *f)
 {
-  evlog_pcs_follower_t *epf = (evlog_pcs_follower_t *)f;
-  pcs_iface_wakeup(epf->pi);
+  evlog_svc_follower_t *svc = (evlog_svc_follower_t *)f;
+  svc->cb(svc->opaque, SERVICE_EVENT_WAKEUP);
 }
 
-
-error_t
-evlog_to_pcs(pcs_t *pcs)
+static void *
+evlog_svc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
 {
-  evlog_pcs_follower_t *epf =
-    xalloc(sizeof(evlog_pcs_follower_t), 0, MEM_MAY_FAIL);
+  evlog_svc_follower_t *esf =
+    xalloc(sizeof(evlog_svc_follower_t), 0, MEM_MAY_FAIL);
+  if(esf == NULL)
+    return NULL;
 
-  if(epf == NULL)
-    return ERR_NO_MEMORY;
+  memset(esf, 0, sizeof(evlog_svc_follower_t));
 
-  memset(epf, 0, sizeof(evlog_pcs_follower_t));
-  epf->pcs = pcs;
-  epf->pi = pcs_get_iface(pcs);
+  esf->opaque = opaque;
+  esf->cb = cb;
+  esf->max_fragment_size = max_fragment_size;
 
   evlogfifo_t *ef = &ef0;
 
-  epf->f.ptr = ef->tail;
-  epf->f.cb = evlog_to_pcs_wakeup;
-
   mutex_lock(&ef->mutex);
-  LIST_INSERT_HEAD(&ef->followers, &epf->f, link);
+  esf->f.ptr = ef->tail;
+  esf->f.cb = evlog_svc_wakeup;
+  LIST_INSERT_HEAD(&ef->followers, &esf->f, link);
   mutex_unlock(&ef->mutex);
 
-  pcs_callback(pcs, epf, evlog_to_pcs_fill);
-  return 0;
+  return esf;
 }
 
-#endif
+
+static void
+evlog_svc_close(void *opaque)
+{
+  evlog_svc_follower_t *esf = opaque;
+  evlogfifo_t *ef = &ef0;
+
+  mutex_lock(&ef->mutex);
+  LIST_REMOVE(&esf->f, link);
+  mutex_unlock(&ef->mutex);
+
+  esf->cb(esf->opaque, SERVICE_EVENT_CLOSE);
+  free(esf);
+}
+
+SERVICE_DEF("log",
+            evlog_svc_open, NULL, NULL, evlog_svc_pull, evlog_svc_close);
 
 #endif

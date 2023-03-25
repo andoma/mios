@@ -325,7 +325,7 @@ static const device_class_t mbus_uart_device_class = {
 
 
 static void
-mbus_uart_init_common(uart_mbus_t *um, gpio_t txe, uint8_t local_addr,
+mbus_uart_init_common(uart_mbus_t *um, gpio_t txe,
                       uint8_t prio, int flags)
 {
   um->txe = txe;
@@ -333,11 +333,11 @@ mbus_uart_init_common(uart_mbus_t *um, gpio_t txe, uint8_t local_addr,
   um->um_mni.mni_output = output_hd;
 
   STAILQ_INIT(&um->tx_queue);
-  um->state = MBUS_STATE_GAP;
+  um->state = MBUS_STATE_IDLE;
   um->prio = prio;
   um->flags = flags;
 
-  um->um_mni.mni_ni.ni_mtu = 32;
+  um->um_mni.mni_ni.ni_mtu = 64;
 
   um->timer.t_cb = timer_fire;
   um->timer.t_opaque = um;
@@ -345,6 +345,5 @@ mbus_uart_init_common(uart_mbus_t *um, gpio_t txe, uint8_t local_addr,
   um->softirq.t_run = softirq;
   um->softirq.t_prio = 6;
 
-  mbus_netif_attach(&um->um_mni, "uartmbus", &mbus_uart_device_class,
-                    local_addr, MBUS_NETIF_ENABLE_PCS);
+  mbus_netif_attach(&um->um_mni, "uartmbus", &mbus_uart_device_class);
 }

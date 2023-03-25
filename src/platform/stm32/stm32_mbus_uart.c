@@ -55,7 +55,7 @@ stm32_mbus_uart_irq(void *arg)
 static void
 stm32_mbus_uart_create(uint32_t uart_reg_base, int bbr,
                        int clkid, int uart_irq, uint32_t tx_dma_resouce_id,
-                       gpio_t txe, uint8_t local_addr,
+                       gpio_t txe,
                        uint8_t prio, int flags)
 {
   clk_enable(clkid);
@@ -81,5 +81,5 @@ stm32_mbus_uart_create(uint32_t uart_reg_base, int bbr,
   if(flags & UART_WAKEUP)
     wakelock_acquire();
 
-  mbus_uart_init_common(um, txe, local_addr, prio, flags);
+  mbus_uart_init_common(um, txe, prio, flags);
 }

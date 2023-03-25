@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <mios/task.h>
 #include <sys/queue.h>
+#include <sys/param.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -160,6 +161,86 @@ pbuf_splice(struct pbuf_queue *pq)
 
 
 pbuf_t *
+pbuf_read(pbuf_t *pb, void *ptr, size_t len)
+{
+  assert(len <= pb->pb_pktlen);
+
+  while(len) {
+    size_t to_copy = MIN(len, pb->pb_buflen);
+
+    memcpy(ptr, pb->pb_data + pb->pb_offset, to_copy);
+
+    len           -= to_copy;
+    pb->pb_offset += to_copy;
+    pb->pb_buflen -= to_copy;
+    pb->pb_pktlen -= to_copy;
+
+    if(pb->pb_buflen == 0) {
+      pbuf_t *n = pb->pb_next;
+      n->pb_pktlen = pb->pb_pktlen;
+      pbuf_data_put(pb->pb_data);
+      pbuf_put(pb);
+      pb = n;
+    }
+  }
+  return pb;
+}
+
+pbuf_t *
+pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
+{
+  if(head== NULL)
+    return NULL;
+
+  pbuf_t *pb = head;
+
+  // Jump to end of chain
+  while(pb->pb_next) {
+    pb = pb->pb_next;
+  }
+
+  while(len) {
+
+    if(pb->pb_buflen >= max_fill) {
+
+      pb->pb_flags &= ~PBUF_EOP;
+
+      pbuf_t *n = pbuf_get(0);
+      if(n != NULL) {
+        n->pb_next = NULL;
+        n->pb_data = pbuf_data_get(0);
+        if(n->pb_data == NULL) {
+          pbuf_put(n);
+          n = NULL;
+        } else {
+          n->pb_flags = PBUF_EOP;
+          n->pb_pktlen = 0;
+          n->pb_offset = 0;
+          n->pb_buflen = 0;
+        }
+      }
+      if(n == NULL) {
+        pbuf_free(head);
+        return NULL;
+      }
+      pb->pb_next = n;
+      pb = n;
+    }
+
+    size_t to_copy = MIN(len, max_fill - pb->pb_buflen - pb->pb_offset);
+    memcpy(pb->pb_data + pb->pb_offset + pb->pb_buflen, data, to_copy);
+
+    head->pb_pktlen += to_copy;
+    pb->pb_buflen += to_copy;
+    len -= to_copy;
+    data += to_copy;
+  }
+  return head;
+}
+
+
+
+pbuf_t *
 pbuf_drop(pbuf_t *pb, size_t bytes)
 {
   while(pb) {
@@ -218,7 +299,6 @@ pbuf_free(pbuf_t *pb)
   irq_permit(q);
 }
 
-
 pbuf_t *
 pbuf_pullup(pbuf_t *pb, size_t bytes)
 {
@@ -229,6 +309,19 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
   return NULL;
 }
 
+
+void
+pbuf_reset(pbuf_t *pb, size_t header_size, size_t len)
+{
+  if(pb->pb_next) {
+    pbuf_free(pb->pb_next);
+    pb->pb_next = NULL;
+  }
+  pb->pb_flags = PBUF_SOP | PBUF_EOP;
+  pb->pb_offset = header_size;
+  pb->pb_buflen = len;
+  pb->pb_pktlen = len;
+}
 
 pbuf_t *
 pbuf_make_irq_blocked(int offset, int wait)

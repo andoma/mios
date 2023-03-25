@@ -2,11 +2,6 @@
 
 #include "net/netif.h"
 
-#ifdef ENABLE_NET_PCS
-#include <mios/timer.h>
-#include "net/pcs/pcs.h"
-#endif
-
 #define MBUS_HDR_LEN 1
 
 typedef struct mbus_netif {
@@ -17,7 +12,7 @@ typedef struct mbus_netif {
   // Replace with netif output()?
   pbuf_t *(*mni_output)(struct mbus_netif *mni, pbuf_t *pb);
 
-  uint16_t mni_active_hosts;
+  uint32_t mni_active_hosts;
 
   uint32_t mni_rx_packets;
   uint32_t mni_rx_bytes;
@@ -31,22 +26,20 @@ typedef struct mbus_netif {
   uint32_t mni_tx_qdrops;
   uint32_t mni_tx_fail;
 
-#ifdef ENABLE_NET_PCS
-  pcs_iface_t *mni_pcs;
-#endif
-
 } mbus_netif_t;
 
-#define MBUS_NETIF_ENABLE_PCS 0x1
+void mbus_set_host_address(uint8_t addr);
 
 void mbus_print_info(mbus_netif_t *mni, struct stream *st);
 
 void mbus_netif_attach(mbus_netif_t *mni, const char *name,
-                       const device_class_t *dc, uint8_t local_addr, int flags);
+                       const device_class_t *dc);
 
-pbuf_t *mbus_output(mbus_netif_t *mni, struct pbuf *pb, uint8_t dst_addr);
 
-pbuf_t *mbus_xmit(uint8_t remote_addr, pbuf_t *pb);
+pbuf_t *mbus_output_unicast(pbuf_t *pb, uint8_t dst_addr, uint8_t type);
+
+pbuf_t *mbus_output_multicast(pbuf_t *pb, uint8_t group);
+
 
 pbuf_t *mbus_handle_rpc_resolve(mbus_netif_t *mni, pbuf_t *pb,
                                 uint8_t remote_addr);
@@ -56,28 +49,3 @@ pbuf_t *mbus_handle_rpc_invoke(mbus_netif_t *mni, pbuf_t *pb,
 
 pbuf_t *mbus_handle_rpc_response(mbus_netif_t *mni, pbuf_t *pb,
                                  uint8_t remote_addr);
-
-#define MBUS_OP_PING       0
-#define MBUS_OP_PONG       1
-#define MBUS_OP_PUB_META   2
-#define MBUS_OP_PUB_DATA   3
-
-#define MBUS_OP_DSIG_EMIT  7
-// [u8 signal] [u8 valid] [...]
-
-#define MBUS_OP_RPC_RESOLVE         8
-// [u8 txid] [name ...]
-
-#define MBUS_OP_RPC_RESOLVE_REPLY   9
-// [u8 txid] ([u32 method id] | [])
-
-#define MBUS_OP_RPC_INVOKE          10
-// [u8 txid] [u32 method id] [var in-data]
-
-#define MBUS_OP_RPC_ERR             11
-// [u8 txid] [s32 errcode]
-
-#define MBUS_OP_RPC_REPLY           12
-// [u8 txid] [var out-data]
-
-#define MBUS_OP_OTA_XFER            13

@@ -2,38 +2,24 @@
 #include "stm32f4_uart.h"
 #include "stm32f4_dma.h"
 #include "stm32f4_tim.h"
-
-#define USART_SR    0x00
-#define USART_TDR   0x04
-#define USART_RDR   0x04
-#define USART_BBR   0x08
-#define USART_CR1   0x0c
-#define USART_CR3   0x14
-
-#define CR1_IDLE       (1 << 13) | (1 << 5) | (1 << 3) | (1 << 2)
-#define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
-
-#define CR1_ENABLE_TCIE CR1_IDLE | (1 << 6)
-
-
 #include "platform/stm32/stm32_uart.c"
 #include "platform/stm32/stm32_mbus_uart.c"
 
-static const struct {
-  uint16_t base;
-  uint16_t clkid;
-  uint8_t irq;
-  uint8_t af;
-  uint32_t txdma;
-} uart_config[] = {
-  { 0x0110, CLK_USART1, 37, 7, STM32F4_DMA_USART1_TX},
-  { 0x0044, CLK_USART2, 38, 7, STM32F4_DMA_USART2_TX},
-  { 0x0048, CLK_USART3, 39, 7, STM32F4_DMA_USART3_TX},
-  { 0x004c, CLK_UART4,  52, 8, STM32F4_DMA_UART4_TX},
-  { 0x0050, CLK_UART5,  53, 8, STM32F4_DMA_UART5_TX},
-  { 0x0114, CLK_USART6, 71, 8, STM32F4_DMA_USART6_TX},
+
+static const stm32f4_uart_config_t stm32f4_uart_config[] = {
+  { 0x0110, CLK_USART1, 37, 7, STM32F4_DMA_USART1_TX, STM32F4_DMA_USART1_RX},
+  { 0x0044, CLK_USART2, 38, 7, STM32F4_DMA_USART2_TX, STM32F4_DMA_USART2_RX},
+  { 0x0048, CLK_USART3, 39, 7, STM32F4_DMA_USART3_TX, STM32F4_DMA_USART3_RX},
+  { 0x004c, CLK_UART4,  52, 8, STM32F4_DMA_UART4_TX,  STM32F4_DMA_UART4_RX},
+  { 0x0050, CLK_UART5,  53, 8, STM32F4_DMA_UART5_TX,  STM32F4_DMA_UART5_RX},
+  { 0x0114, CLK_USART6, 71, 8, STM32F4_DMA_USART6_TX, STM32F4_DMA_USART6_RX}
 };
 
+const stm32f4_uart_config_t *
+stm32f4_uart_get_config(int index)
+{
+  return &stm32f4_uart_config[index];
+}
 
 static stm32_uart_t *uarts[6];
 
@@ -41,24 +27,22 @@ stream_t *
 stm32f4_uart_init(stm32_uart_t *u, int instance, int baudrate,
                   gpio_t tx, gpio_t rx, uint8_t flags)
 {
-  instance--;
+  const int index = instance - 1;
+  const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
 
-  if(instance >= ARRAYSIZE(uart_config))
-    return NULL;
-
-  const int af = uart_config[instance].af;
+  const int af = cfg->af;
   gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
 
   u = stm32_uart_init(u,
-                      (uart_config[instance].base << 8) + 0x40000000,
+                      (cfg->base << 8) + 0x40000000,
                       baudrate,
-                      uart_config[instance].clkid,
-                      uart_config[instance].irq,
+                      cfg->clkid,
+                      cfg->irq,
                       flags,
-                      uart_config[instance].txdma);
+                      cfg->txdma);
 
-  uarts[instance] = u;
+  uarts[index] = u;
 
   return &u->stream;
 }
@@ -74,27 +58,23 @@ void irq_71(void) { uart_irq(uarts[5]); }
 
 void
 stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
-                         gpio_t tx, gpio_t rx, gpio_t txe, uint8_t local_addr)
+                         gpio_t tx, gpio_t rx, gpio_t txe)
 {
-  instance--;
-
-  if(instance > ARRAYSIZE(uart_config))
-    return;
-
-  const int af = uart_config[instance].af;
+  const int index = instance - 1;
+  const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
+  const int af = cfg->af;
 
   gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
-  const unsigned int freq = clk_get_freq(uart_config[instance].clkid);
+  const unsigned int freq = clk_get_freq(cfg->clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;
 
-  stm32_mbus_uart_create((uart_config[instance].base << 8) + 0x40000000,
+  stm32_mbus_uart_create((cfg->base << 8) + 0x40000000,
                          bbr,
-                         uart_config[instance].clkid,
-                         uart_config[instance].irq,
+                         cfg->clkid,
+                         cfg->irq,
                          0, txe,
-                         local_addr,
                          10, 0);
 }

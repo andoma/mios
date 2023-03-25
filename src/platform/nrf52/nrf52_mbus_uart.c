@@ -42,7 +42,7 @@ nrf52_mbus_uart_irq(void *arg)
 
 void
 nrf52_mbus_uart_init(gpio_t txpin, gpio_t rxpin, gpio_t txe,
-                     uint8_t local_addr, uint8_t prio, int flags)
+                     uint8_t prio, int flags)
 {
   uart_mbus_t *um = calloc(1, sizeof(uart_mbus_t));
 
@@ -58,5 +58,5 @@ nrf52_mbus_uart_init(gpio_t txpin, gpio_t rxpin, gpio_t txe,
 
   irq_enable_fn_arg(2, IRQ_LEVEL_CONSOLE, nrf52_mbus_uart_irq, um);
 
-  mbus_uart_init_common(um, txe, local_addr, prio, flags);
+  mbus_uart_init_common(um, txe, prio, flags);
 }

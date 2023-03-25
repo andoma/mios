@@ -6,8 +6,7 @@
 
 #include "pbuf.h"
 #include "socket.h"
-
-#define NET_MAX_INTERFACES 8
+#include "net_task.h"
 
 SLIST_HEAD(netif_list, netif);
 LIST_HEAD(nexthop_list, nexthop);
@@ -15,10 +14,16 @@ LIST_HEAD(nexthop_list, nexthop);
 struct nexthop;
 
 extern struct netif_list netifs;
+extern mutex_t netif_mutex;
+
+#define NETIF_TASK_RX 0x1
+
 
 typedef struct netif {
 
   device_t ni_dev;
+
+  net_task_t ni_task;
 
   struct pbuf_queue ni_rx_queue;
 
@@ -38,8 +43,6 @@ typedef struct netif {
   void (*ni_buffers_avail)(struct netif *ni);
 
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
-
-  void (*ni_signals)(struct netif *ni, uint32_t signals);
 
   SLIST_ENTRY(netif) ni_global_link;
 
@@ -69,16 +72,16 @@ typedef struct nexthop {
 } nexthop_t;
 
 
-void netif_wakeup(netif_t *ni);
 
 void netif_attach(netif_t *ni, const char *name, const device_class_t *dc);
-
-int netif_deliver_signal(netif_t *ni, uint32_t signals);
-
-extern mutex_t netif_mutex;
 
 void net_timer_arm(timer_t *t, uint64_t deadline);
 
 void netlog(const char *fmt, ...);
 
 void netlog_hexdump(const char *prefix, const uint8_t *buf, size_t len);
+
+static inline void netif_wakeup(netif_t *ni)
+{
+  net_task_raise(&ni->ni_task, NETIF_TASK_RX);
+}

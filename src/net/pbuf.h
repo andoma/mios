@@ -10,10 +10,11 @@
 
 STAILQ_HEAD(pbuf_queue, pbuf);
 
-#define PBUF_SOP 0x1
-#define PBUF_EOP 0x2
-#define PBUF_BCAST 0x4
-#define PBUF_MCAST 0x8
+#define PBUF_SOP   0x1
+#define PBUF_EOP   0x2
+#define PBUF_SEQ   0x8
+#define PBUF_BCAST 0x10
+#define PBUF_MCAST 0x20
 
 typedef struct pbuf {
 
@@ -29,11 +30,7 @@ typedef struct pbuf {
 
 } pbuf_t;
 
-static inline void pbuf_reset(pbuf_t *pb, size_t header_size, size_t len) {
-  pb->pb_offset = header_size;
-  pb->pb_buflen = len;
-  pb->pb_pktlen = len;
-}
+void pbuf_reset(pbuf_t *pb, size_t header_size, size_t len);
 
 static inline void *pbuf_data(pbuf_t *pb, size_t offset) {
   return pb->pb_data + pb->pb_offset + offset;
@@ -62,6 +59,14 @@ pbuf_t *pbuf_copy(const pbuf_t *src, int wait);
 void *pbuf_append(pbuf_t *pb, size_t bytes);
 
 pbuf_t *pbuf_splice(struct pbuf_queue *pq);
+
+pbuf_t *pbuf_read(pbuf_t *pb, void *ptr, size_t len);
+
+pbuf_t *pbuf_write(pbuf_t *pb, const void *ptr, size_t len, size_t max_fill);
+
+// =========================================================
+// Debug helpers
+// =========================================================
 
 void pbuf_status(void);
 

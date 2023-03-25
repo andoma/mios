@@ -193,7 +193,7 @@ static const device_class_t usb_mbus_device_class = {
 
 
 void
-usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
+usb_mbus_create(struct usb_interface_queue *q,
                 uint8_t usb_sub_class)
 {
   usb_mbus_t *um = calloc(1, sizeof(usb_mbus_t));
@@ -205,16 +205,16 @@ usb_mbus_create(struct usb_interface_queue *q, uint8_t local_addr,
 
   usb_init_endpoint(&um->iface->ui_endpoints[0],
                     um, mbus_rx, NULL,
-                    USB_ENDPOINT_BULK, 0x0, 0x1, 32);
+                    USB_ENDPOINT_BULK, 0x0, 0x1, 64);
 
   usb_init_endpoint(&um->iface->ui_endpoints[1],
                     um, mbus_txco, mbus_tx_reset,
-                    USB_ENDPOINT_BULK, 0x80, 0x1, 32);
+                    USB_ENDPOINT_BULK, 0x80, 0x1, 64);
 
   um->um_mni.mni_output = usb_mbus_output;
   um->um_mni.mni_ni.ni_buffers_avail = buffers_avail;
-  um->um_mni.mni_ni.ni_mtu = 32;
+  um->um_mni.mni_ni.ni_mtu = 64;
 
   mbus_netif_attach(&um->um_mni, "usbmbus",
-                    &usb_mbus_device_class, local_addr, 0);
+                    &usb_mbus_device_class);
 }

@@ -63,6 +63,7 @@ dsig_emit(uint8_t signal, const void *data, size_t len,
     dsig_dispatch(signal, data, len, ttl, 0);
   }
 
+#if 0
 #ifdef ENABLE_NET_MBUS
   if(flags & DSIG_EMIT_MBUS) {
     static socket_t *sock;
@@ -89,6 +90,7 @@ dsig_emit(uint8_t signal, const void *data, size_t len,
 
     socket_sendv(sock, iov, 2, SOCK_SEND_NONBLOCK | SOCK_SEND_BROADCAST);
   }
+#endif
 #endif
 }
 

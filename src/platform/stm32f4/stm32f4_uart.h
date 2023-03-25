@@ -2,12 +2,33 @@
 #include <mios/stream.h>
 
 #include "platform/stm32/stm32_uart.h"
-#include "platform/stm32/stm32_tim.h"
+
+#define USART_SR    0x00
+#define USART_TDR   0x04
+#define USART_RDR   0x04
+#define USART_BBR   0x08
+#define USART_CR1   0x0c
+#define USART_CR3   0x14
+
+#define CR1_IDLE        (1 << 13) | (1 << 5) | (1 << 3) | (1 << 2)
+#define CR1_ENABLE_TXI  CR1_IDLE | (1 << 7)
+#define CR1_ENABLE_TCIE CR1_IDLE | (1 << 6)
+
+
+typedef struct {
+  uint16_t base;
+  uint16_t clkid;
+  uint8_t irq;
+  uint8_t af;
+  uint32_t txdma;
+  uint32_t rxdma;
+} stm32f4_uart_config_t;
 
 stream_t *stm32f4_uart_init(struct stm32_uart *uart,
                             int instance, int baudrate,
                             gpio_t tx, gpio_t rx, uint8_t flags);
 
 void stm32f4_mbus_uart_create(unsigned int instance, int baudrate,
-                              gpio_t tx, gpio_t rx, gpio_t txe,
-                              uint8_t local_addr);
+                              gpio_t tx, gpio_t rx, gpio_t txe);
+
+const stm32f4_uart_config_t *stm32f4_uart_get_config(int index);

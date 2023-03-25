@@ -22,8 +22,6 @@ SRCS += ${C}/systick.c \
 	${P}/stm32g0_dma.c \
 	${P}/stm32g0_flash.c \
 
-SRCS-${ENABLE_OTA} += ${P}/stm32g0_ota.c
-
 SRCS-${ENABLE_SYSTIM} += ${P}/stm32g0_systim.c
 
 ${MOS}/platform/stm32g0/stm32g0_ota.o : OPTLEVEL = s
