@@ -770,7 +770,6 @@ irq_67(void)
         } else {
           const uint32_t status = (rspr >> 17) & 0xf;
           const uint32_t bytes = (rspr >> 4) & 0x7ff;
-
           switch(status) {
           case 2:
             ue->ue_completed(&uc->uc_dev, ue, bytes, 0);
@@ -845,11 +844,12 @@ stm32f4_otgfs_init_regs(usb_ctrl_t *uc)
          (3 << 0) | // Device speed = 0b11 (Full speed)
          0);
 
-  int fifo_words = 32;
+  int fifo_words = 64;
   int fifo_addr = 0;
   reg_wr(OTG_FS_GRXFSIZ, fifo_words);
   fifo_addr += fifo_words;
 
+  fifo_words = 32;
   reg_wr(OTG_FS_NPTXFSIZ,
          (fifo_words << 16) |
          fifo_addr);
