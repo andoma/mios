@@ -8,6 +8,7 @@ cmd_math_test(cli_t *cli, int argc, char **argv)
 {
   float v = argc;
   cli_printf(cli, "Measuring sqrtf(%f) performance for 5 seconds\n", v);
+  cli_flush(cli);
   int64_t stop_at = clock_get() + 5000000;
   int rounds = 0;
   while(clock_get() < stop_at) {
