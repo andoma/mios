@@ -4,4 +4,5 @@
 
 struct pbuf;
 
-struct pbuf *mbus_seqpkt_input(struct pbuf *pb, uint8_t src_addr);
+struct pbuf *mbus_seqpkt_init_flow(struct pbuf *pb, uint8_t src_addr,
+                                   uint16_t flow);

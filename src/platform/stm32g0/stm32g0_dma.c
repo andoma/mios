@@ -25,7 +25,7 @@ stm32_dma_alloc(uint32_t resource_id, const char *name)
 {
   // NB: CLK_DMAMUX is not available on stm32g0, rather it's piggybacking
   // on any other enabled DMA instance
-  stm32_dma_instance_t instance = stm32_dma_alloc_instance(-1, name);
+  stm32_dma_instance_t instance = stm32_dma_alloc_instance(0b1111111, name);
   reg_wr(DMAMUX1_CxCR(instance), resource_id);
   return instance;
 }

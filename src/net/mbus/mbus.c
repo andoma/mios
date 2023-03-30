@@ -1,6 +1,8 @@
 #include "mbus.h"
 #include "util/crc32.h"
 
+#include <mios/eventlog.h>
+
 #include "net/pbuf.h"
 #include "net/netif.h"
 #include "net/socket.h"
@@ -11,17 +13,22 @@
 
 #include "mbus_rpc.h"
 #include "mbus_dsig.h"
+#include "mbus_flow.h"
 
 #include "mbus_seqpkt.h"
 
+#include <mios/io.h>
+
+
+LIST_HEAD(mbus_flow_list, mbus_flow);
 
 SLIST_HEAD(mbus_netif_list, mbus_netif);
-
-//static struct socket_list mbus_sockets;
 
 static struct mbus_netif_list mbus_netifs;
 
 static uint8_t mbus_local_addr;
+
+static struct mbus_flow_list mbus_flows;
 
 static uint32_t
 mbus_crc32(struct pbuf *pb, uint32_t crc)
@@ -33,7 +40,7 @@ mbus_crc32(struct pbuf *pb, uint32_t crc)
 }
 
 
-static pbuf_t *
+pbuf_t *
 mbus_output(pbuf_t *pb, uint8_t dst_addr)
 {
   uint32_t crc = mbus_crc32(pb, 0);
@@ -78,38 +85,88 @@ mbus_output(pbuf_t *pb, uint8_t dst_addr)
 
 
 pbuf_t *
-mbus_output_unicast(pbuf_t *pb, uint8_t dst_addr, uint8_t type)
+mbus_output_flow(pbuf_t *pb, const mbus_flow_t *mf)
 {
-  pb = pbuf_prepend(pb, 2);
-
+  pb = pbuf_prepend(pb, 3);
   uint8_t *hdr = pbuf_data(pb, 0);
-  hdr[0] = dst_addr;
-  hdr[1] = mbus_local_addr | (type << 5);
-  return mbus_output(pb, dst_addr);
+  hdr[0] = mf->mf_remote_addr;
+  hdr[1] = mbus_local_addr | ((mf->mf_flow >> 3) & 0x60);
+  hdr[2] = mf->mf_flow;
+  return mbus_output(pb, mf->mf_remote_addr);
 }
 
 
-pbuf_t *
-mbus_output_multicast(pbuf_t *pb, uint8_t group)
+static pbuf_t *
+mbus_ping(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
 {
-  pb = pbuf_prepend(pb, 1);
-  uint8_t *hdr = pbuf_data(pb, 0);
-  hdr[0] = group | 0x20;
-  return mbus_output(pb, group);
+  pbuf_reset(pb, 0, 0);
+  uint8_t *pkt = pbuf_append(pb, 3);
+  pkt[0] = remote_addr;
+  pkt[1] = ((flow >> 3) & 0x60) | mbus_local_addr;
+  pkt[2] = flow;
+  return mbus_output(pb, remote_addr);
 }
 
 
+void
+mbus_flow_insert(mbus_flow_t *mf)
+{
+  LIST_INSERT_HEAD(&mbus_flows, mf, mf_link);
+}
+
+void
+mbus_flow_remove(mbus_flow_t *mf)
+{
+  if(mf->mf_input) {
+    LIST_REMOVE(mf, mf_link);
+    mf->mf_input = NULL;
+  }
+}
+
+
+mbus_flow_t *
+mbus_flow_find(uint8_t remote_addr, uint16_t flow)
+{
+  mbus_flow_t *mf;
+  LIST_FOREACH(mf, &mbus_flows, mf_link) {
+    if(mf->mf_flow == flow && mf->mf_remote_addr == remote_addr) {
+      return mf;
+    }
+  }
+  return NULL;
+}
 
 
 struct pbuf *
-mbus_local(mbus_netif_t *mni, pbuf_t *pb, uint8_t src_addr, uint8_t type)
+mbus_local(mbus_netif_t *mni, pbuf_t *pb)
 {
-  switch(type) {
-  case 0:
-    return mbus_seqpkt_input(pb, src_addr);
+  if(pb->pb_buflen < 3)
+    return pb;
 
-  default:
-    // Unknown type
+  const uint8_t *pkt = pbuf_cdata(pb, 0);
+  const uint16_t flow = pkt[2] | ((pkt[1] << 3) & 0x300);
+  const uint8_t src_addr = pkt[1] & 0x1f;
+  const int init = pkt[1] & 0x80;
+
+  if(init) {
+    if(pb->pb_buflen < 4)
+      return pb;
+
+    const uint8_t type = pkt[3];
+
+    switch(type) {
+    case 0:
+      return mbus_ping(pb, src_addr, flow);
+    case 1:
+      return mbus_seqpkt_init_flow(pbuf_drop(pb, 4), src_addr, flow);
+    default:
+      return pb;
+    }
+  } else {
+    mbus_flow_t *mf = mbus_flow_find(src_addr, flow);
+    if(mf != NULL)
+      return mf->mf_input(mf, pbuf_drop(pb, 3));
+
     return pb;
   }
 }
@@ -163,12 +220,15 @@ mbus_input(struct netif *ni, struct pbuf *pb)
   }
 
   const uint8_t *hdr = pbuf_cdata(pb, 0);
-  const uint8_t dst_addr = hdr[0] & 0x3f;
+  const uint32_t dst_addr = hdr[0] & 0x3f;
 
   if(dst_addr & 0x20) {
 
-    // Multicast
+    uint16_t group = (dst_addr << 8) | hdr[1];
 
+    if(group < 4096) {
+      pb = mbus_dsig_input(pb, group);
+    }
 
   } else {
 
@@ -182,11 +242,8 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     }
 
     if(dst_addr == mbus_local_addr) {
-      const uint8_t type = hdr[1] >> 5;
-      // Destined for us
       pb = pbuf_trim(pb, 4); // Drop CRC
-      pb = pbuf_drop(pb, 2); // Drop header
-      return mbus_local(mni, pb, src_addr, type);
+      return mbus_local(mni, pb);
     }
 
     // Forward if we know about the host on a different interface
@@ -208,13 +265,14 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 void
 mbus_print_info(mbus_netif_t *mni, struct stream *st)
 {
-  stprintf(st, "\tPacket interface:\n");
-  stprintf(st, "\t\tRX %u bytes  %u packets\n",
+  stprintf(st, "\tRX Packets:\n");
+  stprintf(st, "\t\tBytes:%u  Packets:%u  ",
            mni->mni_rx_bytes, mni->mni_rx_packets);
-  stprintf(st, "\t\t   %u CRC  %u runts  %u bad opcode\n",
-           mni->mni_rx_crc_errors, mni->mni_rx_runts,
-           mni->mni_rx_unknown_opcode);
-  stprintf(st, "\t\tTX %u bytes  %u sent  %u qdrops  %u failed\n",
+  stprintf(st, "CRC:%u  Runts:%u\n",
+           mni->mni_rx_crc_errors, mni->mni_rx_runts);
+  stprintf(st, "\tTX Packets:\n");
+
+  stprintf(st, "\t\tBytes:%u  Sent:%u  Qdrops:%u  Failed:%u\n",
            mni->mni_tx_bytes,  mni->mni_tx_packets,
            mni->mni_tx_qdrops, mni->mni_tx_fail);
   stprintf(st, "\tLocal address: %x\n", mbus_local_addr);

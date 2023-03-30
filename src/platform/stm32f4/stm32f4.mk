@@ -17,10 +17,13 @@ SRCS += ${C}/systick.c \
 	${P}/stm32f4_spi.c \
 	${P}/stm32f4_dma.c \
 	${P}/stm32f4_clk.c \
-	${P}/stm32f4_uart.c \
+	${P}/stm32f4_uart_stream.c \
 	${P}/stm32f4_flash.c \
 	${P}/stm32f4_adc.c \
 	${P}/stm32f4_otgfs.c \
 	${P}/stm32f4_systim.c \
+
+SRCS-${ENABLE_NET_MBUS} += \
+	${P}/stm32f4_uart_mbus.c
 
 ${MOS}/platform/stm32f4/%.o : CFLAGS += ${NOFPU}

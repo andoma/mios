@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <sys/queue.h>
 
 typedef struct net_task {

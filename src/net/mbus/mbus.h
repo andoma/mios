@@ -2,7 +2,7 @@
 
 #include "net/netif.h"
 
-#define MBUS_HDR_LEN 1
+struct mbus_flow;
 
 typedef struct mbus_netif {
   netif_t mni_ni;
@@ -36,10 +36,9 @@ void mbus_netif_attach(mbus_netif_t *mni, const char *name,
                        const device_class_t *dc);
 
 
-pbuf_t *mbus_output_unicast(pbuf_t *pb, uint8_t dst_addr, uint8_t type);
+pbuf_t *mbus_output(pbuf_t *pb, uint8_t dst_addr);
 
-pbuf_t *mbus_output_multicast(pbuf_t *pb, uint8_t group);
-
+pbuf_t *mbus_output_flow(pbuf_t *pb, const struct mbus_flow *mf);
 
 pbuf_t *mbus_handle_rpc_resolve(mbus_netif_t *mni, pbuf_t *pb,
                                 uint8_t remote_addr);

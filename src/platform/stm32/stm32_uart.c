@@ -1,3 +1,12 @@
+
+
+#define CR1_IDLE \
+  (USART_CR1_UE | USART_CR1_RXNEIE | USART_CR1_TE | USART_CR1_RE)
+
+#define CR1_ENABLE_TCIE  (CR1_IDLE | USART_CR1_TCIE)
+#define CR1_ENABLE_TXEIE (CR1_IDLE | USART_CR1_TXEIE)
+
+
 // This file is not compiled on its own but needs to be included
 // by a stm32 chip specific file
 
@@ -48,7 +57,7 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size)
 
     if(!u->tx_busy) {
       reg_wr(u->reg_base + USART_TDR, d[i]);
-      reg_wr(u->reg_base + USART_CR1, CR1_ENABLE_TXI);
+      reg_wr(u->reg_base + USART_CR1, CR1_ENABLE_TXEIE);
       u->tx_busy = 1;
     } else {
       u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = d[i];
@@ -242,7 +251,7 @@ stm32_uart_init(stm32_uart_t *u, int reg_base, int baudrate,
   const unsigned int freq = clk_get_freq(clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;
 
-  reg_wr(u->reg_base + USART_BBR, bbr);
+  reg_wr(u->reg_base + USART_BRR, bbr);
   reg_wr(u->reg_base + USART_CR1, CR1_IDLE);
 
   task_waitable_init(&u->wait_rx, "uartrx");
