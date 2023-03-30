@@ -168,6 +168,9 @@ stm32_dma_start(stm32_dma_instance_t instance)
 void
 stm32_dma_stop(stm32_dma_instance_t instance)
 {
+  reg_clr_bit(DMA_SCR(instance), 0);
+  while(reg_get_bit(DMA_SCR(instance), 0)) {}
+
   const uint32_t base = DMA_BASE(instance >> 3);
   const int hi = (instance >> 2) & 1;
   const uint8_t offset = (const uint8_t []){0,6,16,22}[instance & 3];
@@ -183,7 +186,7 @@ stm32_dma_wait(stm32_dma_instance_t instance)
   while(1) {
     if(ds->err == 1) {
       if(task_sleep_deadline(&ds->waitq, deadline)) {
-        reg_clr_bit(DMA_SCR(instance), 0);
+        stm32_dma_stop(instance);
         return ERR_TIMEOUT;
       }
       continue;
@@ -201,30 +204,30 @@ dma_irq(int instance, int bits)
   if(ds == NULL)
     return;
 
-  ds->cb(instance, ds->arg, bits & 0xc ? ERR_DMA_ERROR : 0);
+  ds->cb(instance, ds->arg, bits & 0xd ? ERR_DMA_ERROR : 0);
 }
 
 
 
-#define GET_ISR(controller, hi, offset)                                \
+#define GET_ISR(controller, hi, offset, instance)                      \
   const uint32_t base = DMA_BASE(controller);                          \
   const uint32_t bits = (reg_rd(base + DMA_ISR(hi)) >> offset) & 0x3f; \
-  reg_wr(base + DMA_IFCR(hi), 0x3f << offset);                         \
+  dma_irq(instance, bits);                                             \
+  reg_wr(base + DMA_IFCR(hi), bits << offset);                         \
 
-
-void irq_11(void) { GET_ISR(0, 0, 0)  dma_irq( 0, bits); }
-void irq_12(void) { GET_ISR(0, 0, 6)  dma_irq( 1, bits); }
-void irq_13(void) { GET_ISR(0, 0, 16) dma_irq( 2, bits); }
-void irq_14(void) { GET_ISR(0, 0, 22) dma_irq( 3, bits); }
-void irq_15(void) { GET_ISR(0, 1, 0)  dma_irq( 4, bits); }
-void irq_16(void) { GET_ISR(0, 1, 6)  dma_irq( 5, bits); }
-void irq_17(void) { GET_ISR(0, 1, 16) dma_irq( 6, bits); }
-void irq_47(void) { GET_ISR(0, 1, 22) dma_irq( 7, bits); }
-void irq_56(void) { GET_ISR(1, 0,  0) dma_irq( 8, bits); }
-void irq_57(void) { GET_ISR(1, 0,  6) dma_irq( 9, bits); }
-void irq_58(void) { GET_ISR(1, 0, 16) dma_irq(10, bits); }
-void irq_59(void) { GET_ISR(1, 0, 22) dma_irq(11, bits); }
-void irq_60(void) { GET_ISR(1, 1,  0) dma_irq(12, bits); }
-void irq_68(void) { GET_ISR(1, 1,  6) dma_irq(13, bits); }
-void irq_69(void) { GET_ISR(1, 1, 16) dma_irq(14, bits); }
-void irq_70(void) { GET_ISR(1, 1, 22) dma_irq(15, bits); }
+void irq_11(void) { GET_ISR(0, 0, 0,  0) }
+void irq_12(void) { GET_ISR(0, 0, 6,  1) }
+void irq_13(void) { GET_ISR(0, 0, 16, 2) }
+void irq_14(void) { GET_ISR(0, 0, 22, 3) }
+void irq_15(void) { GET_ISR(0, 1, 0,  4) }
+void irq_16(void) { GET_ISR(0, 1, 6,  5) }
+void irq_17(void) { GET_ISR(0, 1, 16, 6) }
+void irq_47(void) { GET_ISR(0, 1, 22, 7) }
+void irq_56(void) { GET_ISR(1, 0,  0, 8) }
+void irq_57(void) { GET_ISR(1, 0,  6, 9) }
+void irq_58(void) { GET_ISR(1, 0, 16,10) }
+void irq_59(void) { GET_ISR(1, 0, 22,11) }
+void irq_60(void) { GET_ISR(1, 1,  0,12) }
+void irq_68(void) { GET_ISR(1, 1,  6,13) }
+void irq_69(void) { GET_ISR(1, 1, 16,14) }
+void irq_70(void) { GET_ISR(1, 1, 22,15) }

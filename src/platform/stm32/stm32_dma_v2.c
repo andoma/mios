@@ -148,6 +148,7 @@ void
 stm32_dma_stop(stm32_dma_instance_t instance)
 {
   reg_clr_bit(DMA_CCRx(instance), 0);
+  while(reg_get_bit(DMA_CCRx(instance), 0)) {}
 }
 
 
@@ -181,6 +182,14 @@ dma_irq(int channel)
   dma_stream_t *ds = g_streams[channel];
   if(ds == NULL)
     return;
-  ds->cb(channel, ds->arg, bits & 0x8 ? ERR_DMA_ERROR : 0);
+  error_t err;
+  if(bits & 8) {
+    err = ERR_DMA_ERROR;
+  } else if(bits & 2) {
+    err = 0;
+  } else {
+    return;
+  }
+  ds->cb(channel, ds->arg, err);
 }
 
