@@ -57,6 +57,7 @@ systim_trace_add(uint64_t when, timer_t *t,
 static void
 systim_dump_trace(stream_t *s)
 {
+  systim_t *st = &g_systim;
   int64_t now = clock_get_irq_blocked();
 
   stprintf(s, "%d trace events in total\n", traceptr);
@@ -79,12 +80,12 @@ systim_dump_trace(stream_t *s)
                  (int)ht->when, (int)(now - ht->when));
       continue;
     }
-    stprintf(s, "%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
-               ht->t);
+     stprintf(s, "%15d %15d %p\n", (int)ht->when, (int)(now - ht->when),
+             ht->t);
   }
 
   const timer_t *t;
-  LIST_FOREACH(t, &hr_timers, t_link) {
+  LIST_FOREACH(t, &st->timers, t_link) {
     stprintf(s, "%p %p %p %15d %15d %s\n",
                t, t->t_cb, t->t_opaque,
                (int)t->t_expire,
