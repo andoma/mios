@@ -1,9 +1,12 @@
 #include "net_task.h"
 
 #include "pbuf.h"
+#include "irq.h"
+
+#include <mios/eventlog.h>
 
 #include <stdio.h>
-
+#include <string.h>
 
 static struct pbuf_queue netlog_queue =
   STAILQ_HEAD_INITIALIZER(netlog_queue);
@@ -13,7 +16,7 @@ static void
 netlog_cb(struct net_task *nt, uint32_t signals)
 {
   while(1) {
-    q = irq_forbid(IRQ_LEVEL_NET);
+    int q = irq_forbid(IRQ_LEVEL_NET);
     pbuf_t *pb = pbuf_splice(&netlog_queue);
     irq_permit(q);
     if(pb == NULL)

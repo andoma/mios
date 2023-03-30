@@ -4,6 +4,7 @@ SRCS_net += \
 	${SRC}/net/service.c \
 	${SRC}/net/pbuf.c \
 	${SRC}/net/net_main.c \
+	${SRC}/net/net_log.c \
 	${SRC}/net/service/svc_echo.c \
 	${SRC}/net/service/svc_shell.c \
 	${SRC}/net/service/svc_chargen.c \
