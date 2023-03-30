@@ -218,7 +218,6 @@ ota_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
   sa->sa_info = pb;
   mutex_init(&sa->sa_mutex, "ota");
   cond_init(&sa->sa_cond, "ota");
-  sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
   return sa;
 }
 
@@ -236,6 +235,9 @@ static pbuf_t *
 ota_push(void *opaque, struct pbuf *pb)
 {
   svc_ota_t *sa = opaque;
+  if(!sa->sa_thread)
+    sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
+
   mutex_lock(&sa->sa_mutex);
   sa->sa_rxbuf = pb;
   cond_signal(&sa->sa_cond);
@@ -260,7 +262,10 @@ ota_close(void *opaque)
   sa->sa_shutdown = 1;
   cond_signal(&sa->sa_cond);
   mutex_unlock(&sa->sa_mutex);
-  thread_join(sa->sa_thread);
+
+  if(sa->sa_thread)
+    thread_join(sa->sa_thread);
+
   pbuf_free(sa->sa_info);
   free(sa);
   ota_busy = 0;
