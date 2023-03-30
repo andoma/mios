@@ -13,19 +13,29 @@
 static uint32_t apb1clock;
 static uint32_t apb2clock;
 
+#define APB1_CLK_BITS 0x1ff
+#define APB2_CLK_BITS 0x70003
+
 
 int
 clk_get_freq(uint16_t id)
 {
   uint32_t r;
+
+  uint32_t bit = (1 << (id & 0x1f));
+
   switch(id >> 8) {
   default:
     panic("clk_get_speed() invalid id: 0x%x", id);
   case CLK_APB1:
     r = apb1clock;
+    if(bit & APB1_CLK_BITS)
+      r *= 2;
     break;
   case CLK_APB2:
     r = apb2clock;
+    if(bit & APB2_CLK_BITS)
+      r *= 2;
     break;
   }
   if(!r)
