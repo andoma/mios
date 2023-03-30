@@ -1,0 +1,16 @@
+#include "crc4.h"
+
+static const uint8_t crc4_tab[] = {
+	0x0, 0x7, 0xe, 0x9, 0xb, 0xc, 0x5, 0x2,
+	0x1, 0x6, 0xf, 0x8, 0xa, 0xd, 0x4, 0x3,
+};
+
+
+uint8_t
+crc4(uint8_t c, uint8_t *data, size_t nibbles)
+{
+  for(size_t i = 0; i < nibbles; i++) {
+    c = crc4_tab[c ^ ((data[i >> 1] >> (i & 1 ? 4 : 0)) & 0xf)];
+  }
+  return c;
+}

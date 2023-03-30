@@ -2,6 +2,7 @@ GLOBALDEPS += ${SRC}/util/util.mk
 
 SRCS += ${SRC}/util/crc32.c \
 	${SRC}/util/crc8.c \
+	${SRC}/util/crc4.c \
 	${SRC}/util/hdlc.c \
 	${SRC}/util/pkv.c \
 	${SRC}/util/dsig.c \
