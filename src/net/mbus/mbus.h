@@ -36,15 +36,9 @@ void mbus_netif_attach(mbus_netif_t *mni, const char *name,
                        const device_class_t *dc);
 
 
-pbuf_t *mbus_output(pbuf_t *pb, uint8_t dst_addr);
+pbuf_t *mbus_output(pbuf_t *pb) __attribute__((warn_unused_result));
 
-pbuf_t *mbus_output_flow(pbuf_t *pb, const struct mbus_flow *mf);
+pbuf_t *mbus_output_flow(pbuf_t *pb, const struct mbus_flow *mf)
+  __attribute__((warn_unused_result));
 
-pbuf_t *mbus_handle_rpc_resolve(mbus_netif_t *mni, pbuf_t *pb,
-                                uint8_t remote_addr);
-
-pbuf_t *mbus_handle_rpc_invoke(mbus_netif_t *mni, pbuf_t *pb,
-                               uint8_t remote_addr);
-
-pbuf_t *mbus_handle_rpc_response(mbus_netif_t *mni, pbuf_t *pb,
-                                 uint8_t remote_addr);
+void mbus_send(pbuf_t *pb);

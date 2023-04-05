@@ -22,28 +22,6 @@ mbus_dsig_input(struct pbuf *pb, uint16_t signal)
   return pb;
 }
 
-static mutex_t dsig_emit_mutex = MUTEX_INITIALIZER("dsigemit");
-
-static struct pbuf_queue dsig_emit_queue =
-  STAILQ_HEAD_INITIALIZER(dsig_emit_queue);
-
-static void
-mbus_dsig_emit_cb(net_task_t *nt, uint32_t signals)
-{
-  while(1) {
-    mutex_lock(&dsig_emit_mutex);
-    pbuf_t *pb = pbuf_splice(&dsig_emit_queue);
-    mutex_unlock(&dsig_emit_mutex);
-    if(pb == NULL)
-      break;
-    pb = mbus_output(pb, 0xff);
-    if(pb != NULL)
-      pbuf_free(pb);
-  }
-}
-
-static net_task_t mbus_dsig_emit_task = { mbus_dsig_emit_cb };
-
 void
 mbus_dsig_emit(uint16_t signal, const void *data, size_t len)
 {
@@ -62,11 +40,5 @@ mbus_dsig_emit(uint16_t signal, const void *data, size_t len)
   pb->pb_pktlen = len + 2;
   pb->pb_buflen = len + 2;
 
-  mutex_lock(&dsig_emit_mutex);
-  int empty = !STAILQ_FIRST(&dsig_emit_queue);
-  STAILQ_INSERT_TAIL(&dsig_emit_queue, pb, pb_link);
-  mutex_unlock(&dsig_emit_mutex);
-  if(empty) {
-    net_task_raise(&mbus_dsig_emit_task, 1);
-  }
+  mbus_send(pb);
 }

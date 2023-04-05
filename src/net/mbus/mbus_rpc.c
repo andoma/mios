@@ -7,6 +7,7 @@
 #include <mios/error.h>
 #include <mios/rpc.h>
 
+#include <string.h>
 
 static pbuf_t *
 mbus_rpc_err(struct pbuf *pb, const mbus_flow_t *mf, error_t code)
@@ -62,4 +63,30 @@ mbus_rpc_dispatch(struct pbuf *pb, uint8_t src_addr, uint16_t flow)
   uint8_t *out = pbuf_data(reply, 0);
   out[0] = 0;
   return mbus_output_flow(reply, &mf);
+}
+
+error_t
+mbus_rpc_call(uint8_t addr, const char *method,
+              const void *args, size_t argsize,
+              int wait)
+{
+  extern uint8_t mbus_local_addr;
+
+  pbuf_t *pb = pbuf_make(0, wait);
+  if(pb == NULL)
+    return ERR_NO_BUFFER;
+
+  const size_t methodlen = strlen(method);
+  const size_t header_len = (5 + methodlen + 3) & ~3;
+  const size_t total_len = header_len + argsize;
+  uint8_t *data = pbuf_append(pb, total_len);
+  data[0] = addr;
+  data[1] = 0x80 | mbus_local_addr;
+  data[2] = 0;
+  data[3] = 2; // MBUS_RPC
+  data[4] = methodlen;
+  memcpy(data + 5, method, methodlen);
+  memcpy(data + header_len, args, argsize);
+  mbus_send(pb);
+  return 0;
 }

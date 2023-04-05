@@ -41,8 +41,11 @@ mbus_crc32(struct pbuf *pb, uint32_t crc)
 
 
 pbuf_t *
-mbus_output(pbuf_t *pb, uint8_t dst_addr)
+mbus_output(pbuf_t *pb)
 {
+  const uint8_t *hdr = pbuf_cdata(pb, 0);
+  const int dst_addr = hdr[0];
+
   uint32_t crc = mbus_crc32(pb, 0);
   uint8_t *trailer = pbuf_append(pb, sizeof(uint32_t));
   trailer[0] = crc;
@@ -92,7 +95,7 @@ mbus_output_flow(pbuf_t *pb, const mbus_flow_t *mf)
   hdr[0] = mf->mf_remote_addr;
   hdr[1] = mbus_local_addr | ((mf->mf_flow >> 3) & 0x60);
   hdr[2] = mf->mf_flow;
-  return mbus_output(pb, mf->mf_remote_addr);
+  return mbus_output(pb);
 }
 
 
@@ -104,7 +107,42 @@ mbus_ping(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   pkt[0] = remote_addr;
   pkt[1] = ((flow >> 3) & 0x60) | mbus_local_addr;
   pkt[2] = flow;
-  return mbus_output(pb, remote_addr);
+  return mbus_output(pb);
+}
+
+
+static mutex_t mbus_send_mutex = MUTEX_INITIALIZER("mbussend");
+
+static struct pbuf_queue mbus_send_queue =
+  STAILQ_HEAD_INITIALIZER(mbus_send_queue);
+
+static void
+mbus_send_cb(net_task_t *nt, uint32_t signals)
+{
+  while(1) {
+    mutex_lock(&mbus_send_mutex);
+    pbuf_t *pb = pbuf_splice(&mbus_send_queue);
+    mutex_unlock(&mbus_send_mutex);
+    if(pb == NULL)
+      break;
+    pb = mbus_output(pb);
+    if(pb != NULL)
+      pbuf_free(pb);
+  }
+}
+
+static net_task_t mbus_send_task = { mbus_send_cb };
+
+void
+mbus_send(pbuf_t *pb)
+{
+  mutex_lock(&mbus_send_mutex);
+  int empty = !STAILQ_FIRST(&mbus_send_queue);
+  STAILQ_INSERT_TAIL(&mbus_send_queue, pb, pb_link);
+  mutex_unlock(&mbus_send_mutex);
+  if(empty) {
+    net_task_raise(&mbus_send_task, 1);
+  }
 }
 
 
