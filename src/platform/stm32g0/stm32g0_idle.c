@@ -6,19 +6,12 @@
 #include "stm32g0_clk.h"
 #include "stm32g0_pwr.h"
 #include "stm32g0_rtc.h"
-
+#include "stm32g0_wdog.h"
 
 #define WDOG_HZ 128
 #define RTC_HZ 2048
 
 #define WDOG_TIMEOUT_SEC 30
-
-#define IWDG_BASE 0x40003000
-
-#define IWDG_KR  (IWDG_BASE + 0x00)
-#define IWDG_PR  (IWDG_BASE + 0x04)
-#define IWDG_RLR (IWDG_BASE + 0x08)
-#define IWDG_SR  (IWDG_BASE + 0x0c)
 
 static volatile unsigned int * const SCR  = (unsigned int *)0xe000ed10;
 

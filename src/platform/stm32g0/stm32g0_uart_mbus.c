@@ -6,9 +6,9 @@
 #include "platform/stm32/stm32_mbus_uart.c"
 
 void
-stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
+stm32g0_mbus_uart_create(unsigned int instance,
                          gpio_t tx, gpio_t rx, gpio_t txe,
-                         uint8_t prio, int flags)
+                         int flags)
 {
   const stm32g0_uart_cfg_t *cfg = stm32g0_uart_config_get(instance);
   const int tx_af = stm32g0_uart_tx(instance, tx);

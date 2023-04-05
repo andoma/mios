@@ -13,12 +13,16 @@ struct pbuf;
 
 typedef void (service_event_cb_t)(void *opaque, uint32_t signals);
 
+typedef uint32_t (service_get_flow_header_t)(void *opaque);
+
 typedef struct service {
 
   const char *name;
 
-  void *(*open)(void *opaque, service_event_cb_t *event,
-                size_t max_fragment_size);
+  void *(*open)(void *opaque,
+                service_event_cb_t *event,
+                size_t max_fragment_size,
+                service_get_flow_header_t *get_flow_hdr);
 
   // Data from network to service
   struct pbuf *(*push)(void *opaque, struct pbuf *pb);

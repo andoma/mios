@@ -20,7 +20,8 @@
 #define GAP_RAND_MASK 1023
 
 #define CR1_HEADER \
-  (USART_CR1_UE | USART_CR1_RXNEIE | USART_CR1_TE | USART_CR1_RE)
+  (USART_CR1_UE | USART_CR1_RXNEIE | USART_CR1_TE | USART_CR1_RE | \
+   USART_CR1_UESM)
 #define CR1_PAYLOAD_TX \
   (USART_CR1_UE | USART_CR1_TCIE | USART_CR1_TE)
 #define CR1_PAYLOAD_RX \
@@ -179,11 +180,11 @@ decode_header(uart_mbus_t *um)
   reg_wr(um->uart_reg_base + USART_BRR, um->uart_bbr_header);
   reg_wr(um->uart_reg_base + USART_CR1, CR1_HEADER);
 
+  wakelock_release();
   um->state = MBUS_STATE_IDLE;
   timer_disarm(&um->timer);
   return 0;
 }
-
 
 __attribute__((warn_unused_result))
 static uint32_t
@@ -191,6 +192,7 @@ input_byte(uart_mbus_t *um, uint8_t b)
 {
   switch(um->state) {
   case MBUS_STATE_IDLE:
+    wakelock_acquire();
   case MBUS_STATE_GAP:
     um->rx_hdr[0] = b;
     um->state = MBUS_STATE_RX_HDR1;
@@ -263,6 +265,9 @@ start_tx(uart_mbus_t *um)
   um->tx_hdr[1] = len >> 2;
   uint8_t c = crc4(0, um->tx_hdr, 3);
   um->tx_hdr[1] |= c << 4;
+
+  if(um->state == MBUS_STATE_IDLE)
+    wakelock_acquire();
 
   um->state = MBUS_STATE_TX_HDR0;
   reg_wr(um->uart_reg_base + USART_TDR, um->tx_hdr[0]);
@@ -391,10 +396,6 @@ mbus_uart_output(struct mbus_netif *mni, pbuf_t *pb)
     STAILQ_INSERT_TAIL(&um->txq, pb, pb_link);
     pb = NULL;
     if(um->state == MBUS_STATE_IDLE) {
-#if 0
-      if(um->flags & UART_WAKEUP)
-        wakelock_acquire();
-#endif
       mbus_uart_arm(um, start_tx(um));
     }
   } else {
@@ -415,6 +416,8 @@ timer_fire(void *opaque, uint64_t now)
   switch(um->state) {
   case MBUS_STATE_GAP:
     um->state = MBUS_STATE_IDLE;
+    wakelock_release();
+
   case MBUS_STATE_IDLE:
     if(um->txq_len)
       delta = start_tx(um);
@@ -481,22 +484,6 @@ mbus_uart_print_info(struct device *dev, struct stream *st)
 
 
 static void
-buffers_avail(netif_t *ni)
-{
-  uart_mbus_t *um = (uart_mbus_t *)ni;
-  if(um->rx == NULL) {
-    um->rx = pbuf_make(0, 0);
-    if(um->rx != NULL) {
-      stm32_dma_set_mem0(um->rx_dma, um->rx->pb_data + 1);
-    }
-  }
-}
-
-
-
-
-
-static void
 mbus_uart_power_state(struct device *dev, device_power_state_t state)
 {
   uart_mbus_t *um = (uart_mbus_t *)dev;
@@ -511,6 +498,18 @@ static const device_class_t mbus_uart_device_class = {
   .dc_power_state = mbus_uart_power_state,
 };
 
+
+static void
+buffers_avail(netif_t *ni)
+{
+  uart_mbus_t *um = (uart_mbus_t *)ni;
+  if(um->rx == NULL) {
+    um->rx = pbuf_make(0, 0);
+    if(um->rx != NULL) {
+      stm32_dma_set_mem0(um->rx_dma, um->rx->pb_data + 1);
+    }
+  }
+}
 
 
 static uint32_t
@@ -573,18 +572,12 @@ stm32_mbus_uart_create(uint32_t uart_reg_base,
 
 #if defined(USART_CR2) && defined(USART_CR3)
   if(flags & UART_WAKEUP) {
-    reg_wr(um->uart_reg_base + USART_CR3, 0b110 << 20);
+    reg_wr(um->uart_reg_base + USART_CR3, 0b111 << 20);
   }
 #endif
 
   reg_wr(um->uart_reg_base + USART_BRR, um->uart_bbr_header);
   reg_wr(um->uart_reg_base + USART_CR1, CR1_HEADER);
-
-#if 0
-  if(flags & UART_WAKEUP)
-    wakelock_acquire();
-#endif
-
 
   um->txe = txe;
   um->um_mni.mni_output = mbus_uart_output;

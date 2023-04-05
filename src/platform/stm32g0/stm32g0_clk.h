@@ -91,6 +91,8 @@ clk_disable(uint16_t id)
 
 void stm32g0_init_pll(void);
 
+void stm32g0_stop_pll(void);
+
 static inline int
 clk_get_freq(uint16_t id)
 {

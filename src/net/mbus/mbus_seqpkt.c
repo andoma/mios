@@ -110,6 +110,19 @@ mbus_seqpkt_service_event_cb(void *opaque, uint32_t events)
 }
 
 
+static uint32_t
+mbus_seqpkt_get_flow_header(void *opaque)
+{
+  mbus_seqpkt_con_t *msc = opaque;
+  extern uint8_t mbus_local_addr;
+
+  return
+    msc->msc_flow.mf_remote_addr |
+    ((mbus_local_addr | ((msc->msc_flow.mf_flow >> 3) & 0x60)) << 8) |
+    (msc->msc_flow.mf_flow << 16) |
+    (msc->msc_local_flags << 24);
+}
+
 static void
 mbus_seqpkt_accept_err(const char *name, const char *reason,
                        uint8_t remote_addr)
@@ -166,7 +179,8 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   msc->msc_svc = s;
 
   msc->msc_svc_opaque = s->open(msc, mbus_seqpkt_service_event_cb,
-                                MBUS_FRAGMENT_SIZE);
+                                MBUS_FRAGMENT_SIZE,
+                                mbus_seqpkt_get_flow_header);
 
   msc->msc_last_rx = clock_get();
 

@@ -13,7 +13,8 @@ typedef struct svc_echo {
 } svc_echo_t;
 
 static void *
-echo_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
+echo_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+          service_get_flow_header_t *get_flow_hdr)
 {
   svc_echo_t *se = xalloc(sizeof(svc_echo_t), 0, MEM_MAY_FAIL);
   if(se == NULL)

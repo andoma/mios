@@ -411,7 +411,8 @@ evlog_svc_wakeup(follower_t *f)
 }
 
 static void *
-evlog_svc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
+evlog_svc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+               service_get_flow_header_t *get_flow_hdr)
 {
   evlog_svc_follower_t *esf =
     xalloc(sizeof(evlog_svc_follower_t), 0, MEM_MAY_FAIL);

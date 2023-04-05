@@ -14,6 +14,7 @@
 
 
 #define USART_CR1_UE     (1 << 0)
+#define USART_CR1_UESM   (1 << 1)
 #define USART_CR1_RE     (1 << 2)
 #define USART_CR1_TE     (1 << 3)
 #define USART_CR1_RXNEIE (1 << 5)
@@ -42,6 +43,6 @@ stream_t *stm32g0_uart_init(stm32_uart_t *u, unsigned int instance,
                             int baudrate, gpio_t tx, gpio_t rex,
                             uint8_t flags);
 
-void stm32g0_mbus_uart_create(unsigned int instance, int baudrate,
+void stm32g0_mbus_uart_create(unsigned int instance,
                               gpio_t tx, gpio_t rx, gpio_t txe,
-                              uint8_t prio, int flags);
+                              int flags);

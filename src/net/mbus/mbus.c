@@ -26,7 +26,7 @@ SLIST_HEAD(mbus_netif_list, mbus_netif);
 
 static struct mbus_netif_list mbus_netifs;
 
-static uint8_t mbus_local_addr;
+uint8_t mbus_local_addr;
 
 static struct mbus_flow_list mbus_flows;
 

@@ -15,7 +15,8 @@ typedef struct svc_chargen {
 
 
 static void *
-chargen_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
+chargen_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+             service_get_flow_header_t *get_flow_hdr)
 {
   svc_chargen_t *sc = xalloc(sizeof(svc_chargen_t), 0, MEM_MAY_FAIL);
   if(sc == NULL)

@@ -19,6 +19,7 @@
 typedef struct svc_ota {
   void *sa_opaque;
   service_event_cb_t *sa_cb;
+  service_get_flow_header_t *sa_get_flow_hdr;
   pbuf_t *sa_info;
   int sa_shutdown;
 
@@ -27,6 +28,23 @@ typedef struct svc_ota {
   cond_t sa_cond;
   pbuf_t *sa_rxbuf;
 } svc_ota_t;
+
+
+error_t  __attribute__((weak))
+ota_platform_start(uint32_t flow_header, struct pbuf *pb)
+{
+  return 0;
+}
+
+void __attribute__((weak))
+ota_platform_info(uint8_t *hdr)
+{
+  hdr[0] = 0;
+  hdr[1] = 's';
+  hdr[2] = 32;
+  hdr[3] = 0;
+}
+
 
 static char ota_busy;
 
@@ -189,7 +207,8 @@ ota_thread(void *arg)
 
 
 static void *
-ota_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
+ota_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+         service_get_flow_header_t *get_flow_hdr)
 {
   if(ota_busy)
     return NULL;
@@ -199,11 +218,13 @@ ota_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
     return NULL;
   memset(sa, 0, sizeof(svc_ota_t));
   sa->sa_opaque = opaque;
-  sa->sa_cb = cb;
+  sa->sa_get_flow_hdr = get_flow_hdr;
 
+  sa->sa_cb = cb;
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb != NULL) {
-    uint8_t hdr[4] = { 0, 's', 32, 0 };
+    uint8_t hdr[4];
+    ota_platform_info(hdr);
     pb = pbuf_write(pb, hdr, sizeof(hdr), max_fragment_size);
     pb = pbuf_write(pb, mios_build_id(), 20, max_fragment_size);
     const char *appname = mios_get_app_name();
@@ -231,13 +252,22 @@ ota_pull(void *opaque)
   return pb;
 }
 
+
+
 static pbuf_t *
 ota_push(void *opaque, struct pbuf *pb)
 {
   svc_ota_t *sa = opaque;
-  if(!sa->sa_thread)
-    sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
 
+  if(!sa->sa_thread) {
+
+    // This can take over the transfer and if so, it won't return
+    error_t err = ota_platform_start(sa->sa_get_flow_hdr(sa->sa_opaque), pb);
+    if(err)
+      return pb;
+
+    sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
+  }
   mutex_lock(&sa->sa_mutex);
   sa->sa_rxbuf = pb;
   cond_signal(&sa->sa_cond);
@@ -265,6 +295,8 @@ ota_close(void *opaque)
 
   if(sa->sa_thread)
     thread_join(sa->sa_thread);
+  else
+    sa->sa_cb(sa->sa_opaque, SERVICE_EVENT_CLOSE);
 
   pbuf_free(sa->sa_info);
   free(sa);

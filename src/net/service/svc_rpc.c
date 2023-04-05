@@ -20,7 +20,8 @@ typedef struct svc_rpc {
 
 
 static void *
-rpc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size)
+rpc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+         service_get_flow_header_t *get_flow_hdr)
 {
   svc_rpc_t *sr = xalloc(sizeof(svc_rpc_t), 0, MEM_MAY_FAIL);
   if(sr == NULL)
