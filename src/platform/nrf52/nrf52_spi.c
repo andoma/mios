@@ -89,6 +89,8 @@ spi_xfer(nrf52_spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len)
     reg_wr(spi->base_addr + SPIM_RXD_MAXCNT, rx ? chunk : 0);
     reg_wr(spi->base_addr + SPIM_TXD_MAXCNT, tx ? chunk : 0);
 
+    int q = irq_forbid(IRQ_LEVEL_SCHED);
+
     reg_wr(spi->base_addr + SPIM_TASKS_START, 1);
 
     while(!spi->done) {
@@ -96,6 +98,8 @@ spi_xfer(nrf52_spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len)
     }
 
     spi->done = 0;
+
+    irq_permit(q);
 
     if(rx)
       rx += chunk;
