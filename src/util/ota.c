@@ -172,8 +172,12 @@ ota_perform(svc_ota_t *sa)
     }
   }
 
-  crc = ~crc_acc;
-  if(crc != ~crc_acc)
+  crc_acc = ~crc_acc;
+
+  evlog(LOG_DEBUG, "Computed CRC: 0x%08x  Expecting 0x%08x",
+        crc_acc, crc);
+
+  if(crc != crc_acc)
     return ERR_CHECKSUM_ERROR;
 
   ota_send_final_status(sa, 0);
