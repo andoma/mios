@@ -84,6 +84,7 @@ typedef struct mbus_seqpkt_con {
   void *msc_svc_opaque;
 
   int64_t msc_last_rx;
+  int64_t msc_last_tx;
 
 } mbus_seqpkt_con_t;
 
@@ -314,6 +315,8 @@ mbus_seqpkt_output(mbus_seqpkt_con_t *msc, pbuf_t *pb, uint32_t xmit)
   if(pb == NULL)
     return NULL;
 
+  msc->msc_last_tx = clock_get();
+
   uint8_t *hdr = pbuf_append(pb, 1);
   hdr[0] = msc->msc_local_flags;
 
@@ -330,7 +333,7 @@ mbus_seqpkt_output(mbus_seqpkt_con_t *msc, pbuf_t *pb, uint32_t xmit)
     uint8_t *payload = pbuf_append(pb, tx->pb_buflen);
     memcpy(payload, pbuf_cdata(tx, 0), tx->pb_buflen);
 
-    net_timer_arm(&msc->msc_rtx_timer, clock_get() + SP_TIME_RTX);
+    net_timer_arm(&msc->msc_rtx_timer, msc->msc_last_tx + SP_TIME_RTX);
 
   } else if(msc->msc_local_close) {
 
@@ -528,6 +531,7 @@ mbus_seqpkt_ka_timer(void *opaque, uint64_t now)
     mbus_seqpkt_shutdown(msc, "Timeout");
   } else {
     net_timer_arm(&msc->msc_ka_timer, now + SP_TIME_KA);
-    mbus_seqpkt_timer(msc, SP_XMIT_KA);
+    if(now > msc->msc_last_tx + SP_TIME_KA)
+      mbus_seqpkt_timer(msc, SP_XMIT_KA);
   }
 }
