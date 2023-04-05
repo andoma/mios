@@ -17,7 +17,8 @@ mbus_dsig_input(struct pbuf *pb, uint16_t signal)
 {
   if((pb = pbuf_pullup(pb, pb->pb_pktlen)) == NULL)
     return pb;
-  dsig_dispatch(signal, pbuf_cdata(pb, 2), pb->pb_pktlen - 2);
+  // -6 accounts for header and trailing CRC
+  dsig_dispatch(signal, pbuf_cdata(pb, 2), pb->pb_pktlen - 6);
   return pb;
 }
 
@@ -62,7 +63,7 @@ mbus_dsig_emit(uint16_t signal, const void *data, size_t len)
   pb->pb_buflen = len + 2;
 
   mutex_lock(&dsig_emit_mutex);
-  int empty = !!STAILQ_FIRST(&dsig_emit_queue);
+  int empty = !STAILQ_FIRST(&dsig_emit_queue);
   STAILQ_INSERT_TAIL(&dsig_emit_queue, pb, pb_link);
   mutex_unlock(&dsig_emit_mutex);
   if(empty) {

@@ -226,8 +226,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   if(dst_addr & 0x20) {
 
-    uint16_t group = (dst_addr << 8) | hdr[1];
-
+    uint16_t group = ((dst_addr & 0x1f) << 8) | hdr[1];
     if(group < 4096) {
       pb = mbus_dsig_input(pb, group);
     }
