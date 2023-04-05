@@ -1,0 +1,18 @@
+#pragma once
+
+#define NVMC_BASE      0x4001e000
+
+#define NVMC_READY     (NVMC_BASE + 0x400)
+#define NVMC_CONFIG    (NVMC_BASE + 0x504)
+#define NVMC_ERASEPAGE (NVMC_BASE + 0x508)
+#define NVMC_ERASEALL  (NVMC_BASE + 0x50c)
+#define NVMC_ERASEPCR0 (NVMC_BASE + 0x510)
+#define NVMC_ERASEUICR (NVMC_BASE + 0x514)
+#define NVMC_ICACHECNF (NVMC_BASE + 0x540)
+#define NVMC_IHIT      (NVMC_BASE + 0x548)
+#define NVMC_IMIS      (NVMC_BASE + 0x54c)
+
+#define UICR_BASE 0x10001000
+
+#define UICR_NFCPINS (UICR_BASE + 0x20c)
+
