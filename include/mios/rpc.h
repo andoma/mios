@@ -15,6 +15,8 @@ typedef struct rpc_method {
   uint16_t stacksize;
 } rpc_method_t;
 
+const rpc_method_t *rpc_method_resovle(const uint8_t *req_name, size_t req_len);
+
 #define RPC_MAY_BLOCK 0x1
 
 #define RPC_DEF(name, in_size, out_size, fn, flags)                     \
