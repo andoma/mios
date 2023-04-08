@@ -5,6 +5,12 @@
         .global start
 start:
         ldr r0,=_sdata
+        ldr r1,=#0x20000000
+        ldr r2,=#0xdeadcafe
+1:      str r2, [r1]
+        adds r1, #4
+        cmp r0, r1
+        bne 1b
         mov sp, r0
         cpsid i     // Disable interrupts
         bl init
