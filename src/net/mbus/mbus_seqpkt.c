@@ -68,10 +68,12 @@ typedef struct mbus_seqpkt_con {
 
   uint8_t msc_seqgen;
   uint8_t msc_local_flags_sent;
-  uint8_t msc_local_close;
 
+  uint8_t msc_local_close;
   uint8_t msc_txq_len;
+
   uint8_t msc_new_fragment;
+  uint8_t msc_rtx_attempt;
 
   struct pbuf_queue msc_txq;
   struct pbuf_queue msc_rxq;
@@ -333,7 +335,9 @@ mbus_seqpkt_output(mbus_seqpkt_con_t *msc, pbuf_t *pb, uint32_t xmit)
     uint8_t *payload = pbuf_append(pb, tx->pb_buflen);
     memcpy(payload, pbuf_cdata(tx, 0), tx->pb_buflen);
 
-    net_timer_arm(&msc->msc_rtx_timer, msc->msc_last_tx + SP_TIME_RTX);
+    msc->msc_rtx_attempt++;
+    net_timer_arm(&msc->msc_rtx_timer,
+                  msc->msc_last_tx + SP_TIME_RTX * msc->msc_rtx_attempt);
 
   } else if(msc->msc_local_close) {
 
@@ -370,6 +374,7 @@ release_txq(mbus_seqpkt_con_t *msc)
   pb->pb_next = NULL;
   pbuf_free(pb);
   timer_disarm(&msc->msc_rtx_timer);
+  msc->msc_rtx_attempt = 0;
   msc->msc_new_fragment = 1;
 }
 
