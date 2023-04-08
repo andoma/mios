@@ -19,10 +19,16 @@
 
 #define GAP_RAND_MASK 1023
 
+#ifdef USART_CR1_UESM
 #define CR1_HEADER \
   (USART_CR1_UE | USART_CR1_RXNEIE | USART_CR1_TE | USART_CR1_RE | \
    USART_CR1_UESM)
-#define CR1_PAYLOAD_TX \
+#else
+#define CR1_HEADER \
+  (USART_CR1_UE | USART_CR1_RXNEIE | USART_CR1_TE | USART_CR1_RE)
+#endif
+
+#define CR1_PAYLOAD_TX                                  \
   (USART_CR1_UE | USART_CR1_TCIE | USART_CR1_TE)
 #define CR1_PAYLOAD_RX \
   (USART_CR1_UE | USART_CR1_RE | USART_CR1_TE)
