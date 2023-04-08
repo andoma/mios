@@ -50,17 +50,7 @@ static const char errmsg[] = {
 const char *
 error_to_string(error_t e)
 {
-  unsigned int index = -e;
-  const char *str = errmsg;
-  while(1) {
-    if(!index)
-      return str;
-    index--;
-    size_t n = strlen(str);
-    if(n == 0)
-      return "???";
-    str += n + 1;
-  }
+  return strtbl(errmsg, -e);
 }
 
 static int
