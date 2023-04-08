@@ -20,6 +20,7 @@ cpu_init(void)
   // Create idle task
   void *sp_bottom = xalloc(stack_size + sizeof(thread_t),
                            CPU_STACK_ALIGNMENT, 0);
+  memset(sp_bottom, 0x55, stack_size + sizeof(thread_t));
   void *sp = sp_bottom + stack_size;
   asm volatile ("msr psp, %0" : : "r" (sp));
 
