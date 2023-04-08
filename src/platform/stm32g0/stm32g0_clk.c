@@ -50,7 +50,7 @@ stm32g0_init_pll(void)
 void
 stm32g0_stop_pll(void)
 {
-  reg_set_bits(RCC_CFGR, 0, 3, 0); // Use PLL as system clock
+  reg_set_bits(RCC_CFGR, 0, 3, 0); // Use HSI16 as system clock
   while(((reg_rd(RCC_CFGR) >> 3) & 0x7) != 0x0) {}
   reg_clr_bit(RCC_CR, 24);
 }
