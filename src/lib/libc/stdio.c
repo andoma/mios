@@ -386,6 +386,29 @@ hexdump(const char *prefix, const void *data, size_t len)
 }
 
 
+void
+stprintflags(stream_t *s, const char *str, uint32_t flags, const char *sep)
+{
+  int i = 0;
+  int need_sep = 0;
+  size_t seplen = strlen(sep);
+  while(1) {
+    size_t n = strlen(str);
+    if(n == 0)
+      break;
+    if(flags & (1 << i)) {
+      if(need_sep) {
+        s->write(s, sep, seplen);
+      }
+      s->write(s, str, n);
+      need_sep = 1;
+    }
+    str += n + 1;
+    i++;
+  }
+}
+
+
 #if WITH_MAIN
 
 static size_t

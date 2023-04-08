@@ -24,3 +24,6 @@ void sthexdump(stream_t *s, const char *prefix, const void *data, size_t len,
                unsigned int offset);
 
 void hexdump(const char *prefix, const void *data, size_t len);
+
+void stprintflags(stream_t *s, const char *str,
+                  unsigned int flags, const char *sep);

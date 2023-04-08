@@ -123,3 +123,18 @@ strlcpy(char * restrict dst, const char * restrict src, size_t siz)
 
   return (src - s0) + strlen(src);
 }
+
+
+const char *
+strtbl(const char *str, size_t index)
+{
+  while(1) {
+    if(!index)
+      return str;
+    index--;
+    size_t n = strlen(str);
+    if(n == 0)
+      return "???";
+    str += n + 1;
+  }
+}

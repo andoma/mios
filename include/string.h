@@ -25,3 +25,5 @@ size_t strlcpy(char * restrict dst, const char * restrict src, size_t siz);
 
 __attribute__((access(read_only, 1), access(read_only, 2)))
 int strcmp(const char *s1, const char *s2);
+
+const char *strtbl(const char *str, size_t index);
