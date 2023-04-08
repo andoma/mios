@@ -93,9 +93,6 @@ ota_perform(svc_ota_t *sa)
     return ERR_BAD_PKT_SIZE;
   }
 
-  int first_sector = -1;
-  int num_sectors = 0;
-  size_t consecutive_size = 0;
 
   int num_blocks;
   uint32_t crc;
@@ -108,21 +105,41 @@ ota_perform(svc_ota_t *sa)
 
   const flash_iface_t *fif = flash_get_primary();
 
-  for(int i = 0; ; i++) {
-    int type = fif->get_sector_type(fif, i);
-    if(type == 0)
-      break;
+  // First, figure out number of sectors
 
+  int total_sectors = 0;
+  size_t total_size = 0;
+  while(1) {
+    size_t siz = fif->get_sector_size(fif, total_sectors);
+    if(siz == 0)
+      break;
+    total_size += siz;
+    total_sectors++;
+  }
+
+  evlog(LOG_NOTICE, "OTA: Flash total %d sectors (%d bytes)",
+        total_sectors, total_size);
+
+  if(total_sectors == 0)
+    return ERR_NO_FLASH_SPACE;
+
+  int first_sector = -1;
+  int last_sector = -1;
+  size_t consecutive_size = 0;
+
+  // Start from the end or we risk overwriting ourself
+  for(int i = total_sectors - 1; i >= 0; i--) {
+    const int type = fif->get_sector_type(fif, i);
     if(type == FLASH_SECTOR_TYPE_AVAIL) {
-      if(first_sector == -1)
-        first_sector = i;
+      if(last_sector == -1)
+        last_sector = i;
       consecutive_size += fif->get_sector_size(fif, i);
-      num_sectors++;
+      first_sector = i;
       if(consecutive_size >= size)
         break;
     } else {
+      last_sector = -1;
       first_sector = -1;
-      num_sectors = 0;
       consecutive_size = 0;
     }
   }
@@ -134,6 +151,7 @@ ota_perform(svc_ota_t *sa)
   if(consecutive_size < size)
     return ERR_NO_FLASH_SPACE;
 
+  const int num_sectors = last_sector - first_sector + 1;
   for(int i = 0; i < num_sectors; i++) {
     evlog(LOG_DEBUG, "OTA: Erasing sector %d", first_sector + i);
     usleep(10000);
