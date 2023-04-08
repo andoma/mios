@@ -62,6 +62,8 @@ typedef struct {
   void *arg;
 } gpiote_event_t;
 
+static uint8_t gpiote_level = 0xff;
+
 static gpiote_event_t gpiote_events[8];
 
 #define GPIOTE_BASE       0x40006000
@@ -89,11 +91,14 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull,
               void (*cb)(void *arg), void *arg,
               gpio_edge_t edge, int level)
 {
+  if(level < gpiote_level) {
+    gpiote_level = level;
+    irq_enable(6, level);
+  }
 
-  irq_enable(6, level); // Increase loopcount to 8 once we fix IRQ level mixing
   gpio_conf_input(gpio, pull);
 
-  for(int i = 0; i < 1; i++) {
+  for(int i = 0; i < ARRAYSIZE(gpiote_events); i++) {
     if(gpiote_events[i].cb)
       continue;
 
