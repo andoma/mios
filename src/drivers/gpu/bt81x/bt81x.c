@@ -643,7 +643,8 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
              const bt81x_bitmap_t bitmaps[],
              size_t num_bitmaps,
              const gfx_display_delegate_t *gdd,
-             void *opaque)
+             void *opaque,
+             int enabled)
 {
   bt81x_t *b = calloc(1, sizeof(bt81x_t) + sizeof(uint32_t) * num_bitmaps);
   g_bt81x = b;
@@ -652,7 +653,7 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
 
   b->display_size.siz.width = timings->width;
   b->display_size.siz.height = timings->height;
-  b->enabled = 1;
+  b->enabled = enabled;
   b->backlight = 64;
   b->timings = timings;
   b->spi = spi;

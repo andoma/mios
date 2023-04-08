@@ -41,7 +41,8 @@ struct gfx_display *bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
                                  const bt81x_bitmap_t bitmaps[],
                                  size_t num_bitmaps,
                                  const gfx_display_delegate_t *gdd,
-                                 void *opaque);
+                                 void *opaque,
+                                 int enabled);
 
 void bt81x_enable(struct gfx_display *, int enabled);
 
