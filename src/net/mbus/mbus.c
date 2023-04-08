@@ -78,7 +78,7 @@ mbus_output(pbuf_t *pb)
     if(copy != NULL) {
 
       mni->mni_tx_bytes += pb->pb_pktlen;
-      copy = mni->mni_output(mni, pb);
+      copy = mni->mni_output(mni, copy);
       if(copy != NULL)
         pbuf_free(copy);
     }
@@ -232,6 +232,8 @@ mbus_bcast(pbuf_t *pb, mbus_netif_t *src)
       continue;
 
     pbuf_t *copy = pbuf_copy(pb, 0);
+    if(copy == NULL)
+      continue;
     mni->mni_tx_bytes += copy->pb_pktlen;
     copy = mni->mni_output(mni, copy);
     if(copy != NULL)
