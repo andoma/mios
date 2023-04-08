@@ -151,35 +151,25 @@ cmd_settings(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("settings", cmd_settings)
 
 
-static error_t
-cmd_version(cli_t *cli, int argc, char **argv)
-{
-  mios_print_version(cli->cl_stream);
-  return 0;
-}
 
-CLI_CMD_DEF("version", cmd_version)
-
-
-
-
-static const char *reset_reasons[8] = {
-  [0] = "Unknown",
-  [RESET_REASON_LOW_POWER_RESET] = "Low power",
-  [RESET_REASON_WATCHDOG] = "Watchdog",
-  [RESET_REASON_SW_RESET] = "SW-Reset",
-  [RESET_REASON_POWER_ON] = "Power On",
-  [RESET_REASON_EXT_RESET] = "External",
-  [RESET_REASON_BROWNOUT] = "Brownout",
-  [RESET_REASON_OTHER] = "Other",
-};
-
-
+const char *reset_reasons =
+  "Low-Power\0"
+  "Watchdog\0"
+  "Software\0"
+  "Power-On\0"
+  "External\0"
+  "Brownout\0"
+  "CPU-lockup\0"
+  "GPIO\0"
+  "Comp\0"
+  "NFC\0";
 
 static error_t
 cmd_sysinfo(cli_t *cli, int argc, char **argv)
 {
   const struct serial_number sn = sys_get_serial_number();
+
+  mios_print_version(cli->cl_stream);
 
   if(sn.len) {
     cli_printf(cli, "Serial number: ");
@@ -189,8 +179,12 @@ cmd_sysinfo(cli_t *cli, int argc, char **argv)
     }
     cli_printf(cli, "\n");
   }
-  cli_printf(cli, "Last reset reason: %s\n",
-             reset_reasons[sys_get_reset_reason()]);
+  uint32_t rr = sys_get_reset_reason();
+  if(rr) {
+    cli_printf(cli, "Last reset reason: ");
+    stprintflags(cli->cl_stream, reset_reasons, rr, " ");
+    cli_printf(cli, "\n");
+  }
   return 0;
 }
 

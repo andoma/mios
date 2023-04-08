@@ -3,14 +3,17 @@
 #include "io.h"
 
 typedef enum {
-  RESET_REASON_UNKNOWN         = 0x0,
-  RESET_REASON_LOW_POWER_RESET = 0x1,
-  RESET_REASON_WATCHDOG        = 0x2,
-  RESET_REASON_SW_RESET        = 0x3,
-  RESET_REASON_POWER_ON        = 0x4,
-  RESET_REASON_EXT_RESET       = 0x5,
-  RESET_REASON_BROWNOUT        = 0x6,
-  RESET_REASON_OTHER           = 0x7
+  RESET_REASON_LOW_POWER_RESET = (1 << 0),
+  RESET_REASON_WATCHDOG        = (1 << 1),
+  RESET_REASON_SW_RESET        = (1 << 2),
+  RESET_REASON_POWER_ON        = (1 << 3),
+  RESET_REASON_EXT_RESET       = (1 << 4),
+  RESET_REASON_BROWNOUT        = (1 << 5),
+  RESET_REASON_CPU_LOCKUP      = (1 << 6),
+  RESET_REASON_GPIO            = (1 << 7),
+  RESET_REASON_COMPARATOR      = (1 << 8),
+  RESET_REASON_DEBUG           = (1 << 9),
+  RESET_REASON_NFC             = (1 << 10),
 } reset_reason_t;
 
 reset_reason_t sys_get_reset_reason(void);

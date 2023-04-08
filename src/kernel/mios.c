@@ -107,7 +107,7 @@ flash_get_primary(void)
 reset_reason_t __attribute__((weak))
 sys_get_reset_reason(void)
 {
-  return RESET_REASON_UNKNOWN;
+  return 0;
 }
 
 const struct serial_number __attribute__((weak))
