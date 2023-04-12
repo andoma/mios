@@ -1,0 +1,11 @@
+
+define print_threads
+  set var $t = allthreads.slh_first
+  while $t
+    printf "%12s Stack:%p sp:%p\n", $t.t_name, $t.t_sp_bottom, $t.t_sp
+    set var $rz = (unsigned int *)$t.t_sp_bottom
+    printf "\t\t Redzone: %08x.%08x.%08x.%08x\n", $rz[0], $rz[1], $rz[2], $rz[3]
+    set var $t = $t.t_global_link.sle_next
+  end
+end
+
