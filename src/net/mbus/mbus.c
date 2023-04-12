@@ -56,6 +56,7 @@ mbus_output(pbuf_t *pb)
   mbus_netif_t *mni, *n;
 
   if(dst_addr < 32) {
+    // Unicast
     const uint32_t mask = 1 << dst_addr;
 
     SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
@@ -63,6 +64,16 @@ mbus_output(pbuf_t *pb)
         mni->mni_tx_bytes += pb->pb_pktlen;
         return mni->mni_output(mni, pb);
       }
+    }
+  } else {
+    // Multicast
+
+    const uint16_t group = ((hdr[0] & 0x1f) << 8) | (hdr[1]);
+    if(group < 4096) {
+      // We loop back dsig outputs to our input as well
+      pb = mbus_dsig_input(pb, group);
+      if(pb == NULL)
+        return pb;
     }
   }
 
@@ -266,7 +277,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 
   if(dst_addr & 0x20) {
 
-    uint16_t group = ((dst_addr & 0x1f) << 8) | hdr[1];
+    const uint16_t group = ((dst_addr & 0x1f) << 8) | hdr[1];
     if(group < 4096) {
       pb = mbus_dsig_input(pb, group);
     }

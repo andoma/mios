@@ -2,7 +2,6 @@
 
 #include <mios/device.h>
 #include <mios/task.h>
-#include <mios/timer.h>
 
 #include "pbuf.h"
 #include "socket.h"
@@ -74,8 +73,6 @@ typedef struct nexthop {
 
 
 void netif_attach(netif_t *ni, const char *name, const device_class_t *dc);
-
-void net_timer_arm(timer_t *t, uint64_t deadline);
 
 void netlog(const char *fmt, ...);
 

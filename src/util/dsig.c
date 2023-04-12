@@ -9,9 +9,13 @@
 #include "net/mbus/mbus_dsig.h"
 #endif
 
-#include "irq.h"
+#include "net/net_task.h"
 
 static SLIST_HEAD(, dsig_sub) dsig_subs;
+static SLIST_HEAD(, dsig_sub) dsig_pending_subs;
+
+
+static mutex_t dsig_sub_mutex = MUTEX_INITIALIZER("dsigsub");
 
 struct dsig_sub {
   SLIST_ENTRY(dsig_sub) ds_link;
@@ -34,42 +38,59 @@ sub_timeout(void *opaque, uint64_t expire)
 }
 
 
-#include <stdio.h>
-
 void
 dsig_dispatch(uint16_t signal, const void *data, size_t len)
 {
-  dsig_sub_t *ds;
-  int q = irq_forbid(IRQ_LEVEL_CLOCK);
   uint64_t now = 0;
+  dsig_sub_t *ds;
+
+  mutex_lock(&dsig_sub_mutex);
   SLIST_FOREACH(ds, &dsig_subs, ds_link) {
     if(ds->ds_signal == -1) {
       ds->ds_cbg(ds->ds_opaque, data, len, signal);
     } else if(ds->ds_signal == signal) {
       if(!now)
-        now = clock_get_irq_blocked();
-      timer_arm_abs(&ds->ds_timer, now + ds->ds_ttl * 1000);
+        now = clock_get();
+      net_timer_arm(&ds->ds_timer, now + ds->ds_ttl * 1000);
       ds->ds_cb(ds->ds_opaque, data, len);
     }
   }
-  irq_permit(q);
+  mutex_unlock(&dsig_sub_mutex);
 }
 
 
 
 void
-dsig_emit(uint16_t signal, const void *data, size_t len, int flags)
+dsig_emit(uint16_t signal, const void *data, size_t len)
 {
-  if(flags & DSIG_EMIT_LOCAL) {
-    dsig_dispatch(signal, data, len);
-  }
-
 #ifdef ENABLE_NET_MBUS
-  if(flags & DSIG_EMIT_MBUS) {
-    mbus_dsig_emit(signal, data, len);
-  }
+  mbus_dsig_emit(signal, data, len);
 #endif
 }
+
+
+static void
+dsig_sub_insert_cb(net_task_t *nt, uint32_t signals)
+{
+  mutex_lock(&dsig_sub_mutex);
+  while(1) {
+    dsig_sub_t *ds = SLIST_FIRST(&dsig_pending_subs);
+    if(ds != NULL)
+      SLIST_REMOVE_HEAD(&dsig_pending_subs, ds_link);
+
+    if(ds == NULL)
+      break;
+
+    if(ds->ds_ttl)
+      net_timer_arm(&ds->ds_timer, clock_get() + ds->ds_ttl * 1000);
+
+    SLIST_INSERT_HEAD(&dsig_subs, ds, ds_link);
+  }
+  mutex_unlock(&dsig_sub_mutex);
+}
+
+
+static net_task_t dsig_sub_insert_task = { dsig_sub_insert_cb };
 
 
 dsig_sub_t *
@@ -85,13 +106,14 @@ dsig_sub(uint16_t signal, uint16_t ttl,
   ds->ds_timer.t_cb = sub_timeout;
   ds->ds_timer.t_opaque = ds;
 
-  int q = irq_forbid(IRQ_LEVEL_CLOCK);
-  timer_arm_abs(&ds->ds_timer, clock_get_irq_blocked() + ttl * 1000);
-  SLIST_INSERT_HEAD(&dsig_subs, ds, ds_link);
-  irq_permit(q);
-
+  mutex_lock(&dsig_sub_mutex);
+  SLIST_INSERT_HEAD(&dsig_pending_subs, ds, ds_link);
+  mutex_unlock(&dsig_sub_mutex);
+  net_task_raise(&dsig_sub_insert_task, 1);
   return ds;
 }
+
+
 
 dsig_sub_t *
 dsig_sub_all(void (*cb)(void *opaque, const void *data, size_t len,
@@ -102,8 +124,11 @@ dsig_sub_all(void (*cb)(void *opaque, const void *data, size_t len,
   ds->ds_cbg = cb;
   ds->ds_opaque = opaque;
   ds->ds_signal = -1;
-  int q = irq_forbid(IRQ_LEVEL_SWITCH);
-  SLIST_INSERT_HEAD(&dsig_subs, ds, ds_link);
-  irq_permit(q);
+
+  mutex_lock(&dsig_sub_mutex);
+  SLIST_INSERT_HEAD(&dsig_pending_subs, ds, ds_link);
+  mutex_unlock(&dsig_sub_mutex);
+  net_task_raise(&dsig_sub_insert_task, 1);
+
   return ds;
 }
