@@ -148,14 +148,12 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
 
   const service_t *s = service_find(name);
   if(s == NULL) {
-    // TODO: Send reject reply
     mbus_seqpkt_accept_err(name, "Not available", remote_addr);
     return pb;
   }
 
   mbus_seqpkt_con_t *msc = xalloc(sizeof(mbus_seqpkt_con_t), 0, MEM_MAY_FAIL);
   if(msc == NULL) {
-    // TODO: Send reject reply
     mbus_seqpkt_accept_err(name, "No memory", remote_addr);
     return pb;
   }
@@ -190,7 +188,6 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   if(msc->msc_svc_opaque == NULL) {
     free(msc);
     mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
-    // TODO: Send reject reply
     return pb;
   }
 
