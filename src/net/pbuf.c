@@ -177,7 +177,8 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
 
     if(pb->pb_buflen == 0) {
       pbuf_t *n = pb->pb_next;
-      n->pb_pktlen = pb->pb_pktlen;
+      if(n != NULL)
+        n->pb_pktlen = pb->pb_pktlen;
       pbuf_data_put(pb->pb_data);
       pbuf_put(pb);
       pb = n;
