@@ -70,6 +70,15 @@ gpio_conf_output(gpio_t gpio,
 
 
 void
+gpio_dir_output(gpio_t gpio)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+  reg_set_bits(GPIO_MODER(port), bit * 2, 2, 1);
+}
+
+
+void
 gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
              gpio_output_speed_t speed, gpio_pull_t pull)
 {
@@ -153,6 +162,23 @@ static uint8_t gpio_irq_level[3];
 
 #define EXTI_EXTICR(x)   (0x40021860 + 4 * (x))
 #define EXTI_IMR          0x40021880
+
+
+void
+gpio_conf_irq_edge(gpio_t gpio, gpio_edge_t edge)
+{
+  const int bit = gpio & 0xf;
+
+  if(edge & GPIO_FALLING_EDGE)
+    reg_set_bit(EXTI_FTSR1, bit);
+  else
+    reg_clr_bit(EXTI_FTSR1, bit);
+
+  if(edge & GPIO_RISING_EDGE)
+    reg_set_bit(EXTI_RTSR1, bit);
+  else
+    reg_clr_bit(EXTI_RTSR1, bit);
+}
 
 
 void
