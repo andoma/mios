@@ -327,11 +327,11 @@ mbus_print_info(mbus_netif_t *mni, struct stream *st)
   stprintf(st, "\t\tBytes:%u  Sent:%u  Qdrops:%u  Failed:%u\n",
            mni->mni_tx_bytes,  mni->mni_tx_packets,
            mni->mni_tx_qdrops, mni->mni_tx_fail);
-  stprintf(st, "\tLocal address: %x\n", mbus_local_addr);
+  stprintf(st, "\tLocal address: %d\n", mbus_local_addr);
   stprintf(st, "\tActive hosts:");
   for(int i = 0; i < 32; i++) {
     if((1 << i) & mni->mni_active_hosts) {
-      stprintf(st, "%x ", i);
+      stprintf(st, "%d ", i);
     }
   }
   stprintf(st, "\n");
