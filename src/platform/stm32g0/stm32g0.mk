@@ -33,3 +33,5 @@ SRCS-${ENABLE_NET_MBUS} += \
 SRCS-${ENABLE_SYSTIM} += ${P}/stm32g0_systim.c
 
 ${MOS}/platform/stm32g0/boot/bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m0plus -mthumb -include ${BOOTLOADER_DEFS}
+
+${P}/boot/bootloader.c : ${O}/version_git.h
