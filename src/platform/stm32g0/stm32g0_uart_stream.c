@@ -8,6 +8,7 @@
 static const stm32g0_uart_cfg_t uart_config[] = {
   { 0x0138, CLK_USART1, 27, 51, 50},
   { 0x0044, CLK_USART2, 28, 53, 52},
+  { 0x0048, CLK_USART3, 29, 55, 54},
 };
 
 
@@ -28,9 +29,10 @@ int stm32g0_uart_tx(int instance, gpio_t pin)
     return 1;
   if(instance == 2 && pin == GPIO_PA(14))
     return 1;
+  if(instance == 3 && pin == GPIO_PB(8))
+    return 4;
 
-  extern int __invalid_stm32g0_uart_tx();
-  return __invalid_stm32g0_uart_tx();
+  panic("Invalid UART TX %d %d", instance, pin);
 }
 
 
@@ -44,16 +46,18 @@ int stm32g0_uart_rx(int instance, gpio_t pin)
     return 1;
   if(instance == 2 && pin == GPIO_PA(15))
     return 1;
+  if(instance == 3 && pin == GPIO_PB(9))
+    return 4;
 
-  extern int __invalid_stm32g0_uart_rx();
-  return __invalid_stm32g0_uart_rx();
+  panic("Invalid UART RX %d %d", instance, pin);
 }
 
 
-static stm32_uart_t *uarts[2];
+static stm32_uart_t *uarts[3];
 
 void irq_27(void) { uart_irq(uarts[0]); }
 void irq_28(void) { uart_irq(uarts[1]); }
+void irq_29(void) { uart_irq(uarts[2]); }
 
 
 
