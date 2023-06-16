@@ -9,20 +9,13 @@
 #define BLOCKSIZE 32
 #define BLOCKS_PER_SECTOR (2048 / 32)
 
+#ifndef GPIO_MODER_PA
+#define GPIO_MODER_PA 0
+#endif
 
-/*
-
-TBD: Make this configurable
-
-Console USART2
-  TX  = PA2
-  RX  = PA3
-
-MBUS USART1
-  TX  = PB6  AF=0
-  RX  = PB7  AF=0
-
-*/
+#ifndef GPIO_MODER_PB
+#define GPIO_MODER_PB 0
+#endif
 
 //======================================================================
 // USART
@@ -30,6 +23,8 @@ MBUS USART1
 
 #define USART1_BASE 0x40013800
 #define USART2_BASE 0x40004400
+#define USART3_BASE 0x40004800
+
 
 #define USART_CR1  0x00
 #define USART_CR2  0x04
@@ -53,8 +48,8 @@ __attribute__((section("bltext"),noinline))
 static void
 console_send(char c)
 {
-  while(!(reg_rd(USART2_BASE + USART_SR) & (1 << 7))) {}
-  reg_wr(USART2_BASE + USART_TDR, c);
+  while(!(reg_rd(USART_CONSOLE + USART_SR) & (1 << 7))) {}
+  reg_wr(USART_CONSOLE + USART_TDR, c);
 }
 
 __attribute__((section("bltext"),noinline))
@@ -94,12 +89,12 @@ mbus_recv_byte(int timeout)
 {
   int c = 0;
 
-  while(!(reg_rd(USART1_BASE + USART_SR) & (1 << 5))) {
+  while(!(reg_rd(USART_MBUS + USART_SR) & (1 << 5))) {
     c++;
     if(c == timeout)
       return -1;
   }
-  return reg_rd(USART1_BASE + USART_RDR);
+  return reg_rd(USART_MBUS + USART_RDR);
 }
 
 
@@ -107,9 +102,9 @@ __attribute__((section("bltext"),noinline))
 static void
 mbus_send_byte(uint8_t c)
 {
-  reg_wr(USART1_BASE + USART_TDR, c);
+  reg_wr(USART_MBUS + USART_TDR, c);
   // Wait for byte to transmit
-  while(!(reg_rd(USART1_BASE + USART_SR) & (1 << 6))) {}
+  while(!(reg_rd(USART_MBUS + USART_SR) & (1 << 6))) {}
   // Read back echo
   mbus_recv_byte(256);
 }
@@ -189,55 +184,94 @@ __attribute__((section("bldata")))
 static const uint32_t reginit[] = {
 
   // Clocks
-
   RCC_AHBENR,      (1 << 12) | (1 << 8),  // CRC and FLASH
-  RCC_APBENR2,     (1 << 14), // CLK_USART1
-  RCC_APBENR1,     (1 << 17), // CLK_USART2
-  RCC_IOPENR,      0xf, // CLK_GPIO{A,B,C,D}
+  RCC_APBENR2,     (1 << 14),             // CLK_USART1
+  RCC_APBENR1,     (1 << 17) | (1 << 18), // CLK_USART2 | CLK_USART3
+  RCC_IOPENR,      0xf,                   // CLK_GPIO{A,B,C,D}
 
   // -----------------------------------------------------
   // Console
   // -----------------------------------------------------
 
-  // Set PA2 and PA3 into PULLUP
-  GPIO_PUPDR(PA),  GPIO_BITPAIR(2, 1) | GPIO_BITPAIR(3, 1) | 0x24000000,
+  USART_CONSOLE + USART_BRR, 139, // 115200 BAUD
 
-  // PA2 and PA3 AF=1
-  GPIO_AFRL(PA),   GPIO_BITQUAD(2, 1) | GPIO_BITQUAD(3, 1),
-
-
-  USART2_BASE + USART_BRR, 139, // 115200 BAUD
-
-  USART2_BASE + USART_CR1, (USART_CR1_UE | USART_CR1_TE), // Enable UART TX
+  USART_CONSOLE + USART_CR1, (USART_CR1_UE | USART_CR1_TE), // Enable UART TX
 
   // -----------------------------------------------------
   // MBUS
   // -----------------------------------------------------
 
-  // Set PB6 and PB7 into PULLUP
-  GPIO_PUPDR(PB),  GPIO_BITPAIR(6, 1) | GPIO_BITPAIR(7, 1),
-
-
-  USART1_BASE + USART_BRR, 139, // 115200 BAUD
+  USART_MBUS + USART_BRR, 139, // 115200 BAUD
 
   // Enable UART TX & RX
-  USART1_BASE + USART_CR1, 0,
-  USART1_BASE + USART_CR3, (1 << 12), // OVRDIS
-  USART1_BASE + USART_CR1, (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE),
-  USART1_BASE + USART_CR2, 0,
-  USART1_BASE + USART_ICR, 0xffffffff,
+  USART_MBUS + USART_CR1, 0,
+  USART_MBUS + USART_CR3, (1 << 12), // OVRDIS
+  USART_MBUS + USART_CR1, (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE),
+  USART_MBUS + USART_CR2, 0,
+  USART_MBUS + USART_ICR, 0xffffffff,
 
   // -----------------------------------------------------
-  // GPIO
+  // GPIO PORT A
   // -----------------------------------------------------
 
-  // Set PA2 and PA3 into AF  Keep SWDIO & SWCLK on
-  GPIO_MODER(PA),  GPIO_MODER_PA | GPIO_BITPAIR(2, 2) | GPIO_BITPAIR(3, 2) | 0xeb000000,
-  // Set PB6 and PB7 into AF
-  GPIO_MODER(PB),  GPIO_MODER_PB | GPIO_BITPAIR(6, 2) | GPIO_BITPAIR(7, 2),
+  GPIO_PUPDR(PA),
+#ifdef USART2_PA2_PA3
+  GPIO_BITPAIR(2, 1) | GPIO_BITPAIR(3, 1) |
+#endif
+  0x24000000,  // SWDIO SWCLK
 
+  GPIO_AFRL(PA),
+#ifdef USART2_PA2_PA3
+  GPIO_BITQUAD(2, 1) | GPIO_BITQUAD(3, 1) |
+#endif
+  0,
+
+  GPIO_MODER(PA),
+#ifdef USART2_PA2_PA3
+  GPIO_BITPAIR(2, 2) | GPIO_BITPAIR(3, 2) |
+#endif
+  GPIO_MODER_PA |
+  0xeb000000, // SWDIO SWCLK
+
+  // -----------------------------------------------------
+  // GPIO PORT B
+  // -----------------------------------------------------
+
+  // Set PB6 and PB7 into PULLUP
+  GPIO_PUPDR(PB),
+#ifdef USART1_PB6_PB7
+  GPIO_BITPAIR(6, 1) | GPIO_BITPAIR(7, 1) |
+#endif
+#ifdef USART3_PB8_PB9
+  GPIO_BITPAIR(8, 1) | GPIO_BITPAIR(9, 1) |
+#endif
+  0,
+
+  GPIO_AFRH(PB),
+#ifdef USART3_PB8_PB9
+  GPIO_BITQUAD(0, 4) | GPIO_BITQUAD(1, 4) |
+#endif
+  0,
+
+  GPIO_MODER(PB),
+#ifdef USART1_PB6_PB7
+  GPIO_BITPAIR(6, 2) | GPIO_BITPAIR(7, 2) |
+#endif
+#ifdef USART3_PB8_PB9
+  GPIO_BITPAIR(8, 2) | GPIO_BITPAIR(9, 2) |
+#endif
+  GPIO_MODER_PB,
+
+  // -----------------------------------------------------
+  // GPIO PORT C & D
+  // -----------------------------------------------------
+
+#ifdef GPIO_MODER_PC
   GPIO_MODER(PC),  GPIO_MODER_PC,
+#endif
+#ifdef GPIO_MODER_PD
   GPIO_MODER(PD),  GPIO_MODER_PD,
+#endif
 };
 
 
@@ -324,7 +358,7 @@ __attribute__((section("bltext"),noinline))
 static int
 mbus_recv_packet(ota_workmem_t *o)
 {
-  reg_wr(USART1_BASE + USART_BRR, 139); // 115200
+  reg_wr(USART_MBUS + USART_BRR, 139); // 115200
   const int h0 = mbus_recv_byte(RECV_TIMEOUT_SLOW);
   if(h0 < 0)
     return 2;
@@ -338,7 +372,7 @@ mbus_recv_packet(ota_workmem_t *o)
 
   o->rx_buf[0] = h0 & 0x3f;
   const int payload_len = (h0 >> 6) | ((h1 & 0xf) << 2);
-  reg_wr(USART1_BASE + USART_BRR, 16); // 1 MBAUD
+  reg_wr(USART_MBUS + USART_BRR, 16); // 1 MBAUD
   for(int i = 0; i < payload_len; i++) {
     const int p = mbus_recv_byte(RECV_TIMEOUT_FAST);
     if(p < 0)
@@ -366,11 +400,11 @@ mbus_tx_packet(ota_workmem_t *o)
   len += 4;
 
   // Wait for BUSY to clear
-  while((reg_rd(USART1_BASE + USART_SR) & (1 << 16))) {}
+  while((reg_rd(USART_MBUS + USART_SR) & (1 << 16))) {}
 
   reg_wr(GPIO_BSRR(TXE_PORT), (1 << TXE_BIT)); // Enable TXE
 
-  reg_wr(USART1_BASE + USART_BRR, 139); // 115200
+  reg_wr(USART_MBUS + USART_BRR, 139); // 115200
 
   int payload_len = len - 1;
   uint8_t hdr[2] = {o->tx_buf[0] | (payload_len << 6), payload_len >> 2};
@@ -385,7 +419,7 @@ mbus_tx_packet(ota_workmem_t *o)
     asm volatile("nop");
   }
 
-  reg_wr(USART1_BASE + USART_BRR, 16); // 1 MBAUD
+  reg_wr(USART_MBUS + USART_BRR, 16); // 1 MBAUD
   for(int i = 0; i < payload_len; i++) {
     mbus_send_byte(o->tx_buf[i + 1]);
   }

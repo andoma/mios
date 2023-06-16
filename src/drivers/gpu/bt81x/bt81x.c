@@ -691,10 +691,13 @@ void
 bt81x_enable(gfx_display_t *gd, int enabled)
 {
   bt81x_t *b = (bt81x_t *)gd;
-  int q = irq_forbid(IRQ_LEVEL_CLOCK);
-  b->enabled = enabled;
-  task_wakeup(&b->irq_waitq, 0);
-  irq_permit(q);
+  if(b->enabled != enabled) {
+    b->enabled = enabled;
+
+    int q = irq_forbid(IRQ_LEVEL_CLOCK);
+    task_wakeup(&b->irq_waitq, 0);
+    irq_permit(q);
+  }
 }
 
 
