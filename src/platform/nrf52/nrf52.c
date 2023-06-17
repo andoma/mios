@@ -7,6 +7,8 @@
 
 #include "nrf52_reg.h"
 
+static uint32_t reset_reason;
+
 static void  __attribute__((constructor(102)))
 nrf52_init_heap(void)
 {
@@ -26,14 +28,16 @@ nrf52_init(void)
 
   printf("\nnRF%x (%d kB Flash, %d kB RAM)\n", part, flashsize, ramsize);
 
+  reset_reason = reg_rd(0x40000400);
+  reg_wr(0x40000400, reset_reason);
 }
 
 
 reset_reason_t
 sys_get_reset_reason(void)
 {
-  reset_reason_t r = 0;
-  const uint32_t flags = reg_rd(0x40000400);
+  const uint32_t flags = reset_reason;
+  uint32_t r = 0;
 
   if(flags & (1 << 0))
     r |= RESET_REASON_EXT_RESET;
