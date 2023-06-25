@@ -17,6 +17,13 @@
 static const uint8_t pullmap[3] = {0, 3, 1};
 
 void
+gpio_disconnect(gpio_t gpio)
+{
+  reg_wr(GPIO_PIN_CNF(gpio), 2); // Set disconnect BIT
+}
+
+
+void
 gpio_conf_output(gpio_t gpio, gpio_output_type_t type,
                  gpio_output_speed_t speed, gpio_pull_t pull)
 {

@@ -102,3 +102,4 @@ void gpio_dir_output(gpio_t gpio);
 
 void gpio_conf_irq_edge(gpio_t gpio, gpio_edge_t edge);
 
+void gpio_disconnect(gpio_t gpio);
