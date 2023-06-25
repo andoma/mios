@@ -25,7 +25,7 @@ ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}
 GDB_PORT ?= 3333
 
 stlink: ${O}/build.elf
-	${GDB} -ex "target extended-remote localhost:${GDB_PORT}" $<
+	${GDB} -ex "target extended-remote localhost:${GDB_PORT}" -x ${T}/gdb/macros $<
 
 dfu: ${O}/build.bin
 	dfu-util -a 0 -D $< -s 0x08000000:leave

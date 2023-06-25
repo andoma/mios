@@ -2,10 +2,11 @@
 define print_threads
   set var $t = allthreads.slh_first
   while $t
-    printf "%12s Stack:%p sp:%p\n", $t.t_name, $t.t_sp_bottom, $t.t_sp
+    printf "%12s Stack:%p sp:%p state:%d prio:%d\n", $t.t_name, $t.t_sp_bottom, $t.t_sp, $t.t_task.t_state, $t.t_task.t_prio
     set var $rz = (unsigned int *)$t.t_sp_bottom
     printf "\t\t Redzone: %08x.%08x.%08x.%08x\n", $rz[0], $rz[1], $rz[2], $rz[3]
-    set var $t = $t.t_global_link.sle_next
+    printf "\t\t Wchan: %s\n", $t.t_wchan
+set var $t = $t.t_global_link.sle_next
   end
 end
 
