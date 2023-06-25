@@ -50,9 +50,9 @@ typedef struct nrf52_spi {
 static void
 spi_xfer_init(nrf52_spi_t *spi, gpio_t nss, int config)
 {
-  gpio_set_output(nss, 0);
+  reg_wr(spi->base_addr + SPIM_CONFIG, config & 0x7);
   reg_wr(spi->base_addr + SPIM_FREQUENCY, config & 0xff000000);
-  reg_wr(spi->base_addr + SPIM_CONFIG, config & 0x3);
+  gpio_set_output(nss, 0);
 }
 
 static void
@@ -60,6 +60,7 @@ spi_xfer_fini(nrf52_spi_t *spi, gpio_t nss)
 {
   gpio_set_output(nss, 1);
 }
+
 
 static void
 spi_xfer(nrf52_spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len)
@@ -94,7 +95,7 @@ spi_xfer(nrf52_spi_t *spi, const uint8_t *tx, uint8_t *rx, size_t len)
     reg_wr(spi->base_addr + SPIM_TASKS_START, 1);
 
     while(!spi->done) {
-      task_sleep(&spi->waitq);
+      task_sleep_sched_locked(&spi->waitq);
     }
 
     spi->done = 0;
@@ -135,7 +136,8 @@ spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss,
 }
 
 static error_t
-spi_txv(struct spi *dev, const struct iovec *txiov, size_t count,
+spi_rwv(struct spi *dev, const struct iovec *txiov,
+        const struct iovec *rxiov, size_t count,
         gpio_t nss, int config)
 {
   nrf52_spi_t *spi = (nrf52_spi_t *)dev;
@@ -144,7 +146,8 @@ spi_txv(struct spi *dev, const struct iovec *txiov, size_t count,
   spi_xfer_init(spi, nss, config);
 
   for(size_t i = 0; i < count; i++) {
-    spi_xfer(spi, txiov[i].iov_base, NULL, txiov[i].iov_len);
+    spi_xfer(spi, txiov[i].iov_base,
+             rxiov ? rxiov[i].iov_base : NULL, txiov[i].iov_len);
   }
   spi_xfer_fini(spi, nss);
   mutex_unlock(&spi->mutex);
@@ -176,9 +179,9 @@ spi_irq(void *arg)
 {
   struct nrf52_spi *spi = (struct nrf52_spi *)arg;
   if(reg_rd(spi->base_addr + SPIM_EVENTS_END)) {
-    spi->done = 1;
-    task_wakeup(&spi->waitq, 0);
     reg_wr(spi->base_addr + SPIM_EVENTS_END, 0);
+    spi->done = 1;
+    task_wakeup_sched_locked(&spi->waitq, 0);
   }
 }
 
@@ -220,7 +223,7 @@ nrf52_spi_create(unsigned int spi_instance, gpio_t clk, gpio_t miso,
   reg_wr(spi->base_addr + SPIM_INTENSET, (1 << 6)); // END interrupt
 
   spi->spi.rw = spi_rw;
-  spi->spi.txv = spi_txv;
+  spi->spi.rwv = spi_rwv;
   spi->spi.rw_locked = spi_rw_locked;
   spi->spi.lock = spi_lock;
   spi->spi.get_config = spi_get_config;

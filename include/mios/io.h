@@ -62,8 +62,11 @@ struct iovec;
 typedef struct spi {
   error_t (*rw)(struct spi *bus, const uint8_t *tx, uint8_t *rx, size_t len,
                 gpio_t nss, int config);
-  __attribute__((access(read_only, 2, 3)))
-  error_t (*txv)(struct spi *bus, const struct iovec *txiov,
+
+  __attribute__((access(read_only, 2, 4)))
+  error_t (*rwv)(struct spi *bus,
+                 const struct iovec *txiov,
+                 const struct iovec *rxiov,
                  size_t count, gpio_t nss, int config);
   error_t (*rw_locked)(struct spi *bus, const uint8_t *tx, uint8_t *rx,
                        size_t len, gpio_t nss, int mode);

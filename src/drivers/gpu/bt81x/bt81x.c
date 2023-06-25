@@ -324,7 +324,8 @@ bt81x_cop_writev(bt81x_t *b, const void *data, size_t len)
     hdr[1] = 0x80 | (b->cmd_write >> 8);
     hdr[2] = b->cmd_write;
 
-    error_t err = b->spi->txv(b->spi, iov, 2 + !!pad, b->gpio_ncs, b->spi_cfg);
+    error_t err = b->spi->rwv(b->spi, iov, NULL,
+                              2 + !!pad, b->gpio_ncs, b->spi_cfg);
     if(err)
       return err;
     b->cmd_write = (b->cmd_write + len + pad) & 0xfff;
@@ -443,7 +444,7 @@ load_initial_displaylist(bt81x_t *b)
   v[1].iov_base = (void *)setup_displaylist;
   v[1].iov_len = sizeof(setup_displaylist);
 
-  error_t err = b->spi->txv(b->spi, v, 2, b->gpio_ncs, b->spi_cfg);
+  error_t err = b->spi->rwv(b->spi, v, NULL, 2, b->gpio_ncs, b->spi_cfg);
   if(err)
     return err;
   bt81x_wr32(b, EVE_REG_DLSWAP, EVE_DLSWAP_FRAME);

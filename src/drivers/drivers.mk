@@ -26,3 +26,7 @@ SRCS-${ENABLE_BT81X} += \
 
 SRCS-${ENABLE_MCP23008} += \
 	${SRC}/drivers/mcp23008.c
+
+SRCS += ${SRC}/drivers/spiflash.c
+
+${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}
