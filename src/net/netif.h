@@ -4,7 +4,6 @@
 #include <mios/task.h>
 
 #include "pbuf.h"
-#include "socket.h"
 #include "net_task.h"
 
 SLIST_HEAD(netif_list, netif);
@@ -44,8 +43,6 @@ typedef struct netif {
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
 
   SLIST_ENTRY(netif) ni_global_link;
-
-  struct socket_list ni_sockets;
 
 } netif_t;
 

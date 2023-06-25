@@ -1,7 +1,7 @@
 #include <mios/dsig.h>
 #include <mios/timer.h>
+#include <mios/task.h>
 #include <sys/queue.h>
-#include <net/socket.h>
 #include <stdlib.h>
 #include <unistd.h>
 

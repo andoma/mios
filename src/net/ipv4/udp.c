@@ -1,9 +1,10 @@
+#if 0
+
 #include "udp.h"
 
 #include "net/pbuf.h"
 #include "net/netif.h"
 #include "net/net.h"
-#include "net/socket.h"
 
 #include "ipv4.h"
 #include "dhcpv4.h"
@@ -67,3 +68,4 @@ udp_send(socket_t *s, pbuf_t *pb)
 }
 
 NET_SOCKET_PROTO_DEF(AF_INET, IPPROTO_UDP, udp_control, udp_send);
+#endif

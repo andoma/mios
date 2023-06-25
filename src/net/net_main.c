@@ -11,7 +11,6 @@
 #include "pbuf.h"
 
 #include "netif.h"
-#include "socket.h"
 #include "net_task.h"
 
 struct netif_list netifs;

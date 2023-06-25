@@ -39,12 +39,6 @@ SECTIONS {
                 . = ALIGN(4);
 
                 . = ALIGN(4);
-                _netsock_array_begin = .;
-                KEEP(*(netsock))
-                _netsock_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
                 _rpcdef_array_begin = .;
                 KEEP(*(rpcdef))
                 _rpcdef_array_end = .;

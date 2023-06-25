@@ -5,7 +5,6 @@
 
 #include "net/pbuf.h"
 #include "net/netif.h"
-#include "net/socket.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -25,7 +25,12 @@ typedef struct pbuf_pool {
 static struct pbuf_pool pbuf_datas = { . pp_wait = WAITABLE_INITIALIZER("pbufdata")};
 static struct pbuf_pool pbufs  = { . pp_wait = WAITABLE_INITIALIZER("pbuf")};
 
-void net_buffers_available(void);
+void __attribute__((weak))
+net_buffers_available(void)
+{
+
+}
+
 
 static void
 pbuf_pool_put(pbuf_pool_t *pp, void *item)
