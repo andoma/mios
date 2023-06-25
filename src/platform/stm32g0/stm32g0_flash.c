@@ -136,8 +136,8 @@ error_t
 stm32g0_p13n_put(const void *data, size_t len)
 {
   if(len > P13N_MAX_SIZE)
-    return ERR_NO_FLASH_SPACE;
-  
+    return ERR_NOSPC;
+
   error_t err = flash_erase_sector(get_p13n_sector());
   if(!err) {
     void *dst = get_p13n_addr();
