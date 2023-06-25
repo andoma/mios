@@ -15,8 +15,9 @@ LIST_HEAD(task_list, task);
 
 #define TASK_STATE_NONE     0
 #define TASK_STATE_RUNNING  1
-#define TASK_STATE_SLEEPING 2
-#define TASK_STATE_ZOMBIE   3
+#define TASK_STATE_READY    2
+#define TASK_STATE_SLEEPING 3
+#define TASK_STATE_ZOMBIE   4
 
 typedef struct task {
   union {
@@ -148,6 +149,9 @@ void task_wakeup(task_waitable_t *waitable, int all);
 void task_wakeup_sched_locked(task_waitable_t *waitable, int all);
 
 void task_sleep(task_waitable_t *waitable);
+
+// Use if you have irq_forbid(IRQ_LEVEL_SCHED)
+void task_sleep_sched_locked(task_waitable_t *waitable);
 
 // Returns 1 if deadline expired
 int task_sleep_deadline(task_waitable_t *waitable, int64_t deadline)

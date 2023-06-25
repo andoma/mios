@@ -1,3 +1,5 @@
+GLOBALDEPS += ${SRC}/kernel/kernel.mk
+
 SRCS += ${SRC}/kernel/mios.c \
 	${SRC}/kernel/io.c \
 	${SRC}/kernel/task.c \
