@@ -109,7 +109,8 @@ spi_rw(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len, gpio_t nss,
 
 
 static error_t
-spi_txv(struct spi *bus, const struct iovec *txiov, size_t count,
+spi_rwv(struct spi *bus, const struct iovec *txiov,
+        const struct iovec *rxiov, size_t count,
         gpio_t nss, int config)
 {
   struct stm32_spi *spi = (struct stm32_spi *)bus;
@@ -120,7 +121,8 @@ spi_txv(struct spi *bus, const struct iovec *txiov, size_t count,
   reg_wr(spi->base_addr + SPI_CR1, config);
 
   for(size_t i = 0; i < count; i++) {
-    err = spi_dma(spi, txiov[i].iov_base, NULL, txiov[i].iov_len, config);
+    err = spi_dma(spi, txiov[i].iov_base,
+                  rxiov ? rxiov[i].iov_base : NULL, txiov[i].iov_len, config);
     if(err)
       break;
   }
@@ -223,7 +225,7 @@ stm32_spi_create(int reg_base, int clkid,
 
 
   spi->spi.rw = spi_rw;
-  spi->spi.txv = spi_txv;
+  spi->spi.rwv = spi_rwv;
   spi->spi.rw_locked = spi_rw_locked;
   spi->spi.lock = spi_lock;
   spi->spi.get_config = spi_get_config;
