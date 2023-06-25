@@ -69,7 +69,7 @@
 #define MBUS_STATE_RX_HDR1    5
 #define MBUS_STATE_RX_PAYLOAD 6
 #define MBUS_STATE_GAP        7
-
+#define MBUS_STATE_DISABLED   8
 
 typedef struct uart_mbus {
   mbus_netif_t um_mni;
@@ -79,11 +79,14 @@ typedef struct uart_mbus {
   uint8_t state;
   uint8_t txq_len;
   uint8_t tx_attempts;
+  uint8_t disabled;
 
   uint32_t uart_reg_base;
 
-  gpio_t txe;
-  gpio_t rxe;
+  gpio_t txe_pin;
+  gpio_t rxe_pin;
+  gpio_t tx_pin;
+  gpio_t rx_pin;
 
   uint32_t tx_header_timeout;
   uint32_t tx_header_bad;
@@ -113,6 +116,27 @@ typedef struct uart_mbus {
 
 } uart_mbus_t;
 
+static void
+mbus_uart_enable(uart_mbus_t *um)
+{
+  gpio_conf_output(um->txe_pin, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_output(um->rxe_pin, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
+  reg_wr(UARTE_ENABLE, 8);
+  reg_wr(UARTE_PSELTXD, um->tx_pin);
+  reg_wr(UARTE_PSELRXD, um->rx_pin);
+}
+
+
+static void
+mbus_uart_disable(uart_mbus_t *um)
+{
+  gpio_disconnect(um->txe_pin);
+  gpio_disconnect(um->rxe_pin);
+  reg_wr(UARTE_ENABLE, 0);
+  um->state = MBUS_STATE_DISABLED;
+}
+
 
 static void
 disarm_timer()
@@ -141,8 +165,8 @@ splice(uart_mbus_t *um)
 static void
 enter_gap(uart_mbus_t *um)
 {
-  gpio_set_output(um->txe, 0);
-  gpio_set_output(um->rxe, 0);
+  gpio_set_output(um->txe_pin, 0);
+  gpio_set_output(um->rxe_pin, 0);
 
   um->state = MBUS_STATE_GAP;
   int delta = 50 + (reg_rd(RNG_VALUE) << 2);
@@ -168,7 +192,7 @@ start_tx(uart_mbus_t *um)
     return;
   }
 
-  gpio_set_output(um->txe, 1);
+  gpio_set_output(um->txe_pin, 1);
 
   const pbuf_t *pb = STAILQ_FIRST(&um->txq);
   const uint8_t *pkt = pbuf_cdata(pb, 0);
@@ -200,7 +224,7 @@ transmit_payload(uart_mbus_t *um)
   assert(pb != NULL);
   uint8_t *pkt = pbuf_data(pb, 0);
 
-  gpio_set_output(um->rxe, 1);
+  gpio_set_output(um->rxe_pin, 1);
 
   reg_wr(UARTE_TXD_PTR, (intptr_t)pkt + 1);
   reg_wr(UARTE_TXD_MAXCNT, pb->pb_pktlen - 1);
@@ -249,6 +273,10 @@ decode_header(uart_mbus_t *um)
   }
   um->state = MBUS_STATE_IDLE;
   disarm_timer();
+
+  if(um->disabled) {
+    mbus_uart_disable(um);
+  }
 }
 
 
@@ -360,8 +388,14 @@ nrf52_mbus_uart_timer_irq(void *arg)
       um->state = MBUS_STATE_IDLE;
       // FALLTHRU
     case MBUS_STATE_IDLE:
-      if(um->txq_len)
+      if(um->txq_len) {
         start_tx(um);
+      } else {
+
+        if(um->disabled) {
+          mbus_uart_disable(um);
+        }
+      }
       break;
     case MBUS_STATE_TX_HDR0:
     case MBUS_STATE_TX_HDR1:
@@ -381,6 +415,8 @@ nrf52_mbus_uart_timer_irq(void *arg)
       transmit_payload(um);
       break;
     case MBUS_STATE_TX_PAYLOAD:
+      break;
+    case MBUS_STATE_DISABLED:
       break;
     default:
       panic("Bad timer state");
@@ -457,19 +493,29 @@ static void
 mbus_uart_power_state(struct device *dev, device_power_state_t state)
 {
   uart_mbus_t *um = (uart_mbus_t *)dev;
-  if(state == DEVICE_POWER_STATE_SUSPEND) {
-    // Make sure we are silent on bus when suspended
-    gpio_set_output(um->txe, 0);
+  int q = irq_forbid(IRQ_LEVEL_NET);
+
+  switch(state) {
+  case DEVICE_POWER_STATE_SUSPEND:
+    if(um->state == MBUS_STATE_IDLE) {
+      mbus_uart_disable(um);
+    }
+    um->disabled = 1;
+    break;
+  case DEVICE_POWER_STATE_RESUME:
+    um->disabled = 0;
+    mbus_uart_enable(um);
+    enter_gap(um);
+    break;
   }
+
+  irq_permit(q);
 }
 
 static const device_class_t mbus_uart_device_class = {
   .dc_print_info = mbus_uart_print_info,
   .dc_power_state = mbus_uart_power_state,
 };
-
-
-
 
 
 static void
@@ -482,22 +528,16 @@ buffers_avail(netif_t *ni)
 }
 
 
-uart_mbus_t *g_um;
-
 void
-nrf52_mbus_uart_init(gpio_t txpin, gpio_t rxpin, gpio_t txe, gpio_t rxe)
+nrf52_mbus_uart_init(gpio_t tx, gpio_t rx, gpio_t txe, gpio_t rxe)
 {
   uart_mbus_t *um = calloc(1, sizeof(uart_mbus_t));
-  g_um = um;
-  um->txe = txe;
-  um->rxe = rxe;
+  um->tx_pin = tx;
+  um->rx_pin = rx;
+  um->txe_pin = txe;
+  um->rxe_pin = rxe;
 
-  gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_output(rxe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-
-  reg_wr(UARTE_ENABLE, 8);
-  reg_wr(UARTE_PSELTXD, txpin);
-  reg_wr(UARTE_PSELRXD, rxpin);
+  mbus_uart_enable(um);
 
   enter_gap(um);
 
