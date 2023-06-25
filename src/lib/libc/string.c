@@ -138,3 +138,56 @@ strtbl(const char *str, size_t index)
     str += n + 1;
   }
 }
+
+
+char *
+strcpy(char *dst, const char *src)
+{
+  char *r = dst;
+  while(1) {
+    *dst = *src;
+    if(*src == 0)
+      break;
+    src++;
+    dst++;
+  }
+  return r;
+}
+
+
+char *
+strchr(const char *s, int c)
+{
+  while(*s) {
+    if((char)c == *s)
+      return (char *)s;
+    s++;
+  }
+  return NULL;
+}
+
+
+size_t
+strspn(const char *s, const char *accept)
+{
+  size_t i = 0;
+  while(s[i]) {
+    if(strchr(accept, s[i]) == NULL)
+      break;
+    i++;
+  }
+  return i;
+}
+
+
+size_t
+strcspn(const char *s, const char *reject)
+{
+  size_t i = 0;
+  while(s[i]) {
+    if(strchr(reject, s[i]) != NULL)
+      break;
+    i++;
+  }
+  return i;
+}

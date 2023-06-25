@@ -26,6 +26,8 @@ typedef struct {
 
 typedef struct flash_iface {
 
+  // TODO: Merge with block.h
+
   size_t (*get_sector_size)(const struct flash_iface *fif, int sector);
 
   flash_sector_type_t (*get_sector_type)(const struct flash_iface *fif,

@@ -23,7 +23,7 @@ typedef enum {
   ERR_MALFORMED             = -19,
   ERR_INVALID_RPC_ID        = -20,
   ERR_INVALID_RPC_ARGS      = -21,
-  ERR_NO_FLASH_SPACE        = -22,
+  ERR_NOSPC                 = -22,
   ERR_INVALID_ARGS          = -23,
   ERR_INVALID_LENGTH        = -24,
   ERR_NOT_IDLE              = -25,
@@ -36,6 +36,18 @@ typedef enum {
   ERR_AGAIN                 = -32,
   ERR_NOT_CONNECTED         = -33,
   ERR_BAD_PKT_SIZE          = -34,
+  ERR_EXIST                 = -35,
+  ERR_CORRUPT               = -36,
+  ERR_NOTDIR                = -37,
+  ERR_ISDIR                 = -38,
+  ERR_NOTEMPTY              = -39,
+  ERR_BADF                  = -40,
+  ERR_FBIG                  = -41,
+  ERR_INVALID_PARAMETER     = -42,
+  ERR_NOATTR                = -43,
+  ERR_TOOLONG               = -44,
+  ERR_IO                    = -45,
+  ERR_FS                    = -46,
 } error_t;
 
 const char *error_to_string(error_t e);

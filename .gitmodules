@@ -7,3 +7,6 @@
 [submodule "src/lib/libfixmath"]
 	path = src/lib/libfixmath
 	url = https://github.com/PetteriAimonen/libfixmath.git
+[submodule "src/lib/littlefs"]
+	path = src/lib/littlefs
+	url = https://github.com/littlefs-project/littlefs.git

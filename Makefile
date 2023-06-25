@@ -68,6 +68,7 @@ include ${SRC}/shell/shell.mk
 include ${SRC}/lib/libc/libc.mk
 include ${SRC}/lib/math/math.mk
 include ${SRC}/lib/fixmath.mk
+include ${SRC}/lib/littlefs.mk
 include ${SRC}/lib/usb/usb.mk
 include ${SRC}/lib/gui/gui.mk
 include ${SRC}/lib/tig/tig.mk

@@ -43,6 +43,18 @@ static const char errmsg[] = {
   "AGAIN\0"
   "NOT_CONNECTED\0"
   "BAD_PKT_SIZ\0"
+  "EXISTS\0"
+  "CORRUPT\0"
+  "NOT_DIR\0"
+  "IS_DIR\0"
+  "NOT_EMPTY\0"
+  "BADF\0"
+  "TOOBIG\0"
+  "INVALID_PARAMETER\0"
+  "NOTATTR\0"
+  "TOOLONG\0"
+  "IO\0"
+  "FS\0"
   "\0"
 };
 

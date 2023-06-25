@@ -121,7 +121,7 @@ ota_perform(svc_ota_t *sa)
         total_sectors, total_size);
 
   if(total_sectors == 0)
-    return ERR_NO_FLASH_SPACE;
+    return ERR_NOSPC;
 
   int first_sector = -1;
   int last_sector = -1;
@@ -149,7 +149,7 @@ ota_perform(svc_ota_t *sa)
         consecutive_size, size, crc);
 
   if(consecutive_size < size)
-    return ERR_NO_FLASH_SPACE;
+    return ERR_NOSPC;
 
   const int num_sectors = last_sector - first_sector + 1;
   for(int i = 0; i < num_sectors; i++) {

@@ -27,3 +27,12 @@ __attribute__((access(read_only, 1), access(read_only, 2)))
 int strcmp(const char *s1, const char *s2);
 
 const char *strtbl(const char *str, size_t index);
+
+__attribute__((access(write_only, 1), access(read_only, 2)))
+char *strcpy(char *dst, const char *src);
+
+size_t strspn(const char *s, const char *accept);
+
+size_t strcspn(const char *s, const char *reject);
+
+char *strchr(const char *s, int c);
