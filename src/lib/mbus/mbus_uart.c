@@ -337,8 +337,6 @@ mbus_uart_init_common(uart_mbus_t *um, gpio_t txe,
   um->prio = prio;
   um->flags = flags;
 
-  um->um_mni.mni_ni.ni_mtu = 64;
-
   um->timer.t_cb = timer_fire;
   um->timer.t_opaque = um;
 

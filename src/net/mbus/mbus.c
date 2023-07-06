@@ -355,6 +355,7 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name,
                   const device_class_t *dc)
 {
   mni->mni_ni.ni_input = mbus_input;
+  mni->mni_ni.ni_mtu = 64;
 
   netif_attach(&mni->mni_ni, name, dc);
 

@@ -591,8 +591,6 @@ stm32_mbus_uart_create(uint32_t uart_reg_base,
 
   STAILQ_INIT(&um->txq);
 
-  um->um_mni.mni_ni.ni_mtu = 64;
-
   um->timer.t_cb = timer_fire;
   um->timer.t_opaque = um;
 

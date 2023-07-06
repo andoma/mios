@@ -213,7 +213,6 @@ usb_mbus_create(struct usb_interface_queue *q,
 
   um->um_mni.mni_output = usb_mbus_output;
   um->um_mni.mni_ni.ni_buffers_avail = buffers_avail;
-  um->um_mni.mni_ni.ni_mtu = 64;
 
   mbus_netif_attach(&um->um_mni, "usbmbus",
                     &usb_mbus_device_class);

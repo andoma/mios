@@ -541,7 +541,7 @@ nrf52_mbus_uart_init(gpio_t tx, gpio_t rx, gpio_t txe, gpio_t rxe)
   um->um_mni.mni_output = mbus_uart_output;
   um->um_mni.mni_ni.ni_buffers_avail = buffers_avail;
   STAILQ_INIT(&um->txq);
-  um->um_mni.mni_ni.ni_mtu = 64;
+
   mbus_netif_attach(&um->um_mni, "uartmbus", &mbus_uart_device_class);
 
   irq_enable_fn_arg(2, IRQ_LEVEL_NET, nrf52_mbus_uart_irq, um);
