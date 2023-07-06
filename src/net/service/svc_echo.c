@@ -13,7 +13,8 @@ typedef struct svc_echo {
 } svc_echo_t;
 
 static void *
-echo_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+echo_open(void *opaque, service_event_cb_t *cb,
+          svc_pbuf_policy_t spp,
           service_get_flow_header_t *get_flow_hdr)
 {
   svc_echo_t *se = xalloc(sizeof(svc_echo_t), 0, MEM_MAY_FAIL);
@@ -64,5 +65,5 @@ echo_close(void *opaque)
   free(se);
 }
 
-SERVICE_DEF("echo",
+SERVICE_DEF("echo", 7, SERVICE_TYPE_STREAM,
             echo_open, echo_push, echo_may_push, echo_pull, echo_close);

@@ -11,11 +11,13 @@ typedef struct svc_chargen {
   void *sc_opaque;
   service_event_cb_t *sc_cb;
   int sc_cnt;
+  svc_pbuf_policy_t sc_pbuf_policy;
 } svc_chargen_t;
 
 
 static void *
-chargen_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+chargen_open(void *opaque, service_event_cb_t *cb,
+             svc_pbuf_policy_t pbuf_policy,
              service_get_flow_header_t *get_flow_hdr)
 {
   svc_chargen_t *sc = xalloc(sizeof(svc_chargen_t), 0, MEM_MAY_FAIL);
@@ -24,6 +26,7 @@ chargen_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
   sc->sc_cnt = 0;
   sc->sc_opaque = opaque;
   sc->sc_cb = cb;
+  sc->sc_pbuf_policy = pbuf_policy;
   return sc;
 }
 
@@ -37,7 +40,7 @@ chargen_pull(void *opaque)
     return NULL;
   }
   sc->sc_cnt++;
-  pbuf_t *pb = pbuf_make(0, 0);
+  pbuf_t *pb = pbuf_make(sc->sc_pbuf_policy.preferred_offset, 0);
   if(pb != NULL) {
     int len = snprintf(pbuf_data(pb, 0), 20, "%d\n", sc->sc_cnt);
     pb->pb_pktlen = len;
@@ -53,5 +56,5 @@ chargen_close(void *opaque)
   free(opaque);
 }
 
-SERVICE_DEF("chargen",
+SERVICE_DEF("chargen", 19, SERVICE_TYPE_STREAM,
             chargen_open, NULL, NULL, chargen_pull, chargen_close);

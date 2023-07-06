@@ -16,11 +16,13 @@ typedef struct svc_rpc {
   void *sr_opaque;
   service_event_cb_t *sr_cb;
   pbuf_t *sr_pb;
+  svc_pbuf_policy_t sr_pbuf_policy;
 } svc_rpc_t;
 
 
 static void *
-rpc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+rpc_open(void *opaque, service_event_cb_t *cb,
+         svc_pbuf_policy_t pbuf_policy,
          service_get_flow_header_t *get_flow_hdr)
 {
   svc_rpc_t *sr = xalloc(sizeof(svc_rpc_t), 0, MEM_MAY_FAIL);
@@ -29,6 +31,7 @@ rpc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
   sr->sr_opaque = opaque;
   sr->sr_cb = cb;
   sr->sr_pb = NULL;
+  sr->sr_pbuf_policy = pbuf_policy;
   return sr;
 }
 
@@ -120,7 +123,7 @@ rpc_push(void *opaque, struct pbuf *pb)
     rpc_error(sr, pb, ERR_INVALID_RPC_ARGS);
   }
 
-  pbuf_t *resp = pbuf_make(0, 0);
+  pbuf_t *resp = pbuf_make(sr->sr_pbuf_policy.preferred_offset, 0);
   if(resp == NULL) {
     return rpc_error(sr, pb, ERR_NO_BUFFER);
   }
@@ -150,7 +153,7 @@ rpc_close(void *opaque)
   free(sr);
 }
 
-SERVICE_DEF("rpc",
+SERVICE_DEF("rpc", 1, SERVICE_TYPE_DGRAM,
             rpc_open, rpc_push, rpc_may_push, rpc_pull, rpc_close);
 
 

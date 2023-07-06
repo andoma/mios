@@ -306,7 +306,7 @@ typedef struct {
 
   void *opaque;
   service_event_cb_t *cb;
-  size_t max_fragment_size;
+  svc_pbuf_policy_t pbuf_policy;
 
 } evlog_svc_follower_t;
 
@@ -374,22 +374,21 @@ evlog_svc_pull(void *opaque)
     hdr |= level;
     hdr |= tslen << 3;
 
-    pb = pbuf_make(0, 0);
+    pb = pbuf_make(esf->pbuf_policy.preferred_offset, 0);
+    const int mfs = esf->pbuf_policy.max_fragment_size;
     if(pb != NULL) {
-      pb = pbuf_write(pb, &hdr, 1, esf->max_fragment_size);
+      pb = pbuf_write(pb, &hdr, 1, mfs);
 
       if(hdr & 0x40) {
-        pb = pbuf_write(pb, &ef->seq_tail, 4, esf->max_fragment_size);
+        pb = pbuf_write(pb, &ef->seq_tail, 4, mfs);
       }
-      pb = pbuf_write(pb, tsbuf, tslen, esf->max_fragment_size);
+      pb = pbuf_write(pb, tsbuf, tslen, mfs);
 
       if(msgend >= msgstart) {
-        pb = pbuf_write(pb, ef->data + msgstart, msglen,
-                        esf->max_fragment_size);
+        pb = pbuf_write(pb, ef->data + msgstart, msglen, mfs);
       } else {
-        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart,
-                        esf->max_fragment_size);
-        pb = pbuf_write(pb, ef->data, msgend, esf->max_fragment_size);
+        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart, mfs);
+        pb = pbuf_write(pb, ef->data, msgend, mfs);
       }
     }
     if(pb != NULL) {
@@ -411,7 +410,8 @@ evlog_svc_wakeup(follower_t *f)
 }
 
 static void *
-evlog_svc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+evlog_svc_open(void *opaque, service_event_cb_t *cb,
+               svc_pbuf_policy_t pbuf_policy,
                service_get_flow_header_t *get_flow_hdr)
 {
   evlog_svc_follower_t *esf =
@@ -423,7 +423,7 @@ evlog_svc_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
 
   esf->opaque = opaque;
   esf->cb = cb;
-  esf->max_fragment_size = max_fragment_size;
+  esf->pbuf_policy = pbuf_policy;
 
   evlogfifo_t *ef = &ef0;
 
@@ -451,7 +451,7 @@ evlog_svc_close(void *opaque)
   free(esf);
 }
 
-SERVICE_DEF("log",
+SERVICE_DEF("log", 2, SERVICE_TYPE_DGRAM,
             evlog_svc_open, NULL, NULL, evlog_svc_pull, evlog_svc_close);
 
 #endif

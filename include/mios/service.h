@@ -15,13 +15,25 @@ typedef void (service_event_cb_t)(void *opaque, uint32_t signals);
 
 typedef uint32_t (service_get_flow_header_t)(void *opaque);
 
+#define SERVICE_TYPE_STREAM 0
+#define SERVICE_TYPE_DGRAM  1
+
+typedef struct {
+  uint16_t max_fragment_size;
+  uint16_t preferred_offset;
+} svc_pbuf_policy_t;
+
 typedef struct service {
 
   const char *name;
 
+  uint16_t id;
+
+  uint16_t type;
+
   void *(*open)(void *opaque,
                 service_event_cb_t *event,
-                size_t max_fragment_size,
+                svc_pbuf_policy_t pbuf_policy,
                 service_get_flow_header_t *get_flow_hdr);
 
   // Data from network to service
@@ -36,8 +48,10 @@ typedef struct service {
 
 } service_t;
 
-const service_t *service_find(const char *name);
+const service_t *service_find_by_name(const char *name);
 
-#define SERVICE_DEF(name, open, push, maypush, pull, close)        \
-  static const service_t MIOS_JOIN(rpc, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, open, push, maypush, pull, close };
+const service_t *service_find_by_id(uint32_t id);
+
+#define SERVICE_DEF(name, id, type, open, push, maypush, pull, close)    \
+  static const service_t MIOS_JOIN(rpc, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, id, type, open, push, maypush, pull, close };
 

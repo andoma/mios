@@ -146,7 +146,7 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
 
   evlog(LOG_INFO, "svc/%s: Connect from addr %d", name, remote_addr);
 
-  const service_t *s = service_find(name);
+  const service_t *s = service_find_by_name(name);
   if(s == NULL) {
     mbus_seqpkt_accept_err(name, "Not available", remote_addr);
     return pb;
@@ -179,8 +179,9 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
 
   msc->msc_svc = s;
 
-  msc->msc_svc_opaque = s->open(msc, mbus_seqpkt_service_event_cb,
-                                MBUS_FRAGMENT_SIZE,
+  svc_pbuf_policy_t spp = {MBUS_FRAGMENT_SIZE, 0};
+
+  msc->msc_svc_opaque = s->open(msc, mbus_seqpkt_service_event_cb, spp,
                                 mbus_seqpkt_get_flow_header);
 
   msc->msc_last_rx = clock_get();

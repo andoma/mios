@@ -31,7 +31,7 @@ typedef struct {
 
   int ss_shutdown;
 
-  size_t ss_max_fragment_size;
+  svc_pbuf_policy_t ss_pbuf_policy;
 
 } svc_shell_t;
 
@@ -88,10 +88,12 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
     while(size) {
 
       if(ss->ss_txbuf == NULL) {
-        ss->ss_txbuf = pbuf_make(0, 1);
+        ss->ss_txbuf = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 1);
       }
 
-      size_t remain = ss->ss_max_fragment_size - ss->ss_txbuf->pb_buflen;
+      size_t remain = ss->ss_pbuf_policy.max_fragment_size -
+        ss->ss_txbuf->pb_buflen;
+
       if(remain == 0) {
         ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
         cond_wait(&ss->ss_cond, &ss->ss_mutex);
@@ -133,7 +135,8 @@ shell_thread(void *arg)
 
 
 static void *
-shell_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+shell_open(void *opaque, service_event_cb_t *cb,
+           svc_pbuf_policy_t pbuf_policy,
            service_get_flow_header_t *get_flow_hdr)
 {
   svc_shell_t *ss = xalloc(sizeof(svc_shell_t), 0, MEM_MAY_FAIL);
@@ -142,7 +145,7 @@ shell_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
   ss->ss_cb = cb;
   ss->s.read = svc_shell_read;
   ss->s.write = svc_shell_write;
-  ss->ss_max_fragment_size = max_fragment_size;
+  ss->ss_pbuf_policy = pbuf_policy;
 
   mutex_init(&ss->ss_mutex, "svc");
   cond_init(&ss->ss_cond, "svc");
@@ -204,5 +207,5 @@ shell_close(void *opaque)
 }
 
 
-SERVICE_DEF("shell",
+SERVICE_DEF("shell", 23, SERVICE_TYPE_STREAM,
             shell_open, shell_push, shell_may_push, shell_pull, shell_close);
