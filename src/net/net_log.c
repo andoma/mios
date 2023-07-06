@@ -53,6 +53,7 @@ void
 netlog_hexdump(const char *prefix, const uint8_t *buf, size_t len)
 {
   const size_t prefixlen = strlen(prefix);
+  int n = 0;
   while(len > 0) {
 
     pbuf_t *pb = pbuf_make_irq_blocked(0,0);
@@ -63,8 +64,10 @@ netlog_hexdump(const char *prefix, const uint8_t *buf, size_t len)
     memcpy(dst, prefix, prefixlen);
 
     size_t off = prefixlen;
+    dst[off++] = '@';
+    dst[off++] = "0123456789abcdef"[n >> 4];
+    dst[off++] = '0';
     dst[off++] = ':';
-    dst[off++] = ' ';
 
     for(size_t i = 0; i < 16 && len > 0; i++) {
       uint8_t b = *buf++;
@@ -72,6 +75,7 @@ netlog_hexdump(const char *prefix, const uint8_t *buf, size_t len)
       dst[off++] = "0123456789abcdef"[b & 0xf];
       dst[off++] = ' ';
       len--;
+      n++;
     }
     dst[off] = 0;
     pb->pb_flags = PBUF_SOP | PBUF_EOP;
