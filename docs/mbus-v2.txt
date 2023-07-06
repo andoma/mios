@@ -1,0 +1,90 @@
+##################################################
+Canonical Packet Format
+##################################################
+
+Maximum packet length = 64 (including trailing CRC32)
+
+
+
+==================================================
+Multicast
+==================================================
+
+7654_3210 7654_3210
+zz1G_GGGG GGGG_GGGG [Payload] [CRC32]
+
+z = Must Be Zero
+G = Group ID
+
+Total = 8192 Groups
+
+Payload depends on channel
+
+First 4096 channels maps to DSIG
+
+==================================================
+Unicast
+==================================================
+
+7654_3210 7654_3210 7654_3210
+zz0D_DDDD IFFS_SSSS FFFF_FFFF
+
+z = Must Be Zero
+D = Destination Node ID
+S = Source Node ID
+F = FlowID (10 bits)
+I = Init flow
+
+
+==================================================
+Init Flow
+==================================================
+7654_3210 7654_3210 7654_3210 7654_3210
+zz0D_DDDD 1FFS_SSSS FFFF_FFFF TTTT_TTTT
+
+T = Flow type
+    0 - Ping
+    1 - Seqpkt
+
+
+==================================================
+SeqPacket
+==================================================
+
+
+Close:
+
+7654_3210 ...
+10EE_EEEE [Reason]
+
+E = Error Code (?)
+
+Data & ACK:
+
+7654_3210
+00MC_SELF [Fragment]
+
+M = More data pending
+C = Clear to send
+S = Sequence
+E = Expected Sequence
+L = Last Fragment
+F = First Fragment
+
+Maximum fragment size = 64 - 4 (header) - 4 (CRC) = 56
+
+
+##################################################
+Serial Multidrop Alternate Header
+##################################################
+
+7654_3210 7654_3210
+LLDD_DDDD CCCC_LLLL
+
+D = Destination Address (6 bit)
+L = Length              (6 bit)
+C = CRC-4 of header     (4 bit)
+
+Header is transmitted at 115200 kbit/s
+
+Data is transmitted at 1Mbit/s
