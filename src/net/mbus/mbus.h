@@ -35,6 +35,7 @@ void mbus_print_info(mbus_netif_t *mni, struct stream *st);
 void mbus_netif_attach(mbus_netif_t *mni, const char *name,
                        const device_class_t *dc);
 
+void mbus_netif_detach(mbus_netif_t *mni);
 
 pbuf_t *mbus_output(pbuf_t *pb) __attribute__((warn_unused_result));
 

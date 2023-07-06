@@ -356,3 +356,11 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name,
 
   SLIST_INSERT_HEAD(&mbus_netifs, mni, mni_global_link);
 }
+
+
+void
+mbus_netif_detach(mbus_netif_t *mni)
+{
+  SLIST_REMOVE(&mbus_netifs, mni, mbus_netif, mni_global_link);
+  netif_detach(&mni->mni_ni); // mni may be free'd after this
+}

@@ -11,11 +11,7 @@ LIST_HEAD(nexthop_list, nexthop);
 
 struct nexthop;
 
-extern struct netif_list netifs;
-extern mutex_t netif_mutex;
-
-#define NETIF_TASK_RX 0x1
-
+#define NETIF_TASK_RX     0x1
 
 typedef struct netif {
 
@@ -70,6 +66,8 @@ typedef struct nexthop {
 
 
 void netif_attach(netif_t *ni, const char *name, const device_class_t *dc);
+
+void netif_detach(netif_t *ni);
 
 void netlog(const char *fmt, ...);
 

@@ -14,7 +14,8 @@
 #include "net_task.h"
 
 struct netif_list netifs;
-mutex_t netif_mutex = MUTEX_INITIALIZER("netifs");
+
+static mutex_t netif_mutex = MUTEX_INITIALIZER("netifs");
 
 static task_waitable_t net_waitq = WAITABLE_INITIALIZER("net");
 
@@ -141,11 +142,36 @@ netif_attach(netif_t *ni, const char *name, const device_class_t *dc)
     ni->ni_buffers_avail(ni);
   ni->ni_dev.d_class = dc;
   ni->ni_dev.d_name = name;
-  device_register(&ni->ni_dev);
-
   mutex_unlock(&netif_mutex);
+
+  device_register(&ni->ni_dev);
 }
 
+
+static void
+net_task_cancel(net_task_t *nt)
+{
+  if(nt->nt_signals) {
+    STAILQ_REMOVE(&net_tasks, nt, net_task, nt_link);
+    nt->nt_signals = 0;
+  }
+}
+
+
+void
+netif_detach(netif_t *ni)
+{
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+  net_task_cancel(&ni->ni_task);
+  pbuf_free_queue_irq_blocked(&ni->ni_rx_queue);
+  irq_permit(q);
+
+  mutex_lock(&netif_mutex);
+  SLIST_REMOVE(&netifs, ni, netif, ni_global_link);
+  mutex_unlock(&netif_mutex);
+
+  device_unregister(&ni->ni_dev);
+}
 
 
 static void __attribute__((constructor(180)))
