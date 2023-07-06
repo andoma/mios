@@ -16,6 +16,7 @@ SRCS-${ENABLE_NET_MBUS} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus_seqpkt.c \
 	${SRC}/net/mbus/mbus_dsig.c \
 	${SRC}/net/mbus/mbus_rpc.c \
+	${SRC}/net/mbus/mbus_service.c \
 
 SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ether.c \
