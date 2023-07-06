@@ -1,4 +1,7 @@
 
+ENABLE_NET_BLE=yes
+ENABLE_NET_MBUS=yes
+
 BOARDNAME := bluefruit-nrf52
 
 B := ${SRC}/platform/${BOARDNAME}
