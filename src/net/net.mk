@@ -25,6 +25,9 @@ SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ipv4/dhcpv4.c \
 	${SRC}/net/ipv4/cmd_ipv4.c \
 
+SRCS-${ENABLE_NET_BLE} += ${SRCS_net} \
+	${SRC}/net/ble/l2cap.c
+
 ${MOS}/net/%.o : CFLAGS += ${NOFPU}
 ${MOS}/net/mbus/%.o : CFLAGS += ${NOFPU}
 ${MOS}/net/ipv4/%.o : CFLAGS += ${NOFPU}

@@ -20,4 +20,7 @@ SRCS += ${P}/nrf52.c \
 	${P}/nrf52_flash.c \
 	${P}/nrf52_wdt.c \
 
+SRCS-${ENABLE_NET_BLE} += \
+	${P}/nrf52_radio.c \
+
 ${MOS}/platform/nrf52/%.o : CFLAGS += ${NOFPU}
