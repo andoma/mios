@@ -47,6 +47,7 @@ pbuf_pool_put(pbuf_pool_t *pp, void *item)
   pp->pp_avail++;
 }
 
+__attribute__((malloc, warn_unused_result))
 static void *
 pbuf_pool_get(pbuf_pool_t *pp, int wait)
 {
@@ -83,6 +84,10 @@ pbuf_pool_add(pbuf_pool_t *pp, void *start, void *end, size_t item_size)
   return count;
 }
 
+#ifndef PBUF_DEFAULT_COUNT
+#define PBUF_DEFAULT_COUNT 8
+#endif
+
 
 void
 pbuf_data_add(void *start, void *end)
@@ -90,11 +95,13 @@ pbuf_data_add(void *start, void *end)
   if(end == NULL) {
     if(pbuf_datas.pp_avail)
       return;
-    const size_t size = PBUF_DATA_SIZE * 8;
+    const size_t size = PBUF_DATA_SIZE * PBUF_DEFAULT_COUNT;
+    printf("pbuf data size:%d\n", size);
     start = xalloc(size, 0, 0);
     end = start + size;
   }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
+  printf("pbuf count:%d\n", count);
   pbuf_alloc(count);
 }
 
@@ -164,6 +171,12 @@ pbuf_splice(struct pbuf_queue *pq)
   return pb;
 }
 
+void
+pbuf_free_queue_irq_blocked(struct pbuf_queue *pq)
+{
+  pbuf_free_irq_blocked(STAILQ_FIRST(pq));
+}
+
 
 pbuf_t *
 pbuf_read(pbuf_t *pb, void *ptr, size_t len)
@@ -174,6 +187,7 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
     size_t to_copy = MIN(len, pb->pb_buflen);
 
     memcpy(ptr, pb->pb_data + pb->pb_offset, to_copy);
+    ptr += to_copy;
 
     len           -= to_copy;
     pb->pb_offset += to_copy;
@@ -195,7 +209,7 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
 pbuf_t *
 pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
 {
-  if(head== NULL)
+  if(head == NULL)
     return NULL;
 
   pbuf_t *pb = head;
@@ -276,14 +290,23 @@ pbuf_trim(pbuf_t *pb, size_t bytes)
 
 
 pbuf_t *
-pbuf_prepend(pbuf_t *pb, size_t bytes)
+pbuf_prepend(pbuf_t *pb, size_t bytes, int wait, size_t extra_offset)
 {
-  assert(bytes <= pb->pb_offset); // Fix this case
+  if(bytes + extra_offset <= pb->pb_offset) {
+    pb->pb_offset -= bytes;
+    pb->pb_buflen += bytes;
+    pb->pb_pktlen += bytes;
+    return pb;
+  }
 
-  pb->pb_offset -= bytes;
-  pb->pb_buflen += bytes;
-  pb->pb_pktlen += bytes;
-  return pb;
+  pbuf_t *pre = pbuf_make(extra_offset, wait);
+  pb->pb_flags &= ~PBUF_SOP;
+  pre->pb_next = pb;
+  pre->pb_flags = PBUF_SOP;
+  pre->pb_pktlen = pb->pb_pktlen + bytes;
+  pre->pb_buflen = bytes;
+  pb->pb_pktlen = 0;
+  return pre;
 }
 
 
@@ -305,14 +328,40 @@ pbuf_free(pbuf_t *pb)
   irq_permit(q);
 }
 
-pbuf_t *
+void
 pbuf_pullup(pbuf_t *pb, size_t bytes)
 {
   if(pb->pb_buflen >= bytes)
-    return pb;
+    return;
 
-  pbuf_free(pb);
-  return NULL;
+  if(bytes + pb->pb_offset > PBUF_DATA_SIZE) {
+    assert(bytes <= PBUF_DATA_SIZE);
+    memcpy(pb->pb_data, pb->pb_data + pb->pb_offset, pb->pb_buflen);
+    pb->pb_offset = 0;
+  }
+
+  bytes -= pb->pb_buflen;
+
+  while(bytes) {
+    pbuf_t *next = pb->pb_next;
+
+    const size_t to_copy = MIN(bytes, next->pb_buflen);
+    memcpy(pb->pb_data + pb->pb_offset + pb->pb_buflen,
+           next->pb_data + next->pb_offset, to_copy);
+
+    bytes -= to_copy;
+    pb->pb_buflen += to_copy;
+    next->pb_buflen -= to_copy;
+
+    if(next->pb_buflen == 0) {
+      pb->pb_next = next->pb_next;
+      pb->pb_flags |= next->pb_flags & PBUF_EOP;
+      int q = irq_forbid(IRQ_LEVEL_NET);
+      pbuf_data_put(next->pb_data);
+      pbuf_put(next);
+      irq_permit(q);
+    }
+  }
 }
 
 

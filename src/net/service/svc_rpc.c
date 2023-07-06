@@ -91,10 +91,11 @@ rpc_push(void *opaque, struct pbuf *pb)
 {
   svc_rpc_t *sr = opaque;
 
-  pb = pbuf_pullup(pb, pb->pb_pktlen);
-  if(pb == NULL || pb->pb_pktlen < 1) {
+  if(pb->pb_pktlen < 1) {
     return rpc_error(sr, pb, ERR_MALFORMED);
   }
+
+  pbuf_pullup(pb, pb->pb_pktlen);
 
   const uint8_t *pkt = pbuf_cdata(pb, 0);
   const uint8_t namelen = pkt[0];

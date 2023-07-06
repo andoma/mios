@@ -13,7 +13,7 @@ static pbuf_t *
 mbus_rpc_err(struct pbuf *pb, const mbus_flow_t *mf, error_t code)
 {
   pbuf_reset(pb, 4, 0);
-  pb = pbuf_prepend(pb, 1);
+  pb = pbuf_prepend(pb, 1, 0, 0);
   if(pb == NULL)
     return pb;
   uint8_t *pkt = pbuf_data(pb, 0);
@@ -57,7 +57,7 @@ mbus_rpc_dispatch(struct pbuf *pb, uint8_t src_addr, uint16_t flow)
     return mbus_rpc_err(pb, &mf, ERR_NO_BUFFER);
   }
   pbuf_free(pb);
-  reply = pbuf_prepend(reply, 1);
+  reply = pbuf_prepend(reply, 1, 0, 0);
   if(reply == NULL)
     return NULL;
   uint8_t *out = pbuf_data(reply, 0);

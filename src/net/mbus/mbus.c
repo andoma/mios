@@ -100,7 +100,9 @@ mbus_output(pbuf_t *pb)
 pbuf_t *
 mbus_output_flow(pbuf_t *pb, const mbus_flow_t *mf)
 {
-  pb = pbuf_prepend(pb, 3);
+  pb = pbuf_prepend(pb, 3, 0, 0);
+  if(pb == NULL)
+    return NULL;
   uint8_t *hdr = pbuf_data(pb, 0);
   hdr[0] = mf->mf_remote_addr;
   hdr[1] = mbus_local_addr | ((mf->mf_flow >> 3) & 0x60);
@@ -261,10 +263,12 @@ mbus_input(struct netif *ni, struct pbuf *pb)
   mni->mni_rx_packets++;
   mni->mni_rx_bytes += pb->pb_pktlen;
 
-  if(pb->pb_pktlen < 2 || (pb = pbuf_pullup(pb, pb->pb_pktlen)) == NULL) {
+  if(pb->pb_pktlen < 2) {
     mni->mni_rx_runts++;
     return pb;
   }
+
+  pbuf_pullup(pb, pb->pb_pktlen);
 
   if(mbus_crc32(pb, 0)) {
     mni->mni_rx_crc_errors++;
