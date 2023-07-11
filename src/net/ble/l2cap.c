@@ -202,7 +202,7 @@ connection_clear_credit_deficit(l2cap_connection_t *lc)
   l2cap_flow_control_credit_ind_t *ind =
     pbuf_append(pb, sizeof(l2cap_flow_control_credit_ind_t));
 
-  ind->cid = lc->lc_remote_cid;
+  ind->cid = lc->lc_local_cid;
   ind->credits = lc->lc_rxq_credit_deficit;
   lc->lc_rxq_credit_deficit = 0;
   ind->hdr.identifier = 1;
@@ -445,7 +445,7 @@ handle_flow_control_credit_ind(l2cap_t *l2c, pbuf_t *pb)
 
   l2cap_connection_t *lc;
   LIST_FOREACH(lc, &l2c->l2c_connections, lc_link) {
-    if(cc->cid == lc->lc_local_cid) {
+    if(cc->cid == lc->lc_remote_cid) {
       break;
     }
   }
