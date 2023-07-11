@@ -70,7 +70,7 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
 {
   pbuf_t *reply = pbuf_make(0,0);
   if(reply) {
-    pbuf_write(reply, &status, 1, 10);
+    reply = pbuf_write(reply, &status, 1, 10);
     mutex_lock(&sa->sa_mutex);
     sa->sa_info = reply;
     mutex_unlock(&sa->sa_mutex);
@@ -229,7 +229,7 @@ ota_thread(void *arg)
 
 
 static void *
-ota_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
+ota_open(void *opaque, service_event_cb_t *cb, svc_pbuf_policy_t pbuf_policy,
          service_get_flow_header_t *get_flow_hdr)
 {
   if(ota_busy)
@@ -247,10 +247,10 @@ ota_open(void *opaque, service_event_cb_t *cb, size_t max_fragment_size,
   if(pb != NULL) {
     uint8_t hdr[4];
     ota_platform_info(hdr);
-    pb = pbuf_write(pb, hdr, sizeof(hdr), max_fragment_size);
-    pb = pbuf_write(pb, mios_build_id(), 20, max_fragment_size);
+    pb = pbuf_write(pb, hdr, sizeof(hdr), pbuf_policy.max_fragment_size);
+    pb = pbuf_write(pb, mios_build_id(), 20, pbuf_policy.max_fragment_size);
     const char *appname = mios_get_app_name();
-    pb = pbuf_write(pb, appname, strlen(appname), max_fragment_size);
+    pb = pbuf_write(pb, appname, strlen(appname), pbuf_policy.max_fragment_size);
   }
 
   if(pb == NULL) {
@@ -325,5 +325,5 @@ ota_close(void *opaque)
   ota_busy = 0;
 }
 
-SERVICE_DEF("ota",
+SERVICE_DEF("ota", 9, SERVICE_TYPE_DGRAM,
             ota_open, ota_push, ota_may_push, ota_pull, ota_close);
