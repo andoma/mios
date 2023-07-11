@@ -180,7 +180,7 @@ dma_irq(int channel)
   reg_wr(DMA_IFCR(ctrl), bits << (channel * 4));
 
   dma_stream_t *ds = g_streams[channel];
-  if(ds == NULL)
+  if(ds == NULL || ds->cb == NULL)
     return;
   error_t err;
   if(bits & 8) {
