@@ -268,6 +268,8 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   cpu_t *cpu = curcpu();
 
   prio &= TASK_PRIO_MASK;
+  if(prio == 0)
+    prio = 1;
 
   if(stack_size < MIN_STACK_SIZE)
     stack_size = MIN_STACK_SIZE;
