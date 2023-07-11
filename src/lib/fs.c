@@ -45,24 +45,25 @@ static int
 fs_blk_sync(const struct lfs_config *c)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->sync(bi);
+  error_t err = bi->ctrl(bi, BLOCK_SYNC);
   return err ? LFS_ERR_IO : 0;
 }
 
 static int
 fs_blk_lock(const struct lfs_config *c)
 {
-  fs_t *fs = (fs_t *)c;
-  mutex_lock(&fs->lock);
-  return 0;
+  block_iface_t *bi = c->context;
+  error_t err = bi->ctrl(bi, BLOCK_LOCK);
+  return err ? LFS_ERR_IO : 0;
 }
 
 static int
 fs_blk_unlock(const struct lfs_config *c)
 {
-  fs_t *fs = (fs_t *)c;
-  mutex_unlock(&fs->lock);
-  return 0;
+  block_iface_t *bi = c->context;
+  error_t err = bi->ctrl(bi, BLOCK_SUSPEND);
+  bi->ctrl(bi, BLOCK_UNLOCK);
+  return err ? LFS_ERR_IO : 0;
 }
 
 

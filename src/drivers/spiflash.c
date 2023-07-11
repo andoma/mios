@@ -2,6 +2,7 @@
 
 #include <mios/block.h>
 #include <mios/mios.h>
+#include <mios/task.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -12,6 +13,7 @@
 typedef struct spiflash {
   block_iface_t iface;
   spi_t *spi;
+  mutex_t mutex;
   uint32_t sectors;
   uint32_t spicfg;
   gpio_t cs;
@@ -21,6 +23,7 @@ typedef struct spiflash {
 #define SPIFLASH_STATE_IDLE 0
 #define SPIFLASH_STATE_BUSY 1
 #define SPIFLASH_STATE_PD   2
+#define SPIFLASH_STATE_OFF  3
 
 
 static int
@@ -50,7 +53,11 @@ static error_t
 spiflash_wait_ready(spiflash_t *sf)
 {
   int status;
+
   switch(sf->state) {
+  case SPIFLASH_STATE_OFF:
+    return ERR_NOT_READY;
+
   case SPIFLASH_STATE_IDLE:
     return 0;
 
@@ -90,20 +97,21 @@ spiflash_erase(struct block_iface *bi, size_t block)
   spiflash_t *sf = (spiflash_t *)bi;
 
   error_t err = spiflash_wait_ready(sf);
-  if(err)
-    return err;
+  if(!err) {
+    err = spiflash_we(sf);
+  }
 
-  err = spiflash_we(sf);
-  if(err)
-    return err;
+  if(!err) {
+    uint32_t addr = block * bi->block_size;
+    uint8_t cmd[4] = {0x20, addr >> 16, addr >> 8, addr};
+    err = sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
+    usleep(30000);
+    sf->state = SPIFLASH_STATE_BUSY;
+  }
 
-  uint32_t addr = block * bi->block_size;
-  uint8_t cmd[4] = {0x20, addr >> 16, addr >> 8, addr};
-  err = sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
-  usleep(30000);
-  sf->state = SPIFLASH_STATE_BUSY;
   return err;
 }
+
 
 static error_t
 spiflash_write(struct block_iface *bi, size_t block,
@@ -112,21 +120,22 @@ spiflash_write(struct block_iface *bi, size_t block,
   spiflash_t *sf = (spiflash_t *)bi;
 
   error_t err = spiflash_wait_ready(sf);
-  if(err)
-    return err;
+  if(!err) {
+    err = spiflash_we(sf);
+  }
 
-  err = spiflash_we(sf);
-  if(err)
-    return err;
+  if(!err) {
 
-  uint32_t addr = block * bi->block_size + offset;
-  uint8_t cmd[4] = {0x2, addr >> 16, addr >> 8, addr};
+    uint32_t addr = block * bi->block_size + offset;
+    uint8_t cmd[4] = {0x2, addr >> 16, addr >> 8, addr};
 
-  struct iovec tx[2] = {{cmd, 4}, {(void *)data, length}};
-  err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
-  sf->state = SPIFLASH_STATE_BUSY;
+    struct iovec tx[2] = {{cmd, 4}, {(void *)data, length}};
+    err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
+    sf->state = SPIFLASH_STATE_BUSY;
+  }
   return err;
 }
+
 
 static error_t
 spiflash_read(struct block_iface *bi, size_t block,
@@ -135,40 +144,58 @@ spiflash_read(struct block_iface *bi, size_t block,
   spiflash_t *sf = (spiflash_t *)bi;
 
   error_t err = spiflash_wait_ready(sf);
-  if(err)
-    return err;
+  if(!err) {
 
-  uint32_t addr = block * bi->block_size + offset;
-  uint8_t cmd[4] = {0x3, addr >> 16, addr >> 8, addr};
+    uint32_t addr = block * bi->block_size + offset;
+    uint8_t cmd[4] = {0x3, addr >> 16, addr >> 8, addr};
 
-  struct iovec tx[2] = {{cmd, 4}, {NULL, length}};
-  struct iovec rx[2] = {{NULL, 4}, {data, length}};
-
-  return sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
-}
-
-static error_t
-spiflash_sync(struct block_iface *bi)
-{
-  spiflash_t *sf = (spiflash_t *)bi;
-
-  return spiflash_wait_ready(sf);
+    struct iovec tx[2] = {{cmd, 4}, {NULL, length}};
+    struct iovec rx[2] = {{NULL, 4}, {data, length}};
+    err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
+  }
+  return err;
 }
 
 
 static error_t
-spiflash_suspend(struct block_iface *bi)
+spiflash_pd(spiflash_t *sf)
 {
-  spiflash_t *sf = (spiflash_t *)bi;
-
-  error_t err = spiflash_wait_ready(sf);
-  if(err)
-    return err;
-
-  sf->state = SPIFLASH_STATE_PD;
   uint8_t cmd[1] = {0xb9};
   return sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
 }
+
+static error_t
+spiflash_ctrl(struct block_iface *bi, block_ctrl_op_t op)
+{
+  spiflash_t *sf = (spiflash_t *)bi;
+
+  error_t err;
+  switch(op) {
+
+  case BLOCK_LOCK:
+    mutex_lock(&sf->mutex);
+    return 0;
+
+  case BLOCK_UNLOCK:
+    mutex_unlock(&sf->mutex);
+    return 0;
+
+  case BLOCK_SYNC:
+    return spiflash_wait_ready(sf);
+
+  case BLOCK_SUSPEND:
+  case BLOCK_SHUTDOWN:
+    err = spiflash_wait_ready(sf);
+    if(!err) {
+      err = spiflash_pd(sf);
+      sf->state = op == BLOCK_SHUTDOWN ? SPIFLASH_STATE_OFF : SPIFLASH_STATE_PD;
+    }
+    return err;
+  default:
+    return ERR_OPERATION_FAILED;
+  }
+}
+
 
 static uint32_t
 read_sfdp(spiflash_t *sf, uint32_t addr)
@@ -238,12 +265,11 @@ spiflash_create(spi_t *spi, gpio_t cs)
   sf->iface.block_size = 4096;
 
   printf("%d kB (%d sectors)  ", size >> 10, sf->iface.num_blocks);
-
+  mutex_init(&sf->mutex, "spiflash");
   sf->iface.erase = spiflash_erase;
   sf->iface.write = spiflash_write;
   sf->iface.read = spiflash_read;
-  sf->iface.sync = spiflash_sync;
-  sf->iface.suspend = spiflash_suspend;
+  sf->iface.ctrl = spiflash_ctrl;
   printf("OK\n");
   return &sf->iface;
 
@@ -252,4 +278,3 @@ spiflash_create(spi_t *spi, gpio_t cs)
   printf("Not configured\n");
   return NULL;
 }
-
