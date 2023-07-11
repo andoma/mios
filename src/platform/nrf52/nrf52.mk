@@ -19,6 +19,7 @@ SRCS += ${P}/nrf52.c \
 	${P}/nrf52_mbus_uart.c \
 	${P}/nrf52_flash.c \
 	${P}/nrf52_wdt.c \
+	${P}/nrf52_adc.c \
 
 SRCS-${ENABLE_NET_BLE} += \
 	${P}/nrf52_radio.c \
