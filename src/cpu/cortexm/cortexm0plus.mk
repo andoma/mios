@@ -7,4 +7,6 @@ CFLAGS += -mcpu=cortex-m0plus -mthumb
 
 CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm0plus.h
 
+SRCS += ${C}/cortexm0plus.s \
+
 include ${SRC}/cpu/cortexm/cortexm.mk
