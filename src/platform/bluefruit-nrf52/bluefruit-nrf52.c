@@ -32,25 +32,29 @@ __attribute__((noreturn))
 static void *
 blinker(void *arg)
 {
-  gpio_conf_output(LED_RED, GPIO_PUSH_PULL,
-                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_output(LED_BLUE, GPIO_PUSH_PULL,
-                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
-
   while(1) {
-    gpio_set_output(LED_RED, 0);
-    gpio_set_output(LED_BLUE, 1);
-    usleep(500000);
     gpio_set_output(LED_RED, 1);
-    gpio_set_output(LED_BLUE, 0);
-    usleep(500000);
+    usleep(100000);
+    gpio_set_output(LED_RED, 0);
+    usleep(900000);
   }
+}
+
+static void
+ble_status(int flags)
+{
+  gpio_set_output(LED_RED, !!(flags & NRF52_BLE_STATUS_CONNECTED));
 }
 
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
+  gpio_conf_output(LED_RED, GPIO_PUSH_PULL,
+                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_output(LED_BLUE, GPIO_PUSH_PULL,
+                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
 
-  nrf52_radio_ble_init("bluefruit");
+  nrf52_radio_ble_init("bluefruit", ble_status);
 }

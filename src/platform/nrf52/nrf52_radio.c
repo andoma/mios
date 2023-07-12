@@ -169,6 +169,8 @@ typedef struct nrf52_radio {
   uint8_t nr_more_data;
   uint8_t nr_resync;
 
+  void (*status_cb)(int status);
+
 } nrf52_radio_t;
 
 
@@ -366,6 +368,7 @@ conn_disconnect(nrf52_radio_t *nr, uint32_t now)
   nr->nr_ll_state = LL_STANDBY;
   nr->nr_adv_timeout = now;
   radio_setup_for_adv(nr);
+  nr->status_cb(0);
 }
 
 
@@ -423,6 +426,9 @@ handle_CONNECT_IND(nrf52_radio_t *nr, const uint8_t *pkt)
          pkt[2 + 1],
          pkt[2 + 0],
          -reg_rd(RADIO_RSSISAMPLE));
+
+  nr->status_cb(NRF52_BLE_STATUS_CONNECTED);
+
   return 1;
 }
 
@@ -958,11 +964,12 @@ buffers_avail(struct netif *ni)
 
 
 void
-nrf52_radio_ble_init(const char *name)
+nrf52_radio_ble_init(const char *name, void (*status_cb)(int flags))
 {
   nrf52_xtal_enable();
 
   nrf52_radio_t *nr = &g_radio;
+  nr->status_cb = status_cb;
 
   nr->nr_empty_packet[0] = 1;
   nr->nr_empty_packet[1] = 0;
