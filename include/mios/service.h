@@ -53,5 +53,5 @@ const service_t *service_find_by_name(const char *name);
 const service_t *service_find_by_id(uint32_t id);
 
 #define SERVICE_DEF(name, id, type, open, push, maypush, pull, close)    \
-  static const service_t MIOS_JOIN(rpc, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, id, type, open, push, maypush, pull, close };
+  static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, id, type, open, push, maypush, pull, close };
 
