@@ -87,6 +87,9 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
 
     while(size) {
 
+      if(ss->ss_shutdown)
+        break;
+
       if(ss->ss_txbuf == NULL) {
         ss->ss_txbuf = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 1);
       }

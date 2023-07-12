@@ -423,7 +423,7 @@ handle_disconnection_req(l2cap_t *l2c, pbuf_t *pb)
 
   LIST_FOREACH(lc, &l2c->l2c_connections, lc_link) {
     if(dst_cid == lc->lc_local_cid && src_cid == lc->lc_remote_cid) {
-      connection_close(lc, "Reqeusted");
+      connection_close(lc, "Closed by peer");
       break;
     }
   }
@@ -665,6 +665,7 @@ l2cap_dispatch_signal(struct net_task *nt, uint32_t signals)
 
     int q = irq_forbid(IRQ_LEVEL_NET);
     l2c->l2c_output(l2c, NULL);
+    pbuf_free_queue_irq_blocked(&l2c->l2c_rx_queue);
     irq_permit(q);
     return;
   }

@@ -531,12 +531,13 @@ handle_ll_version_ind(connection_t *con,
 
 
 static int
-conn_terminate(nrf52_radio_t *nr, connection_t *con, uint8_t code)
+conn_terminate(nrf52_radio_t *nr, connection_t *con, uint8_t code,
+               const char *origin)
 {
   if(con->termination_code)
     return 1;
 
-  netlog("ble: Terminated (code=0x%x)", code);
+  netlog("ble: Terminated (code=0x%x) (%s)", code, origin);
 
   l2cap_disconnect(&con->l2c);
 
@@ -562,7 +563,7 @@ handle_ctrl_pdu(nrf52_radio_t *nr,
   case LL_VERSION_IND:
     return handle_ll_version_ind(con, req + 1, reqlen - 1);
   case LL_TERMINATE_IND:
-    return conn_terminate(nr, con, req[1]);
+    return conn_terminate(nr, con, req[1], "remote");
   default:
     return handle_unknown_ctrlop(con, req[0]);
   }
@@ -637,7 +638,7 @@ conn_rx_done(nrf52_radio_t *nr)
         break;
       case 1:
       case 2:
-        if(!len) {
+        if(!len || con->termination_code) {
           ack = 1;
         } else {
           pb = pbuf_make_irq_blocked(0, 0);
@@ -735,7 +736,7 @@ conn_open_window(nrf52_radio_t *nr)
   connection_t *con = &nr->nr_con;
 
   if(con->next_anchor_point > con->next_timeout) {
-    conn_terminate(nr, con, 0x08);
+    conn_terminate(nr, con, 0x08, "local");
   }
 
   if(con->termination_code && con->l2c.l2c_output == NULL) {
