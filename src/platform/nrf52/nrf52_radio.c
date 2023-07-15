@@ -20,7 +20,8 @@
 
 #define CONN_WINDOW_OPEN_OFFSET 1000
 
-#define ANNOUNCE_INTERVAL 50000
+#define ANNOUNCE_INTERVAL_FAST 100000
+#define ANNOUNCE_INTERVAL_SLOW 1000000
 
 #define RADIO_BASE 0x40001000
 
@@ -82,6 +83,7 @@
 
 // Link Layer State
 typedef enum {
+  LL_IDLE,
   LL_STANDBY,
   LL_ADV_TX,
   LL_ADV_RX,
@@ -90,7 +92,8 @@ typedef enum {
   LL_CONNECTED_TX,
 } ll_state_t;
 
-const char state2str[6][8] = {
+const char state2str[7][8] = {
+  "Idle",
   "Standby",
   "Adv_TX",
   "Adv_RX",
@@ -136,14 +139,19 @@ typedef struct connection {
 
   uint16_t eventCounter;
 
-  uint32_t stat_rx;
-  uint32_t stat_tx;
-  uint32_t stat_rx_qdrops;
-  uint32_t stat_rx_miss;
-  uint32_t stat_rx_crc;
-  uint32_t stat_tx_retransmissions;
+  struct {
+    uint32_t rx;
+    uint32_t tx;
+    uint32_t rx_qdrops;
+    uint32_t rx_bad_seq;
+    uint32_t rx_silent;
+    uint32_t rx_crc;
+    uint32_t tx_retransmissions;
+  } stat;
 
   uint8_t addr[6];
+
+  uint8_t anything;
 
 } connection_t;
 
@@ -156,9 +164,12 @@ typedef struct nrf52_radio {
 
   pbuf_t *nr_pbuf;
 
+  void (*status_cb)(int status);
+
   connection_t nr_con;
 
   uint32_t nr_adv_timeout;
+  uint32_t nr_announce_interval;
 
   uint8_t nr_addr[6];
 
@@ -169,7 +180,8 @@ typedef struct nrf52_radio {
   uint8_t nr_more_data;
   uint8_t nr_resync;
 
-  void (*status_cb)(int status);
+  uint8_t nr_power_mode;
+  uint8_t nr_adv_ch;
 
 } nrf52_radio_t;
 
@@ -263,9 +275,17 @@ radio_setup_for_adv(nrf52_radio_t *nr)
          0);
   reg_wr(RADIO_TIFS, 0);
 
-  select_channel(37, 0x555555, 0x8e89bed6);
+  nr->nr_adv_ch++;
+  if(nr->nr_adv_ch == 3)
+    nr->nr_adv_ch = 0;
 
-  nr->nr_adv_timeout += ANNOUNCE_INTERVAL + reg_rd(RNG_VALUE) * 32;
+  select_channel(37 + nr->nr_adv_ch, 0x555555, 0x8e89bed6);
+}
+
+static void
+radio_arm_for_advertisement(nrf52_radio_t *nr)
+{
+  nr->nr_adv_timeout += nr->nr_announce_interval + reg_rd(RNG_VALUE) * 32;
   reg_wr(TIMER0_BASE + TIMER_CC(3), nr->nr_adv_timeout);
 }
 
@@ -368,6 +388,7 @@ conn_disconnect(nrf52_radio_t *nr, uint32_t now)
   nr->nr_ll_state = LL_STANDBY;
   nr->nr_adv_timeout = now;
   radio_setup_for_adv(nr);
+  radio_arm_for_advertisement(nr);
   nr->status_cb(0);
 }
 
@@ -376,6 +397,11 @@ static void
 conn_hop(nrf52_radio_t *nr, connection_t *con)
 {
   // 4.5.8.2 Channel Selection algorithm #1
+
+  if(nr->nr_resync) {
+    con->stat.rx_silent++;
+  }
+
   uint8_t ch = (con->last_unmapped_channel + con->hop_increment) % 37;
   con->last_unmapped_channel = ch;
   select_channel(con->chmap[ch], con->crc_iv, con->access_addr);
@@ -418,15 +444,18 @@ handle_CONNECT_IND(nrf52_radio_t *nr, const uint8_t *pkt)
          0);
 
   con->next_timeout = con->next_anchor_point  + con->timeout;
-  netlog("ble: Connected to %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d",
+  netlog("ble: Connected to %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d hop:%d (on %d)",
          pkt[2 + 5],
          pkt[2 + 4],
          pkt[2 + 3],
          pkt[2 + 2],
          pkt[2 + 1],
          pkt[2 + 0],
-         -reg_rd(RADIO_RSSISAMPLE));
+         -reg_rd(RADIO_RSSISAMPLE),
+         con->hop_increment,
+         37 + nr->nr_adv_ch);
 
+  memset(&con->stat, 0, sizeof(con->stat));
   nr->status_cb(NRF52_BLE_STATUS_CONNECTED);
 
   return 1;
@@ -480,7 +509,6 @@ handle_ll_feature_req(connection_t *con, const uint8_t *req, int reqlen)
   if(rsp == NULL)
     return 0;
   memset(rsp, 0, 8);
-  rsp[0] = 0x00;
   return 1;
 }
 
@@ -618,9 +646,9 @@ conn_rx_done(nrf52_radio_t *nr)
 
       // Advance sequence
       con->tx_seq = !con->tx_seq;
-      con->stat_tx++;
+      con->stat.tx++;
     } else {
-      con->stat_tx_retransmissions++;
+      con->stat.tx_retransmissions++;
     }
 
     if(b0 & DATA_MD)
@@ -666,15 +694,15 @@ conn_rx_done(nrf52_radio_t *nr)
 
       if(ack) {
         con->last_rx_seq = b0 & DATA_SN;
-        con->stat_rx++;
+        con->stat.rx++;
       } else {
-        con->stat_rx_qdrops++;
+        con->stat.rx_qdrops++;
       }
     } else {
-      con->stat_rx_miss++;
+      con->stat.rx_bad_seq++;
     }
   } else {
-    con->stat_rx_crc++;
+    con->stat.rx_crc++;
   }
 
   // Prepare for transmit
@@ -796,13 +824,13 @@ irq_1(void)
     reg_wr(RADIO_EVENTS_DISABLED, 0);
 
     switch(nr->nr_ll_state) {
+    case LL_IDLE:
     case LL_STANDBY:
       break;
 
     case LL_ADV_TX:
       reg_wr(RADIO_TASKS_RXEN, 1);
       nr->nr_ll_state = LL_ADV_RX;
-      //      netlog("ble: Adv");
       break;
 
     case LL_ADV_RX:
@@ -846,18 +874,26 @@ irq_8(void)
 
     switch(nr->nr_ll_state) {
     case LL_STANDBY:
+      if(nr->nr_power_mode == NRF52_RADIO_PWR_OFF) {
+        nr->nr_ll_state = LL_IDLE;
+        reg_wr(TIMER0_BASE + TIMER_TASKS_STOP, 1);
+        netlog("ble: Idle");
+        break;
+      }
+
+    case LL_IDLE:
+      radio_setup_for_adv(nr);
       memcpy(pbuf_data(nr->nr_pbuf, 0), nr->nr_adv_pkt, 2 + nr->nr_adv_pkt[1]);
       reg_wr(RADIO_TASKS_TXEN, 1);
       nr->nr_ll_state = LL_ADV_TX;
-
-      nr->nr_adv_timeout += 100000;
+      nr->nr_adv_timeout += 4000;
       reg_wr(TIMER0_BASE + TIMER_CC(3), nr->nr_adv_timeout);
       break;
 
     case LL_ADV_TX:
     case LL_ADV_RX:
       reg_wr(RADIO_TASKS_DISABLE, 1);
-      nr->nr_adv_timeout += ANNOUNCE_INTERVAL + reg_rd(RNG_VALUE) * 32;
+      nr->nr_adv_timeout += nr->nr_announce_interval + reg_rd(RNG_VALUE) * 32;
       reg_wr(TIMER0_BASE + TIMER_CC(3), nr->nr_adv_timeout);
       nr->nr_ll_state = LL_STANDBY;
       break;
@@ -913,14 +949,15 @@ nrf52_radio_print_info(struct device *dev, struct stream *st)
   stprintf(st, "\n");
 
 
-  stprintf(st, "\tRX frames:%d  Miss:%d  CRC:%d  Drops:%d\n",
-           con->stat_rx,
-           con->stat_rx_miss,
-           con->stat_rx_crc,
-           con->stat_rx_qdrops);
+  stprintf(st, "\tRX frames:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
+           con->stat.rx,
+           con->stat.rx_bad_seq,
+           con->stat.rx_silent,
+           con->stat.rx_crc,
+           con->stat.rx_qdrops);
 
   stprintf(st, "\tTX frames:%d  Retransmissions:%d Qdepth:%d\n",
-           con->stat_tx, con->stat_tx_retransmissions,
+           con->stat.tx, con->stat.tx_retransmissions,
            con->l2c.l2c_tx_queue_len);
 }
 
@@ -940,7 +977,7 @@ radio_timer_init(nrf52_radio_t *nr)
   reg_wr(TIMER0_BASE + TIMER_INTENSET, 1 << 19); // Compare3 -> IRQ
 
   reg_wr(TIMER0_BASE + TIMER_TASKS_CLEAR, 1);
-  reg_wr(TIMER0_BASE + TIMER_CC(3), ANNOUNCE_INTERVAL);
+  reg_wr(TIMER0_BASE + TIMER_CC(3), nr->nr_announce_interval);
   reg_wr(TIMER0_BASE + TIMER_TASKS_START, 1);
 
   irq_enable(TIMER0_IRQ, IRQ_LEVEL_NET);
@@ -958,8 +995,7 @@ buffers_avail(struct netif *ni)
   if(!nr->nr_pbuf) {
     nr->nr_pbuf = pbuf_make(0, 0);
     reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
-    radio_timer_init(nr);
-    radio_setup_for_adv(nr);
+    radio_arm_for_advertisement(nr);
   }
 }
 
@@ -988,11 +1024,46 @@ nrf52_radio_ble_init(const char *name, void (*status_cb)(int flags))
   build_adv_pkt(nr, name);
 
   nr->nr_bn.ni_buffers_avail = buffers_avail;
+  nr->nr_announce_interval = ANNOUNCE_INTERVAL_FAST;
+
+  radio_timer_init(nr);
+  irq_enable(1, IRQ_LEVEL_NET);
 
   radio_init_ble();
   netif_attach(&nr->nr_bn, "ble", &nrf52_ble_device_class);
 
-  irq_enable(1, IRQ_LEVEL_NET);
   printf("BLE radio initialized\n");
 }
 
+
+
+void
+nrf52_radio_power_mode(int mode)
+{
+  nrf52_radio_t *nr = &g_radio;
+
+  if(nr->nr_power_mode == mode)
+    return;
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+
+  switch(mode) {
+  case NRF52_RADIO_PWR_HIGH:
+    nr->nr_announce_interval = ANNOUNCE_INTERVAL_FAST;
+    netlog("ble: Power mode: %s", "High");
+    break;
+  case NRF52_RADIO_PWR_LOW:
+    nr->nr_announce_interval = ANNOUNCE_INTERVAL_SLOW;
+    netlog("ble: Power mode: %s", "Low");
+    break;
+  }
+
+  if(nr->nr_power_mode == NRF52_RADIO_PWR_OFF && mode != NRF52_RADIO_PWR_OFF) {
+    radio_arm_for_advertisement(nr);
+    reg_wr(TIMER0_BASE + TIMER_TASKS_START, 1);
+    netlog("ble: Restarted");
+  }
+  nr->nr_power_mode = mode;
+
+  irq_permit(q);
+}
