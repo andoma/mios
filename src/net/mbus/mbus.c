@@ -208,7 +208,7 @@ mbus_local(mbus_netif_t *mni, pbuf_t *pb)
     case 0:
       return mbus_ping(pb, src_addr, flow);
     case 1:
-      return mbus_seqpkt_init_flow(pbuf_drop(pb, 4), src_addr, flow);
+      return mbus_seqpkt_accept(pbuf_drop(pb, 4), src_addr, flow);
     case 2:
       return mbus_rpc_dispatch(pbuf_drop(pb, 4), src_addr, flow);
     default:

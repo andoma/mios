@@ -136,7 +136,7 @@ mbus_seqpkt_accept_err(const char *name, const char *reason,
 
 
 pbuf_t *
-mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
+mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
 {
   uint8_t *pkt = pbuf_data(pb, 0);
   size_t len = pb->pb_pktlen;
@@ -158,6 +158,19 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
     return pb;
   }
   memset(msc, 0, sizeof(mbus_seqpkt_con_t));
+
+  svc_pbuf_policy_t spp = {MBUS_FRAGMENT_SIZE, 0};
+
+  msc->msc_svc_opaque = s->open(msc, mbus_seqpkt_service_event_cb, spp,
+                                mbus_seqpkt_get_flow_header);
+
+  if(msc->msc_svc_opaque == NULL) {
+    free(msc);
+    mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
+    return pb;
+  }
+
+  msc->msc_svc = s;
   msc->msc_task.nt_cb = mbus_seqpkt_task_cb;
 
   msc->msc_new_fragment = 1;
@@ -177,20 +190,7 @@ mbus_seqpkt_init_flow(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   msc->msc_ka_timer.t_opaque = msc;
   msc->msc_ka_timer.t_name = "seqpkt";
 
-  msc->msc_svc = s;
-
-  svc_pbuf_policy_t spp = {MBUS_FRAGMENT_SIZE, 0};
-
-  msc->msc_svc_opaque = s->open(msc, mbus_seqpkt_service_event_cb, spp,
-                                mbus_seqpkt_get_flow_header);
-
   msc->msc_last_rx = clock_get();
-
-  if(msc->msc_svc_opaque == NULL) {
-    free(msc);
-    mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
-    return pb;
-  }
 
   msc->msc_flow.mf_flow = flow;
   msc->msc_flow.mf_remote_addr = remote_addr;
