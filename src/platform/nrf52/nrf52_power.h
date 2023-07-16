@@ -1,0 +1,7 @@
+#pragma once
+
+#define POWER_BASE 0x40000000
+
+#define POWER_SYSTEMOFF (POWER_BASE + 0x500)
+#define POWER_DCDCEN    (POWER_BASE + 0x578)
+
