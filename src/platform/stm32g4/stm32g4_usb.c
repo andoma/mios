@@ -857,7 +857,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
         if(size > 62) {
           int num_block = (size + 31) / 32;
           reg_wr16(USB_COUNT_RX(ea), 0x8000 | ((num_block - 1) << 10));
-          size += num_block * 32;
+          size = num_block * 32;
         } else {
           reg_wr16(USB_COUNT_RX(ea), (size << 10));
         }
