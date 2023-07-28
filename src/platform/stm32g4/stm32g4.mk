@@ -15,7 +15,8 @@ SRCS += ${C}/systick.c \
 	${P}/stm32g4_idle.c \
 	${P}/stm32g4_clk.c \
 	${P}/stm32g4_gpio.c \
-	${P}/stm32g4_uart.c \
+	${P}/stm32g4_uart_stream.c \
+	${P}/stm32g4_uart_mbus.c \
 	${P}/stm32g4_spi.c \
 	${P}/stm32g4_dma.c \
 	${P}/stm32g4_i2c.c \
