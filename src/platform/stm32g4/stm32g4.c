@@ -58,8 +58,8 @@ stm32g4_init(void)
   void *SRAM1_end   = (void *)0x20000000 + sram1_size * 1024;
   heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end, MEM_TYPE_DMA);
 
-  void *SRAM2_start = (void *)0x20014000;
-  void *SRAM2_end   = (void *)0x20014000 + sram2_size * 1024;
+  void *SRAM2_start = SRAM1_end;
+  void *SRAM2_end   = SRAM2_start + sram2_size * 1024;
   pbuf_data_add(SRAM2_start, SRAM2_end);
 
   void *CCM_start = (void *)0x10000000 + sizeof(cpu_t);
