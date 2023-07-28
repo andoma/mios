@@ -837,7 +837,7 @@ task_create_shell(void *(*entry)(void *arg), void *arg, const char *name)
   int stack_size = 768;
 #ifdef HAVE_FPU
   flags |= TASK_FPU;
-  stack_size = 1024 * 2;
+  stack_size = 1024;
 #endif
   if(!thread_create(entry, arg, stack_size, name,  flags, 2))
     return ERR_NO_MEMORY;
