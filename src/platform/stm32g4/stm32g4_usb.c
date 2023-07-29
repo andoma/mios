@@ -788,7 +788,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
   usb_interface_t *ui;
   int num_interfaces = 0;
 
-  uint8_t sramptr = 64; // First 64 bytes is the BTABLE
+  uint32_t sramptr = 64; // First 64 bytes is the BTABLE
 
   // Buffers for EP0
   reg_wr16(USB_ADDR_TX(0), sramptr);
