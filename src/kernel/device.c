@@ -66,6 +66,8 @@ device_get_next(device_t *cur)
   if(d)
     device_retain(d);
   mutex_unlock(&devs_mutex);
+  if(cur)
+    device_release(cur);
   return d;
 }
 
@@ -80,7 +82,6 @@ cmd_dev(cli_t *cli, int argc, char **argv)
     cli_printf(cli, "\n[%s]\n", d->d_name);
     if(d->d_class->dc_print_info)
       d->d_class->dc_print_info(d, cli->cl_stream);
-    device_release(d);
   }
   cli_printf(cli, "\n");
   return 0;
