@@ -509,6 +509,10 @@ handle_ll_feature_req(connection_t *con, const uint8_t *req, int reqlen)
   if(rsp == NULL)
     return 0;
   memset(rsp, 0, 8);
+
+  if(req[0] & (1 << 5)) {
+    rsp[0] |= 1 << 5;
+  }
   return 1;
 }
 
@@ -556,6 +560,28 @@ handle_ll_version_ind(connection_t *con,
   return 1;
 }
 
+static int
+handle_ll_length_req(connection_t *con,
+                      const uint8_t *req,
+                      int reqlen)
+{
+  uint8_t *rsp = enqueue_ctrl_pdu(con, LL_LENGTH_RSP, 8);
+  if(rsp == NULL)
+    return 0;
+
+  int o = PBUF_DATA_SIZE - 2;
+  int t = 2120;
+  rsp[0] = o;
+  rsp[1] = o >> 8;
+  rsp[2] = t;
+  rsp[3] = t >> 8;
+  rsp[4] = o;
+  rsp[5] = o >> 8;
+  rsp[6] = t;
+  rsp[7] = t >> 8;
+  return 1;
+}
+
 
 
 static int
@@ -592,6 +618,8 @@ handle_ctrl_pdu(nrf52_radio_t *nr,
     return handle_ll_version_ind(con, req + 1, reqlen - 1);
   case LL_TERMINATE_IND:
     return conn_terminate(nr, con, req[1], "remote");
+  case LL_LENGTH_REQ:
+    return handle_ll_length_req(con, req + 1, reqlen - 1);
   default:
     return handle_unknown_ctrlop(con, req[0]);
   }
