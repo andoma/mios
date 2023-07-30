@@ -36,6 +36,18 @@ typedef struct nrf52_uart {
 
 
 static void
+printchar(char c)
+{
+  reg_wr(UART_TXD, c);
+  reg_wr(UART_TX_TASK, 1);
+
+  while(!reg_rd(UART_TX_RDY)) {
+  }
+  reg_wr(UART_TX_RDY, 0);
+  reg_wr(UART_TX_TASK, 0);
+}
+
+static void
 nrf52_uart_write(stream_t *s, const void *buf, size_t size)
 {
   nrf52_uart_t *u = (nrf52_uart_t *)s;
@@ -51,15 +63,18 @@ nrf52_uart_write(stream_t *s, const void *buf, size_t size)
   if(busy_wait) {
     // We are in an interrupt or all interrupts disabled, we busy wait
 
+    // First drain FIFO
+    while(1) {
+      uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
+      if(!avail)
+        break;
+      char c = u->tx_fifo[u->tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
+      u->tx_fifo_rdptr++;
+      printchar(c);
+    }
     for(size_t i = 0; i < size; i++) {
       const uint8_t c = d[i];
-      reg_wr(UART_TXD, c);
-      reg_wr(UART_TX_TASK, 1);
-
-      while(!reg_rd(UART_TX_RDY)) {
-      }
-      reg_wr(UART_TX_RDY, 0);
-      reg_wr(UART_TX_TASK, 0);
+      printchar(c);
     }
     irq_permit(q);
     return;
