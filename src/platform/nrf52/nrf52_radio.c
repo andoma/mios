@@ -18,8 +18,6 @@
 
 #include "irq.h"
 
-#define CONN_WINDOW_OPEN_OFFSET 1000
-
 #define ANNOUNCE_INTERVAL_FAST 100000
 #define ANNOUNCE_INTERVAL_SLOW 1000000
 
@@ -88,17 +86,19 @@ typedef enum {
   LL_ADV_TX,
   LL_ADV_RX,
   LL_CONNECTED_IDLE,
-  LL_CONNECTED_RX,
+  LL_CONNECTED_RX_1,
+  LL_CONNECTED_RX_N,
   LL_CONNECTED_TX,
 } ll_state_t;
 
-const char state2str[7][8] = {
+const char state2str[8][8] = {
   "Idle",
   "Standby",
   "Adv_TX",
   "Adv_RX",
   "ConnIdl",
-  "ConnRx",
+  "ConnRx1",
+  "ConnRxN",
   "ConnTx"
 };
 
@@ -122,6 +122,7 @@ typedef struct connection {
   uint32_t timeout;
 
   uint32_t next_anchor_point;
+  uint32_t window_open_offset;
   uint32_t next_timeout;
 
   uint8_t hop_increment;
@@ -147,11 +148,10 @@ typedef struct connection {
     uint32_t rx_silent;
     uint32_t rx_crc;
     uint32_t tx_retransmissions;
+    int rx_maxlen;
   } stat;
 
   uint8_t addr[6];
-
-  uint8_t anything;
 
 } connection_t;
 
@@ -178,11 +178,9 @@ typedef struct nrf52_radio {
   uint8_t nr_empty_packet[2];
 
   uint8_t nr_more_data;
-  uint8_t nr_resync;
 
   uint8_t nr_power_mode;
   uint8_t nr_adv_ch;
-
 } nrf52_radio_t;
 
 
@@ -244,7 +242,7 @@ radio_init_ble(void)
          (s1len << 16) | // Length of S1 in bytes
          0);
 
-  const int maxlen = PBUF_DATA_SIZE - 2;
+  const int maxlen = LLMTU;
   const int statlen = 0;
   reg_wr(RADIO_PCNF1,
          (maxlen << 0) |
@@ -253,27 +251,29 @@ radio_init_ble(void)
          (1 << 25)); // Enable whitening
 
   reg_wr(RADIO_MODECNF0,
-         //         (1 << 0) | // Fast ramp-up (Does not work with TIFS)
+         (1 << 0) | // Fast ramp-up (Does not work with TIFS)
          (2 << 8) | // Transmit center frequency when not started
          0);
 
-  reg_wr(RADIO_INTENSET, RADIO_IRQ_DISABLED);
+  reg_wr(RADIO_INTENSET, RADIO_IRQ_END);
+
+  reg_wr(RADIO_SHORTS,
+         RADIO_SHORT_RSSI_SAMPLING |
+         RADIO_SHORT_READY_START |
+         RADIO_SHORT_END_DISABLE);
 }
 
 
 static void
 radio_setup_for_adv(nrf52_radio_t *nr)
 {
-  reg_wr(RADIO_SHORTS,
-         RADIO_SHORT_RSSI_SAMPLING |
-         RADIO_SHORT_READY_START |
-         RADIO_SHORT_END_DISABLE);
-
+#if 0
   reg_wr(RADIO_MODECNF0,
          (1 << 0) | // Fast ramp-up (Does not work with TIFS)
          (2 << 8) | // Transmit center frequency when not started
          0);
   reg_wr(RADIO_TIFS, 0);
+#endif
 
   nr->nr_adv_ch++;
   if(nr->nr_adv_ch == 3)
@@ -334,9 +334,9 @@ conn_output(struct l2cap *self, struct pbuf *pb)
 
   int payload_len = pb->pb_pktlen;
   pb = pbuf_prepend(pb, 2, 1, 0);
-  pbuf_pullup(pb, pb->pb_pktlen);
-
-  assert(pb->pb_next == NULL);
+  if(pbuf_pullup(pb, pb->pb_pktlen)) {
+    panic("pullup failed");
+  }
 
   uint8_t *hdr = pbuf_data(pb, 0);
   hdr[0] = pb->pb_flags & PBUF_SOP ? 2 : 1;
@@ -398,13 +398,16 @@ conn_hop(nrf52_radio_t *nr, connection_t *con)
 {
   // 4.5.8.2 Channel Selection algorithm #1
 
-  if(nr->nr_resync) {
-    con->stat.rx_silent++;
-  }
-
   uint8_t ch = (con->last_unmapped_channel + con->hop_increment) % 37;
   con->last_unmapped_channel = ch;
   select_channel(con->chmap[ch], con->crc_iv, con->access_addr);
+}
+
+
+static void
+arm_timer3(uint32_t when)
+{
+  reg_wr(TIMER0_BASE + TIMER_CC(3), when);
 }
 
 
@@ -427,21 +430,22 @@ handle_CONNECT_IND(nrf52_radio_t *nr, const uint8_t *pkt)
     rx_end_time + con->transmitWindowDelay +
     con->transmitWindowOffset;
 
-  reg_wr(TIMER0_BASE + TIMER_CC(3),
-         con->next_anchor_point - CONN_WINDOW_OPEN_OFFSET);
+  con->window_open_offset = 1000;
+
+  arm_timer3(con->next_anchor_point - con->window_open_offset);
 
   nr->nr_ll_state = LL_CONNECTED_IDLE;
 
+#if 0
   reg_wr(RADIO_SHORTS,
          RADIO_SHORT_READY_START |
-         RADIO_SHORT_END_DISABLE |
-         RADIO_SHORT_DISABLED_TXEN);
-
+         RADIO_SHORT_END_DISABLE);
   reg_wr(RADIO_TIFS, 150);
 
   reg_wr(RADIO_MODECNF0,
          (2 << 8) | // Transmit center frequency when not started
          0);
+#endif
 
   con->next_timeout = con->next_anchor_point  + con->timeout;
   netlog("ble: Connected to %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d hop:%d (on %d)",
@@ -569,7 +573,7 @@ handle_ll_length_req(connection_t *con,
   if(rsp == NULL)
     return 0;
 
-  int o = PBUF_DATA_SIZE - 2;
+  int o = LLMTU;
   int t = 2120;
   rsp[0] = o;
   rsp[1] = o >> 8;
@@ -639,26 +643,29 @@ static void
 conn_rx_done(nrf52_radio_t *nr)
 {
   connection_t *con = &nr->nr_con;
-
-  if(nr->nr_resync) {
-    nr->nr_resync = 0;
-
-    const uint32_t anchor_point = reg_rd(TIMER0_BASE + TIMER_CC(1));
-    con->next_anchor_point = anchor_point + con->connInterval;
-    con->next_timeout = con->next_anchor_point + con->timeout;
-
-    reg_wr(TIMER0_BASE + TIMER_CC(3),
-           con->next_anchor_point - CONN_WINDOW_OPEN_OFFSET);
-  }
+  int n = 0;
 
   const uint8_t *rx_pkt = NULL;
   nr->nr_more_data = 0;
+
   if(reg_rd(RADIO_CRCSTATUS)) {
+
+    if(nr->nr_ll_state == LL_CONNECTED_RX_1) {
+      const uint32_t capt = reg_rd(TIMER0_BASE + TIMER_CC(1));
+      n = capt - (con->next_anchor_point - con->connInterval);
+      con->next_anchor_point = capt + con->connInterval;
+      arm_timer3(con->next_anchor_point - con->window_open_offset);
+    }
+
     uint8_t *pkt = pbuf_data(nr->nr_pbuf, 0);
     rx_pkt = pkt;
 
     const uint8_t b0 = pkt[0];
     const uint8_t len = pkt[1];
+    con->stat.rx_maxlen = MAX(con->stat.rx_maxlen, len);
+
+    if(b0 & DATA_SN)
+      con->window_open_offset = 250;
 
     if(con->tx_seq == !(b0 & DATA_NESN)) {
       // Remote received our packet
@@ -762,24 +769,39 @@ conn_rx_done(nrf52_radio_t *nr)
   pkt[0] = b0;
 
   reg_wr(RADIO_PACKETPTR, (intptr_t)pkt);
-  reg_wr(RADIO_SHORTS, 0b11); // Ready->start, end->disable
-  nr->nr_ll_state = LL_CONNECTED_TX;
+
+  uint32_t rxend = reg_rd(TIMER0_BASE + TIMER_CC(2));
+  uint32_t txstart = rxend + 110; // + 40µS ramp-up = 150µS
+
+  reg_wr(TIMER0_BASE + TIMER_CC(0), txstart);
+  reg_wr(PPI_CHENSET, (1 << 20)); // TIMER0_CAPTURE0 -> RADIO_TXEN
+
+
+  con->next_timeout = con->next_anchor_point + con->timeout;
 
   if(rx_pkt)
     log_data_pdu(rx_pkt, "RX");
   log_data_pdu(pkt, "TX");
+
+  if(n < -50 || n > 50)
+    netlog("ble: Anochr adjust:%d @ %d", n, nr->nr_ll_state);
+
+  nr->nr_ll_state = LL_CONNECTED_TX;
 }
 
 
 static void
 conn_tx_done(nrf52_radio_t *nr)
 {
-  reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
+  //  connection_t *con = &nr->nr_con;
+  reg_wr(PPI_CHENCLR, (1 << 20)); // clr: TIMER0_CAPTURE0 -> RADIO_TXEN
 
   if(nr->nr_more_data) {
-    reg_wr(RADIO_SHORTS, 0b111); // Ready->start, end->disable, disabled->txen
+    nr->nr_ll_state = LL_CONNECTED_RX_N;
+
+    reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
     reg_wr(RADIO_TASKS_RXEN, 1);
-    nr->nr_ll_state = LL_CONNECTED_RX;
+
   } else {
     nr->nr_ll_state = LL_CONNECTED_IDLE;
   }
@@ -790,8 +812,10 @@ static void
 conn_open_window(nrf52_radio_t *nr)
 {
   connection_t *con = &nr->nr_con;
-
-  if(con->next_anchor_point > con->next_timeout) {
+  int delta = con->next_anchor_point - con->next_timeout;
+  if(delta > 0) {
+    netlog("ble: timo %d %d %d", delta, con->next_anchor_point,
+           con->next_timeout);
     conn_terminate(nr, con, 0x08, "local");
   }
 
@@ -812,33 +836,37 @@ conn_open_window(nrf52_radio_t *nr)
 
   conn_hop(nr, con);
 
-  nr->nr_resync = 1;
-  reg_wr(RADIO_SHORTS, 0b111); // Ready->start, end->disable, disabled->txen
+  nr->nr_ll_state = LL_CONNECTED_RX_1;
+  reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
   reg_wr(RADIO_TASKS_RXEN, 1);
 
-  nr->nr_ll_state = LL_CONNECTED_RX;
-
-  reg_wr(TIMER0_BASE + TIMER_CC(3),
-         con->next_anchor_point + con->transmitWindowSize);
-
+  arm_timer3(con->next_anchor_point + con->transmitWindowSize);
   con->next_anchor_point += con->connInterval;
 }
 
 
-#if 0
 static void
 conn_close_window(nrf52_radio_t *nr)
 {
   connection_t *con = &nr->nr_con;
 
-  reg_wr(RADIO_SHORTS, 0b11); // Ready->start, end->disable
   reg_wr(RADIO_TASKS_DISABLE, 1);
+  reg_wr(PPI_CHENCLR, (1 << 20)); // TIMER0_CAPTURE0 -> RADIO_TXEN
 
-  nr->nr_ll_state = LL_CONNECTED_IDLE;
-  reg_wr(TIMER0_BASE + TIMER_CC(3),
-         con->next_anchor_point - CONN_WINDOW_OPEN_OFFSET);
+  if(nr->nr_ll_state == LL_CONNECTED_RX_1) {
+    // Never heard anything from central
+    con->stat.rx_silent++;
+    // Open up
+    con->window_open_offset = 1000;
+    arm_timer3(con->next_anchor_point - con->window_open_offset);
+
+    nr->nr_ll_state = LL_CONNECTED_IDLE;
+
+  } else {
+    conn_open_window(nr);
+  }
 }
-#endif
+
 
 /*********************
  * Radio IRQ
@@ -848,8 +876,8 @@ irq_1(void)
 {
   nrf52_radio_t *nr = &g_radio;
 
-  if(reg_rd(RADIO_EVENTS_DISABLED)) {
-    reg_wr(RADIO_EVENTS_DISABLED, 0);
+  if(reg_rd(RADIO_EVENTS_END)) {
+    reg_wr(RADIO_EVENTS_END, 0);
 
     switch(nr->nr_ll_state) {
     case LL_IDLE:
@@ -857,6 +885,7 @@ irq_1(void)
       break;
 
     case LL_ADV_TX:
+      reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
       reg_wr(RADIO_TASKS_RXEN, 1);
       nr->nr_ll_state = LL_ADV_RX;
       break;
@@ -867,13 +896,18 @@ irq_1(void)
         if(adv_rx(nr))
           break;
       }
+      reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
       reg_wr(RADIO_TASKS_RXEN, 1);
       break;
 
     case LL_CONNECTED_IDLE:
       break;
 
-    case LL_CONNECTED_RX:
+    case LL_CONNECTED_RX_1:
+      conn_rx_done(nr);
+      break;
+
+    case LL_CONNECTED_RX_N:
       conn_rx_done(nr);
       break;
 
@@ -927,9 +961,19 @@ irq_8(void)
       break;
 
     case LL_CONNECTED_IDLE:
-    case LL_CONNECTED_TX:
-    case LL_CONNECTED_RX:
       conn_open_window(nr);
+      break;
+
+    case LL_CONNECTED_TX:
+      conn_close_window(nr);
+      break;
+
+    case LL_CONNECTED_RX_1:
+      conn_close_window(nr);
+      break;
+
+    case LL_CONNECTED_RX_N:
+      conn_close_window(nr);
       break;
 
     default:
@@ -977,16 +1021,20 @@ nrf52_radio_print_info(struct device *dev, struct stream *st)
   stprintf(st, "\n");
 
 
+  stprintf(st, "\tEventCounter: %d\n", con->eventCounter);
   stprintf(st, "\tRX frames:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
            con->stat.rx,
            con->stat.rx_bad_seq,
            con->stat.rx_silent,
            con->stat.rx_crc,
            con->stat.rx_qdrops);
+  stprintf(st, "\tMax len:%d\n", con->stat.rx_maxlen);
 
   stprintf(st, "\tTX frames:%d  Retransmissions:%d Qdepth:%d\n",
            con->stat.tx, con->stat.tx_retransmissions,
            con->l2c.l2c_tx_queue_len);
+
+  l2cap_print(&con->l2c, st);
 }
 
 
@@ -1023,6 +1071,8 @@ buffers_avail(struct netif *ni)
   if(!nr->nr_pbuf) {
     nr->nr_pbuf = pbuf_make(0, 0);
     reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
+    uint8_t *guard = pbuf_data(nr->nr_pbuf, PBUF_DATA_SIZE - 1);
+    *guard = 0xdf;
     radio_arm_for_advertisement(nr);
   }
 }

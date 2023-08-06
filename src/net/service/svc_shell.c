@@ -3,6 +3,7 @@
 #include <mios/stream.h>
 #include <mios/task.h>
 #include <mios/cli.h>
+#include <mios/eventlog.h>
 
 #include <sys/param.h>
 
@@ -29,7 +30,8 @@ typedef struct {
 
   pbuf_t *ss_txbuf;
 
-  int ss_shutdown;
+  uint8_t ss_shutdown;
+  uint8_t ss_flushed;
 
   svc_pbuf_policy_t ss_pbuf_policy;
 
@@ -80,8 +82,10 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
   if(buf == NULL) {
     // Flush
 
-    if(ss->ss_txbuf != NULL)
+    if(ss->ss_txbuf != NULL) {
+      ss->ss_flushed = 1;
       ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
+    }
 
   } else {
 
@@ -91,13 +95,19 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
         break;
 
       if(ss->ss_txbuf == NULL) {
-        ss->ss_txbuf = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 1);
+        ss->ss_txbuf = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 0);
+        if(ss->ss_txbuf == NULL) {
+          ss->ss_flushed = 1;
+          ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
+          ss->ss_txbuf = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 1);
+        }
       }
 
       size_t remain = ss->ss_pbuf_policy.max_fragment_size -
         ss->ss_txbuf->pb_buflen;
 
       if(remain == 0) {
+        ss->ss_flushed = 1;
         ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
         cond_wait(&ss->ss_cond, &ss->ss_mutex);
         continue;
@@ -166,12 +176,15 @@ static struct pbuf *
 shell_pull(void *opaque)
 {
   svc_shell_t *ss = opaque;
-  pbuf_t *pb;
+  pbuf_t *pb = NULL;
   mutex_lock(&ss->ss_mutex);
-  pb = ss->ss_txbuf;
-  if(pb != NULL) {
-    ss->ss_txbuf = NULL;
-    cond_signal(&ss->ss_cond);
+  if(ss->ss_flushed) {
+    pb = ss->ss_txbuf;
+    if(pb != NULL) {
+      ss->ss_txbuf = NULL;
+      cond_signal(&ss->ss_cond);
+      ss->ss_flushed = 0;
+    }
   }
   mutex_unlock(&ss->ss_mutex);
   return pb;

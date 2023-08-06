@@ -43,3 +43,7 @@ pbuf_t *mbus_output_flow(pbuf_t *pb, const struct mbus_flow *mf)
   __attribute__((warn_unused_result));
 
 void mbus_send(pbuf_t *pb);
+
+uint32_t mbus_crc32(struct pbuf *pb, uint32_t crc);
+
+void mbus_append_crc(struct pbuf *pb);

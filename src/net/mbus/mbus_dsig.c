@@ -15,7 +15,8 @@
 struct pbuf *
 mbus_dsig_input(struct pbuf *pb, uint16_t signal)
 {
-  pbuf_pullup(pb, pb->pb_pktlen);
+  if(pbuf_pullup(pb, pb->pb_pktlen))
+    return pb;
   // -6 accounts for header and trailing CRC
   dsig_dispatch(signal, pbuf_cdata(pb, 2), pb->pb_pktlen - 6);
   return pb;

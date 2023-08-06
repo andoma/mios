@@ -21,7 +21,8 @@ typedef struct pbuf {
   STAILQ_ENTRY(pbuf) pb_link;
 #define pb_next pb_link.stqe_next
 
-  uint16_t pb_flags;
+  uint8_t pb_flags;
+  uint8_t pb_credits;
   uint16_t pb_pktlen;
   uint16_t pb_offset;
   uint16_t pb_buflen;
@@ -45,13 +46,14 @@ __attribute__((warn_unused_result))
 pbuf_t *pbuf_drop(pbuf_t *pb, size_t bytes);
 
 // Remove from tail
-__attribute__((warn_unused_result))
-pbuf_t *pbuf_trim(pbuf_t *pb, size_t bytes);
+void pbuf_trim(pbuf_t *pb, size_t bytes);
 
 __attribute__((warn_unused_result))
 pbuf_t *pbuf_prepend(pbuf_t *pb, size_t bytes, int wait, size_t extra_offset);
 
-void pbuf_pullup(pbuf_t *pb, size_t bytes);
+// returns number of bytes missing (0 == ok)
+__attribute__((warn_unused_result))
+size_t pbuf_pullup(pbuf_t *pb, size_t bytes);
 
 void pbuf_free(pbuf_t *pb);
 
@@ -80,6 +82,10 @@ pbuf_t *pbuf_write(pbuf_t *pb, const void *ptr, size_t len, size_t max_fill);
 void pbuf_status(void);
 
 void pbuf_print(const char *prefix, const pbuf_t *pb, int full);
+
+struct stream;
+void pbuf_stprint(const char *prefix, const pbuf_t *pb, int full,
+                  struct stream *st);
 
 // =========================================================
 // All functions below here assume irq_forbid(IRQ_LEVEL_NET)

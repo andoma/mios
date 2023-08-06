@@ -391,7 +391,9 @@ rx_complete(stm32_dma_instance_t instance, void *arg, error_t err)
 static pbuf_t *
 mbus_uart_output(struct mbus_netif *mni, pbuf_t *pb)
 {
-  pbuf_pullup(pb, pb->pb_pktlen);
+  if(pbuf_pullup(pb, pb->pb_pktlen))
+    panic("pbuf_pullup");
+
   uart_mbus_t *um = (uart_mbus_t *)mni;
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
   if(um->txq_len < 5) {

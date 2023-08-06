@@ -2,6 +2,7 @@
 #include "util/crc32.h"
 
 #include <mios/eventlog.h>
+#include <mios/mios.h>
 
 #include "net/pbuf.h"
 #include "net/netif.h"
@@ -19,8 +20,6 @@
 #include <mios/io.h>
 
 
-LIST_HEAD(mbus_flow_list, mbus_flow);
-
 SLIST_HEAD(mbus_netif_list, mbus_netif);
 
 static struct mbus_netif_list mbus_netifs;
@@ -29,7 +28,7 @@ uint8_t mbus_local_addr;
 
 static struct mbus_flow_list mbus_flows;
 
-static uint32_t
+uint32_t
 mbus_crc32(struct pbuf *pb, uint32_t crc)
 {
   for(; pb != NULL; pb = pb->pb_next)
@@ -38,6 +37,16 @@ mbus_crc32(struct pbuf *pb, uint32_t crc)
   return ~crc;
 }
 
+void
+mbus_append_crc(struct pbuf *pb)
+{
+  uint32_t crc = mbus_crc32(pb, 0);
+  uint8_t *trailer = pbuf_append(pb, sizeof(uint32_t));
+  trailer[0] = crc;
+  trailer[1] = crc >> 8;
+  trailer[2] = crc >> 16;
+  trailer[3] = crc >> 24;
+}
 
 pbuf_t *
 mbus_output(pbuf_t *pb)
@@ -45,15 +54,9 @@ mbus_output(pbuf_t *pb)
   const uint8_t *hdr = pbuf_cdata(pb, 0);
   const int dst_addr = hdr[0];
 
-  uint32_t crc = mbus_crc32(pb, 0);
-  uint8_t *trailer = pbuf_append(pb, sizeof(uint32_t));
-  trailer[0] = crc;
-  trailer[1] = crc >> 8;
-  trailer[2] = crc >> 16;
-  trailer[3] = crc >> 24;
+  mbus_append_crc(pb);
 
   mbus_netif_t *mni, *n;
-
   if(dst_addr < 32) {
     // Unicast
     const uint32_t mask = 1 << dst_addr;
@@ -268,7 +271,9 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     return pb;
   }
 
-  pbuf_pullup(pb, pb->pb_pktlen);
+  if(pbuf_pullup(pb, pb->pb_pktlen)) {
+    panic("pullup failed");
+  }
 
   if(mbus_crc32(pb, 0)) {
     mni->mni_rx_crc_errors++;
@@ -297,7 +302,7 @@ mbus_input(struct netif *ni, struct pbuf *pb)
     }
 
     if(dst_addr == mbus_local_addr) {
-      pb = pbuf_trim(pb, 4); // Drop CRC
+      pbuf_trim(pb, 4); // Drop CRC
       return mbus_local(mni, pb);
     }
 

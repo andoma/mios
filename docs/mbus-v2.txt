@@ -45,12 +45,13 @@ zz0D_DDDD 1FFS_SSSS FFFF_FFFF TTTT_TTTT
 T = Flow type
     0 - Ping
     1 - Seqpkt
+    2 - RPC
+    3 - Seqpkt Guaranteed Delivery Mode
 
 
 ==================================================
 SeqPacket
 ==================================================
-
 
 Close:
 
@@ -62,8 +63,9 @@ E = Error Code (?)
 Data & ACK:
 
 7654_3210
-00MC_SELF [Fragment]
+0GMC_SELF [Fragment]
 
+G = Guaranteed Delivery
 M = More data pending
 C = Clear to send
 S = Sequence
@@ -72,6 +74,26 @@ L = Last Fragment
 F = First Fragment
 
 Maximum fragment size = 64 - 4 (header) - 4 (CRC) = 56
+
+==================================================
+SeqPacket Guaranteed Delivery Mode
+==================================================
+
+Close:
+
+7654_3210 ...
+10EE_EEEE [Reason]
+
+E = Error Code (?)
+
+Data & Credits
+
+7654_3210
+00cc_ccLF [Fragment]
+
+c = 4bit Credit increase
+L = Last Fragment
+F = First Fragment
 
 
 ##################################################

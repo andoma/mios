@@ -12,85 +12,9 @@
 
 #include "net/pbuf.h"
 #include "mbus.h"
-#include "mbus_flow.h"
 
 #include "irq.h"
-
-#define MBUS_FRAGMENT_SIZE 56
-
-#define SP_TIME_TIMEOUT  2500000
-#define SP_TIME_KA       300000
-#define SP_TIME_RTX      25000
-#define SP_TIME_ACK      10000
-#define SP_TIME_FAST_ACK 1000
-
-#define SP_FF   0x1
-#define SP_LF   0x2
-#define SP_ESEQ 0x4
-#define SP_SEQ  0x8
-#define SP_CTS  0x10
-#define SP_MORE 0x20
-
-// We rely on these flags having the same value, so make sure that holds
-_Static_assert(SP_FF  == PBUF_SOP);
-_Static_assert(SP_LF  == PBUF_EOP);
-_Static_assert(SP_SEQ == PBUF_SEQ);
-
-LIST_HEAD(mbus_seqpkt_con_list, mbus_seqpkt_con);
-
-// Transmit because sequence bumped, we're sending a new fragment
-#define SP_XMIT_NEW_FRAGMENT  0x1
-
-// Transmit because RTX timer has expired
-#define SP_XMIT_RTX           0x2
-
-// Transmit because CTS changed
-#define SP_XMIT_CTS_CHANGED   0x4
-
-// Transmit because expected SEQ changed
-#define SP_XMIT_ESEQ_CHANGED  0x8
-
-// Transmit because close
-#define SP_XMIT_CLOSE         0x10
-
-// Transmit because KA
-#define SP_XMIT_KA            0x20
-
-
-typedef struct mbus_seqpkt_con {
-
-  mbus_flow_t msc_flow;
-
-  net_task_t msc_task;
-
-  uint8_t msc_remote_flags;
-  uint8_t msc_local_flags;
-
-  uint8_t msc_seqgen;
-  uint8_t msc_local_flags_sent;
-
-  uint8_t msc_local_close;
-  uint8_t msc_txq_len;
-
-  uint8_t msc_new_fragment;
-  uint8_t msc_rtx_attempt;
-
-  struct pbuf_queue msc_txq;
-  struct pbuf_queue msc_rxq;
-
-  timer_t msc_ack_timer;
-  timer_t msc_rtx_timer;
-  timer_t msc_ka_timer;
-
-  const service_t *msc_svc;
-  void *msc_svc_opaque;
-
-  int64_t msc_last_rx;
-  int64_t msc_last_tx;
-
-} mbus_seqpkt_con_t;
-
-static void mbus_seqpkt_shutdown(mbus_seqpkt_con_t *msc, const char *reason);
+#include "mbus_seqpkt_defs.h"
 
 static void mbus_seqpkt_rtx_timer(void *opaque, uint64_t expire);
 
@@ -105,16 +29,8 @@ static void mbus_seqpkt_maybe_destroy(mbus_seqpkt_con_t *msc);
 static pbuf_t *mbus_seqpkt_input(mbus_flow_t *mf, pbuf_t *pb);
 
 
-static void
-mbus_seqpkt_service_event_cb(void *opaque, uint32_t events)
-{
-  mbus_seqpkt_con_t *msc = opaque;
-  net_task_raise(&msc->msc_task, events);
-}
-
-
 static uint32_t
-mbus_seqpkt_get_flow_header(void *opaque)
+mbus_seqpkt_local_flow_get_header(void *opaque)
 {
   mbus_seqpkt_con_t *msc = opaque;
   extern uint8_t mbus_local_addr;
@@ -126,53 +42,129 @@ mbus_seqpkt_get_flow_header(void *opaque)
     (msc->msc_local_flags << 24);
 }
 
+
+static pbuf_t *
+mbus_seqpkt_local_flow_xmit(pbuf_t *pb, mbus_seqpkt_con_t *msc)
+{
+  return mbus_output_flow(pb, &msc->msc_flow);
+}
+
+
+static void
+mbus_seqpkt_service_event_cb(void *opaque, uint32_t events)
+{
+  mbus_seqpkt_con_t *msc = opaque;
+  net_task_raise(&msc->msc_task, events);
+}
+
+void
+mbus_seqpkt_txq_enq(mbus_seqpkt_con_t *msc, struct pbuf *pb)
+{
+  pbuf_t *n;
+  for(; pb != NULL; pb = n) {
+    n = pb->pb_next;
+
+    if(msc->msc_seqgen & 1)
+      pb->pb_flags |= PBUF_SEQ;
+    else
+      pb->pb_flags &= ~PBUF_SEQ;
+
+    msc->msc_seqgen++;
+    msc->msc_txq_len++;
+    STAILQ_INSERT_TAIL(&msc->msc_txq, pb, pb_link);
+  }
+}
+
+static int
+mbus_seqpkt_service_prep_send(mbus_seqpkt_con_t *msc)
+{
+  if(msc->msc_flow.mf_input == NULL)
+    return 1;
+
+  if(msc->msc_app_closed)
+    return 0;
+
+  if(msc->msc_app_opaque == NULL)
+    return 0;
+
+  const service_t *s = msc->msc_app_vtable;
+  if(s->pull == NULL)
+    return 0;
+
+  while(msc->msc_txq_len < 2) {
+    pbuf_t *p = s->pull(msc->msc_app_opaque);
+    if(p == NULL)
+      break;
+    mbus_seqpkt_txq_enq(msc, p);
+  }
+  return 0;
+}
+
+static uint8_t
+mbus_seqpkt_service_update_cts(mbus_seqpkt_con_t *msc)
+{
+  uint8_t prev = msc->msc_local_flags;
+  const service_t *s = msc->msc_app_vtable;
+
+  if(msc->msc_app_opaque != NULL && s->may_push &&
+     s->may_push(msc->msc_app_opaque)) {
+    msc->msc_local_flags |= SP_CTS;
+  } else {
+    msc->msc_local_flags &= ~SP_CTS;
+  }
+  return (msc->msc_local_flags ^ prev) ? SP_XMIT_CTS_CHANGED : 0;
+}
+
+
+static pbuf_t *
+mbus_seqpkt_service_recv(pbuf_t *pb, mbus_seqpkt_con_t *msc)
+{
+  const service_t *s = msc->msc_app_vtable;
+
+  if(s->push != NULL && msc->msc_app_opaque != NULL) {
+
+    STAILQ_INSERT_TAIL(&msc->msc_rxq, pb, pb_link);
+
+    if(pb->pb_flags & PBUF_EOP) {
+      pb = pbuf_splice(&msc->msc_rxq);
+      pb = s->push(msc->msc_app_opaque, pb);
+    } else {
+      pb = NULL;
+    }
+  }
+  return pb;
+}
+
+static void
+mbus_seqpkt_service_shut(mbus_seqpkt_con_t *msc, const char *reason)
+{
+  if(msc->msc_app_opaque) {
+
+    const service_t *s = msc->msc_app_vtable;
+    evlog(LOG_INFO, "seqpkt/%s: Connection %d from %d -- %s",
+          s->name, msc->msc_flow.mf_flow,
+          msc->msc_flow.mf_remote_addr, reason);
+    s->close(msc->msc_app_opaque);
+    msc->msc_app_opaque = NULL;
+  }
+}
+
+
+
+
 static void
 mbus_seqpkt_accept_err(const char *name, const char *reason,
                        uint8_t remote_addr)
 {
-  evlog(LOG_WARNING, "svc/%s: Remote %d unable to connect -- %s",
+  evlog(LOG_WARNING, "seqpkt/%s: Remote %d unable to connect -- %s",
         name, remote_addr, reason);
 }
 
 
-pbuf_t *
-mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
+void
+mbus_seqpkt_con_init(mbus_seqpkt_con_t *msc)
 {
-  uint8_t *pkt = pbuf_data(pb, 0);
-  size_t len = pb->pb_pktlen;
-
-  pkt[len] = 0; // Zero-terminate service name (safe, CRC was here before)
-  const char *name = (const char *)pkt;
-
-  evlog(LOG_INFO, "svc/%s: Connect from addr %d", name, remote_addr);
-
-  const service_t *s = service_find_by_name(name);
-  if(s == NULL) {
-    mbus_seqpkt_accept_err(name, "Not available", remote_addr);
-    return pb;
-  }
-
-  mbus_seqpkt_con_t *msc = xalloc(sizeof(mbus_seqpkt_con_t), 0, MEM_MAY_FAIL);
-  if(msc == NULL) {
-    mbus_seqpkt_accept_err(name, "No memory", remote_addr);
-    return pb;
-  }
-  memset(msc, 0, sizeof(mbus_seqpkt_con_t));
-
-  svc_pbuf_policy_t spp = {MBUS_FRAGMENT_SIZE, 0};
-
-  msc->msc_svc_opaque = s->open(msc, mbus_seqpkt_service_event_cb, spp,
-                                mbus_seqpkt_get_flow_header);
-
-  if(msc->msc_svc_opaque == NULL) {
-    free(msc);
-    mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
-    return pb;
-  }
-
-  msc->msc_svc = s;
   msc->msc_task.nt_cb = mbus_seqpkt_task_cb;
-
   msc->msc_new_fragment = 1;
 
   STAILQ_INIT(&msc->msc_rxq);
@@ -192,34 +184,74 @@ mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
 
   msc->msc_last_rx = clock_get();
 
+  msc->msc_flow.mf_input = mbus_seqpkt_input;
+
+  net_timer_arm(&msc->msc_ka_timer, msc->msc_last_rx + SP_TIME_FAST_ACK);
+}
+
+
+pbuf_t *
+mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
+{
+  uint8_t *pkt = pbuf_data(pb, 0);
+  size_t len = pb->pb_pktlen;
+
+  pkt[len] = 0; // Zero-terminate service name (safe, CRC was here before)
+  const char *name = (const char *)pkt;
+
+  evlog(LOG_INFO, "seqpkt/%s: Connect from addr %d", name, remote_addr);
+
+  const service_t *s = service_find_by_name(name);
+  if(s == NULL) {
+    mbus_seqpkt_accept_err(name, "Not available", remote_addr);
+    return pb;
+  }
+
+  mbus_seqpkt_con_t *msc = xalloc(sizeof(mbus_seqpkt_con_t), 0, MEM_MAY_FAIL);
+  if(msc == NULL) {
+    mbus_seqpkt_accept_err(name, "No memory", remote_addr);
+    return pb;
+  }
+  memset(msc, 0, sizeof(mbus_seqpkt_con_t));
+
+  svc_pbuf_policy_t spp = {MBUS_FRAGMENT_SIZE, 0};
+
+  msc->msc_app_opaque = s->open(msc, mbus_seqpkt_service_event_cb, spp,
+                                mbus_seqpkt_local_flow_get_header);
+
+  if(msc->msc_app_opaque == NULL) {
+    free(msc);
+    mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
+    return pb;
+  }
+
+  msc->msc_name = s->name;
+
+  // Network interface
+  msc->msc_xmit = mbus_seqpkt_local_flow_xmit;
+
+  // Service/App interface
+  msc->msc_update_local_cts = mbus_seqpkt_service_update_cts;
+  msc->msc_prep_send = mbus_seqpkt_service_prep_send;
+  msc->msc_recv = mbus_seqpkt_service_recv;
+  msc->msc_shut_app = mbus_seqpkt_service_shut;
+  msc->msc_app_vtable = s;
+
+  mbus_seqpkt_con_init(msc);
+
   msc->msc_flow.mf_flow = flow;
   msc->msc_flow.mf_remote_addr = remote_addr;
-  msc->msc_flow.mf_input = mbus_seqpkt_input;
 
   mbus_flow_insert(&msc->msc_flow);
 
-  pb = pbuf_trim(pb, len - 1);
+  pbuf_trim(pb, len - 1);
   pkt[0] = msc->msc_local_flags;
-  msc->msc_local_flags_sent = msc->msc_local_flags;
-
-  net_timer_arm(&msc->msc_ka_timer, msc->msc_last_rx + SP_TIME_KA);
+  msc->msc_local_flags_sent = msc->msc_local_flags | SP_SEQ;
 
   return mbus_output_flow(pb, &msc->msc_flow);
 }
 
 
-static uint8_t
-update_local_cts(mbus_seqpkt_con_t *msc)
-{
-  uint8_t prev = msc->msc_local_flags;
-  if(msc->msc_svc_opaque != NULL && msc->msc_svc->may_push &&
-     msc->msc_svc->may_push(msc->msc_svc_opaque)) {
-    msc->msc_local_flags |= SP_CTS;
-  } else {
-    msc->msc_local_flags &= ~SP_CTS;
-  }
-  return (msc->msc_local_flags ^ prev) ? SP_XMIT_CTS_CHANGED : 0;
-}
 
 
 
@@ -239,57 +271,14 @@ pbuf_for_xmit(mbus_seqpkt_con_t *msc, pbuf_t *pb)
   return pb;
 }
 
-static void
-tx_enq(mbus_seqpkt_con_t *msc, struct pbuf *pb)
-{
-  pbuf_t *n;
-  for(; pb != NULL; pb = n) {
-    n = pb->pb_next;
-
-    if(msc->msc_seqgen & 1)
-      pb->pb_flags |= PBUF_SEQ;
-    else
-      pb->pb_flags &= ~PBUF_SEQ;
-
-    msc->msc_seqgen++;
-    msc->msc_txq_len++;
-    STAILQ_INSERT_TAIL(&msc->msc_txq, pb, pb_link);
-  }
-}
-
-
-
-static void
-tx_pull(mbus_seqpkt_con_t *msc)
-{
-  if(msc->msc_local_close)
-    return;
-
-  if(msc->msc_svc_opaque == NULL)
-    return;
-
-  if(msc->msc_svc->pull == NULL)
-    return;
-
-  while(msc->msc_txq_len < 2) {
-
-    pbuf_t *p = msc->msc_svc->pull(msc->msc_svc_opaque);
-    if(p == NULL)
-      break;
-
-    tx_enq(msc, p);
-  }
-}
 
 
 
 static pbuf_t *
 mbus_seqpkt_output(mbus_seqpkt_con_t *msc, pbuf_t *pb, uint32_t xmit)
 {
-  if(msc->msc_flow.mf_input == NULL)
+  if(msc->msc_prep_send && msc->msc_prep_send(msc))
     return pb;
-
-  tx_pull(msc);
 
   pbuf_t *tx = STAILQ_FIRST(&msc->msc_txq);
   if(tx != NULL) {
@@ -304,9 +293,9 @@ mbus_seqpkt_output(mbus_seqpkt_con_t *msc, pbuf_t *pb, uint32_t xmit)
     }
   }
 
-  xmit |= msc->msc_local_close ? SP_XMIT_CLOSE : 0;
+  xmit |= msc->msc_app_closed ? SP_XMIT_CLOSE : 0;
 
-  xmit |= update_local_cts(msc);
+  xmit |= msc->msc_update_local_cts(msc);
 
   if(!xmit)
     return pb;
@@ -337,21 +326,19 @@ mbus_seqpkt_output(mbus_seqpkt_con_t *msc, pbuf_t *pb, uint32_t xmit)
     net_timer_arm(&msc->msc_rtx_timer,
                   msc->msc_last_tx + SP_TIME_RTX * msc->msc_rtx_attempt);
 
-  } else if(msc->msc_local_close) {
+  } else if(msc->msc_app_closed) {
 
-    const int last_seq = !!(msc->msc_local_flags_sent & SP_SEQ);
-    const int expected_seq = !!(msc->msc_remote_flags & SP_ESEQ);
-
-    if(last_seq != expected_seq) {
-      hdr[0] = 0x80; // Send close
-      mbus_seqpkt_shutdown(msc, "Close sent");
-    }
+    timer_disarm(&msc->msc_ack_timer);
+    hdr[0] |= SP_EOS; // Send close
+    msc->msc_local_flags_sent = hdr[0];
+    pb = msc->msc_xmit(pb, msc);
+    msc->msc_shut_app(msc, "Close sent");
+    return pb;
   }
 
   timer_disarm(&msc->msc_ack_timer);
-
   msc->msc_local_flags_sent = hdr[0];
-  return mbus_output_flow(pb, &msc->msc_flow);
+  return msc->msc_xmit(pb, msc);
 }
 
 
@@ -374,6 +361,10 @@ release_txq(mbus_seqpkt_con_t *msc)
   timer_disarm(&msc->msc_rtx_timer);
   msc->msc_rtx_attempt = 0;
   msc->msc_new_fragment = 1;
+  msc->msc_remote_avail_credits++;
+
+  if(msc->msc_post_send)
+    msc->msc_post_send(msc);
 }
 
 
@@ -402,15 +393,9 @@ mbus_seqpkt_recv_data(mbus_seqpkt_con_t *msc, pbuf_t *pb)
         SP_TIME_FAST_ACK : SP_TIME_ACK;
       net_timer_arm(&msc->msc_ack_timer, msc->msc_last_rx + ack_time);
 
-      if(msc->msc_svc->push != NULL && msc->msc_svc_opaque != NULL) {
+      pb->pb_flags = msc->msc_remote_flags & (SP_FF | SP_LF);
 
-        STAILQ_INSERT_TAIL(&msc->msc_rxq, pb, pb_link);
-
-        if(pb->pb_flags & PBUF_EOP) {
-          pb = pbuf_splice(&msc->msc_rxq);
-          pb = msc->msc_svc->push(msc->msc_svc_opaque, pb);
-        }
-      }
+      pb = msc->msc_recv(pb, msc);
     }
   }
 
@@ -420,26 +405,19 @@ mbus_seqpkt_recv_data(mbus_seqpkt_con_t *msc, pbuf_t *pb)
 }
 
 
-static void
-mbus_seqpkt_recv_close(mbus_seqpkt_con_t *msc, const char *reason)
-{
-  mbus_flow_remove(&msc->msc_flow);
-  mbus_seqpkt_shutdown(msc, reason);
-  mbus_seqpkt_maybe_destroy(msc);
-}
-
-
 static pbuf_t *
 mbus_seqpkt_input(mbus_flow_t *mf, pbuf_t *pb)
 {
   mbus_seqpkt_con_t *msc = (mbus_seqpkt_con_t *)mf;
-
   const uint8_t *pkt = pbuf_data(pb, 0);
   if(pb->pb_pktlen < 1)
     return pb;
 
-  if(pkt[0] & 0x80) {
-    mbus_seqpkt_recv_close(msc, "Peer closed");
+  if(pkt[0] & SP_EOS) {
+    evlog(LOG_DEBUG, "seqpkt/%s: Close received", msc->msc_name);
+    msc->msc_shut_app(msc, "Peer closed");
+    mbus_flow_remove(&msc->msc_flow);
+    mbus_seqpkt_maybe_destroy(msc);
     return pb;
   }
   return mbus_seqpkt_recv_data(msc, pb);
@@ -449,12 +427,8 @@ mbus_seqpkt_input(mbus_flow_t *mf, pbuf_t *pb)
 static void
 mbus_seqpkt_maybe_destroy(mbus_seqpkt_con_t *msc)
 {
-  if(!msc->msc_local_close || msc->msc_svc_opaque)
+  if(!msc->msc_app_closed || msc->msc_app_opaque)
     return;
-
-  evlog(LOG_DEBUG, "svc/%s: Connection %d from %d finalized",
-        msc->msc_svc->name, msc->msc_flow.mf_flow,
-        msc->msc_flow.mf_remote_addr);
 
   pbuf_free(STAILQ_FIRST(&msc->msc_rxq));
   pbuf_free(STAILQ_FIRST(&msc->msc_txq));
@@ -462,9 +436,18 @@ mbus_seqpkt_maybe_destroy(mbus_seqpkt_con_t *msc)
   timer_disarm(&msc->msc_ack_timer);
   timer_disarm(&msc->msc_ka_timer);
   mbus_flow_remove(&msc->msc_flow);
+  evlog(LOG_DEBUG, "seqpkt/%s: Destroyed", msc->msc_name);
   free(msc);
 }
 
+
+static void
+mbus_seqpkt_tick(mbus_seqpkt_con_t *msc, uint32_t xmit)
+{
+  pbuf_t *pb = mbus_seqpkt_output(msc, NULL, xmit);
+  pbuf_free(pb);
+  mbus_seqpkt_maybe_destroy(msc);
+}
 
 static void
 mbus_seqpkt_task_cb(net_task_t *nt, uint32_t signals)
@@ -473,55 +456,25 @@ mbus_seqpkt_task_cb(net_task_t *nt, uint32_t signals)
     ((void *)nt) - offsetof(mbus_seqpkt_con_t, msc_task);
 
   if(signals & SERVICE_EVENT_CLOSE) {
-    msc->msc_local_close = 1;
+    evlog(LOG_DEBUG, "seqpkt/%s: App side closed", msc->msc_name);
+    msc->msc_app_closed = 1;
   }
 
-  pbuf_t *pb = mbus_seqpkt_output(msc, NULL, 0);
-  pbuf_free(pb);
-  mbus_seqpkt_maybe_destroy(msc);
+  mbus_seqpkt_tick(msc, 0);
 }
 
-
-/**
- * This is called, either:
- *   1. If there is a timeout
- *   2. When we have received a close over the network
- *   3. When we send a close over the network
- */
-
-static void
-mbus_seqpkt_shutdown(mbus_seqpkt_con_t *msc, const char *reason)
-{
-  if(msc->msc_svc_opaque) {
-    evlog(LOG_INFO, "svc/%s: Connection %d from %d -- %s",
-          msc->msc_svc->name, msc->msc_flow.mf_flow,
-          msc->msc_flow.mf_remote_addr, reason);
-    msc->msc_svc->close(msc->msc_svc_opaque);
-    msc->msc_svc_opaque = NULL;
-  }
-}
-
-
-
-static void
-mbus_seqpkt_timer(mbus_seqpkt_con_t *msc, uint32_t xmit)
-{
-  pbuf_t *pb = mbus_seqpkt_output(msc, NULL, xmit);
-  pbuf_free(pb);
-  mbus_seqpkt_maybe_destroy(msc);
-}
 
 static void
 mbus_seqpkt_rtx_timer(void *opaque, uint64_t now)
 {
-  mbus_seqpkt_timer(opaque, SP_XMIT_RTX);
+  mbus_seqpkt_tick(opaque, SP_XMIT_RTX);
 }
 
 
 static void
 mbus_seqpkt_ack_timer(void *opaque, uint64_t now)
 {
-  mbus_seqpkt_timer(opaque, SP_XMIT_ESEQ_CHANGED);
+  mbus_seqpkt_tick(opaque, SP_XMIT_ESEQ_CHANGED);
 }
 
 
@@ -531,10 +484,10 @@ mbus_seqpkt_ka_timer(void *opaque, uint64_t now)
   mbus_seqpkt_con_t *msc = opaque;
 
   if(now > msc->msc_last_rx + SP_TIME_TIMEOUT) {
-    mbus_seqpkt_shutdown(msc, "Timeout");
+    msc->msc_shut_app(msc, "Timeout");
   } else {
     net_timer_arm(&msc->msc_ka_timer, now + SP_TIME_KA);
     if(now > msc->msc_last_tx + SP_TIME_KA)
-      mbus_seqpkt_timer(msc, SP_XMIT_KA);
+      mbus_seqpkt_tick(msc, SP_XMIT_KA);
   }
 }

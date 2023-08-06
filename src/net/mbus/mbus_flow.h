@@ -1,10 +1,18 @@
 #pragma once
 
+LIST_HEAD(mbus_flow_list, mbus_flow);
+
 typedef struct mbus_flow {
 
   LIST_ENTRY(mbus_flow) mf_link;
-  uint16_t mf_flow;
-  uint8_t mf_remote_addr;
+
+  union {
+    struct {
+      uint16_t mf_flow;
+      uint8_t mf_remote_addr;
+    };
+    uint32_t mf_tag;
+  };
 
   pbuf_t *(*mf_input)(struct mbus_flow *mf, pbuf_t *pb);
 

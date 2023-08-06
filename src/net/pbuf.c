@@ -96,12 +96,12 @@ pbuf_data_add(void *start, void *end)
     if(pbuf_datas.pp_avail)
       return;
     const size_t size = PBUF_DATA_SIZE * PBUF_DEFAULT_COUNT;
-    printf("pbuf data size:%d\n", size);
     start = xalloc(size, 0, 0);
     end = start + size;
   }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
-  printf("pbuf count:%d\n", count);
+  printf("pbuf: size:%d arena:%d count:%d\n",
+         PBUF_DATA_SIZE, end - start, count);
   pbuf_alloc(count);
 }
 
@@ -198,8 +198,10 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
       pbuf_t *n = pb->pb_next;
       if(n != NULL)
         n->pb_pktlen = pb->pb_pktlen;
+      int q = irq_forbid(IRQ_LEVEL_NET);
       pbuf_data_put(pb->pb_data);
       pbuf_put(pb);
+      irq_permit(q);
       pb = n;
     }
   }
@@ -225,6 +227,7 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
 
       pb->pb_flags &= ~PBUF_EOP;
 
+      int q = irq_forbid(IRQ_LEVEL_NET);
       pbuf_t *n = pbuf_get(0);
       if(n != NULL) {
         n->pb_next = NULL;
@@ -234,11 +237,14 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
           n = NULL;
         } else {
           n->pb_flags = PBUF_EOP;
+          n->pb_credits = 0;
           n->pb_pktlen = 0;
           n->pb_offset = 0;
           n->pb_buflen = 0;
         }
       }
+      irq_permit(q);
+
       if(n == NULL) {
         pbuf_free(head);
         return NULL;
@@ -264,7 +270,12 @@ pbuf_t *
 pbuf_drop(pbuf_t *pb, size_t bytes)
 {
   while(pb) {
-    assert(bytes <= pb->pb_buflen); // Fix this case
+    if(bytes > pb->pb_buflen) {
+      // Fix this case
+      pbuf_print("pbuf_drop", pb, 1);
+      panic("pbuf_drop r:%d bl:%d pl:%d pb:%p",
+            bytes, pb->pb_buflen, pb->pb_pktlen, pb);
+    }
 
     pb->pb_offset += bytes;
     pb->pb_buflen -= bytes;
@@ -275,16 +286,16 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
 }
 
 
-pbuf_t *
+void
 pbuf_trim(pbuf_t *pb, size_t bytes)
 {
-  while(pb) {
-    assert(bytes < pb->pb_buflen); // Fix this case
-    pb->pb_buflen -= bytes;
-    pb->pb_pktlen -= bytes;
-    break;
+  while(pb->pb_next != NULL) {
+    pb = pb->pb_next;
   }
-  return pb;
+
+  assert(bytes < pb->pb_buflen); // Fix this case
+  pb->pb_buflen -= bytes;
+  pb->pb_pktlen -= bytes;
 }
 
 
@@ -328,11 +339,11 @@ pbuf_free(pbuf_t *pb)
   irq_permit(q);
 }
 
-void
+size_t
 pbuf_pullup(pbuf_t *pb, size_t bytes)
 {
   if(pb->pb_buflen >= bytes)
-    return;
+    return 0;
 
   if(bytes + pb->pb_offset > PBUF_DATA_SIZE) {
     assert(bytes <= PBUF_DATA_SIZE);
@@ -344,6 +355,8 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
 
   while(bytes) {
     pbuf_t *next = pb->pb_next;
+    if(next == NULL)
+      return bytes;
 
     const size_t to_copy = MIN(bytes, next->pb_buflen);
     memcpy(pb->pb_data + pb->pb_offset + pb->pb_buflen,
@@ -352,16 +365,19 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
     bytes -= to_copy;
     pb->pb_buflen += to_copy;
     next->pb_buflen -= to_copy;
+    next->pb_offset += to_copy;
 
     if(next->pb_buflen == 0) {
       pb->pb_next = next->pb_next;
       pb->pb_flags |= next->pb_flags & PBUF_EOP;
+      pb->pb_credits += next->pb_credits;
       int q = irq_forbid(IRQ_LEVEL_NET);
       pbuf_data_put(next->pb_data);
       pbuf_put(next);
       irq_permit(q);
     }
   }
+  return 0;
 }
 
 
@@ -373,6 +389,7 @@ pbuf_reset(pbuf_t *pb, size_t header_size, size_t len)
     pb->pb_next = NULL;
   }
   pb->pb_flags = PBUF_SOP | PBUF_EOP;
+  pb->pb_credits = 0;
   pb->pb_offset = header_size;
   pb->pb_buflen = len;
   pb->pb_pktlen = len;
@@ -389,6 +406,7 @@ pbuf_make_irq_blocked(int offset, int wait)
       pbuf_put(pb);
     } else {
       pb->pb_flags = PBUF_SOP | PBUF_EOP;
+      pb->pb_credits = 0;
       pb->pb_pktlen = 0;
       pb->pb_offset = offset;
       pb->pb_buflen = 0;
@@ -445,15 +463,17 @@ pbuf_status(void)
 
 
 void
-pbuf_print(const char *prefix, const pbuf_t *pb, int full)
+pbuf_stprint(const char *prefix, const pbuf_t *pb, int full, stream_t *st)
 {
   for(; pb != NULL; pb = pb->pb_next) {
 
-    printf("%s: %p %5d %c%c %p+%-4d [%4d]: ",
+    stprintf(st, "%s: %p %5d %c%c%c %d %p+%-4d [%4d]: ",
            prefix, pb,
            pb->pb_pktlen,
            pb->pb_flags & PBUF_SOP ? 'S' : ' ',
            pb->pb_flags & PBUF_EOP ? 'E' : ' ',
+           pb->pb_next ? '+' : ' ',
+           pb->pb_credits,
            pb->pb_data,
            pb->pb_offset,
            pb->pb_buflen);
@@ -474,17 +494,23 @@ pbuf_print(const char *prefix, const pbuf_t *pb, int full)
       }
 
       for(int i = 0; i < head; i++) {
-        printf("%02x ", data[i]);
+        stprintf(st, "%02x ", data[i]);
       }
 
       if(pb->pb_buflen > 8) {
-        printf("... ");
+        stprintf(st, "... ");
       }
     }
     for(int i = 0; i < tail; i++) {
-      printf("%02x ", data[pb->pb_buflen - tail + i]);
+      stprintf(st, "%02x ", data[pb->pb_buflen - tail + i]);
     }
 
-    printf("\n");
+    stprintf(st, "\n");
   }
+}
+
+void
+pbuf_print(const char *prefix, const pbuf_t *pb, int full)
+{
+  pbuf_stprint(prefix, pb, full, stdio);
 }

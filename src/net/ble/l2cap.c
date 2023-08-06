@@ -37,68 +37,91 @@ typedef struct l2cap_connection {
   int lc_local_credits;
 
   struct pbuf_queue lc_rxq;
-  int lc_rxq_credit_deficit;
+  uint16_t lc_credit_deficit;
+  uint16_t lc_credit_threshold;
 
   struct pbuf_queue lc_rfq;
 
   uint16_t lc_remote_mtu;
   uint16_t lc_remote_mps;
+  uint16_t lc_psm;
 
   uint8_t lc_local_cid;
   uint8_t lc_remote_cid;
 
   uint8_t lc_reframing;
 
+  int lc_refcount;
+
+  int lc_queued_credits;
+
 } l2cap_connection_t;
+
+static void
+connection_release(l2cap_connection_t *lc)
+{
+  if(__sync_add_and_fetch(&lc->lc_refcount, -1))
+    return;
+  free(lc);
+}
+
 
 
 __attribute__((warn_unused_result))
 pbuf_t *
 l2cap_splice(struct pbuf_queue *pq, int header_size)
 {
-  while(1) {
-    pbuf_t *const pb = STAILQ_FIRST(pq);
-    if(pb == NULL)
-      return NULL;
+  pbuf_t *pb = STAILQ_FIRST(pq);
+  if(pb == NULL)
+    return NULL;
 
-    // First packet must have SOP and have a full header
-    if(!(pb->pb_flags & PBUF_SOP) || pb->pb_buflen < header_size) {
-    bad:
-      STAILQ_REMOVE_HEAD(pq, pb_link);
-      pb->pb_next = NULL;
-      pb->pb_buflen = 0;
-      return pb;
-    }
+  if(pbuf_pullup(pb, header_size))
+    return NULL;
 
-    pbuf_t *last = pb;
+  pbuf_t *last = pb;
+  last->pb_flags |= PBUF_SOP;
 
-    const uint16_t *hdr = pbuf_cdata(pb, 0);
-    const int expected_length = hdr[0] + header_size;
-    int sum = 0;
-
-    while(1) {
-      sum += last->pb_buflen;
-      if(sum > expected_length) {
-        goto bad;
-      }
-      if(sum == expected_length)
-        break;
-      last->pb_flags &= ~PBUF_EOP;
-      last = STAILQ_NEXT(last, pb_link);
-      if(last == NULL)
-        break;
-      last->pb_flags &= ~PBUF_SOP;
-    }
-
-    if(last == NULL)
-      return NULL;
-
-    pb->pb_pktlen = expected_length;
-    STAILQ_REMOVE_HEAD_UNTIL(pq, last, pb_link);
-    last->pb_next = NULL;
-    last->pb_flags |= PBUF_EOP;
-    return pb;
+  const uint16_t *hdr = pbuf_cdata(pb, 0);
+  const int expected_length = hdr[0] + header_size;
+  if(expected_length > 200) {
+    pbuf_print("badlen", pb, 1);
+    panic("High unexpected length %d",expected_length);
   }
+  int sum = 0;
+  int count = 1;
+  while(1) {
+    if(sum + last->pb_buflen > expected_length) {
+      size_t splitsize = sum + last->pb_buflen - expected_length;
+      pbuf_t *s = pbuf_make(0, 0);
+      if(s == NULL)
+        return NULL;
+      STAILQ_INSERT_AFTER(pq, last, s, pb_link);
+      last->pb_buflen -= splitsize;
+      memcpy(s->pb_data, last->pb_data + last->pb_offset + last->pb_buflen,
+             splitsize);
+      s->pb_buflen = splitsize;
+
+      s->pb_credits += last->pb_credits;
+      last->pb_credits = 0;
+    }
+    sum += last->pb_buflen;
+    if(sum == expected_length)
+      break;
+    last->pb_flags &= ~PBUF_EOP;
+    last = STAILQ_NEXT(last, pb_link);
+    if(last == NULL)
+      break;
+    count++;
+    last->pb_flags &= ~PBUF_SOP;
+  }
+
+  if(last == NULL)
+    return NULL;
+  pb->pb_pktlen = expected_length;
+  STAILQ_REMOVE_HEAD_UNTIL(pq, last, pb_link);
+  last->pb_next = NULL;
+  last->pb_flags |= PBUF_EOP;
+  return pb;
 }
 
 
@@ -145,12 +168,14 @@ con_output(l2cap_connection_t *lc, pbuf_t *pb)
   l2cap_t *l2c = lc->lc_l2c;
 
   while(1) {
-    size_t frag = MIN(PBUF_DATA_SIZE - 2, lc->lc_remote_mps) - o->pb_buflen;
+    size_t frag = MIN(LLMTU, lc->lc_remote_mps) - o->pb_buflen;
     frag = MIN(frag, pb->pb_pktlen);
     pb = pbuf_read(pb, o->pb_data + o->pb_offset + o->pb_buflen, frag);
 
+    assert(o->pb_offset + frag <= LLMTU);
     o->pb_buflen += frag;
     o->pb_pktlen = o->pb_buflen;
+
     l2c->l2c_output(l2c, o);
     if(pb == NULL)
       break;
@@ -191,6 +216,9 @@ connection_close(l2cap_connection_t *lc, const char *why)
 static void
 connection_clear_credit_deficit(l2cap_connection_t *lc)
 {
+  if(lc->lc_credit_deficit < lc->lc_credit_threshold)
+    return;
+
   l2cap_t *l2c = lc->lc_l2c;
   if(l2c == NULL)
     return;
@@ -203,8 +231,8 @@ connection_clear_credit_deficit(l2cap_connection_t *lc)
     pbuf_append(pb, sizeof(l2cap_flow_control_credit_ind_t));
 
   ind->cid = lc->lc_local_cid;
-  ind->credits = lc->lc_rxq_credit_deficit;
-  lc->lc_rxq_credit_deficit = 0;
+  ind->credits = lc->lc_credit_deficit;
+  lc->lc_credit_deficit = 0;
   ind->hdr.identifier = 1;
   ind->hdr.data_length = 4;
   ind->hdr.code = L2CAP_FLOW_CONTROL_CREDIT_IND;
@@ -212,37 +240,67 @@ connection_clear_credit_deficit(l2cap_connection_t *lc)
 }
 
 
+static int
+count_credits(const pbuf_t *pb)
+{
+  int c = 0;
+  for(; pb != NULL; pb = pb->pb_next) {
+    c += pb->pb_credits;
+  }
+  return c;
+}
+
 static pbuf_t *
 connection_push(l2cap_connection_t *lc)
 {
-  if(!lc->lc_svc->may_push(lc->lc_svc_opaque))
-    return NULL;
+  pbuf_t *pb = NULL;
+  while(1) {
+    if(!lc->lc_svc->may_push(lc->lc_svc_opaque))
+      return pb;
 
-  pbuf_t *pb = l2cap_splice(&lc->lc_rxq, 2);
-  if(pb == NULL)
-    return NULL;
+    pbuf_t *pb2 = l2cap_splice(&lc->lc_rxq, 2);
+    if(pb2 == NULL)
+      return pb;
+    if(pb)
+      pbuf_free(pb);
+    pb = pbuf_drop(pb2, 2);
+    if(pbuf_pullup(pb, pb->pb_pktlen)) {
+      panic("pullup failed");
+    }
 
-  if(pb->pb_pktlen == 0) {
-    // Sequence failure
-    connection_close(lc, "Bad sequence");
-    return pb;
+    if(lc->lc_reframing) {
+      STAILQ_INSERT_TAIL(&lc->lc_rfq, pb, pb_link);
+      pb = NULL;
+      while(1) {
+
+        if(!lc->lc_svc->may_push(lc->lc_svc_opaque)) {
+          break;
+        }
+
+        pb2 = l2cap_splice(&lc->lc_rfq, 2);
+        if(pb2 == NULL)
+          break;
+
+        if(pb)
+          pbuf_free(pb);
+        pb = pbuf_drop(pb2, 2);
+        if(pbuf_pullup(pb, pb->pb_pktlen)) {
+          panic("pullup failed");
+        }
+
+        int credits = count_credits(pb);
+        lc->lc_credit_deficit += credits;
+        lc->lc_queued_credits -= credits;
+        assert(lc->lc_queued_credits >= 0);
+        pb = lc->lc_svc->push(lc->lc_svc_opaque, pb);
+      }
+    } else {
+      int credits = count_credits(pb);
+      lc->lc_credit_deficit += credits;
+
+      pb = lc->lc_svc->push(lc->lc_svc_opaque, pb);
+    }
   }
-
-  pb = pbuf_drop(pb, 2);
-  pbuf_pullup(pb, pb->pb_pktlen);
-  if(lc->lc_reframing) {
-    STAILQ_INSERT_TAIL(&lc->lc_rfq, pb, pb_link);
-    pb = l2cap_splice(&lc->lc_rfq, 2);
-    if(pb == NULL)
-      return NULL;
-    pb = pbuf_drop(pb, 2);
-  }
-
-  if(STAILQ_FIRST(&lc->lc_rxq) == NULL && STAILQ_FIRST(&lc->lc_rfq) == NULL) {
-    connection_clear_credit_deficit(lc);
-  }
-
-  return lc->lc_svc->push(lc->lc_svc_opaque, pb);
 }
 
 
@@ -277,7 +335,7 @@ connection_task_cb(net_task_t *task, uint32_t signals)
     pbuf_free_queue_irq_blocked(&lc->lc_rxq);
     pbuf_free_queue_irq_blocked(&lc->lc_rfq);
     irq_permit(q);
-    free(lc);
+    connection_release(lc);
     return;
   }
 
@@ -307,6 +365,7 @@ connection_create(l2cap_t *l2c)
       return NULL;
     memset(lc, 0, sizeof(l2cap_connection_t));
 
+    lc->lc_refcount = 1;
     STAILQ_INIT(&lc->lc_rxq);
     STAILQ_INIT(&lc->lc_rfq);
 
@@ -372,16 +431,17 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
                                                   L2CAP_CON_NO_RESOURCES);
   }
 
+  size_t hdrs = 2 + sizeof(l2cap_header_t) + 2 + lc->lc_reframing * 2;
+
   lc->lc_reframing = !!(req->spsm & 0x40);
   lc->lc_remote_cid = req->src_cid;
   lc->lc_svc = s;
-
+  lc->lc_psm = req->spsm;
   lc->lc_remote_mtu = req->mtu;
-  lc->lc_remote_mps = MIN(req->mps, PBUF_DATA_SIZE - 6);
+  lc->lc_remote_mps = MIN(req->mps, PBUF_DATA_SIZE - hdrs);
   lc->lc_remote_credits = req->initial_credits;
 
-  svc_pbuf_policy_t spp = {lc->lc_remote_mps,
-    2 + sizeof(l2cap_header_t) + 2 + lc->lc_reframing * 2};
+  svc_pbuf_policy_t spp = {lc->lc_remote_mps, hdrs};
 
   lc->lc_svc_opaque = s->open(lc, l2c_service_event_cb, spp, NULL);
   if(lc->lc_svc_opaque == NULL) {
@@ -401,9 +461,10 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
 
   rsp->dst_cid = lc->lc_local_cid;
   rsp->result = 0;
-  rsp->mtu = PBUF_DATA_SIZE;
+  rsp->mtu = LLMTU;
   rsp->mps = PBUF_DATA_SIZE;
-  rsp->initial_credits = 2;
+  rsp->initial_credits = 65535;
+  lc->lc_credit_threshold = 2;
   lc->lc_local_credits = rsp->initial_credits;
 
   return l2cap_output(l2c, pb, L2CAP_CID_LE_SIGNALING);
@@ -466,15 +527,14 @@ handle_le_signaling(l2cap_t *l2c, pbuf_t *pb)
   case L2CAP_LE_CREDIT_BASED_CONNECTION_REQ:
     handle_le_credit_based_connection_req(l2c, pb);
     break;
-
   case L2CAP_DISCONNECTION_REQ:
     handle_disconnection_req(l2c, pb);
     break;
-
   case L2CAP_FLOW_CONTROL_CREDIT_IND:
     handle_flow_control_credit_ind(l2c, pb);
     return pb;
-
+  case L2CAP_DISCONNECTION_RSP:
+    return pb;
   default:
     evlog(LOG_DEBUG, "l2cap_le_signaling: Unsupported code: 0x%x", cf->code);
     return pb;
@@ -590,13 +650,17 @@ handle_channel(l2cap_t *l2c, pbuf_t *pb, uint16_t channel_id)
 
   pbuf_t *next;
   for(; pb; pb = next) {
+    pb->pb_credits = 0;
     next = pb->pb_next;
+    if(!next) {
+      pb->pb_credits = 1;
+    }
     STAILQ_INSERT_TAIL(&lc->lc_rxq, pb, pb_link);
   }
 
-  lc->lc_rxq_credit_deficit++;
-
+  lc->lc_queued_credits++;
   pb = connection_push(lc);
+  connection_clear_credit_deficit(lc);
   connection_pull(lc);
   return pb;
 }
@@ -641,6 +705,7 @@ void
 l2cap_input(l2cap_t *l2c, pbuf_t *pb)
 {
   STAILQ_INSERT_TAIL(&l2c->l2c_rx_queue, pb, pb_link);
+  assert(pb->pb_buflen > 0);
   net_task_raise(&l2c->l2c_task, L2CAP_SIGNAL_INPUT);
 }
 
@@ -666,6 +731,7 @@ l2cap_dispatch_signal(struct net_task *nt, uint32_t signals)
     int q = irq_forbid(IRQ_LEVEL_NET);
     l2c->l2c_output(l2c, NULL);
     pbuf_free_queue_irq_blocked(&l2c->l2c_rx_queue);
+    l2c->l2c_rx_queue_len = 0;
     irq_permit(q);
     return;
   }
@@ -675,16 +741,18 @@ l2cap_dispatch_signal(struct net_task *nt, uint32_t signals)
     int q = irq_forbid(IRQ_LEVEL_NET);
 
     while(1) {
-      pbuf_t *pb = l2cap_splice(&l2c->l2c_rx_queue, 4);
+      pbuf_t *pb = STAILQ_FIRST(&l2c->l2c_rx_queue);
       if(pb == NULL)
         break;
-      if(pb->pb_buflen) {
-        irq_permit(q);
-        pb = handle_packet(l2c, pb);
-        q = irq_forbid(IRQ_LEVEL_NET);
-      } else {
-        evlog(LOG_WARNING, "l2cap: Bad sequence");
-      }
+      assert(pb->pb_flags == 1);
+      assert(pb->pb_offset == 2);
+
+      pb = l2cap_splice(&l2c->l2c_rx_queue, 4);
+      if(pb == NULL)
+        break;
+      irq_permit(q);
+      pb = handle_packet(l2c, pb);
+      q = irq_forbid(IRQ_LEVEL_NET);
       if(pb)
         pbuf_free_irq_blocked(pb);
     }
@@ -698,5 +766,59 @@ l2cap_connect(l2cap_t *l2cap)
   l2cap->l2c_task.nt_cb = l2cap_dispatch_signal;
   STAILQ_INIT(&l2cap->l2c_rx_queue);
   return 0;
+}
+
+
+static l2cap_connection_t *
+l2cap_connection_next(l2cap_t *l2c, l2cap_connection_t *cur)
+{
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  l2cap_connection_t *lc;
+
+  if(cur == NULL) {
+    lc = LIST_FIRST(&l2c->l2c_connections);
+  } else {
+    LIST_FOREACH(lc, &l2c->l2c_connections, lc_link) {
+      if(lc == cur)
+        break;
+    }
+    if(lc)
+      lc = LIST_NEXT(lc, lc_link);
+  }
+
+  if(lc)
+    __sync_add_and_fetch(&lc->lc_refcount, 1);
+
+  irq_permit(q);
+
+  if(cur)
+    connection_release(cur);
+  return lc;
+}
+
+void
+l2cap_print(l2cap_t *l2c, stream_t *st)
+{
+  l2cap_connection_t *lc = NULL;
+  while((lc = l2cap_connection_next(l2c, lc)) != NULL) {
+    stprintf(st, "\tL2CAP:\t%s (PSM:0x%x)\n", lc->lc_svc->name, lc->lc_psm);
+
+    stprintf(st, "\t\tLocal:  CID:%d Credits:%d\n",
+             lc->lc_local_cid,
+             lc->lc_local_credits);
+
+    stprintf(st, "\t\tRemote: CID:%d MTU:%d MPS:%d Credits:%d\n",
+             lc->lc_remote_cid,
+             lc->lc_remote_mtu,
+             lc->lc_remote_mps,
+             lc->lc_remote_credits);
+    stprintf(st, "\t\tRX credits: deficit:%d queued:%d\n",
+             lc->lc_credit_deficit,
+             lc->lc_queued_credits);
+    stprintf(st, "\n");
+
+    pbuf_stprint("RXQ", STAILQ_FIRST(&lc->lc_rxq), 0, st);
+    pbuf_stprint("RFQ", STAILQ_FIRST(&lc->lc_rfq), 0, st);
+  }
 }
 

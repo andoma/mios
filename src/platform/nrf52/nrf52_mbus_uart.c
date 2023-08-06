@@ -430,7 +430,9 @@ nrf52_mbus_uart_timer_irq(void *arg)
 static pbuf_t *
 mbus_uart_output(struct mbus_netif *mni, pbuf_t *pb)
 {
-  pbuf_pullup(pb, pb->pb_pktlen);
+  if(pbuf_pullup(pb, pb->pb_pktlen)) {
+    panic("pullup failed");
+  }
   uart_mbus_t *um = (uart_mbus_t *)mni;
   int q = irq_forbid(IRQ_LEVEL_NET);
   if(um->txq_len < 5) {
