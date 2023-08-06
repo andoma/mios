@@ -91,7 +91,7 @@ fs_init(block_iface_t *bi)
 
   int err = lfs_mount(&fs->lfs, &fs->cfg);
   if(err) {
-    printf("Failed to mount fs: %d\n", err);
+    printf("Failed to mount fs: %d. Formatting...\n", err);
     err = lfs_format(&fs->lfs, &fs->cfg);
     if(err) {
       printf("Failed to format: %d\n", err);
