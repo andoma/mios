@@ -163,7 +163,7 @@ shell_open(void *opaque, service_event_cb_t *cb,
   mutex_init(&ss->ss_mutex, "svc");
   cond_init(&ss->ss_cond, "svc");
   wakelock_acquire();
-  error_t r = task_create_shell(shell_thread, ss, "remotecli");
+  error_t r = task_create_shell(shell_thread, ss, "remotecli", 0);
   if(r) {
     free(ss);
     wakelock_release();

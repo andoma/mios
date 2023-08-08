@@ -340,5 +340,5 @@ usb_cdc_create(struct usb_interface_queue *q)
                     cdc, cdc_rx, NULL,
                     USB_ENDPOINT_BULK, 0, 1, 64);
 
-  task_create_shell(cdc_shell_thread, cdc, "cdc-cli");
+  task_create_shell(cdc_shell_thread, cdc, "cdc-cli", 0);
 }

@@ -255,4 +255,5 @@ int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
 
 // Helper for constructing a task used for cli/shell activities
 
-error_t task_create_shell(void *(*entry)(void *arg), void *arg, const char *name);
+error_t task_create_shell(void *(*entry)(void *arg), void *arg,
+                          const char *name, size_t stack_size);

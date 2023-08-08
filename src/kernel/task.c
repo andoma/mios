@@ -831,14 +831,19 @@ CLI_CMD_DEF("ps", cmd_ps);
 
 
 error_t
-task_create_shell(void *(*entry)(void *arg), void *arg, const char *name)
+task_create_shell(void *(*entry)(void *arg), void *arg, const char *name,
+                  size_t stack_size)
 {
   int flags = TASK_DETACHED;
-  int stack_size = 768;
 #ifdef HAVE_FPU
   flags |= TASK_FPU;
-  stack_size = 1024;
 #endif
+  if(!stack_size) {
+    stack_size = 768;
+#ifdef HAVE_FPU
+    stack_size = 1024;
+#endif
+  }
   if(!thread_create(entry, arg, stack_size, name,  flags, 2))
     return ERR_NO_MEMORY;
   return 0;
