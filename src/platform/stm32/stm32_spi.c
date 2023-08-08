@@ -32,8 +32,10 @@ static error_t
 spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
         uint32_t config)
 {
-  stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
-  stm32_dma_set_nitems(spi->tx_dma, len);
+  if(tx != NULL) {
+    stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
+    stm32_dma_set_nitems(spi->tx_dma, len);
+  }
 
   if(rx != NULL) {
     stm32_dma_set_mem0(spi->rx_dma, rx);
@@ -43,23 +45,37 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
 
   int q = irq_forbid(IRQ_LEVEL_SCHED);
 
-  stm32_dma_start(spi->tx_dma);
+  if(tx != NULL) {
+    stm32_dma_start(spi->tx_dma);
+  }
+
   if(rx != NULL) {
     stm32_dma_start(spi->rx_dma);
   }
 
   reg_wr(spi->base_addr + SPI_CR2,
          CR2_VALUE |
-         (1 << 1) |
+         (tx ? 2 : 0) |
          (rx ? 1 : 0));
+
+  if(rx != NULL && tx == NULL) {
+    reg_wr(spi->base_addr + SPI_CR1, config | (1 << 10));
+  }
 
   error_t err;
   err = rx != NULL ? stm32_dma_wait(spi->rx_dma) : 0;
-  if(!err) {
-    err = stm32_dma_wait(spi->tx_dma);
+
+  if(rx != NULL && tx == NULL) {
+    reg_wr(spi->base_addr + SPI_CR1, config);
   }
 
-  stm32_dma_stop(spi->tx_dma);
+  if(!err) {
+    err = tx != NULL ? stm32_dma_wait(spi->tx_dma) : 0;
+  }
+
+  if(tx != NULL) {
+    stm32_dma_stop(spi->tx_dma);
+  }
   if(rx != NULL) {
     stm32_dma_stop(spi->rx_dma);
   }
