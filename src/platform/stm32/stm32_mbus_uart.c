@@ -106,7 +106,6 @@ static uint32_t
 enter_gap(uart_mbus_t *um)
 {
   gpio_set_output(um->txe, 0);
-  reg_wr(um->uart_reg_base + USART_CR1, 0);
   reg_wr(um->uart_reg_base + USART_BRR, um->uart_bbr_header);
   reg_wr(um->uart_reg_base + USART_CR1, CR1_HEADER);
   um->state = MBUS_STATE_GAP;
@@ -124,7 +123,6 @@ transmit_payload(uart_mbus_t *um)
 
   um->state = MBUS_STATE_TX_PAYLOAD;
 
-  reg_wr(um->uart_reg_base + USART_CR1, 0);
   reg_wr(um->uart_reg_base + USART_BRR, um->uart_bbr_payload);
   reg_wr(um->uart_reg_base + USART_CR1, CR1_PAYLOAD_TX);
   reg_set_bit(um->uart_reg_base + USART_CR3, 7);
@@ -145,7 +143,6 @@ __attribute__((warn_unused_result))
 static uint32_t
 decode_header(uart_mbus_t *um)
 {
-  reg_wr(um->uart_reg_base + USART_CR1, 0);
   reg_wr(um->uart_reg_base + USART_BRR, um->uart_bbr_payload);
   reg_wr(um->uart_reg_base + USART_CR1, CR1_PAYLOAD_RX);
 
@@ -182,7 +179,6 @@ decode_header(uart_mbus_t *um)
     um->rx_nobufs++;
   }
 
-  reg_wr(um->uart_reg_base + USART_CR1, 0);
   reg_wr(um->uart_reg_base + USART_BRR, um->uart_bbr_header);
   reg_wr(um->uart_reg_base + USART_CR1, CR1_HEADER);
 
