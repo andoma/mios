@@ -35,8 +35,20 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size)
 
   if(busy_wait) {
     // We are not on user thread, busy wait
-    for(size_t i = 0; i < size; i++) {
+
+    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+
+    while(1) {
+      uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
+      if(!avail)
+        break;
+      uint8_t c = u->tx_fifo[u->tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
+      u->tx_fifo_rdptr++;
+      reg_wr(u->reg_base + USART_TDR, c);
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+    }
+
+    for(size_t i = 0; i < size; i++) {
       reg_wr(u->reg_base + USART_TDR, d[i]);
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
     }
