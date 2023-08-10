@@ -3,6 +3,7 @@
 #include <mios/block.h>
 #include <mios/mios.h>
 #include <mios/task.h>
+#include <mios/eventlog.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>

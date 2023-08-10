@@ -91,14 +91,14 @@ fs_init(block_iface_t *bi)
 
   int err = lfs_mount(&fs->lfs, &fs->cfg);
   if(err) {
-    printf("Failed to mount fs: %d. Formatting...\n", err);
+    evlog(LOG_ERR, "Failed to mount fs: %d. Formatting", err);
     err = lfs_format(&fs->lfs, &fs->cfg);
     if(err) {
-      printf("Failed to format: %d\n", err);
+      evlog(LOG_ERR, "Failed to format: %d", err);
     } else {
       err = lfs_mount(&fs->lfs, &fs->cfg);
       if(err) {
-        printf("Failed to mount after format: %d\n", err);
+        evlog(LOG_ERR, "Failed to mount after format: %d", err);
       }
     }
   }
@@ -107,7 +107,8 @@ fs_init(block_iface_t *bi)
     free(fs);
     free(bi);
   } else {
-    printf("FS mounted ok\n");
+    evlog(LOG_INFO,"FS mounted ok (%d kbyte)",
+                   bi->block_size * bi->num_blocks / 1024);
     g_fs = fs;
   }
 }
