@@ -25,7 +25,7 @@ include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
 OPTLEVEL ?= 2
 
-CFLAGS += -Wframe-larger-than=128
+CFLAGS += -Wframe-larger-than=192
 
 CFLAGS += ${CFLAGS-yes}
 

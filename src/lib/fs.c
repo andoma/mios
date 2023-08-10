@@ -6,6 +6,7 @@
 #include <mios/task.h>
 #include <mios/cli.h>
 #include <mios/mios.h>
+#include <mios/fs.h>
 
 typedef struct fs {
   struct lfs_config cfg; // Must be first
@@ -66,6 +67,9 @@ fs_blk_unlock(const struct lfs_config *c)
   return err ? LFS_ERR_IO : 0;
 }
 
+#define LFS_READ_SIZE 32
+
+#define LFS_CACHE_SIZE (LFS_READ_SIZE * 1)
 
 void
 fs_init(block_iface_t *bi)
@@ -80,16 +84,17 @@ fs_init(block_iface_t *bi)
   fs->cfg.lock = fs_blk_lock;
   fs->cfg.unlock = fs_blk_unlock;
 
-  fs->cfg.read_size = 32;
-  fs->cfg.prog_size = 32;
+  fs->cfg.read_size = LFS_READ_SIZE;
+  fs->cfg.prog_size = LFS_READ_SIZE;
   fs->cfg.block_size = bi->block_size;
   fs->cfg.block_count = bi->num_blocks;
-  fs->cfg.cache_size = 32;
+  fs->cfg.cache_size = LFS_CACHE_SIZE;
   fs->cfg.lookahead_size = 32;
   fs->cfg.block_cycles = 500;
   mutex_init(&fs->lock, "fs");
 
   int err = lfs_mount(&fs->lfs, &fs->cfg);
+
   if(err) {
     evlog(LOG_ERR, "Failed to mount fs: %d. Formatting", err);
     err = lfs_format(&fs->lfs, &fs->cfg);
@@ -135,8 +140,8 @@ static const int8_t lfs_errmap[] = {
 static error_t
 maperr(int err)
 {
-  if(err == 0)
-    return 0;
+  if(err >= 0)
+    return err;
 
   for(size_t i = 0; i < ARRAYSIZE(lfs_errmap); i+=2) {
     if(err == lfs_errmap[i])
@@ -146,15 +151,101 @@ maperr(int err)
 }
 
 
+error_t
+fs_mkdir(const char *path)
+{
+  if(g_fs == NULL)
+    return ERR_NO_DEVICE;
+  return maperr(lfs_mkdir(&g_fs->lfs, path));
+}
+
+error_t
+fs_rename(const char *from, const char *to)
+{
+  if(g_fs == NULL)
+    return ERR_NO_DEVICE;
+  return maperr(lfs_rename(&g_fs->lfs, from, to));
+}
+
+error_t
+fs_remove(const char *path)
+{
+  if(g_fs == NULL)
+    return ERR_NO_DEVICE;
+  return maperr(lfs_remove(&g_fs->lfs, path));
+}
+
+
+_Static_assert(FS_RDONLY == LFS_O_RDONLY);
+_Static_assert(FS_WRONLY == LFS_O_WRONLY);
+_Static_assert(FS_RDWR   == LFS_O_RDWR);
+
+_Static_assert(FS_CREAT  == LFS_O_CREAT);
+_Static_assert(FS_EXCL   == LFS_O_EXCL);
+_Static_assert(FS_TRUNC  == LFS_O_TRUNC);
+_Static_assert(FS_APPEND == LFS_O_APPEND);
+
+struct fs_file {
+  lfs_file_t file;
+  struct lfs_file_config config;
+  uint8_t buffer[LFS_CACHE_SIZE];
+};
+
+error_t
+fs_open(const char *path, int flags, fs_file_t **fp)
+{
+  if(g_fs == NULL)
+    return ERR_NO_DEVICE;
+
+  fs_file_t *f = xalloc(sizeof(fs_file_t), 0, MEM_MAY_FAIL);
+  if(f == NULL)
+    return ERR_NO_MEMORY;
+  memset(f, 0, sizeof(fs_file_t));
+  f->config.buffer = &f->buffer;
+
+  int r = lfs_file_opencfg(&g_fs->lfs, &f->file, path, flags, &f->config);
+  if(r) {
+    free(f);
+    return maperr(r);
+  }
+  *fp = f;
+  return 0;
+}
+
+error_t
+fs_close(fs_file_t *f)
+{
+  int r = lfs_file_close(&g_fs->lfs, &f->file);
+  free(f);
+  return maperr(r);
+}
+
+ssize_t
+fs_read(fs_file_t *f, void *buffer, size_t len)
+{
+  return maperr(lfs_file_read(&g_fs->lfs, &f->file, buffer, len));
+}
+
+ssize_t
+fs_write(fs_file_t *f, const void *buffer, size_t len)
+{
+  return maperr(lfs_file_write(&g_fs->lfs, &f->file, buffer, len));
+}
+
+error_t
+fs_fsync(fs_file_t *f)
+{
+  return maperr(lfs_file_sync(&g_fs->lfs, &f->file));
+}
+
+//--------------------------------------------------------------------
 
 static error_t
 cmd_mkdir(cli_t *cli, int argc, char **argv)
 {
   if(argc != 2)
     return ERR_INVALID_ARGS;
-  if(g_fs == NULL)
-    return ERR_NO_DEVICE;
-  return maperr(lfs_mkdir(&g_fs->lfs, argv[1]));
+  return fs_mkdir(argv[1]);
 }
 
 CLI_CMD_DEF("mkdir", cmd_mkdir);
@@ -164,9 +255,7 @@ cmd_rm(cli_t *cli, int argc, char **argv)
 {
   if(argc != 2)
     return ERR_INVALID_ARGS;
-  if(g_fs == NULL)
-    return ERR_NO_DEVICE;
-  return maperr(lfs_remove(&g_fs->lfs, argv[1]));
+  return fs_remove(argv[1]);
 }
 
 CLI_CMD_DEF("rm", cmd_rm);
@@ -176,9 +265,7 @@ cmd_mv(cli_t *cli, int argc, char **argv)
 {
   if(argc != 3)
     return ERR_INVALID_ARGS;
-  if(g_fs == NULL)
-    return ERR_NO_DEVICE;
-  return maperr(lfs_rename(&g_fs->lfs, argv[1], argv[2]));
+  return fs_rename(argv[1], argv[2]);
 }
 
 CLI_CMD_DEF("mv", cmd_mv);
@@ -216,9 +303,9 @@ cmd_ls(cli_t *cli, int argc, char **argv)
     }
 
     if(ls->info.type == LFS_TYPE_DIR) {
-      cli_printf(cli, "<dir>\t%s\n", ls->info.name);
+      cli_printf(cli, "  <dir>  %s\n", ls->info.name);
     } else {
-      cli_printf(cli, "%d\t%s\n",
+      cli_printf(cli, "%8d %s\n",
                  ls->info.size, ls->info.name);
     }
   }
@@ -230,21 +317,68 @@ cmd_ls(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF("ls", cmd_ls);
 
+
+static error_t
+cmd_cat(cli_t *cli, int argc, char **argv)
+{
+  if(argc != 2)
+    return ERR_INVALID_ARGS;
+
+  char buf[32];
+
+  fs_file_t *fp;
+  error_t err = fs_open(argv[1], FS_RDONLY, &fp);
+  if(err) {
+    return err;
+  }
+  stream_t *st = cli->cl_stream;
+  while(1) {
+    ssize_t r = fs_read(fp, buf, sizeof(buf));
+    if(r < 0) {
+      err = r;
+      break;
+    }
+    if(r == 0)
+      break;
+    st->write(st, buf, r);
+  }
+  fs_close(fp);
+  return err;
+}
+
+CLI_CMD_DEF("cat", cmd_cat);
+
+
 #if 0
 static error_t
 cmd_stress(cli_t *cli, int argc, char **argv)
 {
   int cnt = 0;
-  while(1) {
-    lfs_mkdir(&g_fs->lfs, "tjena");
-    lfs_remove(&g_fs->lfs, "tjena");
 
+  error_t err;
+  fs_remove("foo");
+  while(cli_getc(cli, 0) == ERR_NOT_READY) {
+    err = fs_mkdir("foo");
+    if(err) {
+      cli_printf(cli, "mkdir failed %s\n", error_to_string(err));
+      break;
+    }
+    err = fs_rename("foo", "bar");
+    if(err) {
+      cli_printf(cli, "rename failed %s\n", error_to_string(err));
+      break;
+    }
+    err = fs_remove("bar");
+    if(err) {
+      cli_printf(cli, "remove failed %s\n", error_to_string(err));
+      break;
+    }
     cnt++;
-    printf("%d\n", cnt);
+    cli_printf(cli, "%d\n", cnt);
   }
   return 0;
 }
 
-CLI_CMD_DEF("stress", cmd_stress);
+CLI_CMD_DEF("fs_stress", cmd_stress);
 
 #endif
