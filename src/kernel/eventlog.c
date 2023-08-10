@@ -286,6 +286,8 @@ static error_t
 cmd_mark(cli_t *cli, int argc, char **argv)
 {
   int cnt = 1;
+  if(argc < 2)
+    return ERR_INVALID_ARGS;
   if(argc > 2)
     cnt = atoi(argv[2]);
   for(int i = 0; i < cnt; i++) {
@@ -453,5 +455,108 @@ evlog_svc_close(void *opaque)
 
 SERVICE_DEF("log", 2, SERVICE_TYPE_DGRAM,
             evlog_svc_open, NULL, NULL, evlog_svc_pull, evlog_svc_close);
+
+
+#include <mios/fs.h>
+
+
+static size_t g_logfile_max_size;
+
+__attribute__((noreturn))
+static void *
+eventlog_to_fs_thread(void *arg)
+{
+  fs_mkdir("log");
+  fs_file_t *f = NULL;
+  evlogfifo_t *ef = &ef0;
+  mutex_lock(&ef->mutex);
+
+  static stream_follower_t sf;
+  static char linebuf[128];
+
+  sf.f.ptr = ef->tail;
+  sf.f.cb = stream_follower_wakeup;
+  cond_init(&sf.c, "log");
+
+  LIST_INSERT_HEAD(&ef->followers, &sf.f, link);
+
+  int64_t ts = ef->ts_tail;
+
+  while(1) {
+
+    uint16_t ptr = sf.f.ptr;
+
+    if(ptr == ef->head) {
+      if(f) {
+        mutex_unlock(&ef->mutex);
+        fs_fsync(f);
+        mutex_lock(&ef->mutex);
+      }
+      if(ptr == ef->head) {
+        cond_wait(&sf.c, &ef->mutex);
+        continue;
+      }
+    }
+
+    const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
+    const uint8_t flags = ef->data[(ptr + 1) & EVENTLOG_MASK];
+    const uint8_t level = flags & 7;
+    const uint8_t tlen = (flags >> 3) & 7;
+    uint16_t msglen = len - 2 - tlen;
+    const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
+
+    ts += evl_read_delta_ts(ef, ptr);
+
+    //    const int ms_ago = (clock_get() - ts) / 1000;
+
+    size_t buflen = 0;
+    buflen += snprintf(linebuf, sizeof(linebuf),
+                       "%d\t%s\t", (int)(ts / 1000), level2str[level]);
+    msglen = MIN(msglen, sizeof(linebuf) - buflen - 1);
+
+    const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
+
+    if(msgend >= msgstart) {
+      memcpy(linebuf + buflen, ef->data + msgstart, msglen);
+      buflen += msglen;
+    } else {
+      memcpy(linebuf + buflen, ef->data + msgstart, EVENTLOG_SIZE - msgstart);
+      buflen += EVENTLOG_SIZE - msgstart;
+      memcpy(linebuf + buflen, ef->data, msgend);
+      buflen += msgend;
+    }
+    sf.f.ptr = ptr + len;
+    mutex_unlock(&ef->mutex);
+    linebuf[buflen++] = '\n';
+
+    if(f == NULL) {
+      error_t err =
+        fs_open("log/log.txt", FS_CREAT | FS_WRONLY | FS_APPEND, &f);
+      if(err) {
+        evlog(LOG_ERR, "Unable to open logfile: %s", error_to_string(err));
+        thread_exit(NULL);
+      }
+    }
+    fs_write(f, linebuf, buflen);
+
+    if(fs_size(f) > g_logfile_max_size) {
+      fs_close(f);
+      f = NULL;
+      fs_rename("log/log.txt", "log/old.txt");
+      evlog(LOG_INFO, "Log rotated");
+    }
+
+    mutex_lock(&ef->mutex);
+  }
+}
+
+
+void
+eventlog_to_fs(size_t max_file_size)
+{
+  g_logfile_max_size = max_file_size;
+  int flags = TASK_DETACHED;
+  thread_create(eventlog_to_fs_thread, NULL, 2048, "fslog", flags, 4);
+}
 
 #endif

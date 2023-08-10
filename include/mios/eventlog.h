@@ -30,9 +30,7 @@ void evlog0(event_level_t level, struct stream *st, const char *fmt, ...)
 
 #define evlogst(level, st, fmt...) evlog0(level, st, fmt)
 
-struct pcs;
-
-error_t evlog_to_pcs(struct pcs *pcs);
+void eventlog_to_fs(size_t logfile_max_size);
 
 #else
 

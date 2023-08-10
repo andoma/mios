@@ -137,7 +137,7 @@ static const int8_t lfs_errmap[] = {
   LFS_ERR_NAMETOOLONG, ERR_TOOLONG
 };
 
-static error_t
+static int
 maperr(int err)
 {
   if(err >= 0)
@@ -237,6 +237,13 @@ fs_fsync(fs_file_t *f)
 {
   return maperr(lfs_file_sync(&g_fs->lfs, &f->file));
 }
+
+ssize_t
+fs_size(fs_file_t *f)
+{
+  return maperr(lfs_file_size(&g_fs->lfs, &f->file));
+}
+
 
 //--------------------------------------------------------------------
 
