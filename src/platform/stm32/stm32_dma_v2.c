@@ -176,7 +176,7 @@ static void __attribute__((noinline))
 dma_irq(int channel)
 {
   const uint32_t ctrl = channel >> 3;
-  const uint32_t bits = (reg_rd(DMA_ISR(ctrl)) >> (channel * 4)) & 0xf;
+  const uint32_t bits = (reg_rd(DMA_ISR(ctrl)) >> (channel * 4)) & 0xe;
   reg_wr(DMA_IFCR(ctrl), bits << (channel * 4));
 
   dma_stream_t *ds = g_streams[channel];
