@@ -26,6 +26,9 @@ typedef struct stm32_spi {
 #define SPI_SR   0x08
 #define SPI_DR   0x0c
 
+#define SPI_CR1_ENABLE (1 << 6)
+#define SPI_CR1_RXONLY (1 << 10)
+
 #define CR2_VALUE (1 << 12) // Should be set for 8 bit wide transfers
 
 static error_t
@@ -35,15 +38,20 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
   if(tx != NULL) {
     stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
     stm32_dma_set_nitems(spi->tx_dma, len);
+  } else {
+    config |= SPI_CR1_RXONLY;
   }
 
   if(rx != NULL) {
     stm32_dma_set_mem0(spi->rx_dma, rx);
     stm32_dma_set_nitems(spi->rx_dma, len);
-    reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE | 1);
   }
 
   int q = irq_forbid(IRQ_LEVEL_SCHED);
+
+  reg_wr(spi->base_addr + SPI_CR1, config);
+
+  reg_wr(spi->base_addr + SPI_CR1, config | SPI_CR1_ENABLE);
 
   if(tx != NULL) {
     stm32_dma_start(spi->tx_dma);
@@ -58,19 +66,18 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
          (tx ? 2 : 0) |
          (rx ? 1 : 0));
 
-  if(rx != NULL && tx == NULL) {
-    reg_wr(spi->base_addr + SPI_CR1, config | (1 << 10));
-  }
-
   error_t err;
   err = rx != NULL ? stm32_dma_wait(spi->rx_dma) : 0;
 
-  if(rx != NULL && tx == NULL) {
+  if(tx == NULL) {
+    config &= ~SPI_CR1_RXONLY;
     reg_wr(spi->base_addr + SPI_CR1, config);
-  }
 
-  if(!err) {
-    err = tx != NULL ? stm32_dma_wait(spi->tx_dma) : 0;
+  } else {
+
+    if(!err) {
+      err = stm32_dma_wait(spi->tx_dma);
+    }
   }
 
   if(tx != NULL) {
@@ -102,7 +109,6 @@ spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
     return ERR_OK;
 
   gpio_set_output(nss, 0);
-  reg_wr(spi->base_addr + SPI_CR1, config);
 
   error_t err = spi_dma(spi, tx, rx, len, config);
 
@@ -134,7 +140,6 @@ spi_rwv(struct spi *bus, const struct iovec *txiov,
   mutex_lock(&spi->mutex);
 
   gpio_set_output(nss, 0);
-  reg_wr(spi->base_addr + SPI_CR1, config);
 
   for(size_t i = 0; i < count; i++) {
     err = spi_dma(spi, txiov[i].iov_base,
@@ -207,7 +212,6 @@ stm32_spi_create(int reg_base, int clkid,
 
   spi->base_addr = reg_base;
   mutex_init(&spi->mutex, "spi");
-  reg_wr(spi->base_addr + SPI_CR1, spi_get_config(&spi->spi, 0, 1));
 
   spi->rx_dma = stm32_dma_alloc(rx_dma_resource_id, "spirx");
   stm32_dma_make_waitable(spi->rx_dma, "spirx");
