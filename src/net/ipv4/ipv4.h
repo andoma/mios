@@ -38,6 +38,27 @@ typedef struct udp_hdr {
 } udp_hdr_t;
 
 
+typedef struct tcp_hdr {
+  uint16_t src_port;
+  uint16_t dst_port;
+  uint32_t seq;
+  uint32_t ack;
+  uint8_t off;
+  uint8_t flg;
+  uint16_t wnd;
+  uint16_t cksum;
+  uint16_t up;
+} tcp_hdr_t;
+
+#define TCP_F_FIN 0x01
+#define TCP_F_SYN 0x02
+#define TCP_F_RST 0x04
+#define TCP_F_PSH 0x08
+#define TCP_F_ACK 0x10
+#define TCP_F_URG 0x20
+
+
+
 #define IPPROTO_ICMP 1
 #define IPPROTO_TCP  6
 #define IPPROTO_UDP  17

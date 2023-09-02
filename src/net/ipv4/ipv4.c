@@ -249,6 +249,8 @@ ipv4_input(netif_t *ni, pbuf_t *pb)
     return ipv4_input_icmp(ni, pb, 20);
   case IPPROTO_UDP:
     return udp_input_ipv4(ni, pb, 20);
+  case IPPROTO_TCP:
+    return tcp_input_ipv4(ni, pb, 20);
   default:
     return pb;
   }
