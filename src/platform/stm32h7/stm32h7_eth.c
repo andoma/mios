@@ -403,8 +403,8 @@ stm32h7_eth_irq(stm32h7_eth_t *se)
   const uint32_t mtlisr = reg_rd(ETH_MTLISR);
   const uint32_t macisr = reg_rd(ETH_MACISR);
 
-  if(dmacsr & ~0x8445) {
-    panic("%s: Unhandled dmairq 0x%x", __FUNCTION__, dmacsr);
+  if(dmacsr & ~0x8c45) {
+    panic("%s: Unhandled dmairq 0x%x", __FUNCTION__, dmacsr & ~0x8c45);
   }
   assert(mtlisr == 0);
   assert(macisr == 0);
