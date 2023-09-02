@@ -17,7 +17,7 @@
 #include "platform/stm32/stm32_dma_v1.c"
 
 stm32_dma_instance_t
-stm32h7_dma_alloc(int resource_id, const char *name)
+stm32_dma_alloc(uint32_t resource_id, const char *name)
 {
   stm32_dma_instance_t instance = stm32_dma_alloc_instance(-1, name);
   reg_wr(DMAMUX1_CxCR(instance), resource_id);

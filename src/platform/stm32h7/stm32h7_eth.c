@@ -155,7 +155,16 @@ rx_desc_give(desc_t *rx, void *buf)
 }
 
 
-static const device_class_t stm32h7_eth_device_class = {};
+static void
+stm32h7_eth_print_info(struct device *dev, struct stream *st)
+{
+  ether_print((ether_netif_t *)dev, st);
+}
+
+
+static const device_class_t stm32h7_eth_device_class = {
+  .dc_print_info = stm32h7_eth_print_info,
+};
 
 
 static void

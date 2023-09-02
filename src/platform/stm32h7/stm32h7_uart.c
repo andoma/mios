@@ -3,14 +3,26 @@
 
 #include "irq.h"
 
+
 #define USART_CR1  0x00
-#define USART_BBR  0x0c
+#define USART_CR2  0x04
+#define USART_CR3  0x08
+#define USART_BRR  0x0c
 #define USART_SR   0x1c
+#define USART_ICR  0x20
 #define USART_RDR  0x24
 #define USART_TDR  0x28
 
-#define CR1_IDLE       (1 << 0) | (1 << 5) | (1 << 3) | (1 << 2)
-#define CR1_ENABLE_TXI CR1_IDLE | (1 << 7)
+
+#define USART_CR1_UE     (1 << 0)
+#define USART_CR1_UESM   (1 << 1)
+#define USART_CR1_RE     (1 << 2)
+#define USART_CR1_TE     (1 << 3)
+#define USART_CR1_RXNEIE (1 << 5)
+#define USART_CR1_TCIE   (1 << 6)
+#define USART_CR1_TXEIE  (1 << 7)
+
+#define USART_SR_BUSY    (1 << 16)
 
 #include "platform/stm32/stm32_uart.c"
 
