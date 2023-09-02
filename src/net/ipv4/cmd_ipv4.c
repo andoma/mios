@@ -6,11 +6,9 @@
 static error_t
 cmd_arp(cli_t *cli, int argc, char **argv)
 {
-  const netif_t *ni;
+  netif_t *ni = NULL;
 
-  mutex_lock(&netif_mutex);
-
-  SLIST_FOREACH(ni, &netifs, ni_global_link) {
+  while((ni = netif_get_net(ni)) != NULL) {
     const nexthop_t *nh;
 
     LIST_FOREACH(nh, &ni->ni_nexthops, nh_netif_link) {
@@ -32,7 +30,6 @@ cmd_arp(cli_t *cli, int argc, char **argv)
       }
     }
   }
-  mutex_unlock(&netif_mutex);
 
   return 0;
 }

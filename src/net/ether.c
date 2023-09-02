@@ -41,7 +41,7 @@ static void
 ether_output(ether_netif_t *eni, pbuf_t *pb,
              uint16_t ether_type, const uint8_t *dstmac)
 {
-  pb = pbuf_prepend(pb, 14);
+  pb = pbuf_prepend(pb, 14, 1, 0);
 
   uint8_t *eh = pbuf_data(pb, 0);
   memcpy(eh, dstmac, 6);
@@ -78,7 +78,7 @@ arp_send_who_has(ether_netif_t *eni, uint32_t addr)
 static pbuf_t *
 arp_input(ether_netif_t *eni, pbuf_t *pb)
 {
-  if((pb = pbuf_pullup(pb, sizeof(struct arp_pkt))) == NULL)
+  if(pbuf_pullup(pb, sizeof(struct arp_pkt)))
     return pb;
 
   struct arp_pkt *ap = pbuf_data(pb, 0);
@@ -124,7 +124,7 @@ ether_input(netif_t *ni, pbuf_t *pb)
   ether_netif_t *eni = (ether_netif_t *)ni;
   //  pbuf_print("ether", pb);
 
-  if((pb = pbuf_pullup(pb, sizeof(ether_hdr_t))) == NULL)
+  if(pbuf_pullup(pb, sizeof(ether_hdr_t)))
     return pb;
 
   const ether_hdr_t *eh = pbuf_data(pb, 0);
@@ -239,4 +239,24 @@ ether_netif_init(ether_netif_t *eni, const char *name,
   eni->eni_periodic.t_name = name;
 
   net_timer_arm(&eni->eni_periodic, clock_get() + 1000000);
+}
+
+
+void
+ether_print(ether_netif_t *en, struct stream *st)
+{
+
+  stprintf(st, "\tEther: %02x:%02x:%02x:%02x:%02x:%02x\n",
+           en->eni_addr[0],
+           en->eni_addr[1],
+           en->eni_addr[2],
+           en->eni_addr[3],
+           en->eni_addr[4],
+           en->eni_addr[5]);
+
+  stprintf(st, "\tIP address: %Id/%d\n", en->eni_ni.ni_local_addr,
+           en->eni_ni.ni_local_prefixlen);
+
+  dhcpv4_print(en, st);
+
 }

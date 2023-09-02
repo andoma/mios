@@ -208,6 +208,7 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
   return pb;
 }
 
+
 pbuf_t *
 pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
 {
@@ -324,7 +325,7 @@ pbuf_prepend(pbuf_t *pb, size_t bytes, int wait, size_t extra_offset)
 void *
 pbuf_append(pbuf_t *pb, size_t bytes)
 {
-  assert(pb->pb_offset + bytes <= PBUF_DATA_SIZE);
+  assert(pb->pb_offset + pb->pb_buflen + bytes <= PBUF_DATA_SIZE);
   void *r = pb->pb_data + pb->pb_offset + pb->pb_buflen;
   pb->pb_buflen += bytes;
   pb->pb_pktlen += bytes;

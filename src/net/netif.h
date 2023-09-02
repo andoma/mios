@@ -43,6 +43,8 @@ typedef struct netif {
 } netif_t;
 
 
+extern struct netif_list netifs;
+
 
 #define NEXTHOP_IDLE       0
 #define NEXTHOP_RESOLVE    5
@@ -68,6 +70,8 @@ typedef struct nexthop {
 void netif_attach(netif_t *ni, const char *name, const device_class_t *dc);
 
 void netif_detach(netif_t *ni);
+
+netif_t *netif_get_net(netif_t *cur);
 
 void netlog(const char *fmt, ...);
 

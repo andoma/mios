@@ -1,3 +1,4 @@
+#include <mios/eventlog.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
 #include <unistd.h>
@@ -151,7 +152,7 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
 
   size_t packet_len = pb->pb_pktlen;
 
-  pb = pbuf_prepend(pb, 8);
+  pb = pbuf_prepend(pb, 8, 1, 20);
 
   udp_hdr_t *udp = pbuf_data(pb, 0);
   udp->dst_port = htons(67);
@@ -159,7 +160,7 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
   udp->length = htons(packet_len);
   udp->cksum = 0;
 
-  pb = pbuf_prepend(pb, 20);
+  pb = pbuf_prepend(pb, 20, 1, 0);
   ipv4_header_t *ip = pbuf_data(pb, 0);
 
   ip->ver_ihl = 0x45;
@@ -173,7 +174,7 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
   ip->src_addr = eni->eni_ni.ni_local_addr;
   ip->dst_addr = dst_addr;
 
-  printf("DHCP: Sending to %Id (%s)\n", dst_addr, why);
+  evlog(LOG_INFO, "dhcp: sending to %Id (%s)", dst_addr, why);
 
   if(dst_addr == 0xffffffff) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, 20);
@@ -297,7 +298,7 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
   po->valid = 0;
 
   while(pb) {
-    if((pb = pbuf_pullup(pb, 1)) == NULL)
+    if(pbuf_pullup(pb, 1))
       break;
     uint8_t type = *(const uint8_t *)pbuf_data(pb, 0);
     if(type == 0xff) // END
@@ -306,14 +307,14 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
     if(type == 0)
       continue;
 
-    if((pb = pbuf_pullup(pb, 1)) == NULL)
+    if(pbuf_pullup(pb, 1))
       break;
     uint8_t length = *(const uint8_t *)pbuf_data(pb, 0);
     pb = pbuf_drop(pb, 1);
     if(length > pb->pb_pktlen)
       break;
 
-    if((pb = pbuf_pullup(pb, length)) == NULL)
+    if(pbuf_pullup(pb, length))
       break;
 #if 0
     const uint8_t *dx = pbuf_data(pb, 0);
@@ -341,7 +342,7 @@ pbuf_t *
 dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
-  if((pb = pbuf_pullup(pb, sizeof(dhcp_hdr_t))) == NULL)
+  if(pbuf_pullup(pb, sizeof(dhcp_hdr_t)))
     return pb;
 
   const dhcp_hdr_t *dh = pbuf_data(pb, 0);
@@ -352,7 +353,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
     return pb;
 
   const uint32_t yiaddr = dh->yiaddr;
-  pbuf_drop(pb, sizeof(dhcp_hdr_t));
+  pb = pbuf_drop(pb, sizeof(dhcp_hdr_t));
 
   parsed_opts_t po;
   if((pb = parse_opts(pb, &po)) == NULL)
@@ -364,11 +365,11 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
   switch(po.msgtype) {
   case DHCPOFFER:
     if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
-      printf("DHCP: Got OFFER but we are not selecting\n");
+      evlog(LOG_INFO, "dhcp: Got OFFER but we are not selecting");
       return pb;
     }
 
-    printf("DHCPOFFER: %Id from %Id\n", yiaddr, from);
+    evlog(LOG_INFO, "dhcp: OFFER %Id from %Id", yiaddr, from);
     eni->eni_dhcp_requested_ip = yiaddr;
     eni->eni_dhcp_server_ip = po.server_identifer;
     dhcpv4_send_request(eni, "got-offer");
@@ -380,20 +381,20 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
     if(eni->eni_dhcp_state == DHCP_STATE_REQUESTING ||
        eni->eni_dhcp_state == DHCP_STATE_REQUESTING_RETRY ||
        eni->eni_dhcp_state == DHCP_STATE_BOUND) {
-      printf("DHCPACK: %Id from %Id\n", yiaddr, from);
+      evlog(LOG_INFO, "dhcp: ACK %Id from %Id", yiaddr, from);
 
       if(eni->eni_dhcp_requested_ip != yiaddr) {
-        printf("  rejected, not requested ip\n");
+        evlog(LOG_INFO, "dhcp: rejected, not requested ip");
         break;
       }
 
       if(eni->eni_dhcp_server_ip != from) {
-        printf("  rejected, not correct source\n");
+        evlog(LOG_INFO, "dhcp: rejected, not correct source");
         break;
       }
 
       eni->eni_ni.ni_local_addr = yiaddr;
-      eni->eni_ni.ni_local_prefixlen = 24; // XXX FIX
+      eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
       eni->eni_dhcp_timeout =
         clock_get() + 1000000ull * (ntohl(po.lease_time) / 2);
@@ -406,8 +407,6 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
 
 
 
-
-
 static const char *dhcp_state_str[] = {
 
   [DHCP_STATE_SELECTING] = "selecting",
@@ -417,31 +416,20 @@ static const char *dhcp_state_str[] = {
   [DHCP_STATE_RENEWING] = "renewing"
 };
 
-static error_t
-cmd_dhcp(cli_t *cli, int argc, char **argv)
+
+void
+dhcpv4_print(ether_netif_t *eni, struct stream *st)
 {
-  ether_netif_t *eni;
-
-  mutex_lock(&netif_mutex);
-
-  SLIST_FOREACH(eni, &ether_netifs, eni_global_link) {
-
-    cli_printf(cli, "DHCP State: %s\n", dhcp_state_str[eni->eni_dhcp_state]);
-    cli_printf(cli, "     Our address: %Id\n", eni->eni_dhcp_requested_ip);
-    cli_printf(cli, "     Server: %Id\n", eni->eni_dhcp_server_ip);
-    if(eni->eni_dhcp_timeout) {
-      int delta = (eni->eni_dhcp_timeout - clock_get()) / 1000000;
-
-      if(eni->eni_dhcp_state == DHCP_STATE_BOUND) {
-        cli_printf(cli, "     Renew in: %d seconds\n", delta);
-      } else if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
-        cli_printf(cli, "     Re-init in: %d seconds\n", delta);
-      }
+  stprintf(st, "\tDHCP State: %s\n", dhcp_state_str[eni->eni_dhcp_state]);
+  stprintf(st, "\t\tOur address: %Id\n", eni->eni_dhcp_requested_ip);
+  stprintf(st, "\t\tServer: %Id\n", eni->eni_dhcp_server_ip);
+  if(eni->eni_dhcp_timeout) {
+    int delta = (eni->eni_dhcp_timeout - clock_get()) / 1000000;
+    if(eni->eni_dhcp_state == DHCP_STATE_BOUND) {
+      stprintf(st, "\t\tRenew in: %d seconds\n", delta);
+    } else if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
+      stprintf(st, "\t\tRe-init in: %d seconds\n", delta);
     }
   }
-  mutex_unlock(&netif_mutex);
-  return 0;
 }
 
-
-CLI_CMD_DEF("dhcp", cmd_dhcp);

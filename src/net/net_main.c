@@ -174,6 +174,32 @@ netif_detach(netif_t *ni)
 }
 
 
+netif_t *
+netif_get_net(netif_t *cur)
+{
+  netif_t *ni;
+
+  mutex_lock(&netif_mutex);
+  if(cur == NULL) {
+    ni = SLIST_FIRST(&netifs);
+  } else {
+    SLIST_FOREACH(ni, &netifs, ni_global_link) {
+      if(ni == cur) {
+        break;
+      }
+    }
+    if(ni)
+      ni = SLIST_NEXT(ni, ni_global_link);
+  }
+  if(ni)
+    device_retain(&ni->ni_dev);
+  mutex_unlock(&netif_mutex);
+  if(cur)
+    device_release(&cur->ni_dev);
+  return ni;
+}
+
+
 static void __attribute__((constructor(180)))
 net_init(void)
 {

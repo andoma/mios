@@ -18,6 +18,11 @@ typedef struct ipv4_header {
 
 } ipv4_header_t;
 
+#define IPV4_F_DF 0x4000
+#define IPV4_F_MF 0x2000
+#define IPV4_F_FO 0x1fff
+
+
 typedef struct icmp_hdr {
   uint8_t type;
   uint8_t code;

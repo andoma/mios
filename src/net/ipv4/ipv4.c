@@ -9,12 +9,11 @@
 #include "ipv4.h"
 #include "irq.h"
 #include "udp.h"
+#include "tcp.h"
 
 static uint32_t
-ipv4_cksum_add(uint32_t sum, const void *data, size_t len)
+ipv4_cksum_add(uint32_t sum, const uint16_t *u16, size_t len)
 {
-  const uint16_t *u16 = (const uint16_t *)data;
-
   while(len > 1) {
     sum += *u16++;
     len -= 2;
@@ -28,11 +27,16 @@ ipv4_cksum_add(uint32_t sum, const void *data, size_t len)
 
 
 struct ipv4_cksum_pseudo_hdr {
-  uint32_t src_addr;
-  uint32_t dst_addr;
-  uint8_t zero;
-  uint8_t protocol;
-  uint16_t length;
+  union {
+    struct {
+      uint32_t src_addr;
+      uint32_t dst_addr;
+      uint8_t zero;
+      uint8_t protocol;
+      uint16_t length;
+    };
+    uint16_t raw[6];
+  };
 };
 
 uint32_t
@@ -40,9 +44,9 @@ ipv4_cksum_pseudo(uint32_t src_addr, uint32_t dst_addr,
                   uint8_t protocol, uint16_t length)
 {
   struct ipv4_cksum_pseudo_hdr h = {
-    src_addr, dst_addr, 0, protocol, htons(length)
+    {{src_addr, dst_addr, 0, protocol, htons(length)}}
   };
-  return ipv4_cksum_add(0, &h, sizeof(h));
+  return ipv4_cksum_add(0, h.raw, 12);
 }
 
 
@@ -178,7 +182,7 @@ ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
   if(ipv4_cksum_pbuf(0, pb, icmp_offset, INT32_MAX))
     return pb;
 
-  if((pb = pbuf_pullup(pb, icmp_offset + 4)) == NULL)
+  if(pbuf_pullup(pb, icmp_offset + 4))
     return pb;
 
   const icmp_hdr_t *icmp = pbuf_data(pb, icmp_offset);
@@ -199,12 +203,34 @@ ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
 pbuf_t *
 ipv4_input(netif_t *ni, pbuf_t *pb)
 {
-  if((pb = pbuf_pullup(pb, sizeof(ipv4_header_t))) == NULL)
+  if(pbuf_pullup(pb, sizeof(ipv4_header_t)))
     return pb;
 
   const ipv4_header_t *ip = pbuf_data(pb, 0);
   if(ip->ver_ihl != 0x45)
     return pb;
+
+  if(ipv4_cksum_pbuf(0, pb, 0, 20)) {
+    // IP header checksum error
+    return pb;
+  }
+
+  if(ntohs(ip->fragment_info) & 0x3fff) {
+    // No fragment support
+    return pb;
+  }
+
+  // Make sure packet buffer length matches length in IP header
+  uint16_t len = ntohs(ip->total_length);
+  if(len > pb->pb_pktlen) {
+    // Header says packet is larger than it is, drop packet
+    return pb;
+  }
+
+  if(len < pb->pb_pktlen) {
+    // Header says packet is smaller than it is, trim packet buffer
+    pbuf_trim(pb, pb->pb_pktlen - len);
+  }
 
 #if 0
   printf("\tIPV4 %Id > %Id %d (%d)\n",
@@ -217,9 +243,6 @@ ipv4_input(netif_t *ni, pbuf_t *pb)
   } else if((ip->dst_addr & htonl(0xf0000000u)) == htonl(0xe0000000u)) {
     pb->pb_flags |= PBUF_MCAST;
   }
-
-  // TODO: Verify checksum
-  // TOOD: Fragmentation?
 
   switch(ip->proto) {
   case IPPROTO_ICMP:

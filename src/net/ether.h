@@ -33,3 +33,5 @@ void ether_netif_init(ether_netif_t *eni, const char *name,
 SLIST_HEAD(ether_netif_list, ether_netif);
 
 extern struct ether_netif_list ether_netifs;
+
+void ether_print(ether_netif_t *en, struct stream *st);
