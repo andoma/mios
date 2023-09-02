@@ -385,6 +385,8 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
 void
 pbuf_reset(pbuf_t *pb, size_t header_size, size_t len)
 {
+  assert(pb->pb_buflen >= len);
+
   if(pb->pb_next) {
     pbuf_free(pb->pb_next);
     pb->pb_next = NULL;
@@ -451,6 +453,49 @@ pbuf_copy(const pbuf_t *src, int wait)
   }
   irq_permit(q);
   return NULL;
+}
+
+
+pbuf_t *
+pbuf_copy_pkt(const pbuf_t *src, int wait)
+{
+  pbuf_t *r = NULL;
+  pbuf_t **dp = &r;
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+
+  while(src) {
+    pbuf_t *dst = pbuf_get(wait);
+    if(dst == NULL) {
+      pbuf_free_irq_blocked(r);
+      r = NULL;
+      break;
+    }
+
+    dst->pb_next = NULL;
+    dst->pb_data = pbuf_data_get(wait);
+    if(dst->pb_data == NULL) {
+      pbuf_put(dst);
+      pbuf_free_irq_blocked(r);
+      r = NULL;
+      break;
+    }
+
+    dst->pb_flags = src->pb_flags;
+    dst->pb_pktlen = src->pb_pktlen;
+    dst->pb_offset = src->pb_offset;
+    dst->pb_buflen = src->pb_buflen;
+    memcpy(dst->pb_data + dst->pb_offset, src->pb_data + dst->pb_offset,
+           src->pb_buflen);
+
+    *dp = dst;
+    dp = &dst->pb_next;
+    src = src->pb_next;
+    if(src == NULL || src->pb_flags & PBUF_SOP)
+      break;
+  }
+  irq_permit(q);
+  return r;
 }
 
 

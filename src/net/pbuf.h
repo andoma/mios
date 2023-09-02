@@ -64,6 +64,9 @@ __attribute__((warn_unused_result))
 pbuf_t *pbuf_copy(const pbuf_t *src, int wait);
 
 __attribute__((warn_unused_result))
+pbuf_t *pbuf_copy_pkt(const pbuf_t *src, int wait);
+
+__attribute__((warn_unused_result))
 void *pbuf_append(pbuf_t *pb, size_t bytes);
 
 __attribute__((warn_unused_result))
