@@ -325,5 +325,5 @@ ota_close(void *opaque)
   ota_busy = 0;
 }
 
-SERVICE_DEF("ota", 9, SERVICE_TYPE_DGRAM,
+SERVICE_DEF("ota", 0, 9, SERVICE_TYPE_DGRAM,
             ota_open, ota_push, ota_may_push, ota_pull, ota_close);

@@ -27,9 +27,9 @@ typedef struct service {
 
   const char *name;
 
-  uint16_t id;
-
-  uint16_t type;
+  uint16_t ip_port;
+  uint8_t ble_psm;
+  uint8_t type;
 
   void *(*open)(void *opaque,
                 service_event_cb_t *event,
@@ -50,8 +50,10 @@ typedef struct service {
 
 const service_t *service_find_by_name(const char *name);
 
-const service_t *service_find_by_id(uint32_t id);
+const service_t *service_find_by_ble_psm(uint8_t psm);
 
-#define SERVICE_DEF(name, id, type, open, push, maypush, pull, close)    \
-  static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, id, type, open, push, maypush, pull, close };
+const service_t *service_find_by_ip_port(uint16_t port);
+
+#define SERVICE_DEF(name, ip_port, ble_psm, type, open, push, maypush, pull, close) \
+  static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, type, open, push, maypush, pull, close };
 

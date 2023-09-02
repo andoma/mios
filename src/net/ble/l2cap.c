@@ -417,7 +417,7 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
 
   const service_t *s = NULL;
   if(req->spsm > 0x80 && req->spsm < 0x100) {
-    s = service_find_by_id(req->spsm & 0x3f);
+    s = service_find_by_ble_psm(req->spsm & 0x3f);
   }
 
   if(s == NULL) {

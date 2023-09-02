@@ -155,7 +155,7 @@ rpc_close(void *opaque)
   free(sr);
 }
 
-SERVICE_DEF("rpc", 1, SERVICE_TYPE_DGRAM,
+SERVICE_DEF("rpc", 0, 1, SERVICE_TYPE_DGRAM,
             rpc_open, rpc_push, rpc_may_push, rpc_pull, rpc_close);
 
 

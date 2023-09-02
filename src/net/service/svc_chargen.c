@@ -56,5 +56,5 @@ chargen_close(void *opaque)
   free(opaque);
 }
 
-SERVICE_DEF("chargen", 19, SERVICE_TYPE_STREAM,
+SERVICE_DEF("chargen", 19, 19, SERVICE_TYPE_STREAM,
             chargen_open, NULL, NULL, chargen_pull, chargen_close);

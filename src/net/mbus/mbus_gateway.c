@@ -405,5 +405,5 @@ ms_close(void *opaque)
 }
 
 
-SERVICE_DEF("mbus", 3, SERVICE_TYPE_DGRAM,
+SERVICE_DEF("mbus", 0, 3, SERVICE_TYPE_DGRAM,
             ms_open, ms_push, ms_may_push, ms_pull, ms_close);

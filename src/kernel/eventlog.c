@@ -453,7 +453,7 @@ evlog_svc_close(void *opaque)
   free(esf);
 }
 
-SERVICE_DEF("log", 2, SERVICE_TYPE_DGRAM,
+SERVICE_DEF("log", 2, 2, SERVICE_TYPE_DGRAM,
             evlog_svc_open, NULL, NULL, evlog_svc_pull, evlog_svc_close);
 
 

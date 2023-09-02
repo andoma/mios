@@ -61,6 +61,6 @@ discard_close(void *opaque)
   free(se);
 }
 
-SERVICE_DEF("discard", 8, SERVICE_TYPE_DGRAM,
+SERVICE_DEF("discard", 9, 9, SERVICE_TYPE_DGRAM,
             discard_open, discard_push, discard_may_push,
             discard_pull, discard_close);

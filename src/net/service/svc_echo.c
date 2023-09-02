@@ -65,5 +65,5 @@ echo_close(void *opaque)
   free(se);
 }
 
-SERVICE_DEF("echo", 7, SERVICE_TYPE_STREAM,
+SERVICE_DEF("echo", 7, 7, SERVICE_TYPE_STREAM,
             echo_open, echo_push, echo_may_push, echo_pull, echo_close);
