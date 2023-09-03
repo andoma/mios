@@ -11,7 +11,11 @@ LIST_HEAD(nexthop_list, nexthop);
 
 struct nexthop;
 
-#define NETIF_TASK_RX     0x1
+#define NETIF_TASK_RX          0x1
+#define NETIF_TASK_STATUS_UP   0x2
+#define NETIF_TASK_STATUS_DOWN 0x4
+
+#define NETIF_F_UP   0x1
 
 typedef struct netif {
 
@@ -30,6 +34,8 @@ typedef struct netif {
   uint8_t ni_ifindex;
   uint16_t ni_mtu;
 
+  uint32_t ni_flags;
+
   uint32_t ni_pending_signals;
 
   pbuf_t *(*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
@@ -37,6 +43,8 @@ typedef struct netif {
   void (*ni_buffers_avail)(struct netif *ni);
 
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
+
+  void (*ni_status_change)(struct netif *ni);
 
   SLIST_ENTRY(netif) ni_global_link;
 

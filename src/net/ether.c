@@ -224,12 +224,19 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
 
 
 
+static void
+ether_status_change(struct netif *ni)
+{
+
+}
+
 void
 ether_netif_init(ether_netif_t *eni, const char *name,
                  const device_class_t *dc)
 {
   eni->eni_ni.ni_output = ether_ipv4_output;
   eni->eni_ni.ni_input = ether_input;
+  eni->eni_ni.ni_status_change = ether_status_change;
 
   netif_attach(&eni->eni_ni, name, dc);
 

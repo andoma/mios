@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <mios/io.h>
+#include <mios/eventlog.h>
 #include <malloc.h>
 
 #include <net/pbuf.h>
@@ -167,6 +168,55 @@ static const device_class_t stm32h7_eth_device_class = {
 };
 
 
+
+#include <unistd.h>
+
+static uint16_t
+mii_read(int phyaddr, int reg)
+{
+  reg_wr(ETH_MACMDIOAR,
+         (phyaddr << 21) |
+         (reg << 16) |
+         (0 << 12) |
+         (0 << 8) |
+         (3 << 2) |
+         (1 << 0));
+
+  while(reg_rd(ETH_MACMDIOAR) & 1) {
+    usleep(10);
+  }
+  return reg_rd(ETH_MACMDIODR) & 0xffff;
+}
+
+
+static void *__attribute__((noreturn))
+stm32h7_phy_thread(void *arg)
+{
+  stm32h7_eth_t *se = arg;
+  int current_up = 0;
+  while(1) {
+    mii_read(0, 1);
+    int n = mii_read(0, 1);
+    int up = !!(n & 4);
+
+    if(!current_up && up) {
+      current_up = 1;
+      net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
+      evlog(LOG_INFO, "eth: Link status: %s", "UP");
+    } else if(current_up && !up) {
+      current_up = 0;
+      net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
+      evlog(LOG_INFO, "eth: Link status: %s", "DOWN");
+    }
+    usleep(100000);
+  }
+}
+
+
+
+
+
+
 static void
 stm32h7_eth_init(stm32h7_eth_t *se)
 {
@@ -258,6 +308,7 @@ stm32h7_eth_init(stm32h7_eth_t *se)
 
   ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
   irq_enable(61, IRQ_LEVEL_NET);
+  thread_create(stm32h7_phy_thread, se, 512, "phy", 0, 4);
 }
 
 
