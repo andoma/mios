@@ -277,6 +277,8 @@ shell_open_raw(void *opaque, service_event_cb_t *cb,
                int telnet)
 {
   svc_shell_t *ss = xalloc(sizeof(svc_shell_t), 0, MEM_MAY_FAIL);
+  if(ss == NULL)
+    return NULL;
   memset(ss, 0, sizeof(svc_shell_t));
   ss->ss_opaque = opaque;
   ss->ss_cb = cb;
