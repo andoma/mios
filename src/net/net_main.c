@@ -116,10 +116,6 @@ net_buffers_available(void)
 void
 net_timer_arm(timer_t *t, uint64_t deadline)
 {
-  int64_t now = clock_get();
-  if(deadline > now + 10000000) {
-    panic("deadline far ahead in the future");
-  }
   timer_arm_on_queue(t, deadline, &net_timers);
 }
 
@@ -223,4 +219,3 @@ net_init(void)
 #endif
   thread_create(net_thread, NULL, 768, "net", flags, 5);
 }
-

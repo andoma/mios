@@ -16,13 +16,14 @@ typedef struct ether_netif {
 
   uint8_t eni_addr[6];    // Our address
 
+  timer_t eni_periodic;
+
   uint8_t eni_dhcp_state;
+  uint8_t eni_dhcp_retries;
   uint32_t eni_dhcp_xid;
   uint32_t eni_dhcp_server_ip;
   uint32_t eni_dhcp_requested_ip;
-  uint64_t eni_dhcp_timeout;
-
-  timer_t eni_periodic;
+  timer_t eni_dhcp_timer;
 
 } ether_netif_t;
 

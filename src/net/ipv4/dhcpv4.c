@@ -1,3 +1,5 @@
+#include "dhcpv4.h"
+
 #include <mios/eventlog.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
@@ -7,7 +9,6 @@
 #include <string.h>
 
 #include "net/pbuf.h"
-#include "dhcpv4.h"
 #include "net/ether.h"
 #include "net/net.h"
 
@@ -29,11 +30,10 @@ typedef struct dhcp_hdr {
   uint8_t cookie[4];
 } dhcp_hdr_t;
 
-#define DHCP_STATE_SELECTING         0
-#define DHCP_STATE_REQUESTING        1
-#define DHCP_STATE_REQUESTING_RETRY  2
+#define DHCP_STATE_IDLE              0
+#define DHCP_STATE_SELECTING         1
+#define DHCP_STATE_REQUESTING        2
 #define DHCP_STATE_BOUND             3
-#define DHCP_STATE_RENEWING          4
 
 
 #define DHCP_SUBNET_MASK               1
@@ -174,8 +174,6 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
   ip->src_addr = eni->eni_ni.ni_local_addr;
   ip->dst_addr = dst_addr;
 
-  evlog(LOG_INFO, "dhcp: sending to %Id (%s)", dst_addr, why);
-
   if(dst_addr == 0xffffffff) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, 20);
     eni->eni_ni.ni_output(&eni->eni_ni, NULL, pb);
@@ -224,34 +222,36 @@ dhcpv4_send_request(struct ether_netif *eni, const char *why)
 }
 
 
-
-
-void
-dhcpv4_periodic(struct ether_netif *eni)
+static void
+dhcpv4_discover(ether_netif_t *eni)
 {
-  const int64_t now = clock_get();
-
-  switch(eni->eni_dhcp_state) {
-  case DHCP_STATE_SELECTING:
-    eni->eni_ni.ni_local_addr = 0;
-    eni->eni_dhcp_server_ip = 0;
-    eni->eni_dhcp_requested_ip = 0;
-    dhcpv4_send_discover(eni);
-    break;
-  case DHCP_STATE_BOUND:
-    if(now < eni->eni_dhcp_timeout)
-      break;
-    // FALLTHRU
-  case DHCP_STATE_REQUESTING:
-    eni->eni_dhcp_state = DHCP_STATE_REQUESTING_RETRY;
-    eni->eni_dhcp_timeout = now + 20000000ull;
-    break;
-  case DHCP_STATE_REQUESTING_RETRY:
-    dhcpv4_send_request(eni, "request-retry");
-    if(now > eni->eni_dhcp_timeout)
-      eni->eni_dhcp_state = DHCP_STATE_SELECTING;
-    break;
+  if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
+    evlog(LOG_INFO, "dhcp: selecting");
+    eni->eni_dhcp_state = DHCP_STATE_SELECTING;
   }
+  eni->eni_ni.ni_local_addr = 0;
+  eni->eni_dhcp_server_ip = 0;
+  eni->eni_dhcp_requested_ip = 0;
+
+  dhcpv4_send_discover(eni);
+
+  net_timer_arm(&eni->eni_dhcp_timer, clock_get() + 500000);
+}
+
+
+static void
+dhcpv4_request(ether_netif_t *eni, const char *reason)
+{
+  if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING) {
+    eni->eni_dhcp_state = DHCP_STATE_REQUESTING;
+    evlog(LOG_INFO, "dhcp: requesting");
+    eni->eni_dhcp_retries = 0;
+  }
+
+  dhcpv4_send_request(eni, reason);
+  eni->eni_dhcp_retries++;
+  net_timer_arm(&eni->eni_dhcp_timer,
+                clock_get() + 500000 * eni->eni_dhcp_retries);
 }
 
 
@@ -372,14 +372,14 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
     evlog(LOG_INFO, "dhcp: OFFER %Id from %Id", yiaddr, from);
     eni->eni_dhcp_requested_ip = yiaddr;
     eni->eni_dhcp_server_ip = po.server_identifer;
-    dhcpv4_send_request(eni, "got-offer");
-    eni->eni_dhcp_state = DHCP_STATE_REQUESTING;
+
+    eni->eni_dhcp_retries = 0;
+    dhcpv4_request(eni, "got-offer");
     break;
 
   case DHCPACK:
 
     if(eni->eni_dhcp_state == DHCP_STATE_REQUESTING ||
-       eni->eni_dhcp_state == DHCP_STATE_REQUESTING_RETRY ||
        eni->eni_dhcp_state == DHCP_STATE_BOUND) {
       evlog(LOG_INFO, "dhcp: ACK %Id from %Id", yiaddr, from);
 
@@ -396,8 +396,9 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
       eni->eni_ni.ni_local_addr = yiaddr;
       eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
-      eni->eni_dhcp_timeout =
-        clock_get() + 1000000ull * (ntohl(po.lease_time) / 2);
+
+      net_timer_arm(&eni->eni_dhcp_timer,
+                    clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
       break;
     }
     break;
@@ -406,25 +407,73 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
 }
 
 
+static void
+dhcp_timer_cb(void *opaque, uint64_t now)
+{
+  ether_netif_t *eni = opaque;
+  switch(eni->eni_dhcp_state) {
+  case DHCP_STATE_SELECTING:
+    dhcpv4_discover(eni);
+    break;
+  case DHCP_STATE_REQUESTING:
+    if(eni->eni_dhcp_retries >= 5)
+      dhcpv4_discover(eni);
+    else
+      dhcpv4_request(eni, "retry");
+    break;
+  case DHCP_STATE_BOUND:
+    dhcpv4_request(eni, "renewal");
+    break;
+  }
+}
 
-static const char *dhcp_state_str[] = {
+static void
+dhcpv4_init(ether_netif_t *eni)
+{
+  eni->eni_dhcp_timer.t_cb = dhcp_timer_cb;
+  eni->eni_dhcp_timer.t_opaque = eni;
+  eni->eni_dhcp_timer.t_name = "dhcp";
+}
 
-  [DHCP_STATE_SELECTING] = "selecting",
-  [DHCP_STATE_REQUESTING] = "requesting",
-  [DHCP_STATE_REQUESTING_RETRY] = "requesting-retry",
-  [DHCP_STATE_BOUND] = "bound",
-  [DHCP_STATE_RENEWING] = "renewing"
-};
 
+
+void
+dhcpv4_status_change(ether_netif_t *eni)
+{
+  if(!(eni->eni_ni.ni_flags & NETIF_F_UP))
+    return; // Interface is not up, don't do anything just now
+
+  switch(eni->eni_dhcp_state) {
+  case DHCP_STATE_IDLE:
+    dhcpv4_init(eni);
+  case DHCP_STATE_SELECTING:
+    dhcpv4_discover(eni);
+    break;
+  case DHCP_STATE_REQUESTING:
+  case DHCP_STATE_BOUND:
+    dhcpv4_request(eni, "link-up");
+    break;
+  }
+
+}
+
+
+
+static const char *dhcp_state_str =
+  "idle\0"
+  "selecting\0"
+  "requesting\0"
+  "bound\0";
 
 void
 dhcpv4_print(ether_netif_t *eni, struct stream *st)
 {
-  stprintf(st, "\tDHCP State: %s\n", dhcp_state_str[eni->eni_dhcp_state]);
+  stprintf(st, "\tDHCP State: %s\n",
+           strtbl(dhcp_state_str, eni->eni_dhcp_state));
   stprintf(st, "\t\tOur address: %Id\n", eni->eni_dhcp_requested_ip);
   stprintf(st, "\t\tServer: %Id\n", eni->eni_dhcp_server_ip);
-  if(eni->eni_dhcp_timeout) {
-    int delta = (eni->eni_dhcp_timeout - clock_get()) / 1000000;
+  if(eni->eni_dhcp_state) {
+    int delta = (eni->eni_dhcp_timer.t_expire - clock_get()) / 1000000;
     if(eni->eni_dhcp_state == DHCP_STATE_BOUND) {
       stprintf(st, "\t\tRenew in: %d seconds\n", delta);
     } else if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {

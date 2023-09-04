@@ -187,7 +187,6 @@ ether_periodic(void *opaque, uint64_t expire)
   ether_netif_t *eni = opaque;
   net_timer_arm(&eni->eni_periodic, expire + 1000000);
   ether_nexthop_periodic(eni);
-  dhcpv4_periodic(eni);
 }
 
 
@@ -227,7 +226,8 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
 static void
 ether_status_change(struct netif *ni)
 {
-
+  ether_netif_t *eni = (ether_netif_t *)ni;
+  dhcpv4_status_change(eni);
 }
 
 void

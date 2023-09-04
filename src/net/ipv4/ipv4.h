@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 struct pbuf;
 struct netif;
 
@@ -65,7 +67,7 @@ typedef struct tcp_hdr {
 
 struct pbuf *ipv4_input(struct netif *ni, struct pbuf *pb);
 
-void ipv4_output(pbuf_t *pb);
+void ipv4_output(struct pbuf *pb);
 
 uint32_t ipv4_cksum_pseudo(uint32_t src_addr, uint32_t dst_addr,
                            uint8_t protocol, uint16_t length);
