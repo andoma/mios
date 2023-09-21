@@ -144,38 +144,41 @@ static void
 dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
            const char *why)
 {
-  size_t autopad = PBUF_DATA_SIZE - (pb->pb_buflen + pb->pb_offset);
+  const size_t autopad = PBUF_DATA_SIZE - (pb->pb_buflen + pb->pb_offset);
 
   memset(pbuf_data(pb, pb->pb_buflen), 0, autopad);
   pb->pb_pktlen += autopad;
   pb->pb_buflen += autopad;
 
-  size_t packet_len = pb->pb_pktlen;
-
-  pb = pbuf_prepend(pb, 8, 1, 20);
+  pb = pbuf_prepend(pb, sizeof(udp_hdr_t), 1, sizeof(ipv4_header_t));
 
   udp_hdr_t *udp = pbuf_data(pb, 0);
   udp->dst_port = htons(67);
   udp->src_port = htons(68);
-  udp->length = htons(packet_len);
-  udp->cksum = 0;
+  udp->length = htons(pb->pb_pktlen);
 
-  pb = pbuf_prepend(pb, 20, 1, 0);
+  udp->cksum = 0;
+  udp->cksum =
+    ipv4_cksum_pbuf(ipv4_cksum_pseudo(eni->eni_ni.ni_local_addr, dst_addr,
+                                      IPPROTO_UDP, pb->pb_pktlen),
+                    pb, 0, pb->pb_pktlen);
+
+  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
   ipv4_header_t *ip = pbuf_data(pb, 0);
 
   ip->ver_ihl = 0x45;
   ip->tos = 0;
-  ip->total_length = htons(packet_len + 20 + 8);
+  ip->total_length = htons(pb->pb_pktlen);
   ip->id = rand();
   ip->fragment_info = 0;
-  ip->ttl = 30;
-  ip->proto = 17;
-  ip->cksum = 0;
+  ip->ttl = 255;
+  ip->proto = IPPROTO_UDP;
   ip->src_addr = eni->eni_ni.ni_local_addr;
   ip->dst_addr = dst_addr;
 
   if(dst_addr == 0xffffffff) {
-    ip->cksum = ipv4_cksum_pbuf(0, pb, 0, 20);
+    ip->cksum = 0;
+    ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
     eni->eni_ni.ni_output(&eni->eni_ni, NULL, pb);
   } else {
     ipv4_output(pb);
