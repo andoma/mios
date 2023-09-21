@@ -7,6 +7,22 @@
 #define ETHERTYPE_IPV4 0x0800
 #define ETHERTYPE_ARP  0x0806
 
+
+typedef struct ether_stats {
+  uint64_t tx_pkt;
+  uint64_t tx_byte;
+  uint64_t tx_qdrop;
+
+  uint64_t rx_pkt;
+  uint64_t rx_byte;
+
+  uint64_t rx_crc;
+  uint64_t rx_hw_qdrop;
+  uint64_t rx_sw_qdrop;
+  uint64_t rx_other_err;
+
+} ether_stats_t;
+
 typedef struct ether_netif {
   netif_t eni_ni;
 
@@ -24,6 +40,8 @@ typedef struct ether_netif {
   uint32_t eni_dhcp_server_ip;
   uint32_t eni_dhcp_requested_ip;
   timer_t eni_dhcp_timer;
+
+  ether_stats_t eni_stats;
 
 } ether_netif_t;
 

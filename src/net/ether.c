@@ -122,7 +122,6 @@ static pbuf_t *
 ether_input(netif_t *ni, pbuf_t *pb)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
-  //  pbuf_print("ether", pb);
 
   if(pbuf_pullup(pb, sizeof(ether_hdr_t)))
     return pb;
@@ -252,14 +251,27 @@ ether_netif_init(ether_netif_t *eni, const char *name,
 void
 ether_print(ether_netif_t *en, struct stream *st)
 {
-
-  stprintf(st, "\tEther: %02x:%02x:%02x:%02x:%02x:%02x\n",
+  stprintf(st, "\tMac address: %02x:%02x:%02x:%02x:%02x:%02x\n",
            en->eni_addr[0],
            en->eni_addr[1],
            en->eni_addr[2],
            en->eni_addr[3],
            en->eni_addr[4],
            en->eni_addr[5]);
+
+  stprintf(st, "\tTX  packets: %lld  bytes: %lld  drops: %lld\n",
+           en->eni_stats.tx_pkt,
+           en->eni_stats.tx_byte,
+           en->eni_stats.tx_qdrop);
+
+  stprintf(st, "\tRX  packets: %lld  bytes: %lld  CRC: %lld\n",
+           en->eni_stats.rx_pkt,
+           en->eni_stats.rx_byte,
+           en->eni_stats.rx_crc);
+  stprintf(st, "\t    hw-drop: %lld  sw-drop: %lld  other: %lld\n",
+           en->eni_stats.rx_hw_qdrop,
+           en->eni_stats.rx_sw_qdrop,
+           en->eni_stats.rx_other_err);
 
   stprintf(st, "\tIP address: %Id/%d\n", en->eni_ni.ni_local_addr,
            en->eni_ni.ni_local_prefixlen);
