@@ -4,6 +4,7 @@
 
 struct pbuf;
 struct netif;
+struct nexthop;
 
 typedef struct ipv4_header {
 
@@ -67,9 +68,9 @@ typedef struct tcp_hdr {
 
 struct pbuf *ipv4_input(struct netif *ni, struct pbuf *pb);
 
-void ipv4_output(struct pbuf *pb);
-
 uint32_t ipv4_cksum_pseudo(uint32_t src_addr, uint32_t dst_addr,
                            uint8_t protocol, uint16_t length);
 
 uint16_t ipv4_cksum_pbuf(uint32_t sum, struct pbuf *pb, int offset, int length);
+
+struct nexthop *ipv4_nexthop_resolve(uint32_t addr);

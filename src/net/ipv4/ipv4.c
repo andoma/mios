@@ -102,8 +102,8 @@ ipv4_prefix_match(uint32_t addr,
 
 static struct nexthop_list ipv4_nexthops; // Make a hash
 
-static nexthop_t *
-nexthop_resolve(uint32_t addr)
+nexthop_t *
+ipv4_nexthop_resolve(uint32_t addr)
 {
   nexthop_t *nh;
   LIST_FOREACH(nh, &ipv4_nexthops, nh_global_link) {
@@ -135,26 +135,17 @@ nexthop_resolve(uint32_t addr)
 }
 
 
-
-void
-ipv4_output(pbuf_t *pb)
-{
-  ipv4_header_t *ip = pbuf_data(pb, 0);
-  ip->cksum = 0;
-  ip->cksum = ipv4_cksum_pbuf(0, pb, 0, 20);
-
-  nexthop_t *nh = nexthop_resolve(ip->dst_addr);
-  if(nh != NULL) {
-    nh->nh_netif->ni_output(nh->nh_netif, nh, pb);
-  } else {
-    pbuf_free(pb);
-  }
-}
-
 void
 icmp_input_icmp_echo(netif_t *ni, pbuf_t *pb, int icmp_offset)
 {
   ipv4_header_t *ip = pbuf_data(pb, 0);
+
+  nexthop_t *nh = ipv4_nexthop_resolve(ip->src_addr);
+  if(nh == NULL) {
+    pbuf_free(pb);
+    return;
+  }
+
   icmp_hdr_t *icmp = pbuf_data(pb, icmp_offset);
 
   ip->dst_addr = ip->src_addr;
@@ -162,10 +153,19 @@ icmp_input_icmp_echo(netif_t *ni, pbuf_t *pb, int icmp_offset)
 
   icmp->type = 0;
 
-  icmp->cksum = 0;
-  icmp->cksum = ipv4_cksum_pbuf(0, pb, icmp_offset, INT32_MAX);
+  // ni is now the output interface
+  ni = nh->nh_netif;
 
-  ipv4_output(pb);
+  icmp->cksum = 0;
+  if(!(ni->ni_flags & NETIF_F_TX_ICMP_CKSUM_OFFLOAD)) {
+    icmp->cksum = ipv4_cksum_pbuf(0, pb, icmp_offset, INT32_MAX);
+  }
+
+  ip->cksum = 0;
+  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
+    ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
+  }
+  nh->nh_netif->ni_output(ni, nh, pb);
 }
 
 
@@ -179,12 +179,13 @@ ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
   if(pb->pb_flags & PBUF_MCAST)
     return pb;
 
-  if(ipv4_cksum_pbuf(0, pb, icmp_offset, INT32_MAX))
+  if(ipv4_cksum_pbuf(0, pb, icmp_offset, INT32_MAX)) {
     return pb;
+  }
 
-  if(pbuf_pullup(pb, icmp_offset + 4))
+  if(pbuf_pullup(pb, icmp_offset + 4)) {
     return pb;
-
+  }
   const icmp_hdr_t *icmp = pbuf_data(pb, icmp_offset);
   switch(icmp->type) {
   case 8: // ICMP_ECHO

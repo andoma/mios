@@ -144,6 +144,18 @@ static void
 dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
            const char *why)
 {
+  netif_t *ni = &eni->eni_ni;
+  nexthop_t *nh = NULL;
+
+  if(dst_addr != 0xffffffff) {
+    nh = ipv4_nexthop_resolve(dst_addr);
+    if(nh == NULL) {
+      pbuf_free(pb);
+      return;
+    }
+    ni = nh->nh_netif;
+  }
+
   const size_t autopad = PBUF_DATA_SIZE - (pb->pb_buflen + pb->pb_offset);
 
   memset(pbuf_data(pb, pb->pb_buflen), 0, autopad);
@@ -158,10 +170,13 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
   udp->length = htons(pb->pb_pktlen);
 
   udp->cksum = 0;
-  udp->cksum =
-    ipv4_cksum_pbuf(ipv4_cksum_pseudo(eni->eni_ni.ni_local_addr, dst_addr,
-                                      IPPROTO_UDP, pb->pb_pktlen),
-                    pb, 0, pb->pb_pktlen);
+
+  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
+    udp->cksum =
+      ipv4_cksum_pbuf(ipv4_cksum_pseudo(ni->ni_local_addr, dst_addr,
+                                        IPPROTO_UDP, pb->pb_pktlen),
+                      pb, 0, pb->pb_pktlen);
+  }
 
   pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
   ipv4_header_t *ip = pbuf_data(pb, 0);
@@ -173,16 +188,15 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
   ip->fragment_info = 0;
   ip->ttl = 255;
   ip->proto = IPPROTO_UDP;
-  ip->src_addr = eni->eni_ni.ni_local_addr;
+  ip->src_addr = ni->ni_local_addr;
   ip->dst_addr = dst_addr;
 
-  if(dst_addr == 0xffffffff) {
-    ip->cksum = 0;
+  ip->cksum = 0;
+  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
-    eni->eni_ni.ni_output(&eni->eni_ni, NULL, pb);
-  } else {
-    ipv4_output(pb);
   }
+
+  ni->ni_output(ni, nh, pb);
 }
 
 

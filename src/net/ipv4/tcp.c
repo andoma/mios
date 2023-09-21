@@ -116,6 +116,13 @@ tcp_set_state(tcb_t *tcb, int state, const char *reason)
 static void
 tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
 {
+  nexthop_t *nh = ipv4_nexthop_resolve(remote_addr);
+  if(nh == NULL) {
+    pbuf_free(pb);
+    return;
+  }
+  netif_t *ni = nh->nh_netif;
+
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
 #if 0
@@ -131,12 +138,16 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
   }
 #endif
 
+
   th->up = 0;
   th->cksum = 0;
-  th->cksum =
-    ipv4_cksum_pbuf(ipv4_cksum_pseudo(local_addr, remote_addr,
-                                      IPPROTO_TCP, pb->pb_pktlen),
-                    pb, 0, pb->pb_pktlen);
+
+  if(!(ni->ni_flags & NETIF_F_TX_TCP_CKSUM_OFFLOAD)) {
+    th->cksum =
+      ipv4_cksum_pbuf(ipv4_cksum_pseudo(local_addr, remote_addr,
+                                        IPPROTO_TCP, pb->pb_pktlen),
+                      pb, 0, pb->pb_pktlen);
+  }
 
   pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
   ipv4_header_t *ip = pbuf_data(pb, 0);
@@ -151,7 +162,14 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
   ip->proto = IPPROTO_TCP;
   ip->src_addr = local_addr;
   ip->dst_addr = remote_addr;
-  ipv4_output(pb);
+
+  ip->cksum = 0;
+  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
+    ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
+  }
+
+  nh->nh_netif->ni_output(ni, nh, pb);
+
 }
 
 static void

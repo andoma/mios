@@ -17,6 +17,17 @@ struct nexthop;
 
 #define NETIF_F_UP   0x1
 
+#define NETIF_F_RX_IPV4_CKSUM_OFFLOAD 0x10
+#define NETIF_F_RX_ICMP_CKSUM_OFFLOAD 0x20
+#define NETIF_F_RX_UDP_CKSUM_OFFLOAD  0x40
+#define NETIF_F_RX_TCP_CKSUM_OFFLOAD  0x80
+
+#define NETIF_F_TX_IPV4_CKSUM_OFFLOAD 0x100
+#define NETIF_F_TX_ICMP_CKSUM_OFFLOAD 0x200
+#define NETIF_F_TX_UDP_CKSUM_OFFLOAD  0x400
+#define NETIF_F_TX_TCP_CKSUM_OFFLOAD  0x800
+
+
 typedef struct netif {
 
   device_t ni_dev;
