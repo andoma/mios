@@ -5,6 +5,7 @@
 #include <mios/io.h>
 #include <mios/eventlog.h>
 #include <malloc.h>
+#include <unistd.h>
 
 #include <net/pbuf.h>
 #include <net/ether.h>
@@ -167,10 +168,6 @@ static const device_class_t stm32h7_eth_device_class = {
   .dc_print_info = stm32h7_eth_print_info,
 };
 
-
-
-#include <unistd.h>
-
 static uint16_t
 mii_read(int phyaddr, int reg)
 {
@@ -287,11 +284,7 @@ stm32h7_eth_init(stm32h7_eth_t *se)
     rx_desc_give(rx, buf);
   }
 
-
-
   reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
-
-
 
   reg_set_bit(ETH_MACCR, 21); // CST: Strip CRC for type packets in RX path
   //  reg_set_bit(ETH_MACCR, 20); // ACS: Strip CRC in RX path
