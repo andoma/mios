@@ -57,6 +57,11 @@
 
 #define RST_I2C(x) CLK_ID(RST_APB1, 21 + (x))
 
+#define CLK_ETHRX CLK_ID(CLK_AHB1, 27)
+#define CLK_ETHTX CLK_ID(CLK_AHB1, 26)
+#define CLK_ETH   CLK_ID(CLK_AHB1, 25)
+#define RST_ETH   CLK_ID(RST_AHB1, 25)
+
 #define CLK_DMA1  CLK_ID(CLK_AHB1, 21)
 #define CLK_DMA2  CLK_ID(CLK_AHB1, 22)
 #define CLK_DMA(x)  CLK_ID(CLK_AHB1, 21 + (x))
