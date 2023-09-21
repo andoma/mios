@@ -290,13 +290,29 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
 void
 pbuf_trim(pbuf_t *pb, size_t bytes)
 {
-  while(pb->pb_next != NULL) {
-    pb = pb->pb_next;
-  }
+  while(bytes) {
 
-  assert(bytes < pb->pb_buflen); // Fix this case
-  pb->pb_buflen -= bytes;
-  pb->pb_pktlen -= bytes;
+    pbuf_t *tail = pb;
+    pbuf_t *prev = NULL;
+
+    while(tail->pb_next != NULL) {
+      prev = tail;
+      tail = tail->pb_next;
+    }
+
+    size_t c = MIN(tail->pb_buflen, bytes);
+
+    tail->pb_buflen -= c;
+    pb->pb_pktlen -= c;
+    bytes -= c;
+    if(tail->pb_buflen == 0 && prev) {
+      prev->pb_flags |= tail->pb_flags & PBUF_EOP;
+      prev->pb_next = NULL;
+
+      pbuf_data_put(tail->pb_data);
+      pbuf_put(tail);
+    }
+  }
 }
 
 
