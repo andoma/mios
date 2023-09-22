@@ -31,6 +31,10 @@
  *
  */
 
+
+#define TCP_KEEPALIVE_INTERVAL 5000 // ms
+#define TCP_TIMEOUT_INTERVAL  15000 // ms
+
 #define TCP_STATE_CLOSED       0
 #define TCP_STATE_LISTEN       1
 #define TCP_STATE_SYN_SENT     2
@@ -101,8 +105,14 @@ typedef struct tcb {
   uint64_t tcb_rx_bytes;
   uint64_t tcb_rtx_bytes;
 
+  uint64_t tcb_last_rx;
+
 } tcb_t;
 
+
+#define TCP_PBUF_HEADROOM (16 + sizeof(ipv4_header_t) + sizeof(tcp_hdr_t))
+
+static void tcp_close(tcb_t *tcb, const char *reason);
 
 
 static void
@@ -232,27 +242,65 @@ tcp_send(tcb_t *tcb, pbuf_t *pb, int seg_len, uint8_t flag)
 
 
 static void
+arm_rtx(tcb_t *tcb, uint64_t now)
+{
+  int rtx_duration_ms;
+
+  if(STAILQ_FIRST(&tcb->tcb_unaq)) {
+    rtx_duration_ms = tcb->tcb_rto;
+  } else {
+    rtx_duration_ms = TCP_KEEPALIVE_INTERVAL;
+  }
+  net_timer_arm(&tcb->tcb_rtx_timer, now + rtx_duration_ms * 1000);
+}
+
+
+static void
 tcp_rtx_cb(void *opaque, uint64_t now)
 {
   tcb_t *tcb = opaque;
-  pbuf_t *q = STAILQ_FIRST(&tcb->tcb_unaq);
-  assert(q != NULL);
-  pbuf_t *pb = pbuf_copy_pkt(q, 1);
 
-  pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
-  tcp_hdr_t *th = pbuf_data(pb, 0);
-
-  if(pb->pb_flags & PBUF_SEQ) {
-    th->flg = *(const uint8_t *)pbuf_cdata(pb, sizeof(tcp_hdr_t));
-  } else {
-    th->flg = TCP_F_ACK | TCP_F_PSH;
-    tcb->tcb_rtx_bytes += q->pb_pktlen;
+  if(now > tcb->tcb_last_rx + TCP_TIMEOUT_INTERVAL * 1000) {
+    tcp_close(tcb, "Timeout");
+    return;
   }
 
-  th->seq = htonl(tcb->tcb_snd.una);
+  pbuf_t *q = STAILQ_FIRST(&tcb->tcb_unaq);
+  pbuf_t *pb;
+
+  if(q == NULL) {
+    // Send keep-alive
+
+    pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
+    if(pb == NULL)
+      return;
+
+    pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
+    tcp_hdr_t *th = pbuf_data(pb, 0);
+    th->flg = TCP_F_ACK | TCP_F_PSH;
+
+    th->seq = htonl(tcb->tcb_snd.una - 1);
+
+  } else {
+    // Retransmit data
+
+    pb = pbuf_copy_pkt(q, 1);
+    pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
+    tcp_hdr_t *th = pbuf_data(pb, 0);
+
+    if(pb->pb_flags & PBUF_SEQ) {
+      th->flg = *(const uint8_t *)pbuf_cdata(pb, sizeof(tcp_hdr_t));
+    } else {
+      th->flg = TCP_F_ACK | TCP_F_PSH;
+      tcb->tcb_rtx_bytes += q->pb_pktlen;
+    }
+    th->seq = htonl(tcb->tcb_snd.una);
+
+  }
+
   tcp_output_tcb(tcb, pb);
 
-  net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + tcb->tcb_rto * 1000);
+  arm_rtx(tcb, now);
 }
 
 
@@ -293,11 +341,7 @@ tcp_ack(tcb_t *tcb, uint32_t count)
     }
   }
 
-  if(STAILQ_FIRST(&tcb->tcb_unaq)) {
-    net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + tcb->tcb_rto * 1000);
-  } else {
-    timer_disarm(&tcb->tcb_rtx_timer);
-  }
+  arm_rtx(tcb, tcb->tcb_last_rx);
 }
 
 
@@ -433,7 +477,6 @@ struct pbuf *
 tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
            uint16_t port, uint32_t ack, const char *reason)
 {
-
   evlog(LOG_NOTICE, "Connection from %Id to port %d rejected -- %s",
         remote_addr, port, reason);
 
@@ -465,7 +508,6 @@ tcp_close(tcb_t *tcb, const char *reason)
 
   int q = irq_forbid(IRQ_LEVEL_NET);
   pbuf_free_queue_irq_blocked(&tcb->tcb_unaq);
-  //  pbuf_free_queue_irq_blocked(&tcb->tcb_rxq);
   irq_permit(q);
 
   mutex_lock(&tcbs_mutex);
@@ -634,8 +676,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
     tcb->tcb_task.nt_cb = tcp_task_cb;
 
-    size_t headroom = 16 + sizeof(ipv4_header_t) + sizeof(tcp_hdr_t);
-    svc_pbuf_policy_t spp = {tcb->tcb_snd.mss, headroom};
+    svc_pbuf_policy_t spp = {tcb->tcb_snd.mss, TCP_PBUF_HEADROOM};
 
     tcb->tcb_svc_opaque = svc->open(tcb, tcp_service_event_cb, spp, NULL);
     if(tcb->tcb_svc_opaque == NULL) {
@@ -767,6 +808,8 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     return pb;
   }
 
+  tcb->tcb_last_rx = clock_get();
+
   int try_send_more = 0;
 
   int una_ack = ack - tcb->tcb_snd.una;
@@ -870,7 +913,8 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
             // Already waited once, don't wait more, send now
             tcp_send_flag(tcb, TCP_F_ACK);
           } else {
-            net_timer_arm(&tcb->tcb_delayed_ack_timer, clock_get() + 20000);
+            net_timer_arm(&tcb->tcb_delayed_ack_timer,
+                          tcb->tcb_last_rx + 20000);
           }
         } else {
           try_send_more = 0;
