@@ -257,8 +257,7 @@ telnet_write_filter(struct stream *s, const void *buf, size_t size)
         size_t len = i - s0;
         svc_shell_write(s, buf + s0, len);
         svc_shell_write(s, crlf, 2);
-        i++;
-        s0 = i;
+        s0 = i + 1;
       }
     }
     size_t len = i - s0;
