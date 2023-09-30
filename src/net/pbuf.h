@@ -84,11 +84,11 @@ pbuf_t *pbuf_write(pbuf_t *pb, const void *ptr, size_t len, size_t max_fill);
 
 void pbuf_status(void);
 
-void pbuf_print(const char *prefix, const pbuf_t *pb, int full);
+void pbuf_dump(const char *prefix, const pbuf_t *pb, int full);
 
 struct stream;
-void pbuf_stprint(const char *prefix, const pbuf_t *pb, int full,
-                  struct stream *st);
+void pbuf_dump_stream(const char *prefix, const pbuf_t *pb, int full,
+                      struct stream *st);
 
 // =========================================================
 // All functions below here assume irq_forbid(IRQ_LEVEL_NET)

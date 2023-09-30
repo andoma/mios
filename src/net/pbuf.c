@@ -273,7 +273,7 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
   while(pb) {
     if(bytes > pb->pb_buflen) {
       // Fix this case
-      pbuf_print("pbuf_drop", pb, 1);
+      pbuf_dump("pbuf_drop", pb, 1);
       panic("pbuf_drop r:%d bl:%d pl:%d pb:%p",
             bytes, pb->pb_buflen, pb->pb_pktlen, pb);
     }
@@ -525,7 +525,7 @@ pbuf_status(void)
 
 
 void
-pbuf_stprint(const char *prefix, const pbuf_t *pb, int full, stream_t *st)
+pbuf_dump_stream(const char *prefix, const pbuf_t *pb, int full, stream_t *st)
 {
   for(; pb != NULL; pb = pb->pb_next) {
 
@@ -572,7 +572,7 @@ pbuf_stprint(const char *prefix, const pbuf_t *pb, int full, stream_t *st)
 }
 
 void
-pbuf_print(const char *prefix, const pbuf_t *pb, int full)
+pbuf_dump(const char *prefix, const pbuf_t *pb, int full)
 {
-  pbuf_stprint(prefix, pb, full, stdio);
+  pbuf_dump_stream(prefix, pb, full, stdio);
 }
