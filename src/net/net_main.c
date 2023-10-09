@@ -217,5 +217,5 @@ net_init(void)
 #ifdef ENABLE_NET_FPU_USAGE
   flags |= TASK_FPU;
 #endif
-  thread_create(net_thread, NULL, 768, "net", flags, 5);
+  thread_create(net_thread, NULL, 768, "net", flags, 10);
 }
