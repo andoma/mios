@@ -306,9 +306,7 @@ typedef struct {
   uint64_t ts;
   uint32_t seq;
 
-  void *opaque;
-  service_event_cb_t *cb;
-  svc_pbuf_policy_t pbuf_policy;
+  socket_t *s;
 
 } evlog_svc_follower_t;
 
@@ -376,8 +374,8 @@ evlog_svc_pull(void *opaque)
     hdr |= level;
     hdr |= tslen << 3;
 
-    pb = pbuf_make(esf->pbuf_policy.preferred_offset, 0);
-    const int mfs = esf->pbuf_policy.max_fragment_size;
+    pb = pbuf_make(esf->s->preferred_offset, 0);
+    const int mfs = esf->s->max_fragment_size;
     if(pb != NULL) {
       pb = pbuf_write(pb, &hdr, 1, mfs);
 
@@ -408,35 +406,9 @@ static void
 evlog_svc_wakeup(follower_t *f)
 {
   evlog_svc_follower_t *svc = (evlog_svc_follower_t *)f;
-  svc->cb(svc->opaque, SERVICE_EVENT_WAKEUP);
+  svc->s->net->event(svc->s->net_opaque, SOCKET_EVENT_WAKEUP);
 }
 
-static void *
-evlog_svc_open(void *opaque, service_event_cb_t *cb,
-               svc_pbuf_policy_t pbuf_policy,
-               service_get_flow_header_t *get_flow_hdr)
-{
-  evlog_svc_follower_t *esf =
-    xalloc(sizeof(evlog_svc_follower_t), 0, MEM_MAY_FAIL);
-  if(esf == NULL)
-    return NULL;
-
-  memset(esf, 0, sizeof(evlog_svc_follower_t));
-
-  esf->opaque = opaque;
-  esf->cb = cb;
-  esf->pbuf_policy = pbuf_policy;
-
-  evlogfifo_t *ef = &ef0;
-
-  mutex_lock(&ef->mutex);
-  esf->f.ptr = ef->tail;
-  esf->f.cb = evlog_svc_wakeup;
-  LIST_INSERT_HEAD(&ef->followers, &esf->f, link);
-  mutex_unlock(&ef->mutex);
-
-  return esf;
-}
 
 
 static void
@@ -449,13 +421,43 @@ evlog_svc_close(void *opaque)
   LIST_REMOVE(&esf->f, link);
   mutex_unlock(&ef->mutex);
 
-  esf->cb(esf->opaque, SERVICE_EVENT_CLOSE);
+  esf->s->net->event(esf->s->net_opaque, SOCKET_EVENT_CLOSE);
   free(esf);
 }
 
-SERVICE_DEF("log", 2, 2, SERVICE_TYPE_DGRAM,
-            evlog_svc_open, NULL, NULL, evlog_svc_pull, evlog_svc_close);
+static const socket_app_fn_t evlog_app_fn = {
+  .pull = evlog_svc_pull,
+  .close = evlog_svc_close
+};
 
+
+static error_t
+evlog_svc_open(socket_t *s)
+{
+  evlog_svc_follower_t *esf =
+    xalloc(sizeof(evlog_svc_follower_t), 0, MEM_MAY_FAIL);
+  if(esf == NULL)
+    return ERR_NO_MEMORY;
+
+  memset(esf, 0, sizeof(evlog_svc_follower_t));
+  esf->s = s;
+  esf->s->app = &evlog_app_fn;
+  esf->s->app_opaque = esf;
+
+  evlogfifo_t *ef = &ef0;
+
+  mutex_lock(&ef->mutex);
+  esf->f.ptr = ef->tail;
+  esf->f.cb = evlog_svc_wakeup;
+  LIST_INSERT_HEAD(&ef->followers, &esf->f, link);
+  mutex_unlock(&ef->mutex);
+
+  return 0;
+}
+
+
+
+SERVICE_DEF("log", 2, 2, SERVICE_TYPE_DGRAM, evlog_svc_open);
 
 #include <mios/fs.h>
 

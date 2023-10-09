@@ -15,13 +15,12 @@
 
 #include "net/pbuf.h"
 
+// Maybe move socket_stream to a separate file
+typedef struct socket_stream {
 
+  stream_t ss_stream;
 
-typedef struct {
-  stream_t s;
-
-  void *ss_opaque;
-  service_event_cb_t *ss_cb;
+  socket_t *ss_sock;
 
   mutex_t ss_mutex;
   cond_t ss_cond;
@@ -33,19 +32,21 @@ typedef struct {
 
   uint8_t ss_shutdown;
   uint8_t ss_flushed;
-#ifdef ENABLE_NET_IPV4
-  uint8_t ss_iac_state;
-  uint8_t ss_telnet_mode;
-#endif
-  svc_pbuf_policy_t ss_pbuf_policy;
 
-} svc_shell_t;
+} socket_stream_t;
 
+
+static void
+socket_stream_init(socket_stream_t *ss)
+{
+  mutex_init(&ss->ss_mutex, "sockstream");
+  cond_init(&ss->ss_cond, "sockstream");
+}
 
 static int
-svc_shell_read(struct stream *s, void *buf, size_t size, int wait)
+socket_stream_read(struct stream *s, void *buf, size_t size, int wait)
 {
-  svc_shell_t *ss = (svc_shell_t *)s;
+  socket_stream_t *ss = (socket_stream_t *)s;
 
   int off = 0;
   mutex_lock(&ss->ss_mutex);
@@ -59,7 +60,7 @@ svc_shell_read(struct stream *s, void *buf, size_t size, int wait)
       if(stream_wait_is_done(wait, off, size)) {
         break;
       }
-      ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
+      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
       cond_wait(&ss->ss_cond, &ss->ss_mutex);
       continue;
     }
@@ -78,9 +79,9 @@ svc_shell_read(struct stream *s, void *buf, size_t size, int wait)
 
 
 static void
-svc_shell_write(struct stream *s, const void *buf, size_t size)
+socket_stream_write(struct stream *s, const void *buf, size_t size)
 {
-  svc_shell_t *ss = (svc_shell_t *)s;
+  socket_stream_t *ss = (socket_stream_t *)s;
 
   mutex_lock(&ss->ss_mutex);
 
@@ -89,7 +90,7 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
 
     if(ss->ss_txbuf_head != NULL) {
       ss->ss_flushed = 1;
-      ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
+      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
     }
 
   } else {
@@ -100,16 +101,16 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
         break;
 
       if(ss->ss_txbuf_head == NULL) {
-        ss->ss_txbuf_head = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 0);
+        ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 0);
         if(ss->ss_txbuf_head == NULL) {
           ss->ss_flushed = 1;
-          ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
-          ss->ss_txbuf_head = pbuf_make(ss->ss_pbuf_policy.preferred_offset, 1);
+          ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+          ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 1);
         }
         ss->ss_txbuf_tail = ss->ss_txbuf_head;
       }
 
-      size_t remain = ss->ss_pbuf_policy.max_fragment_size -
+      size_t remain = ss->ss_sock->max_fragment_size -
         ss->ss_txbuf_head->pb_pktlen;
 
       // Check if we need to allocate a new buffer for filling
@@ -132,7 +133,7 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
 
       if(remain == 0) {
         ss->ss_flushed = 1;
-        ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_WAKEUP);
+        ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
         cond_wait(&ss->ss_cond, &ss->ss_mutex);
         continue;
       }
@@ -149,6 +150,89 @@ svc_shell_write(struct stream *s, const void *buf, size_t size)
   }
   mutex_unlock(&ss->ss_mutex);
 }
+
+static void
+socket_stream_stop(socket_stream_t *ss)
+{
+  mutex_lock(&ss->ss_mutex);
+  while(!ss->ss_shutdown)
+    cond_wait(&ss->ss_cond, &ss->ss_mutex);
+  mutex_unlock(&ss->ss_mutex);
+
+  pbuf_free(ss->ss_rxbuf);
+  pbuf_free(ss->ss_txbuf_head);
+}
+
+
+static struct pbuf *
+socket_stream_pull(void *opaque)
+{
+  socket_stream_t *ss = opaque;
+  pbuf_t *pb = NULL;
+  mutex_lock(&ss->ss_mutex);
+  if(ss->ss_flushed) {
+    pb = ss->ss_txbuf_head;
+    if(pb != NULL) {
+      ss->ss_txbuf_head = NULL;
+      ss->ss_txbuf_tail = NULL;
+      cond_signal(&ss->ss_cond);
+      ss->ss_flushed = 0;
+    }
+  }
+  mutex_unlock(&ss->ss_mutex);
+  return pb;
+}
+
+
+static pbuf_t *
+socket_stream_push(void *opaque, struct pbuf *pb)
+{
+  socket_stream_t *ss = opaque;
+
+  mutex_lock(&ss->ss_mutex);
+  assert(ss->ss_rxbuf == NULL);
+  ss->ss_rxbuf = pb;
+  cond_signal(&ss->ss_cond);
+  mutex_unlock(&ss->ss_mutex);
+  return NULL;
+}
+
+static int
+socket_stream_may_push(void *opaque)
+{
+  socket_stream_t *ss = opaque;
+  return ss->ss_rxbuf == NULL;
+}
+
+
+static void
+socket_stream_close(void *opaque)
+{
+  socket_stream_t *ss = opaque;
+  mutex_lock(&ss->ss_mutex);
+  ss->ss_shutdown = 1;
+  cond_signal(&ss->ss_cond);
+  mutex_unlock(&ss->ss_mutex);
+}
+
+
+static const socket_app_fn_t socket_stream_fn = {
+  .push = socket_stream_push,
+  .may_push = socket_stream_may_push,
+  .pull = socket_stream_pull,
+  .close = socket_stream_close
+};
+
+
+typedef struct {
+  socket_stream_t s;
+
+#ifdef ENABLE_NET_IPV4
+  uint8_t ss_iac_state;
+  uint8_t ss_telnet_mode;
+#endif
+
+} svc_shell_t;
 
 
 #ifdef ENABLE_NET_IPV4
@@ -167,21 +251,17 @@ shell_thread(void *arg)
 
 #ifdef ENABLE_NET_IPV4
   if(ss->ss_telnet_mode) {
-    ss->s.write(&ss->s, telnet_init, sizeof(telnet_init));
+    ss->s.ss_stream.write(&ss->s.ss_stream, telnet_init, sizeof(telnet_init));
   }
 #endif
 
-  cli_on_stream(&ss->s, '>');
+  cli_on_stream(&ss->s.ss_stream, '>');
 
-  ss->ss_cb(ss->ss_opaque, SERVICE_EVENT_CLOSE);
+  socket_t *sk = ss->s.ss_sock;
 
-  mutex_lock(&ss->ss_mutex);
-  while(!ss->ss_shutdown)
-    cond_wait(&ss->ss_cond, &ss->ss_mutex);
-  mutex_unlock(&ss->ss_mutex);
+  sk->net->event(sk->net_opaque, SOCKET_EVENT_CLOSE);
 
-  pbuf_free(ss->ss_rxbuf);
-  pbuf_free(ss->ss_txbuf_head);
+  socket_stream_stop(&ss->s);
   free(ss);
 
   wakelock_release();
@@ -196,7 +276,7 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
   svc_shell_t *ss = (svc_shell_t *)s;
   int r;
   while(1) {
-    r = svc_shell_read(s, buf, size, wait);
+    r = socket_stream_read(s, buf, size, wait);
     if(r > 0) {
       uint8_t *b = buf;
 
@@ -248,139 +328,77 @@ telnet_write_filter(struct stream *s, const void *buf, size_t size)
   static const uint8_t crlf[2] = {0x0d, 0x0a};
 
   if(buf == NULL) {
-    svc_shell_write(s, buf, size);
+    socket_stream_write(s, buf, size);
   } else {
     const uint8_t *c = buf;
     size_t s0 = 0, i;
     for(i = 0; i < size; i++) {
       if(c[i] == 0x0a) {
         size_t len = i - s0;
-        svc_shell_write(s, buf + s0, len);
-        svc_shell_write(s, crlf, 2);
+        socket_stream_write(s, buf + s0, len);
+        socket_stream_write(s, crlf, 2);
         s0 = i + 1;
       }
     }
     size_t len = i - s0;
     if(len) {
-      svc_shell_write(s, buf + s0, len);
+      socket_stream_write(s, buf + s0, len);
     }
   }
 }
 
 #endif
 
-static void *
-shell_open_raw(void *opaque, service_event_cb_t *cb,
-               svc_pbuf_policy_t pbuf_policy,
-               service_get_flow_header_t *get_flow_hdr,
-               int telnet)
+static error_t
+shell_open_raw(socket_t *s, int is_telnet)
 {
   svc_shell_t *ss = xalloc(sizeof(svc_shell_t), 0, MEM_MAY_FAIL);
   if(ss == NULL)
-    return NULL;
+    return ERR_NO_MEMORY;
   memset(ss, 0, sizeof(svc_shell_t));
-  ss->ss_opaque = opaque;
-  ss->ss_cb = cb;
-  ss->s.read = svc_shell_read;
-  ss->s.write = svc_shell_write;
-#ifdef ENABLE_NET_IPV4
-  if(telnet) {
-    ss->s.read = telnet_read_filter;
-    ss->s.write = telnet_write_filter;
-  }
-  ss->ss_telnet_mode = telnet;
-#endif
-  ss->ss_pbuf_policy = pbuf_policy;
 
-  mutex_init(&ss->ss_mutex, "svc");
-  cond_init(&ss->ss_cond, "svc");
+  ss->s.ss_sock = s;
+  ss->s.ss_sock->app = &socket_stream_fn;
+  ss->s.ss_sock->app_opaque = ss;
+
+  ss->s.ss_stream.read = socket_stream_read;
+  ss->s.ss_stream.write = socket_stream_write;
+#ifdef ENABLE_NET_IPV4
+  if(is_telnet) {
+    ss->s.ss_stream.read = telnet_read_filter;
+    ss->s.ss_stream.write = telnet_write_filter;
+  }
+  ss->ss_telnet_mode = is_telnet;
+#endif
+
+  socket_stream_init(&ss->s);
   wakelock_acquire();
   error_t r = task_create_shell(shell_thread, ss, "remotecli", 0);
   if(r) {
     free(ss);
     wakelock_release();
-    ss = NULL;
+    return r;
   }
-  return ss;
+  return 0;
 }
 
 
-static void *
-shell_open(void *opaque, service_event_cb_t *cb,
-           svc_pbuf_policy_t pbuf_policy,
-           service_get_flow_header_t *get_flow_hdr)
+static error_t
+shell_open(socket_t *s)
 {
-  return shell_open_raw(opaque, cb, pbuf_policy, get_flow_hdr, 0);
+  return shell_open_raw(s, 0);
 }
 
-
-
-static void *
-telnet_open(void *opaque, service_event_cb_t *cb,
-           svc_pbuf_policy_t pbuf_policy,
-           service_get_flow_header_t *get_flow_hdr)
+static error_t
+telnet_open(socket_t *s)
 {
-  return shell_open_raw(opaque, cb, pbuf_policy, get_flow_hdr, 1);
+  return shell_open_raw(s, 1);
 }
 
 
 
-static struct pbuf *
-shell_pull(void *opaque)
-{
-  svc_shell_t *ss = opaque;
-  pbuf_t *pb = NULL;
-  mutex_lock(&ss->ss_mutex);
-  if(ss->ss_flushed) {
-    pb = ss->ss_txbuf_head;
-    if(pb != NULL) {
-      ss->ss_txbuf_head = NULL;
-      ss->ss_txbuf_tail = NULL;
-      cond_signal(&ss->ss_cond);
-      ss->ss_flushed = 0;
-    }
-  }
-  mutex_unlock(&ss->ss_mutex);
-  return pb;
-}
-
-
-static pbuf_t *
-shell_push(void *opaque, struct pbuf *pb)
-{
-  svc_shell_t *ss = opaque;
-
-  mutex_lock(&ss->ss_mutex);
-  assert(ss->ss_rxbuf == NULL);
-  ss->ss_rxbuf = pb;
-  cond_signal(&ss->ss_cond);
-  mutex_unlock(&ss->ss_mutex);
-  return NULL;
-}
-
-static int
-shell_may_push(void *opaque)
-{
-  svc_shell_t *ss = opaque;
-  return ss->ss_rxbuf == NULL;
-}
-
-
-static void
-shell_close(void *opaque)
-{
-  svc_shell_t *ss = opaque;
-  mutex_lock(&ss->ss_mutex);
-  ss->ss_shutdown = 1;
-  cond_signal(&ss->ss_cond);
-  mutex_unlock(&ss->ss_mutex);
-}
-
-
-SERVICE_DEF("shell", 0, 23, SERVICE_TYPE_STREAM,
-            shell_open, shell_push, shell_may_push, shell_pull, shell_close);
+SERVICE_DEF("shell", 0, 23, SERVICE_TYPE_STREAM, shell_open);
 
 #ifdef ENABLE_NET_IPV4
-SERVICE_DEF("telnet", 23, 0, SERVICE_TYPE_STREAM,
-            telnet_open, shell_push, shell_may_push, shell_pull, shell_close);
+SERVICE_DEF("telnet", 23, 0, SERVICE_TYPE_STREAM, telnet_open);
 #endif

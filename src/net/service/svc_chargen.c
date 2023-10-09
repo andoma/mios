@@ -9,26 +9,11 @@
 
 typedef struct svc_chargen {
   void *sc_opaque;
-  service_event_cb_t *sc_cb;
   int sc_cnt;
-  svc_pbuf_policy_t sc_pbuf_policy;
+  socket_t *sc_sock;
+
 } svc_chargen_t;
 
-
-static void *
-chargen_open(void *opaque, service_event_cb_t *cb,
-             svc_pbuf_policy_t pbuf_policy,
-             service_get_flow_header_t *get_flow_hdr)
-{
-  svc_chargen_t *sc = xalloc(sizeof(svc_chargen_t), 0, MEM_MAY_FAIL);
-  if(sc == NULL)
-    return NULL;
-  sc->sc_cnt = 0;
-  sc->sc_opaque = opaque;
-  sc->sc_cb = cb;
-  sc->sc_pbuf_policy = pbuf_policy;
-  return sc;
-}
 
 static pbuf_t *
 chargen_pull(void *opaque)
@@ -36,11 +21,11 @@ chargen_pull(void *opaque)
   svc_chargen_t *sc = opaque;
 
   if(sc->sc_cnt == 100) {
-    sc->sc_cb(sc->sc_opaque, SERVICE_EVENT_CLOSE);
+    sc->sc_sock->net->event(sc->sc_sock->net_opaque, SOCKET_EVENT_CLOSE);
     return NULL;
   }
   sc->sc_cnt++;
-  pbuf_t *pb = pbuf_make(sc->sc_pbuf_policy.preferred_offset, 0);
+  pbuf_t *pb = pbuf_make(sc->sc_sock->preferred_offset, 0);
   if(pb != NULL) {
     int len = snprintf(pbuf_data(pb, 0), 20, "%d\n", sc->sc_cnt);
     pb->pb_pktlen = len;
@@ -56,5 +41,27 @@ chargen_close(void *opaque)
   free(opaque);
 }
 
-SERVICE_DEF("chargen", 19, 19, SERVICE_TYPE_STREAM,
-            chargen_open, NULL, NULL, chargen_pull, chargen_close);
+
+
+static const socket_app_fn_t chargen_fn = {
+  .pull = chargen_pull,
+  .close = chargen_close
+};
+
+
+static error_t
+chargen_open(socket_t *s)
+{
+  svc_chargen_t *sc = xalloc(sizeof(svc_chargen_t), 0, MEM_MAY_FAIL);
+  if(sc == NULL)
+    return ERR_NO_MEMORY;
+  sc->sc_cnt = 0;
+  sc->sc_sock = s;
+  s->app = &chargen_fn;
+  s->app_opaque = sc;
+
+  return 0;
+}
+
+
+SERVICE_DEF("chargen", 19, 19, SERVICE_TYPE_STREAM, chargen_open);

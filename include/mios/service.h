@@ -2,18 +2,10 @@
 
 #include "mios.h"
 #include "error.h"
+#include "socket.h"
 
 #include <stdint.h>
 #include <stddef.h>
-
-struct pbuf;
-
-#define SERVICE_EVENT_WAKEUP 0x1
-#define SERVICE_EVENT_CLOSE  0x2
-
-typedef void (service_event_cb_t)(void *opaque, uint32_t signals);
-
-typedef uint32_t (service_get_flow_header_t)(void *opaque);
 
 #define SERVICE_TYPE_STREAM 0
 #define SERVICE_TYPE_DGRAM  1
@@ -31,20 +23,7 @@ typedef struct service {
   uint8_t ble_psm;
   uint8_t type;
 
-  void *(*open)(void *opaque,
-                service_event_cb_t *event,
-                svc_pbuf_policy_t pbuf_policy,
-                service_get_flow_header_t *get_flow_hdr);
-
-  // Data from network to service
-  struct pbuf *(*push)(void *opaque, struct pbuf *pb);
-
-  int (*may_push)(void *opaque);
-
-  struct pbuf *(*pull)(void *opaque);
-
-  // Once called, the network engine will not call anything again
-  void (*close)(void *opaque);
+  error_t (*open)(socket_t *s);
 
 } service_t;
 
@@ -54,6 +33,6 @@ const service_t *service_find_by_ble_psm(uint8_t psm);
 
 const service_t *service_find_by_ip_port(uint16_t port);
 
-#define SERVICE_DEF(name, ip_port, ble_psm, type, open, push, maypush, pull, close) \
-  static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, type, open, push, maypush, pull, close };
+#define SERVICE_DEF(name, ip_port, ble_psm, type, open) \
+static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, type, open};
 

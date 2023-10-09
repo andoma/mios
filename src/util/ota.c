@@ -17,9 +17,8 @@
 #define OTA_BLOCKSIZE 32
 
 typedef struct svc_ota {
-  void *sa_opaque;
-  service_event_cb_t *sa_cb;
-  service_get_flow_header_t *sa_get_flow_hdr;
+  socket_t *sa_sock;
+
   pbuf_t *sa_info;
   int sa_shutdown;
 
@@ -60,7 +59,7 @@ ota_get_next_pkt(svc_ota_t *sa)
   }
   sa->sa_rxbuf = NULL;
   mutex_unlock(&sa->sa_mutex);
-  sa->sa_cb(sa->sa_opaque, SERVICE_EVENT_WAKEUP);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_WAKEUP);
   return pb;
 }
 
@@ -74,7 +73,7 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
     mutex_lock(&sa->sa_mutex);
     sa->sa_info = reply;
     mutex_unlock(&sa->sa_mutex);
-    sa->sa_cb(sa->sa_opaque, SERVICE_EVENT_WAKEUP);
+    sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_WAKEUP);
   }
 }
 
@@ -223,45 +222,8 @@ ota_thread(void *arg)
   error_t err = ota_perform(sa);
   evlog(LOG_NOTICE, "OTA: Cancelled -- %s", error_to_string(err));
   ota_send_final_status(sa, -err);
-  sa->sa_cb(sa->sa_opaque, SERVICE_EVENT_CLOSE);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_CLOSE);
   thread_exit(NULL);
-}
-
-
-static void *
-ota_open(void *opaque, service_event_cb_t *cb, svc_pbuf_policy_t pbuf_policy,
-         service_get_flow_header_t *get_flow_hdr)
-{
-  if(ota_busy)
-    return NULL;
-
-  svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0, MEM_MAY_FAIL);
-  if(sa == NULL)
-    return NULL;
-  memset(sa, 0, sizeof(svc_ota_t));
-  sa->sa_opaque = opaque;
-  sa->sa_get_flow_hdr = get_flow_hdr;
-
-  sa->sa_cb = cb;
-  pbuf_t *pb = pbuf_make(0, 0);
-  if(pb != NULL) {
-    uint8_t hdr[4];
-    ota_platform_info(hdr);
-    pb = pbuf_write(pb, hdr, sizeof(hdr), pbuf_policy.max_fragment_size);
-    pb = pbuf_write(pb, mios_build_id(), 20, pbuf_policy.max_fragment_size);
-    const char *appname = mios_get_app_name();
-    pb = pbuf_write(pb, appname, strlen(appname), pbuf_policy.max_fragment_size);
-  }
-
-  if(pb == NULL) {
-    free(sa);
-    return NULL;
-  }
-  ota_busy = 1;
-  sa->sa_info = pb;
-  mutex_init(&sa->sa_mutex, "ota");
-  cond_init(&sa->sa_cond, "ota");
-  return sa;
 }
 
 
@@ -283,8 +245,11 @@ ota_push(void *opaque, struct pbuf *pb)
 
   if(!sa->sa_thread) {
 
+    uint32_t fh = sa->sa_sock->net->get_flow_header  ?
+      sa->sa_sock->net->get_flow_header(sa->sa_sock->net_opaque) : 0;
+
     // This can take over the transfer and if so, it won't return
-    error_t err = ota_platform_start(sa->sa_get_flow_hdr(sa->sa_opaque), pb);
+    error_t err = ota_platform_start(fh, pb);
     if(err)
       return pb;
 
@@ -318,12 +283,56 @@ ota_close(void *opaque)
   if(sa->sa_thread)
     thread_join(sa->sa_thread);
   else
-    sa->sa_cb(sa->sa_opaque, SERVICE_EVENT_CLOSE);
+    sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_CLOSE);
 
   pbuf_free(sa->sa_info);
   free(sa);
   ota_busy = 0;
 }
 
-SERVICE_DEF("ota", 0, 9, SERVICE_TYPE_DGRAM,
-            ota_open, ota_push, ota_may_push, ota_pull, ota_close);
+
+
+static const socket_app_fn_t ota_fn = {
+  .push = ota_push,
+  .may_push = ota_may_push,
+  .pull = ota_pull,
+  .close = ota_close
+};
+
+static error_t
+ota_open(socket_t *s)
+{
+  if(ota_busy)
+    return ERR_NOT_READY;
+
+  svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0, MEM_MAY_FAIL);
+  if(sa == NULL)
+    return ERR_NO_MEMORY;
+  memset(sa, 0, sizeof(svc_ota_t));
+
+  sa->sa_sock = s;
+  s->app = &ota_fn;
+  s->app_opaque = sa;
+
+  pbuf_t *pb = pbuf_make(0, 0);
+  if(pb != NULL) {
+    uint8_t hdr[4];
+    ota_platform_info(hdr);
+    pb = pbuf_write(pb, hdr, sizeof(hdr), s->max_fragment_size);
+    pb = pbuf_write(pb, mios_build_id(), 20, s->max_fragment_size);
+    const char *appname = mios_get_app_name();
+    pb = pbuf_write(pb, appname, strlen(appname), s->max_fragment_size);
+  }
+
+  if(pb == NULL) {
+    free(sa);
+    return ERR_NO_BUFFER;
+  }
+  ota_busy = 1;
+  sa->sa_info = pb;
+  mutex_init(&sa->sa_mutex, "ota");
+  cond_init(&sa->sa_cond, "ota");
+  return 0;
+}
+
+SERVICE_DEF("ota", 0, 9, SERVICE_TYPE_DGRAM, ota_open);

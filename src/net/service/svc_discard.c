@@ -8,27 +8,6 @@
 #include "net/pbuf.h"
 
 
-typedef struct svc_discard {
-  void *se_opaque;
-  service_event_cb_t *se_cb;
-} svc_discard_t;
-
-static void *
-discard_open(void *opaque, service_event_cb_t *cb,
-          svc_pbuf_policy_t spp,
-          service_get_flow_header_t *get_flow_hdr)
-{
-  svc_discard_t *se = xalloc(sizeof(svc_discard_t), 0, MEM_MAY_FAIL);
-  if(se == NULL)
-    return NULL;
-
-  se->se_opaque = opaque;
-  se->se_cb = cb;
-  return se;
-}
-
-
-
 static pbuf_t *
 discard_push(void *opaque, struct pbuf *pb)
 {
@@ -56,11 +35,23 @@ discard_pull(void *opaque)
 static void
 discard_close(void *opaque)
 {
-  svc_discard_t *se = opaque;
-  se->se_cb(se->se_opaque, SERVICE_EVENT_CLOSE);
-  free(se);
+  socket_t *s = opaque;
+  s->net->event(s->net_opaque, SOCKET_EVENT_CLOSE);
 }
 
-SERVICE_DEF("discard", 9, 9, SERVICE_TYPE_DGRAM,
-            discard_open, discard_push, discard_may_push,
-            discard_pull, discard_close);
+static const socket_app_fn_t discard_fn = {
+  .push = discard_push,
+  .may_push = discard_may_push,
+  .pull = discard_pull,
+  .close = discard_close
+};
+
+static error_t
+discard_open(socket_t *s)
+{
+  s->app = &discard_fn;
+  s->app_opaque = s;
+  return 0;
+}
+
+SERVICE_DEF("discard", 9, 9, SERVICE_TYPE_DGRAM, discard_open);

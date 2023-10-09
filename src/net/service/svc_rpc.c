@@ -1,3 +1,5 @@
+#if 0
+
 #include <mios/rpc.h>
 
 #include <mios/service.h>
@@ -13,10 +15,10 @@
 
 
 typedef struct svc_rpc {
-  void *sr_opaque;
-  service_event_cb_t *sr_cb;
+  //  void *sr_opaque;
+  //  service_event_cb_t *sr_cb;
   pbuf_t *sr_pb;
-  svc_pbuf_policy_t sr_pbuf_policy;
+  //  svc_pbuf_policy_t sr_pbuf_policy;
 } svc_rpc_t;
 
 
@@ -187,3 +189,4 @@ rpc_appname(const void *in, void *out, size_t in_size)
 RPC_DEF("appname", 0, 24, rpc_appname, 0);
 
 
+#endif

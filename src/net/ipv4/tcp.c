@@ -58,8 +58,10 @@ typedef struct tcb {
 
   LIST_ENTRY(tcb) tcb_link;
 
+  socket_t tcb_sock;
+
   uint8_t tcb_state;
-  uint8_t tcb_svc_closed;
+  uint8_t tcb_app_closed;
 
   struct {
     uint32_t nxt;
@@ -87,9 +89,6 @@ typedef struct tcb {
   uint16_t tcb_remote_port;
   uint16_t tcb_local_port;
 
-  void *tcb_svc_opaque;
-  const service_t *tcb_svc;
-
   struct pbuf_queue tcb_unaq;
   size_t tcb_unaq_buffers;
 
@@ -106,6 +105,8 @@ typedef struct tcb {
   uint64_t tcb_rtx_bytes;
 
   uint64_t tcb_last_rx;
+
+  const char *tcb_name;
 
 } tcb_t;
 
@@ -349,7 +350,7 @@ tcp_ack(tcb_t *tcb, uint32_t count)
 static int
 tcp_send_data(tcb_t *tcb)
 {
-  if(tcb->tcb_svc_opaque == NULL)
+  if(tcb->tcb_sock.app_opaque == NULL)
     return 0;
 
   // This is not precise enough
@@ -360,7 +361,7 @@ tcp_send_data(tcb_t *tcb)
   if(tcb->tcb_unaq_buffers >= 10)
     return 0;
 
-  pbuf_t *pb = tcb->tcb_svc->pull(tcb->tcb_svc_opaque);
+  pbuf_t *pb = tcb->tcb_sock.app->pull(tcb->tcb_sock.app_opaque);
   if(pb == NULL)
     return 0;
 
@@ -405,7 +406,7 @@ tcp_destroy(tcb_t *tcb)
   if(tcb->tcb_state != TCP_STATE_CLOSED)
     return;
 
-  if(!tcb->tcb_svc_closed)
+  if(!tcb->tcb_app_closed)
     return;
 
   free(tcb);
@@ -417,13 +418,13 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
 {
   tcb_t *tcb = (tcb_t *)nt;
 
-  if(signals & SERVICE_EVENT_WAKEUP) {
+  if(signals & SOCKET_EVENT_WAKEUP) {
     tcp_send_data(tcb);
   }
 
-  if(signals & SERVICE_EVENT_CLOSE) {
+  if(signals & SOCKET_EVENT_CLOSE) {
 
-    tcb->tcb_svc_closed = 1;
+    tcb->tcb_app_closed = 1;
 
     switch(tcb->tcb_state) {
     case TCP_STATE_ESTABLISHED:
@@ -485,11 +486,11 @@ tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
 
 
 static void
-tcp_close_service(tcb_t *tcb)
+tcp_close_app(tcb_t *tcb)
 {
-  if(tcb->tcb_svc_opaque) {
-    tcb->tcb_svc->close(tcb->tcb_svc_opaque);
-    tcb->tcb_svc_opaque = NULL;
+  if(tcb->tcb_sock.app_opaque) {
+    tcb->tcb_sock.app->close(tcb->tcb_sock.app_opaque);
+    tcb->tcb_sock.app_opaque = NULL;
   }
 }
 
@@ -516,7 +517,7 @@ tcp_close(tcb_t *tcb, const char *reason)
 
   tcp_set_state(tcb, TCP_STATE_CLOSED, reason);
 
-  tcp_close_service(tcb);
+  tcp_close_app(tcb);
 
   tcp_destroy(tcb);
 }
@@ -576,6 +577,9 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
   }
 }
 
+static const socket_net_fn_t tcp_net_fn = {
+  .event = tcp_service_event_cb,
+};
 
 struct pbuf *
 tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
@@ -662,6 +666,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         "no memory");
     }
     memset(tcb, 0, sizeof(tcb_t));
+    tcb->tcb_name = svc->name;
 
     tcb->tcb_snd.mss = 536;
     tcb->tcb_rcv.mss = 1460;
@@ -676,13 +681,16 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
     tcb->tcb_task.nt_cb = tcp_task_cb;
 
-    svc_pbuf_policy_t spp = {tcb->tcb_snd.mss, TCP_PBUF_HEADROOM};
+    tcb->tcb_sock.max_fragment_size = tcb->tcb_snd.mss;
+    tcb->tcb_sock.preferred_offset = TCP_PBUF_HEADROOM;
+    tcb->tcb_sock.net = &tcp_net_fn;
+    tcb->tcb_sock.net_opaque = tcb;
 
-    tcb->tcb_svc_opaque = svc->open(tcb, tcp_service_event_cb, spp, NULL);
-    if(tcb->tcb_svc_opaque == NULL) {
+    error_t err = svc->open(&tcb->tcb_sock);
+    if(err) {
       free(tcb);
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
-                        "service failed to init");
+                        error_to_string(err));
     }
 
     tcb->tcb_rto = 250;
@@ -698,8 +706,6 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     tcb->tcb_rtx_timer.t_cb = tcp_rtx_cb;
     tcb->tcb_rtx_timer.t_opaque = tcb;
     tcb->tcb_rtx_timer.t_name = "tcp";
-
-    tcb->tcb_svc = svc;
 
     tcb->tcb_local_addr = ni->ni_local_addr;
     tcb->tcb_remote_addr = remote_addr;
@@ -899,12 +905,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
     if(pb->pb_pktlen) {
 
-      if(tcb->tcb_svc->may_push(tcb->tcb_svc_opaque)) {
+      if(tcb->tcb_sock.app->may_push(tcb->tcb_sock.app_opaque)) {
 
         tcb->tcb_rcv.nxt = seq + pb->pb_pktlen;
         tcb->tcb_rx_bytes += pb->pb_pktlen;
 
-        pb = tcb->tcb_svc->push(tcb->tcb_svc_opaque, pb);
+        pb = tcb->tcb_sock.app->push(tcb->tcb_sock.app_opaque, pb);
 
         int piggybacked_ack_sent = tcp_send_data(tcb);
 
@@ -938,7 +944,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   if(flag & TCP_F_FIN) {
 
     try_send_more = 0;
-    tcp_close_service(tcb);
+    tcp_close_app(tcb);
 
     switch(tcb->tcb_state) {
     case TCP_STATE_CLOSED:
@@ -1005,7 +1011,7 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
 
   LIST_FOREACH(tcb, &tcbs, tcb_link) {
     cli_printf(cli, "%s\tLocal: %Id:%-5d\tRemote: %Id:%-5d\n",
-               tcb->tcb_svc->name,
+               tcb->tcb_name,
                tcb->tcb_local_addr,
                ntohs(tcb->tcb_local_port),
                tcb->tcb_remote_addr,
