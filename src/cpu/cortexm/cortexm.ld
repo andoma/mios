@@ -49,6 +49,12 @@ SECTIONS {
                 KEEP(*(servicedef))
                 _servicedef_array_end = .;
                 . = ALIGN(4);
+
+                . = ALIGN(4);
+                _httproute_array_begin = .;
+                KEEP(*(httproute))
+                _httproute_array_end = .;
+                . = ALIGN(4);
         } >FLASH
 
         .build_id : {

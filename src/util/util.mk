@@ -1,6 +1,7 @@
 GLOBALDEPS += ${SRC}/util/util.mk
 
-SRCS += ${SRC}/util/crc32.c \
+SRCS += ${SRC}/util/bumpalloc.c \
+	${SRC}/util/crc32.c \
 	${SRC}/util/crc8.c \
 	${SRC}/util/crc4.c \
 	${SRC}/util/hdlc.c \
