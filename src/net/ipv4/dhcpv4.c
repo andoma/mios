@@ -3,6 +3,8 @@
 #include <mios/eventlog.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
+#include <mios/version.h>
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +45,7 @@ typedef struct dhcp_hdr {
 #define DHCP_MESSAGE_TYPE              53
 #define DHCP_SERVER_IDENTIFIER         54
 #define DHCP_PARAMETER_REQUEST_LIST    55
+#define DHCP_VENDOR_CLASS_ID           60
 #define DHCP_CLIENT_IDENTIFIER         61
 
 #define DHCPDISCOVER       1
@@ -201,6 +204,54 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
 
 
 
+static void
+append_default_options(pbuf_t *pb, struct ether_netif *eni)
+{
+  append_client_identifier(pb, eni);
+  append_parameter_request_list(pb);
+
+  const char *mios_ver = mios_get_version();
+  const char *app_name = mios_get_app_name();
+  const char *app_ver = mios_get_app_version();
+
+  if(*app_ver == 0)
+    app_ver = "none";
+
+  if(*app_name == 0)
+    app_name = "none";
+
+  const size_t mios_ver_len = strlen(mios_ver);
+  const size_t app_name_len = strlen(app_name);
+  const size_t app_ver_len = strlen(app_ver);
+
+  const size_t vcidlen = strlen("mios") + 1 + mios_ver_len + 1 +
+    app_name_len + 1 + app_ver_len;
+
+  if(vcidlen > 255)
+    return;
+
+  uint8_t *vcid = pbuf_append(pb, vcidlen + 2);
+  if(vcid == NULL)
+    return;
+
+  vcid[0] = DHCP_VENDOR_CLASS_ID;
+  vcid[1] = vcidlen;
+  vcid += 2;
+
+  memcpy(vcid, "mios:", 5);
+  vcid += 5;
+
+  memcpy(vcid, mios_ver, mios_ver_len);
+  vcid += mios_ver_len;
+  *vcid++ = ':';
+
+  memcpy(vcid, app_name, app_name_len);
+  vcid += app_name_len;
+  *vcid++ = ':';
+
+  memcpy(vcid, app_ver, app_ver_len);
+}
+
 
 static void
 dhcpv4_send_discover(struct ether_netif *eni)
@@ -209,8 +260,9 @@ dhcpv4_send_discover(struct ether_netif *eni)
   if(pb == NULL)
     return;
   append_option_u8(pb, DHCP_MESSAGE_TYPE, DHCPDISCOVER);
-  append_client_identifier(pb, eni);
-  append_parameter_request_list(pb);
+
+  append_default_options(pb, eni);
+
   append_end(pb);
   dhcpv4_send(eni, pb, 0xffffffff, "Discover");
 }
@@ -223,8 +275,8 @@ dhcpv4_send_request(struct ether_netif *eni, const char *why)
   if(pb == NULL)
     return;
   append_option_u8(pb, DHCP_MESSAGE_TYPE, DHCPREQUEST);
-  append_client_identifier(pb, eni);
-  append_parameter_request_list(pb);
+
+  append_default_options(pb, eni);
 
   if(!eni->eni_ni.ni_local_addr) {
     // If have no address yet we are in SELECTING state
