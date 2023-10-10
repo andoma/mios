@@ -66,6 +66,7 @@ CONFIG_H := ${O}/include/config.h
 #
 include ${SRC}/kernel/kernel.mk
 include ${SRC}/shell/shell.mk
+include ${SRC}/lib/crypto/crypto.mk
 include ${SRC}/lib/libc/libc.mk
 include ${SRC}/lib/math/math.mk
 include ${SRC}/lib/fixmath.mk
