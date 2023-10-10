@@ -104,6 +104,23 @@ strcmp(const char *s1, const char *s2)
   return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
 
+static int
+tolower(int c)
+{
+  return c >= 'A' && c <= 'Z' ? c + 32 : c;
+}
+
+
+int
+strcasecmp(const char *s1, const char *s2)
+{
+  while(*s1 && (tolower(*s1) == tolower(*s2))) {
+    s1++;
+    s2++;
+  }
+  return tolower(*(const unsigned char *)s1) - tolower(*(const unsigned char *)s2);
+}
+
 size_t
 strlcpy(char * restrict dst, const char * restrict src, size_t siz)
 {
