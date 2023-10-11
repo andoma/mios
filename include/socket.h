@@ -1,11 +1,16 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
+
+struct pbuf;
 
 // Functions defined by the application side
 typedef struct socket_app_fn {
 
-    // Data from network to service
+  size_t (*push_partial)(void *opaque, struct pbuf *pb);
+
+  // Data from network to service
   struct pbuf *(*push)(void *opaque, struct pbuf *pb);
 
   int (*may_push)(void *opaque);

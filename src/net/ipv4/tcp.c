@@ -903,40 +903,45 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   case TCP_STATE_FIN_WAIT1:
   case TCP_STATE_FIN_WAIT2:
 
-    if(pb->pb_pktlen) {
+    if(!pb->pb_pktlen)
+      break;
 
-      if(tcb->tcb_sock.app->may_push(tcb->tcb_sock.app_opaque)) {
+    size_t bytes = 0;
+    if(tcb->tcb_sock.app->push_partial) {
 
-        tcb->tcb_rcv.nxt = seq + pb->pb_pktlen;
-        tcb->tcb_rx_bytes += pb->pb_pktlen;
+      bytes = tcb->tcb_sock.app->push_partial(tcb->tcb_sock.app_opaque, pb);
 
-        pb = tcb->tcb_sock.app->push(tcb->tcb_sock.app_opaque, pb);
+    } else if(tcb->tcb_sock.app->may_push(tcb->tcb_sock.app_opaque)) {
 
-        int piggybacked_ack_sent = tcp_send_data(tcb);
+      bytes = pb->pb_pktlen;
+      pb = tcb->tcb_sock.app->push(tcb->tcb_sock.app_opaque, pb);
+    }
 
-        if(!piggybacked_ack_sent) {
-          if(!timer_disarm(&tcb->tcb_delayed_ack_timer)) {
-            // Already waited once, don't wait more, send now
-            tcp_send_flag(tcb, TCP_F_ACK);
-          } else {
-            net_timer_arm(&tcb->tcb_delayed_ack_timer,
-                          tcb->tcb_last_rx + 20000);
-          }
+    if(bytes) {
+      tcb->tcb_rcv.nxt = seq + bytes;
+      tcb->tcb_rx_bytes += bytes;
+
+      int piggybacked_ack_sent = tcp_send_data(tcb);
+
+      if(!piggybacked_ack_sent) {
+        if(!timer_disarm(&tcb->tcb_delayed_ack_timer)) {
+          // Already waited once, don't wait more, send now
+          tcp_send_flag(tcb, TCP_F_ACK);
         } else {
-          try_send_more = 0;
+          net_timer_arm(&tcb->tcb_delayed_ack_timer,
+                      tcb->tcb_last_rx + 20000);
         }
-
       } else {
-        // Enqueue and decrease window
-        //        tcb->tcb_rcv.wnd -= pb->pb_pktlen;
-        //        STAILQ_INSERT_TAIL(&tcb->tcb_rxq, pb, pb_link);
-        //        panic("%s:%d", __FILE__, __LINE__);
+        try_send_more = 0;
+      }
+    } else {
 
-        if(tcp_send_data_or_ack(tcb))
-          try_send_more = 0;
+      if(tcp_send_data_or_ack(tcb)) {
+        try_send_more = 0;
       }
     }
     break;
+
   default:
     break;
   }
