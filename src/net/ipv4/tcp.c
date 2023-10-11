@@ -32,8 +32,8 @@
  */
 
 
-#define TCP_KEEPALIVE_INTERVAL 5000 // ms
-#define TCP_TIMEOUT_INTERVAL  15000 // ms
+#define TCP_KEEPALIVE_INTERVAL 10000 // ms
+#define TCP_TIMEOUT_INTERVAL   21000 // ms
 
 #define TCP_STATE_CLOSED       0
 #define TCP_STATE_LISTEN       1
@@ -270,17 +270,21 @@ tcp_rtx_cb(void *opaque, uint64_t now)
   pbuf_t *pb;
 
   if(q == NULL) {
-    // Send keep-alive
+    // Send keep-alive if ESTABLISHED
 
-    pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
-    if(pb == NULL)
-      return;
+    pb = NULL;
+    if(tcb->tcb_state == TCP_STATE_ESTABLISHED) {
 
-    pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
-    tcp_hdr_t *th = pbuf_data(pb, 0);
-    th->flg = TCP_F_ACK | TCP_F_PSH;
+      pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
+      if(pb == NULL)
+        return;
 
-    th->seq = htonl(tcb->tcb_snd.una - 1);
+      pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
+      tcp_hdr_t *th = pbuf_data(pb, 0);
+      th->flg = TCP_F_ACK | TCP_F_PSH;
+
+      th->seq = htonl(tcb->tcb_snd.una - 1);
+    }
 
   } else {
     // Retransmit data
@@ -299,7 +303,8 @@ tcp_rtx_cb(void *opaque, uint64_t now)
 
   }
 
-  tcp_output_tcb(tcb, pb);
+  if(pb)
+    tcp_output_tcb(tcb, pb);
 
   arm_rtx(tcb, now);
 }
