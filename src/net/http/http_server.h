@@ -2,19 +2,44 @@
 
 #include <stdint.h>
 #include <mios/mios.h>
+#include <mios/bumpalloc.h>
 #include <sys/queue.h>
 
 struct stream;
 
+
+typedef enum {
+  HST_HTTP_REQ,
+  HST_WEBSOCKET_PACKET,
+} http_server_task_type_t;
+
+typedef struct http_server_task {
+
+  STAILQ_ENTRY(http_server_task) hst_global_link;
+
+  TAILQ_ENTRY(http_server_task) hst_connection_link;
+
+  struct http_connection *hst_hc;
+
+  uint8_t hst_type;
+  uint8_t hst_opcode;
+
+} http_server_task_t;
+
+
+typedef struct http_server_wsp {
+  http_server_task_t hsw_hst;
+
+  size_t hsw_capacity;
+  size_t hsw_used;
+  uint8_t hsw_data[0];
+
+} http_server_wsp_t;
+
+
 typedef struct http_request {
 
-  STAILQ_ENTRY(http_request) hr_global_link;
-
-  TAILQ_ENTRY(http_request) hr_connection_link;
-
-  struct http_connection *hr_hc;
-
-  struct balloc *hr_ba;
+  http_server_task_t hr_hst;
 
   // Headers
   char *hr_url;
@@ -29,7 +54,12 @@ typedef struct http_request {
 
   uint16_t hr_header_err;
   uint16_t hr_piggyback_503;
+
+  uint16_t hr_header_match;
+  uint8_t hr_header_match_len;
   uint8_t hr_should_keep_alive;
+
+  balloc_t hr_bumpalloc;
 
 } http_request_t;
 
