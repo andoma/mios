@@ -292,8 +292,11 @@ eth_irq_rx(stm32f4_eth_t *se)
         }
         rx->buf = nextbuf + 2;
       } else {
+        se->se_eni.eni_stats.rx_sw_qdrop++;
         pbuf_put(pb);
       }
+    } else {
+      se->se_eni.eni_stats.rx_sw_qdrop++;
     }
     rx->w0 = ETH_RDES0_OWN;
     se->se_next_rx++;
