@@ -1,21 +1,12 @@
 #include <mios/mios.h>
 
 #include "stm32f4_clk.h"
+#include "stm32f4_flash.h"
 #include "cpu.h"
 #include "systick.h"
 
-#define FLASH_ACR   0x40023c00
-#define RCC_CR      0x40023800
-#define RCC_PLLCFGR 0x40023804
-#define RCC_CFGR    0x40023808
-
-
-static uint32_t apb1clock;
-static uint32_t apb2clock;
-
 #define APB1_CLK_BITS 0x1ff
 #define APB2_CLK_BITS 0x70003
-
 
 int
 clk_get_freq(uint16_t id)
@@ -23,6 +14,9 @@ clk_get_freq(uint16_t id)
   uint32_t r;
 
   uint32_t bit = (1 << (id & 0x1f));
+
+  const uint32_t apb1clock = CPU_SYSTICK_RVR / 4;
+  const uint32_t apb2clock = CPU_SYSTICK_RVR / 2;
 
   switch(id >> 8) {
   default:
@@ -69,6 +63,7 @@ systick_timepulse(void)
 }
 
 
+#ifdef CPU_SYSCLK_MHZ
 
 void
 stm32f4_init_pll(int hse_freq)
@@ -77,11 +72,7 @@ stm32f4_init_pll(int hse_freq)
   uint32_t pllcfgr = 0;
   reg_wr(FLASH_ACR, 0x705); // D-CACHE I-CACHE PREFETCH, 5 wait states
 
-  apb1clock = CPU_SYSTICK_RVR / 4;
-  apb2clock = CPU_SYSTICK_RVR / 2;
-
   reg_wr(RCC_CFGR,
-         (0x7 << 27) | // MCO2PRE /5
          (0x4 << 13) | // APB2 (High speed) prescaler = 2
          (0x5 << 10)); // APB1 (Low speed)  prescaler = 4
 
@@ -110,6 +101,8 @@ stm32f4_init_pll(int hse_freq)
 
   while((reg_rd(RCC_CFGR) & 0xc) != 0x8) {}
 }
+
+#endif
 
 void
 reset_peripheral(uint16_t id)

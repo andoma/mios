@@ -2,6 +2,7 @@
 
 #include "stm32f4_reg.h"
 
+
 #define RST_AHB1 0x10
 #define RST_AHB2 0x14
 #define RST_APB1 0x20
@@ -12,7 +13,13 @@
 #define CLK_APB1 0x40
 #define CLK_APB2 0x44
 
-#define RCC_BASE 0x40023800
+#define RCC_BASE    0x40023800
+
+#define RCC_CR      (RCC_BASE + 0x00)
+#define RCC_PLLCFGR (RCC_BASE + 0x04)
+#define RCC_CFGR    (RCC_BASE + 0x08)
+#define RCC_PLLCFGR (RCC_BASE + 0x04)
+#define RCC_PLLI2S  (RCC_BASE + 0x84)
 
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 

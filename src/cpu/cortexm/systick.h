@@ -3,8 +3,8 @@
 #include <mios/mios.h>
 
 #define HZ 100
-#define TICKS_PER_US (CPU_SYSTICK_RVR / 1000000)
-#define TICKS_PER_HZ (CPU_SYSTICK_RVR / HZ)
+#define TICKS_PER_US ((CPU_SYSTICK_RVR + 999999) / 1000000)
+#define TICKS_PER_HZ ((CPU_SYSTICK_RVR + HZ - 1) / HZ)
 
 static inline __attribute__((always_inline)) int clock_unwrap(void)
 {

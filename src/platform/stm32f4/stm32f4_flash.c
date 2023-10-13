@@ -4,6 +4,7 @@
 #include <mios/flash.h>
 
 #include "stm32f4_reg.h"
+#include "stm32f4_flash.h"
 
 #include "systick.h"
 #include "irq.h"
@@ -41,12 +42,6 @@ get_sector_offset(unsigned int sector)
 }
 
 
-#define FLASH_BASE 0x40023c00
-
-#define FLASH_KEYR    (FLASH_BASE + 0x04)
-#define FLASH_IOTKEYR (FLASH_BASE + 0x08)
-#define FLASH_SR      (FLASH_BASE + 0x0c)
-#define FLASH_CR      (FLASH_BASE + 0x10)
 
 #define IWDG_KR  0x40003000
 
