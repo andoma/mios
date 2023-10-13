@@ -112,7 +112,8 @@ lookup_af(const i2c_gpio_map_t map[], size_t size,
 
 
 i2c_t *
-stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
+stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull,
+                   gpio_output_speed_t drive_strength)
 {
   if(instance < 1 || instance > 3) {
     panic("i2c: Invalid instance %d", instance);
@@ -126,7 +127,7 @@ stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
 
   // If bus seems to be stuck, toggle SCL until SDA goes high again
   gpio_conf_input(sda, GPIO_PULL_UP);
-  gpio_conf_output(scl, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_output(scl, GPIO_OPEN_DRAIN, drive_strength, GPIO_PULL_NONE);
 
   int c = 0;
   while(1) {
@@ -144,8 +145,8 @@ stm32f4_i2c_create(int instance, gpio_t scl, gpio_t sda, gpio_pull_t pull)
   const uint16_t rstid = RST_I2C(instance);
   clk_enable(clkid);
 
-  gpio_conf_af(scl, scl_af, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
-  gpio_conf_af(sda, sda_af, GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, pull);
+  gpio_conf_af(scl, scl_af, GPIO_OPEN_DRAIN, drive_strength, pull);
+  gpio_conf_af(sda, sda_af, GPIO_OPEN_DRAIN, drive_strength, pull);
 
   stm32_i2c_t *i2c = stm32_i2c_create(I2C_BASE(instance), clkid, rstid);
 
