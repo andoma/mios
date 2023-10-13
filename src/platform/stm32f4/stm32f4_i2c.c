@@ -65,11 +65,11 @@ typedef struct {
 
 
 static const i2c_gpio_map_t i2c_scl_map[] = {
-  { 3, GPIO_PA(8),  4, STM32F4_11 | STM32F4_46 },
-  { 1, GPIO_PB(6),  4, STM32F4_11 | STM32F4_46 },
-  { 1, GPIO_PB(8),  4, STM32F4_11 | STM32F4_46 },
-  { 2, GPIO_PB(10), 4, STM32F4_11 | STM32F4_46 },
-  { 2, GPIO_PF(1),  4, STM32F4_46 },
+  { 3, GPIO_PA(8),  4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
+  { 1, GPIO_PB(6),  4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
+  { 1, GPIO_PB(8),  4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PB(10), 4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PF(1),  4, STM32F4_05 |              STM32F4_46 },
 };
 
 static const i2c_gpio_map_t i2c_sda_map[] = {
@@ -78,16 +78,16 @@ static const i2c_gpio_map_t i2c_sda_map[] = {
   { 3, GPIO_PB(4),  4, STM32F4_46 },
   { 3, GPIO_PB(4),  9, STM32F4_11 },
   { 3, GPIO_PB(4),  4, STM32F4_46 },
-  { 1, GPIO_PB(7),  4, STM32F4_11 | STM32F4_46 },
+  { 1, GPIO_PB(7),  4, STM32F4_05 |STM32F4_11 | STM32F4_46 },
   { 3, GPIO_PB(8),  9, STM32F4_11 },
 
-  { 1, GPIO_PB(9),  4, STM32F4_11 | STM32F4_46 },
+  { 1, GPIO_PB(9),  4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
   { 2, GPIO_PB(9),  9, STM32F4_11 },
 
-  { 2, GPIO_PB(11), 4, STM32F4_11 | STM32F4_46 },
-  { 3, GPIO_PC(9),  4, STM32F4_11 | STM32F4_46 },
+  { 2, GPIO_PB(11), 4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
+  { 3, GPIO_PC(9),  4, STM32F4_05 | STM32F4_11 | STM32F4_46 },
   { 2, GPIO_PC(12), 4, STM32F4_46 },
-  { 2, GPIO_PF(0),  4, STM32F4_46 },
+  { 2, GPIO_PF(0),  4, STM32F4_05 | STM32F4_46 },
 };
 
 
