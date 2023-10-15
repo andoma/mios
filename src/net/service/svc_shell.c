@@ -389,16 +389,16 @@ shell_open(socket_t *s)
   return shell_open_raw(s, 0);
 }
 
+
+SERVICE_DEF("shell", 0, 23, SERVICE_TYPE_STREAM, shell_open);
+
+#ifdef ENABLE_NET_IPV4
+
 static error_t
 telnet_open(socket_t *s)
 {
   return shell_open_raw(s, 1);
 }
 
-
-
-SERVICE_DEF("shell", 0, 23, SERVICE_TYPE_STREAM, shell_open);
-
-#ifdef ENABLE_NET_IPV4
 SERVICE_DEF("telnet", 23, 0, SERVICE_TYPE_STREAM, telnet_open);
 #endif
