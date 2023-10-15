@@ -12,6 +12,7 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <sys/param.h>
+#include <socket.h>
 
 #include <mios/service.h>
 #include <mios/eventlog.h>
@@ -30,8 +31,8 @@ typedef struct l2cap_connection {
   LIST_ENTRY(l2cap_connection) lc_link;
 
   l2cap_t *lc_l2c;
-  const service_t *lc_svc;
-  void *lc_svc_opaque;
+
+  socket_t lc_socket;
 
   int lc_remote_credits;
   int lc_local_credits;
@@ -54,6 +55,8 @@ typedef struct l2cap_connection {
   int lc_refcount;
 
   int lc_queued_credits;
+
+  const char *lc_name;
 
 } l2cap_connection_t;
 
@@ -84,7 +87,7 @@ l2cap_splice(struct pbuf_queue *pq, int header_size)
   const uint16_t *hdr = pbuf_cdata(pb, 0);
   const int expected_length = hdr[0] + header_size;
   if(expected_length > 200) {
-    pbuf_print("badlen", pb, 1);
+    pbuf_dump("badlen", pb, 1);
     panic("High unexpected length %d",expected_length);
   }
   int sum = 0;
@@ -192,8 +195,8 @@ con_output(l2cap_connection_t *lc, pbuf_t *pb)
 static void
 connection_pull(l2cap_connection_t *lc)
 {
-  while(lc->lc_remote_credits > 0 && lc->lc_svc_opaque) {
-    pbuf_t *pb = lc->lc_svc->pull(lc->lc_svc_opaque);
+  while(lc->lc_remote_credits > 0 && lc->lc_socket.app_opaque) {
+    pbuf_t *pb = lc->lc_socket.app->pull(lc->lc_socket.app_opaque);
     if(pb == NULL)
       break;
     con_output(lc, pb);
@@ -208,8 +211,8 @@ connection_close(l2cap_connection_t *lc, const char *why)
 
   lc->lc_l2c = NULL;
   LIST_REMOVE(lc, lc_link);
-  lc->lc_svc->close(lc->lc_svc_opaque);
-  lc->lc_svc_opaque = NULL;
+  lc->lc_socket.app->close(lc->lc_socket.app_opaque);
+  lc->lc_socket.app_opaque = NULL;
 }
 
 
@@ -255,7 +258,7 @@ connection_push(l2cap_connection_t *lc)
 {
   pbuf_t *pb = NULL;
   while(1) {
-    if(!lc->lc_svc->may_push(lc->lc_svc_opaque))
+    if(!lc->lc_socket.app->may_push(lc->lc_socket.app_opaque))
       return pb;
 
     pbuf_t *pb2 = l2cap_splice(&lc->lc_rxq, 2);
@@ -273,7 +276,7 @@ connection_push(l2cap_connection_t *lc)
       pb = NULL;
       while(1) {
 
-        if(!lc->lc_svc->may_push(lc->lc_svc_opaque)) {
+        if(!lc->lc_socket.app->may_push(lc->lc_socket.app_opaque)) {
           break;
         }
 
@@ -292,13 +295,13 @@ connection_push(l2cap_connection_t *lc)
         lc->lc_credit_deficit += credits;
         lc->lc_queued_credits -= credits;
         assert(lc->lc_queued_credits >= 0);
-        pb = lc->lc_svc->push(lc->lc_svc_opaque, pb);
+        pb = lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb);
       }
     } else {
       int credits = count_credits(pb);
       lc->lc_credit_deficit += credits;
 
-      pb = lc->lc_svc->push(lc->lc_svc_opaque, pb);
+      pb = lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb);
     }
   }
 }
@@ -311,7 +314,7 @@ connection_task_cb(net_task_t *task, uint32_t signals)
 
   l2cap_t *l2c = lc->lc_l2c;
 
-  if(signals & SERVICE_EVENT_CLOSE) {
+  if(signals & SOCKET_EVENT_CLOSE) {
 
     if(l2c) {
       evlog(LOG_DEBUG, "l2cap: Connection closed by service end");
@@ -339,7 +342,7 @@ connection_task_cb(net_task_t *task, uint32_t signals)
     return;
   }
 
-  if(signals & SERVICE_EVENT_WAKEUP && l2c) {
+  if(signals & SOCKET_EVENT_WAKEUP && l2c) {
     connection_pull(lc);
   }
 }
@@ -406,6 +409,13 @@ handle_le_credit_based_connection_fail(l2cap_t *l2c, pbuf_t *pb,
   return l2cap_output(l2c, pb, L2CAP_CID_LE_SIGNALING);
 }
 
+
+
+static const socket_net_fn_t l2cap_fns = {
+  . event = &l2c_service_event_cb,
+};
+
+
 static void
 handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
 {
@@ -435,20 +445,24 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
 
   lc->lc_reframing = !!(req->spsm & 0x40);
   lc->lc_remote_cid = req->src_cid;
-  lc->lc_svc = s;
   lc->lc_psm = req->spsm;
   lc->lc_remote_mtu = req->mtu;
   lc->lc_remote_mps = MIN(req->mps, PBUF_DATA_SIZE - hdrs);
   lc->lc_remote_credits = req->initial_credits;
 
-  svc_pbuf_policy_t spp = {lc->lc_remote_mps, hdrs};
+  lc->lc_socket.max_fragment_size = lc->lc_remote_mps;
+  lc->lc_socket.preferred_offset = hdrs;
 
-  lc->lc_svc_opaque = s->open(lc, l2c_service_event_cb, spp, NULL);
-  if(lc->lc_svc_opaque == NULL) {
+  lc->lc_socket.net_opaque = lc;
+  lc->lc_socket.net = &l2cap_fns;
+
+  if(s->open(&lc->lc_socket)) {
     free(lc);
     return handle_le_credit_based_connection_fail(l2c, pb, "Unable to setup",
                                                   L2CAP_CON_NO_RESOURCES);
   }
+
+  lc->lc_name = s->name;
 
   evlog(LOG_INFO,
         "l2cap: Connect [SPSM:0x%x CID:0x%x MTU:%d MPS:%d IC:%d]"
@@ -643,7 +657,7 @@ handle_channel(l2cap_t *l2c, pbuf_t *pb, uint16_t channel_id)
     }
   }
 
-  if(lc == NULL || lc->lc_svc->push == NULL || lc->lc_svc_opaque == NULL) {
+  if(lc == NULL || lc->lc_socket.app_opaque == NULL) {
     evlog(LOG_DEBUG, "l2cap: Input on unexpected channel 0x%x", channel_id);
     return pb;
   }
@@ -801,7 +815,7 @@ l2cap_print(l2cap_t *l2c, stream_t *st)
 {
   l2cap_connection_t *lc = NULL;
   while((lc = l2cap_connection_next(l2c, lc)) != NULL) {
-    stprintf(st, "\tL2CAP:\t%s (PSM:0x%x)\n", lc->lc_svc->name, lc->lc_psm);
+    stprintf(st, "\tL2CAP:\t%s (PSM:0x%x)\n", lc->lc_name, lc->lc_psm);
 
     stprintf(st, "\t\tLocal:  CID:%d Credits:%d\n",
              lc->lc_local_cid,
@@ -817,8 +831,8 @@ l2cap_print(l2cap_t *l2c, stream_t *st)
              lc->lc_queued_credits);
     stprintf(st, "\n");
 
-    pbuf_stprint("RXQ", STAILQ_FIRST(&lc->lc_rxq), 0, st);
-    pbuf_stprint("RFQ", STAILQ_FIRST(&lc->lc_rfq), 0, st);
+    pbuf_dump_stream("RXQ", STAILQ_FIRST(&lc->lc_rxq), 0, st);
+    pbuf_dump_stream("RFQ", STAILQ_FIRST(&lc->lc_rfq), 0, st);
   }
 }
 
