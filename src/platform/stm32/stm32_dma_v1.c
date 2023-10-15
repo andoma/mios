@@ -212,8 +212,8 @@ dma_irq(int instance, int bits)
 #define GET_ISR(controller, hi, offset, instance)                      \
   const uint32_t base = DMA_BASE(controller);                          \
   const uint32_t bits = (reg_rd(base + DMA_ISR(hi)) >> offset) & 0x3f; \
-  dma_irq(instance, bits);                                             \
   reg_wr(base + DMA_IFCR(hi), bits << offset);                         \
+  dma_irq(instance, bits);                                             \
 
 void irq_11(void) { GET_ISR(0, 0, 0,  0) }
 void irq_12(void) { GET_ISR(0, 0, 6,  1) }
