@@ -22,6 +22,8 @@ SRCS += ${C}/systick.c \
 	${P}/stm32f4_adc.c \
 	${P}/stm32f4_otgfs.c \
 	${P}/stm32f4_systim.c \
+
+SRCS-${ENABLE_NET_IPV4} += \
 	${P}/stm32f4_eth.c \
 
 SRCS-${ENABLE_NET_MBUS} += \
