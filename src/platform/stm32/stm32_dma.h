@@ -69,11 +69,21 @@ error_t stm32_dma_wait(stm32_dma_instance_t instance);
 stm32_dma_instance_t stm32_dma_alloc(uint32_t resource_id,
                                      const char *name);
 
-void stm32_dma_set_callback(stm32_dma_instance_t i,
-                            void (*cb)(stm32_dma_instance_t instance,
-                                       void *arg, error_t err),
-                            void *arg,
-                            int irq_level);
+typedef void (dma_cb_t)(stm32_dma_instance_t instance,
+                        uint32_t status_flags, void *arg);
+
+#define DMA_STATUS_FIFO_ERROR        0x1
+#define DMA_STATUS_DIRECT_MODE_ERROR 0x4
+#define DMA_STATUS_XFER_ERROR        0x8
+#define DMA_STATUS_HALF_XFER         0x10
+#define DMA_STATUS_FULL_XFER         0x20
+
+#define DMA_STATUS_ERRORS (DMA_STATUS_XFER_ERROR |              \
+                           DMA_STATUS_DIRECT_MODE_ERROR |       \
+                           DMA_STATUS_FIFO_ERROR)
+
+void stm32_dma_set_callback(stm32_dma_instance_t i, dma_cb_t *cb,
+                            void *arg, int irq_level, uint32_t status_mask);
 
 void stm32_dma_make_waitable(stm32_dma_instance_t i, const char *name);
 

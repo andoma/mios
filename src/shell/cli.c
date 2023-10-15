@@ -18,7 +18,7 @@ static const char errmsg[] = {
   "NO_BUFFER\0"
   "MTU_EXCEEDED\0"
   "INVALID_ID\0"
-  "DMA_ERR\0"
+  "DMAXFER\0"
   "BUS_ERR\0"
   "ARBITRATION_LOST\0"
   "BAD_STATE\0"
@@ -55,6 +55,7 @@ static const char errmsg[] = {
   "TOOLONG\0"
   "IO\0"
   "FS\0"
+  "DMAFIFO\0"
   "\0"
 };
 

@@ -29,8 +29,7 @@ void stm32g0_adc_multi(uint32_t channels,
                        size_t num_buffers,
                        uint8_t trig,
                        int oversampling,
-                       void (*cb)(stm32_dma_instance_t instance,
-                                  void *arg, error_t err),
+                       dma_cb_t *cb,
                        void *arg);
 
 #define ADC_TRG_TIM1_TRGO2 0

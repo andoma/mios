@@ -20,11 +20,11 @@ static const uint8_t irqmap[16] = {
 
 typedef struct dma_stream {
 
-  void (*cb)(stm32_dma_instance_t instance, void *arg, error_t err);
+  dma_cb_t *cb;
   void *arg;
 
   task_waitable_t waitq;
-  error_t err;
+  uint32_t status;
 
 } dma_stream_t;
 
@@ -34,10 +34,10 @@ static dma_stream_t *g_streams[16];
 
 
 static void
-wakeup_cb(stm32_dma_instance_t instance, void *arg, error_t err)
+wakeup_cb(stm32_dma_instance_t instance, uint32_t status, void *arg)
 {
   dma_stream_t *ds = arg;
-  ds->err = err;
+  ds->status |= status;
   task_wakeup_sched_locked(&ds->waitq, 0);
 }
 
@@ -64,17 +64,16 @@ stm32_dma_alloc_instance(int eligible, const char *name)
 
 
 void
-stm32_dma_set_callback(stm32_dma_instance_t i,
-                       void (*cb)(stm32_dma_instance_t instance,
-                                  void *arg, error_t err),
-                       void *arg,
-                       int irq_level)
+stm32_dma_set_callback(stm32_dma_instance_t i, dma_cb_t *cb,  void *arg,
+                       int irq_level, uint32_t status_mask)
 {
   dma_stream_t *ds = g_streams[i];
   ds->cb = cb;
   ds->arg = arg;
   irq_enable(irqmap[i], irq_level);
-  reg_set_bits(DMA_SCR(i), 0, 5, 0b10110);
+
+  const uint32_t ie = (status_mask >> 1) & 0x1e;
+  reg_set_bits(DMA_SCR(i), 0, 5, ie);
 }
 
 
@@ -83,10 +82,9 @@ stm32_dma_make_waitable(stm32_dma_instance_t i, const char *name)
 {
   dma_stream_t *ds = g_streams[i];
   task_waitable_init(&ds->waitq, name);
-  ds->err = 1;
+  ds->status = 0;
   ds->cb = wakeup_cb;
   ds->arg = ds;
-
   irq_enable(irqmap[i], IRQ_LEVEL_SCHED);
   reg_set_bits(DMA_SCR(i), 0, 5, 0b10110);
 }
@@ -184,16 +182,22 @@ stm32_dma_wait(stm32_dma_instance_t instance)
   dma_stream_t *ds = g_streams[instance];
 
   while(1) {
-    if(ds->err == 1) {
+    if(ds->status == 0) {
       if(task_sleep_deadline(&ds->waitq, deadline)) {
         stm32_dma_stop(instance);
+        ds->status = 0;
         return ERR_TIMEOUT;
       }
       continue;
     }
-    int ret = ds->err;
-    ds->err = 1;
-    return ret;
+
+    uint32_t s = ds->status;
+    ds->status = 0;
+    if(s & DMA_STATUS_XFER_ERROR)
+      return ERR_DMA_XFER;
+    if(s & DMA_STATUS_FIFO_ERROR)
+      return ERR_DMA_FIFO;
+    return 0;
   }
 }
 
@@ -204,7 +208,7 @@ dma_irq(int instance, int bits)
   if(ds == NULL)
     return;
 
-  ds->cb(instance, ds->arg, bits & 0xd ? ERR_DMA_ERROR : 0);
+  ds->cb(instance, bits, ds->arg);
 }
 
 

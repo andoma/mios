@@ -11,7 +11,7 @@ typedef enum {
   ERR_NO_BUFFER             = -7,
   ERR_MTU_EXCEEDED          = -8,
   ERR_INVALID_ID            = -9,
-  ERR_DMA_ERROR             = -10,
+  ERR_DMA_XFER              = -10,
   ERR_BUS_ERROR             = -11,
   ERR_ARBITRATION_LOST      = -12,
   ERR_BAD_STATE             = -13,
@@ -48,6 +48,7 @@ typedef enum {
   ERR_TOOLONG               = -44,
   ERR_IO                    = -45,
   ERR_FS                    = -46,
+  ERR_DMA_FIFO              = -47,
 } error_t;
 
 const char *error_to_string(error_t e);

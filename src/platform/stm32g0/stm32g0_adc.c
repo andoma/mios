@@ -127,8 +127,7 @@ stm32g0_adc_multi(uint32_t channels,
                   size_t num_buffers,
                   uint8_t ext_trig,
                   int oversampling,
-                  void (*cb)(stm32_dma_instance_t instance,
-                             void *arg, error_t err),
+                  dma_cb_t *cb,
                   void *arg)
 {
   int q = irq_forbid(IRQ_LEVEL_SWITCH);
@@ -172,7 +171,8 @@ stm32g0_adc_multi(uint32_t channels,
   stm32_dma_instance_t dmainst = stm32_dma_alloc(5, "adc");
 
   if(cb) {
-    stm32_dma_set_callback(dmainst, cb, arg, IRQ_LEVEL_IO);
+    stm32_dma_set_callback(dmainst, cb, arg, IRQ_LEVEL_IO,
+                           DMA_STATUS_FULL_XFER | DMA_STATUS_ERRORS);
   }
 
   stm32_dma_config(dmainst,

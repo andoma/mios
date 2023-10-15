@@ -12,11 +12,11 @@
 
 typedef struct dma_stream {
 
-  void (*cb)(stm32_dma_instance_t instance, void *arg, error_t err);
+  dma_cb_t *cb;
   void *arg;
 
   task_waitable_t waitq;
-  error_t err;
+  uint32_t status;
 
 } dma_stream_t;
 
@@ -26,10 +26,10 @@ static dma_stream_t *g_streams[16];
 
 
 static void
-wakeup_cb(stm32_dma_instance_t instance, void *arg, error_t err)
+wakeup_cb(stm32_dma_instance_t instance, uint32_t status, void *arg)
 {
   dma_stream_t *ds = arg;
-  ds->err = err;
+  ds->status |= status;
   task_wakeup_sched_locked(&ds->waitq, 0);
 }
 
@@ -60,28 +60,42 @@ stm32_dma_alloc_instance(int eligible, const char *name)
 
 
 void
-stm32_dma_set_callback(stm32_dma_instance_t i,
-                       void (*cb)(stm32_dma_instance_t instance,
-                                  void *arg, error_t err),
+stm32_dma_set_callback(stm32_dma_instance_t instance,
+                       dma_cb_t *cb,
                        void *arg,
-                       int irq_level)
+                       int irq_level,
+                       uint32_t mask)
 {
-  dma_stream_t *ds = g_streams[i];
+  dma_stream_t *ds = g_streams[instance];
   ds->cb = cb;
   ds->arg = arg;
-  irq_enable(dma_irqmap[i], irq_level);
+
+  uint32_t bits = 0;
+  if(mask & DMA_STATUS_FULL_XFER)
+    bits |= (1 << 0);
+  if(mask & DMA_STATUS_HALF_XFER)
+    bits |= (1 << 1);
+  if(mask & DMA_STATUS_XFER_ERROR)
+    bits |= (1 << 2);
+
+  reg_set_bits(DMA_CCRx(instance), 1, 3, bits);
+
+  irq_enable(dma_irqmap[instance], irq_level);
 }
 
 
 void
-stm32_dma_make_waitable(stm32_dma_instance_t i, const char *name)
+stm32_dma_make_waitable(stm32_dma_instance_t instance, const char *name)
 {
-  dma_stream_t *ds = g_streams[i];
+  dma_stream_t *ds = g_streams[instance];
   task_waitable_init(&ds->waitq, name);
-  ds->err = 1;
+  ds->status = 0;
   ds->cb = wakeup_cb;
   ds->arg = ds;
-  irq_enable(dma_irqmap[i], IRQ_LEVEL_SCHED);
+
+  reg_set_bits(DMA_CCRx(instance), 1, 3, 0b101);
+
+  irq_enable(dma_irqmap[instance], IRQ_LEVEL_SCHED);
 }
 
 
@@ -119,12 +133,10 @@ stm32_dma_config(stm32_dma_instance_t instance,
   reg |= pinc   << 6;
   reg |= circ   << 5;
   reg |= direction << 4;
-
-  if(g_streams[instance]->cb) {
-    reg |= (1 << 3); // Transfer error interrupt enable
-    reg |= (1 << 1); // Transfer complete interrupt enable
-  }
-  reg_wr(DMA_CCRx(instance), reg);
+  uint32_t v = reg_rd(DMA_CCRx(instance));
+  v &= 0xffff000f;
+  v |= reg;
+  reg_wr(DMA_CCRx(instance), v);
 }
 
 
@@ -159,16 +171,20 @@ stm32_dma_wait(stm32_dma_instance_t instance)
   const int64_t deadline = start + 1000000;
   dma_stream_t *ds = g_streams[instance];
   while(1) {
-    if(ds->err == 1) {
+    if(ds->status == 0) {
       if(task_sleep_deadline(&ds->waitq, deadline)) {
-        reg_clr_bit(DMA_CCRx(instance), 0);
+        stm32_dma_stop(instance);
+        ds->status = 0;
         return ERR_TIMEOUT;
       }
       continue;
     }
-    int ret = ds->err;
-    ds->err = 1;
-    return ret;
+
+    uint32_t s = ds->status;
+    ds->status = 0;
+    if(s & DMA_STATUS_XFER_ERROR)
+      return ERR_DMA_XFER;
+    return 0;
   }
 }
 
@@ -182,14 +198,12 @@ dma_irq(int channel)
   dma_stream_t *ds = g_streams[channel];
   if(ds == NULL || ds->cb == NULL)
     return;
-  error_t err;
-  if(bits & 8) {
-    err = ERR_DMA_ERROR;
-  } else if(bits & 2) {
-    err = 0;
-  } else {
-    return;
-  }
-  ds->cb(channel, ds->arg, err);
+
+  uint32_t status =
+    (bits & 0x8) |        // ERROR
+    ((bits & 0x4) << 2) | // HALF
+    ((bits & 0x2) << 4);  // FULL
+
+  ds->cb(channel, status, ds->arg);
 }
 
