@@ -6,6 +6,8 @@
 #include <mios/task.h>
 #include <unistd.h>
 
+#define I2C_LOG_SIZE 0
+
 #define I2C_CR1   0x00
 #define I2C_CR2   0x04
 #define I2C_OAR1  0x08
@@ -42,6 +44,110 @@ typedef struct stm32_i2c {
 } stm32_i2c_t;
 
 
+#if I2C_LOG_SIZE > 0
+
+#include <mios/cli.h>
+
+typedef struct {
+  int64_t ts;
+  uint16_t event;
+  uint16_t value;
+} i2c_log_t;
+
+#define I2C_LOG_EVENT_EV      1
+#define I2C_LOG_EVENT_ER      2
+#define I2C_LOG_EVENT_WC      3
+#define I2C_LOG_EVENT_RC      4
+#define I2C_LOG_EVENT_START   5
+#define I2C_LOG_EVENT_DONE    6
+#define I2C_LOG_EVENT_SB      7
+#define I2C_LOG_EVENT_WR      8
+#define I2C_LOG_EVENT_AC      9
+
+
+static i2c_log_t i2c_log[I2C_LOG_SIZE];
+static int l2c_log_ptr;
+
+
+static void
+i2c_log_append(uint16_t event, uint16_t value)
+{
+  size_t ptr = l2c_log_ptr & (I2C_LOG_SIZE - 1);
+  i2c_log[ptr].ts = clock_get_irq_blocked();
+  i2c_log[ptr].event = event;
+  i2c_log[ptr].value = value;
+  l2c_log_ptr++;
+}
+
+
+static void
+print_i2clog(stream_t *st)
+{
+  int64_t t0 = 0;
+  for(size_t i = 0; i < I2C_LOG_SIZE; i++) {
+    size_t ptr = (i + l2c_log_ptr) & (I2C_LOG_SIZE - 1);
+
+    i2c_log_t *il = &i2c_log[ptr];
+
+    if(il->event == 0)
+      continue;
+    if(t0 == 0)
+      t0 = il->ts;
+
+    int td = il->ts - t0;
+    stprintf(st, "%10d : ", td);
+    switch(il->event) {
+    case I2C_LOG_EVENT_EV:
+      stprintf(st, "IRQ EVT 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_ER:
+      stprintf(st, "IRQ ERR 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_WC:
+      stprintf(st, "WR COMP 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_RC:
+      stprintf(st, "RD COMP 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_START:
+      stprintf(st, "Start addr: 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_DONE:
+      stprintf(st, "Done  addr: 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_SB:
+      stprintf(st, "STARTBIT  0x%x mode=%s\n",
+               il->value >> 1, il->value & 1 ? "READ" : "WRITE");
+      break;
+    case I2C_LOG_EVENT_WR:
+      stprintf(st, "XMIT BYTE: 0x%x\n", il->value);
+      break;
+    case I2C_LOG_EVENT_AC:
+      stprintf(st, "ADDR COMPLETE\n");
+      break;
+    }
+  }
+}
+
+
+static error_t
+cmd_i2clog(cli_t *cli, int argc, char **argv)
+{
+  print_i2clog(cli->cl_stream);
+  return 0;
+}
+
+CLI_CMD_DEF("i2clog", cmd_i2clog);
+
+
+#else
+
+#define i2c_log_append(e, v)
+
+#endif
+
+
+
 
 static void
 i2c_irq_result(stm32_i2c_t *i2c, error_t result)
@@ -61,43 +167,51 @@ set_read_ack(stm32_i2c_t *i2c)
 }
 
 
+
 static void
 i2c_irq_ev(stm32_i2c_t *i2c)
 {
   uint32_t sr1 = reg_rd(i2c->base_addr + I2C_SR1);
-#if 0
-  printf("i2c: %d/%d %x\n",
-         i2c->write_len, i2c->read_len, sr1);
-#endif
+
+  i2c_log_append(I2C_LOG_EVENT_EV, sr1);
+
   if(sr1 & (1 << 0)) {
     sr1 &= ~(1 << 0);
     // SB
     const int read_bit = i2c->write_len == 0;
-    reg_wr(i2c->base_addr + I2C_DR, (i2c->addr << 1) | read_bit);
+
+    uint8_t byte = (i2c->addr << 1) | read_bit;
+    i2c_log_append(I2C_LOG_EVENT_SB, byte);
+
+    reg_wr(i2c->base_addr + I2C_DR, byte);
     return;
   }
 
   if(sr1 & (1 << 1)) {
+    sr1 &= ~(1 << 1);
+
     // ADDR complete
+
+    i2c_log_append(I2C_LOG_EVENT_AC, 0);
+
     reg_rd(i2c->base_addr + I2C_SR2);
 
-    sr1 &= ~(1 << 1);
     if(i2c->write_len == 0) {
+      i2c_log_append(I2C_LOG_EVENT_WC, i2c->read_len);
       set_read_ack(i2c);
       reg_set_bit(i2c->base_addr + I2C_CR2, 10);
     }
-
   }
 
   if(sr1 & (1 << 6) && i2c->read_len) {
     sr1 &= ~(1 << 6);
 
     *i2c->read = reg_rd(i2c->base_addr + I2C_DR);
-    //    printf("RxNE: %x\n", *i2c->read);
     i2c->read++;
     i2c->read_len--;
 
     if(i2c->read_len == 0) {
+      i2c_log_append(I2C_LOG_EVENT_RC, 0);
       reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_STOP_BIT);
       reg_clr_bit(i2c->base_addr + I2C_CR2, 10);
       i2c_irq_result(i2c, 0);
@@ -110,26 +224,35 @@ i2c_irq_ev(stm32_i2c_t *i2c)
   if(sr1 & (1 << 7) && i2c->write) {
     sr1 &= ~(1 << 7);
     // TxE
-    //    printf("TxE %d\n", i2c->write_len);
 
     if(i2c->write_len == 0) {
       i2c->write = NULL;
-      reg_clr_bit(i2c->base_addr + I2C_CR2, 10);
+      i2c_log_append(I2C_LOG_EVENT_WC, i2c->read_len);
+
+      if(sr1 & 0x4) {
+        reg_rd(i2c->base_addr + I2C_DR);
+      }
+
       if(i2c->read_len) {
         reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_START_BIT);
       } else {
         reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_STOP_BIT);
         i2c_irq_result(i2c, 0);
-        //        printf("TXE done\n");
       }
+
     } else {
 
-      reg_set_bit(i2c->base_addr + I2C_CR2, 10);
+      i2c->write_len--;
+      if(i2c->write_len == 0) {
+        reg_clr_bit(i2c->base_addr + I2C_CR2, 10);
+      } else {
+        reg_set_bit(i2c->base_addr + I2C_CR2, 10);
+      }
+
+      i2c_log_append(I2C_LOG_EVENT_WR, *i2c->write);
       reg_wr(i2c->base_addr + I2C_DR, *i2c->write);
       i2c->write++;
-      i2c->write_len--;
     }
-    return;
   }
 }
 
@@ -190,8 +313,6 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
 {
   stm32_i2c_t *i2c = (stm32_i2c_t *)d;
 
-  //  hexdump("WRITE", write, write_len);
-
   mutex_lock(&i2c->mutex);
 
   i2c->addr = addr;
@@ -203,6 +324,8 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
   const int64_t deadline = clock_get() + 100000;
 
   const int q = irq_forbid(IRQ_LEVEL_IO);
+
+  i2c_log_append(I2C_LOG_EVENT_START, addr);
 
   i2c->result = 1; // 1 means 'no result yet'
 
@@ -221,6 +344,7 @@ i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
   }
 
   reg_clr_bit(i2c->base_addr + I2C_CR2, 10); // Disable xfer IRQ
+  i2c_log_append(I2C_LOG_EVENT_DONE, addr);
   irq_permit(q);
   mutex_unlock(&i2c->mutex);
   return err;
