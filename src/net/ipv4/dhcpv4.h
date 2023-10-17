@@ -9,7 +9,4 @@ struct stream;
 
 void dhcpv4_status_change(struct ether_netif *eni);
 
-struct pbuf *dhcpv4_input(struct netif *ni, struct pbuf *pb,
-                          uint32_t src_addr);
-
 void dhcpv4_print(struct ether_netif *eni, struct stream *st);

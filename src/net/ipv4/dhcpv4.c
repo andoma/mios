@@ -1,5 +1,7 @@
 #include "dhcpv4.h"
 
+#include "udp.h"
+
 #include <mios/eventlog.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
@@ -407,10 +409,16 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
 
 
 
-pbuf_t *
-dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
+static pbuf_t *
+dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
+
+  const ipv4_header_t *ip = pbuf_data(pb, 0);
+  const uint32_t from = ip->src_addr;
+
+  pb = pbuf_drop(pb, udp_offset + 8);
+
   if(pbuf_pullup(pb, sizeof(dhcp_hdr_t)))
     return pb;
 
@@ -475,6 +483,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, uint32_t from)
   return pb;
 }
 
+UDP_INPUT(dhcpv4_input, 68);
 
 static void
 dhcp_timer_cb(void *opaque, uint64_t now)

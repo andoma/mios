@@ -55,6 +55,12 @@ SECTIONS {
                 KEEP(*(httproute))
                 _httproute_array_end = .;
                 . = ALIGN(4);
+
+                . = ALIGN(4);
+                _udpinput_array_begin = .;
+                KEEP(*(udpinput))
+                _udpinput_array_end = .;
+                . = ALIGN(4);
         } >FLASH
 
         .build_id : {

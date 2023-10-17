@@ -7,28 +7,21 @@
 #include "ipv4.h"
 #include "dhcpv4.h"
 
-
 pbuf_t *
-udp_input_ipv4(netif_t *ni, pbuf_t *pb, int udp_offset)
+udp_input_ipv4(netif_t *ni, pbuf_t *pb, size_t udp_offset)
 {
-  const ipv4_header_t *ip = pbuf_data(pb, 0);
-  uint32_t src_addr = ip->src_addr;
   const udp_hdr_t *udp = pbuf_data(pb, udp_offset);
 
-#if 0
-  printf("UDP %Id:%d > %Id:%d\n",
-         ip->src_addr,
-         ntohs(udp->src_port),
-         ip->dst_addr,
-         ntohs(udp->dst_port));
-#endif
+  const uint16_t dst_port = ntohs(udp->dst_port);
 
+  extern unsigned long _udpinput_array_begin;
+  extern unsigned long _udpinput_array_end;
 
-  uint16_t dst_port = ntohs(udp->dst_port);
-
-  if(dst_port == 68) {
-    return dhcpv4_input(ni, pbuf_drop(pb, udp_offset + 8), src_addr);
+  const udp_input_t *ui = (void *)&_udpinput_array_begin;
+  for(; ui != (const void *)&_udpinput_array_end; ui++) {
+    if(ui->port == dst_port) {
+      return ui->input(ni, pb, udp_offset);
+    }
   }
-
   return pb;
 }
