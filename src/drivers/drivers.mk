@@ -29,4 +29,7 @@ SRCS-${ENABLE_MCP23008} += \
 
 SRCS += ${SRC}/drivers/spiflash.c
 
+SRCS-${ENABLE_SSD1306} += \
+	${SRC}/drivers/ssd1306.c
+
 ${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}
