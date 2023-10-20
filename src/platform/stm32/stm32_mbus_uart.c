@@ -350,11 +350,11 @@ rx_payload_timeout(uart_mbus_t *um)
 }
 
 static void
-rx_complete(stm32_dma_instance_t instance, void *arg, error_t err)
+rx_complete(stm32_dma_instance_t instance, uint32_t status, void *arg)
 {
   uart_mbus_t *um = arg;
 
-  if(!err) {
+  if(status & DMA_STATUS_FULL_XFER) {
 
     if(um->state == MBUS_STATE_RX_PAYLOAD) {
 
@@ -373,8 +373,10 @@ rx_complete(stm32_dma_instance_t instance, void *arg, error_t err)
       irq_permit(q);
     }
 
-  } else {
+  } else if(status & DMA_STATUS_ERRORS) {
     um->rx_dma_error++;
+  } else {
+    return;
   }
 
   stm32_dma_stop(um->rx_dma);
@@ -556,7 +558,8 @@ stm32_mbus_uart_create(uint32_t uart_reg_base,
 
   um->rx_dma = stm32_dma_alloc(rx_dma_resouce_id, "mbus-rx");
 
-  stm32_dma_set_callback(um->rx_dma, rx_complete, um, IRQ_LEVEL_CLOCK);
+  stm32_dma_set_callback(um->rx_dma, rx_complete, um, IRQ_LEVEL_CLOCK,
+                         DMA_STATUS_FULL_XFER | DMA_STATUS_ERRORS);
 
   stm32_dma_config(um->rx_dma,
                    STM32_DMA_BURST_NONE,
