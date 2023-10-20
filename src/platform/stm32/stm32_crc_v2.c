@@ -57,7 +57,7 @@ crc32(uint32_t in, const void *data, size_t len)
 
   mutex_lock(&crcmutex);
   clk_enable(CLK_CRC);
-
+  asm volatile("dsb");
   reg_wr(CRC_BASE + CRC_INIT, in);
   reg_wr(CRC_BASE + CRC_CR, 0xa1);
 

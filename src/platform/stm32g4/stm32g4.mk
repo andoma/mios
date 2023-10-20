@@ -23,5 +23,6 @@ SRCS += ${C}/systick.c \
 	${P}/stm32g4_usb.c \
 	${P}/stm32g4_adc.c \
 	${P}/stm32g4_systim.c \
+	${P}/stm32g4_crc.c \
 
 ${MO}/src/platform/stm32g4/%.o : CFLAGS += ${NOFPU}
