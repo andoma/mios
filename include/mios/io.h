@@ -5,7 +5,7 @@
 
 #include "error.h"
 
-
+struct iovec;
 
 typedef enum {
   GPIO_PULL_NONE = 0,
@@ -38,10 +38,12 @@ typedef enum {
 // I2C
 
 typedef struct i2c {
-  __attribute__((access(write_only, 5, 6), access(read_only, 3, 4)))
-  error_t (*rw)(struct i2c *bus, uint8_t addr,
-                const uint8_t *write, size_t write_len,
-                uint8_t *read, size_t read_len);
+
+  error_t (*rwv)(struct i2c *bus, uint8_t addr,
+                 const struct iovec *txiov,
+                 const struct iovec *rxiov,
+                 size_t count);
+
 } i2c_t;
 
 
@@ -53,11 +55,14 @@ __attribute__((access(write_only, 4, 5)))
 error_t i2c_read_bytes(i2c_t *i2c, uint8_t addr, uint8_t reg,
                        uint8_t *u8, size_t len);
 
+__attribute__((access(write_only, 5, 6), access(read_only, 3, 4)))
+error_t i2c_rw(struct i2c *bus, uint8_t addr,
+               const uint8_t *write, size_t write_len,
+               uint8_t *read, size_t read_len);
+
 i2c_t *i2c_get_bus(unsigned int bus_id);
 
 // SPI
-
-struct iovec;
 
 typedef struct spi {
   error_t (*rw)(struct spi *bus, const uint8_t *tx, uint8_t *rx, size_t len,

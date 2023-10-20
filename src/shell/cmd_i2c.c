@@ -99,7 +99,7 @@ cmd_i2c_write(cli_t *cli, int argc, char **argv)
   for(int i = 0; i < argc; i++)
     buf[1 + i] = atoix(argv[i]);
 
-  error_t err = bus->rw(bus, addr, buf, argc + 1, NULL, 0);
+  error_t err = i2c_rw(bus, addr, buf, argc + 1, NULL, 0);
   free(buf);
   return err;
 }
