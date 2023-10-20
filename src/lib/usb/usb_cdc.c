@@ -305,15 +305,16 @@ __attribute__((noreturn))
 static void *
 cdc_shell_thread(void *arg)
 {
-  usb_cdc_t *cdc = arg;
+  stream_t *s = arg;
   while(1) {
-    cli_on_stream(&cdc->s, '>');
+    cli_on_stream(s, '>');
   }
 }
 
 
-void
-usb_cdc_create(struct usb_interface_queue *q)
+
+struct stream *
+usb_cdc_create_stream(struct usb_interface_queue *q)
 {
   usb_cdc_t *cdc = calloc(1, sizeof(usb_cdc_t));
   cdc->s.read = cdc_read;
@@ -340,5 +341,13 @@ usb_cdc_create(struct usb_interface_queue *q)
                     cdc, cdc_rx, NULL,
                     USB_ENDPOINT_BULK, 0, 1, 64);
 
-  task_create_shell(cdc_shell_thread, cdc, "cdc-cli", 0);
+  return &cdc->s;
+}
+
+
+void
+usb_cdc_create_shell(struct usb_interface_queue *q)
+{
+  struct stream *s = usb_cdc_create_stream(q);
+  task_create_shell(cdc_shell_thread, s, "cdc-cli", 0);
 }

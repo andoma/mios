@@ -123,7 +123,9 @@ usb_init_endpoint(usb_ep_t *ue, void *aux,
 }
 
 
-void usb_cdc_create(struct usb_interface_queue *q);
+struct stream *usb_cdc_create_stream(struct usb_interface_queue *q);
+
+void usb_cdc_create_shell(struct usb_interface_queue *q);
 
 void usb_mbus_create(struct usb_interface_queue *q,
                      uint8_t usb_sub_class);
