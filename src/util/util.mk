@@ -6,10 +6,11 @@ SRCS += ${SRC}/util/bumpalloc.c \
 	${SRC}/util/crc8.c \
 	${SRC}/util/crc4.c \
 	${SRC}/util/hdlc.c \
-	${SRC}/util/pkv.c \
 	${SRC}/util/dsig.c \
 	${SRC}/util/ntcpoly.c \
 
 SRCS-${ENABLE_OTA} += ${SRC}/util/ota.c
+
+SRCS-${ENABLE_PKV} += ${SRC}/util/pkv.c
 
 ${MOS}/util/%.o : CFLAGS += ${NOFPU}

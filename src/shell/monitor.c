@@ -5,7 +5,6 @@
 #include <mios/cli.h>
 #include <mios/flash.h>
 #include <mios/mios.h>
-#include <mios/pkv.h>
 #include <mios/version.h>
 #include <mios/sys.h>
 
@@ -129,27 +128,6 @@ cmd_flash_info(cli_t *cli, int argc, char **argv)
 
 
 CLI_CMD_DEF("flash_info", cmd_flash_info);
-
-
-static error_t
-cmd_settings(cli_t *cli, int argc, char **argv)
-{
-  if(argc == 3 && !strcmp(argv[1], "erase")) {
-    return pkv_set(NULL, argv[2], NULL, 0);
-  }
-  if(argc == 3 && !strcmp(argv[1], "set-int")) {
-    return pkv_set_int(NULL, argv[2], atoi(argv[3]));
-  }
-  if(argc == 2 && !strcmp(argv[1], "erase-all")) {
-    return pkv_clear(NULL);
-  }
-
-  pkv_show(NULL, cli->cl_stream);
-  return 0;
-}
-
-CLI_CMD_DEF("settings", cmd_settings)
-
 
 
 const char *reset_reasons =
