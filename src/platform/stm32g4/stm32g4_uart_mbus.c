@@ -3,11 +3,11 @@
 #include "stm32g4_clk.h"
 #include "stm32g4_dma.h"
 
-#include "platform/stm32/stm32_mbus_uart.c"
+#include "platform/stm32/stm32_uart_mbus_multidrop.c"
 
 void
-stm32g4_mbus_uart_create(unsigned int instance,
-                         gpio_t tx, gpio_t rx, gpio_t txe)
+stm32g4_uart_mbus_multidrop_create(unsigned int instance,
+                                   gpio_t tx, gpio_t rx, gpio_t txe)
 {
   const int index = instance - 1;
   const stm32g4_uart_config_t *cfg = stm32g4_uart_get_config(index);

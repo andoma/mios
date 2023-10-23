@@ -1,7 +1,7 @@
 #include <mios/io.h>
 #include <mios/stream.h>
 
-#include "platform/stm32/stm32_uart.h"
+#include "platform/stm32/stm32_uart_stream.h"
 
 #define USART_CR1  0x00
 #define USART_CR2  0x04
@@ -32,11 +32,11 @@ typedef struct {
   uint8_t rxdma;
 } stm32g4_uart_config_t;
 
-stream_t *stm32g4_uart_init(struct stm32_uart *uart,
-                            unsigned int instance, int baudrate,
-                            gpio_t tx, gpio_t rx, uint8_t flags);
+stream_t *stm32g4_uart_stream_init(struct stm32_uart_stream *uart,
+                                   unsigned int instance, int baudrate,
+                                   gpio_t tx, gpio_t rx, uint8_t flags);
 
-void stm32g4_mbus_uart_create(unsigned int instance,
-                              gpio_t tx, gpio_t rx, gpio_t txe);
+void stm32g4_uart_mbus_multidrop_create(unsigned int instance,
+                                        gpio_t tx, gpio_t rx, gpio_t txe);
 
 const stm32g4_uart_config_t *stm32g4_uart_get_config(int index);

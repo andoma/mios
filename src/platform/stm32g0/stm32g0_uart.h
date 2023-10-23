@@ -23,7 +23,7 @@
 
 #define USART_SR_BUSY    (1 << 16)
 
-#include "platform/stm32/stm32_uart.h"
+#include "platform/stm32/stm32_uart_stream.h"
 
 typedef struct {
   uint16_t base;
@@ -39,10 +39,11 @@ int stm32g0_uart_tx(int instance, gpio_t pin);
 
 int stm32g0_uart_rx(int instance, gpio_t pin);
 
-stream_t *stm32g0_uart_init(stm32_uart_t *u, unsigned int instance,
-                            int baudrate, gpio_t tx, gpio_t rex,
-                            uint8_t flags);
+stream_t *stm32g0_uart_stream_init(stm32_uart_stream_t *u,
+                                   unsigned int instance,
+                                   int baudrate, gpio_t tx, gpio_t rex,
+                                   uint8_t flags);
 
-void stm32g0_mbus_uart_create(unsigned int instance,
-                              gpio_t tx, gpio_t rx, gpio_t txe,
-                              int flags);
+void stm32g0_uart_mbus_multidrop_create(unsigned int instance,
+                                        gpio_t tx, gpio_t rx, gpio_t txe,
+                                        int flags);

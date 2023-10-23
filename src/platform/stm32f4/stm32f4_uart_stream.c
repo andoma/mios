@@ -3,7 +3,7 @@
 #include "stm32f4_clk.h"
 #include "stm32f4_dma.h"
 #include "stm32f4_tim.h"
-#include "platform/stm32/stm32_uart.c"
+#include "platform/stm32/stm32_uart_stream.c"
 
 
 
@@ -22,11 +22,11 @@ stm32f4_uart_get_config(int index)
   return &stm32f4_uart_config[index];
 }
 
-static stm32_uart_t *uarts[6];
+static stm32_uart_stream_t *uarts[6];
 
 stream_t *
-stm32f4_uart_init(stm32_uart_t *u, int instance, int baudrate,
-                  gpio_t tx, gpio_t rx, uint8_t flags)
+stm32f4_uart_stream_init(stm32_uart_stream_t *u, int instance, int baudrate,
+                         gpio_t tx, gpio_t rx, uint8_t flags)
 {
   const int index = instance - 1;
   const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
@@ -35,13 +35,13 @@ stm32f4_uart_init(stm32_uart_t *u, int instance, int baudrate,
   gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
 
-  u = stm32_uart_init(u,
-                      (cfg->base << 8) + 0x40000000,
-                      baudrate,
-                      cfg->clkid,
-                      cfg->irq,
-                      flags,
-                      cfg->txdma);
+  u = stm32_uart_stream_init(u,
+                             (cfg->base << 8) + 0x40000000,
+                             baudrate,
+                             cfg->clkid,
+                             cfg->irq,
+                             flags,
+                             cfg->txdma);
 
   uarts[index] = u;
 

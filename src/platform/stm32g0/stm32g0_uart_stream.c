@@ -3,7 +3,7 @@
 #include "stm32g0_clk.h"
 #include "stm32g0_uart.h"
 
-#include "platform/stm32/stm32_uart.c"
+#include "platform/stm32/stm32_uart_stream.c"
 
 static const stm32g0_uart_cfg_t uart_config[] = {
   { 0x0138, CLK_USART1, 27, 51, 50},
@@ -53,7 +53,7 @@ int stm32g0_uart_rx(int instance, gpio_t pin)
 }
 
 
-static stm32_uart_t *uarts[3];
+static stm32_uart_stream_t *uarts[3];
 
 void irq_27(void) { uart_irq(uarts[0]); }
 void irq_28(void) { uart_irq(uarts[1]); }
@@ -62,8 +62,8 @@ void irq_29(void) { uart_irq(uarts[2]); }
 
 
 stream_t *
-stm32g0_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
-                  gpio_t tx, gpio_t rx, uint8_t flags)
+stm32g0_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
+                         int baudrate, gpio_t tx, gpio_t rx, uint8_t flags)
 {
   const stm32g0_uart_cfg_t *cfg = stm32g0_uart_config_get(instance);
   const int tx_af = stm32g0_uart_tx(instance, tx);
@@ -76,13 +76,13 @@ stm32g0_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
     gpio_conf_af(rx, rx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   }
 
-  u = stm32_uart_init(u,
-                      (cfg->base << 8) + 0x40000000,
-                      baudrate,
-                      cfg->clkid,
-                      cfg->irq,
-                      flags,
-                      0);
+  u = stm32_uart_stream_init(u,
+                             (cfg->base << 8) + 0x40000000,
+                             baudrate,
+                             cfg->clkid,
+                             cfg->irq,
+                             flags,
+                             0);
 
   if(flags & UART_HALF_DUPLEX)
     reg_wr(u->reg_base + USART_CR3, 0x8); // HDSEL

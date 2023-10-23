@@ -8,7 +8,7 @@
 #define TX_FIFO_SIZE 64
 #define RX_FIFO_SIZE 32
 
-typedef struct stm32_uart {
+typedef struct stm32_uart_stream {
   stream_t stream;
 
   uint32_t reg_base;
@@ -29,7 +29,7 @@ typedef struct stm32_uart {
   uint8_t tx_fifo[TX_FIFO_SIZE];
   uint8_t rx_fifo[RX_FIFO_SIZE];
 
-} stm32_uart_t;
+} stm32_uart_stream_t;
 
 
 #define UART_HALF_DUPLEX    0x1

@@ -17,7 +17,7 @@
 
 #include "irq.h"
 
-#include "stm32_uart.h"
+#include "stm32_uart_stream.h"
 
 
 static void
@@ -26,7 +26,7 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size)
   if(size == 0)
     return;
 
-  stm32_uart_t *u = (stm32_uart_t *)s;
+  stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
   const char *d = buf;
 
   const int busy_wait = !can_sleep();
@@ -83,7 +83,7 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size)
 static int
 stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 {
-  stm32_uart_t *u = (stm32_uart_t *)s;
+  stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
   char *d = buf;
 
   if(!can_sleep()) {
@@ -122,7 +122,7 @@ stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 static void
 uart_irq(void *arg)
 {
-  stm32_uart_t *u = arg;
+  stm32_uart_stream_t *u = arg;
 
   const uint32_t sr = reg_rd(u->reg_base + USART_SR);
 
@@ -176,7 +176,7 @@ uart_irq(void *arg)
 
 
 static void
-stm32_uart_tx_dma_start(stm32_uart_t *u)
+stm32_uart_tx_dma_start(stm32_uart_stream_t *u)
 {
   if(u->tx_busy)
     return;
@@ -190,7 +190,7 @@ stm32_uart_tx_dma_start(stm32_uart_t *u)
 
 
 static void
-stm32_uart_tx_dma_wait(stm32_uart_t *u)
+stm32_uart_tx_dma_wait(stm32_uart_stream_t *u)
 {
   while(u->tx_busy) {
     task_sleep(&u->wait_tx);
@@ -201,7 +201,7 @@ stm32_uart_tx_dma_wait(stm32_uart_t *u)
 static void
 stm32_uart_write_dma(stream_t *s, const void *buf, size_t size)
 {
-  stm32_uart_t *u = (stm32_uart_t *)s;
+  stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
 
   if(!can_sleep())
     return;
@@ -247,13 +247,13 @@ stm32_uart_write_dma(stream_t *s, const void *buf, size_t size)
 #endif
 
 
-stm32_uart_t *
-stm32_uart_init(stm32_uart_t *u, int reg_base, int baudrate,
-                int clkid, int irq, uint8_t flags,
-                uint32_t tx_dma_resouce_id)
+stm32_uart_stream_t *
+stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
+                       int clkid, int irq, uint8_t flags,
+                       uint32_t tx_dma_resouce_id)
 {
   if(u == NULL)
-    u = calloc(1, sizeof(stm32_uart_t));
+    u = calloc(1, sizeof(stm32_uart_stream_t));
 
   clk_enable(clkid);
 

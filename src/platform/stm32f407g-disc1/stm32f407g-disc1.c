@@ -12,14 +12,13 @@
 #include "stm32f4_clk.h"
 #include "stm32f4_uart.h"
 
-static stm32_uart_t console;
 
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  stm32f4_uart_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3),
-                    UART_CTRLD_IS_PANIC);
-  stdio = &console.stream;
+  static stm32_uart_stream_t console;
+  stdio = stm32f4_uart_stream_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3),
+                                   UART_CTRLD_IS_PANIC);
 }
 
 

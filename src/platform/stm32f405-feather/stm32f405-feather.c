@@ -19,9 +19,9 @@
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  static stm32_uart_t console;
-  stdio = stm32f4_uart_init(&console, 6, 115200, GPIO_PC(6), GPIO_PC(7),
-                            UART_CTRLD_IS_PANIC);
+  static stm32_uart_stream_t console;
+  stdio = stm32f4_uart_stream_init(&console, 6, 115200, GPIO_PC(6), GPIO_PC(7),
+                                   UART_CTRLD_IS_PANIC);
 }
 
 

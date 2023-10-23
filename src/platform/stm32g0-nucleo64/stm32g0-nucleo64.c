@@ -22,11 +22,11 @@ board_init(void)
 {
   stm32g0_init_pll();
 
-  static stm32_uart_t console;
-  stdio = stm32g0_uart_init(&console, 2, 115200,
-                            stm32g0_uart_tx(2, GPIO_PA(2)),
-                            stm32g0_uart_rx(2, GPIO_PA(3)),
-                            UART_CTRLD_IS_PANIC);
+  static stm32_uart_stream_t console;
+  stdio = stm32g0_uart_stream_init(&console, 2, 115200,
+                                   stm32g0_uart_tx(2, GPIO_PA(2)),
+                                   stm32g0_uart_rx(2, GPIO_PA(3)),
+                                   UART_CTRLD_IS_PANIC);
 }
 
 struct {
