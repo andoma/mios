@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <mios/task.h>
 #include <unistd.h>
+#include <assert.h>
+#include <sys/uio.h>
 
 #define I2C_LOG_SIZE 0
 
@@ -308,18 +310,22 @@ i2c_initialize(stm32_i2c_t *i2c)
 
 
 static error_t
-i2c_rw(i2c_t *d, uint8_t addr, const uint8_t *write, size_t write_len,
-       uint8_t *read, size_t read_len)
+i2c_rwv(struct i2c *d, uint8_t addr,
+        const struct iovec *txiov,
+        const struct iovec *rxiov,
+        size_t count)
 {
   stm32_i2c_t *i2c = (stm32_i2c_t *)d;
+
+  assert(count == 1);
 
   mutex_lock(&i2c->mutex);
 
   i2c->addr = addr;
-  i2c->write = write_len ? write : NULL;
-  i2c->write_len = write_len;
-  i2c->read = read;
-  i2c->read_len = read_len;
+  i2c->write = txiov ? txiov->iov_base : NULL;
+  i2c->write_len = txiov ? txiov->iov_len : 0;
+  i2c->read = rxiov ? rxiov->iov_base : NULL;
+  i2c->read_len = rxiov ? rxiov->iov_len : 0;
 
   const int64_t deadline = clock_get() + 100000;
 
@@ -359,7 +365,7 @@ stm32_i2c_create(uint32_t base_addr, uint16_t clkid, uint16_t rstid)
   i2c->rstid = rstid;
   i2c->base_addr = base_addr;
   i2c->freq_mhz = clk_get_freq(clkid) / 1000000;
-  i2c->i2c.rw = i2c_rw;
+  i2c->i2c.rwv = i2c_rwv;
 
   i2c_initialize(i2c);
   task_waitable_init(&i2c->wait, "i2c");
