@@ -21,9 +21,6 @@
 
 SLIST_HEAD(thread_slist, thread);
 
-int task_trace;
-
-
 static struct thread_slist allthreads;
 
 static mutex_t allthreads_mutex = MUTEX_INITIALIZER("alltasks");
@@ -161,16 +158,6 @@ task_switch(void *cur_sp)
     task->t_run(task);
     q = irq_forbid(IRQ_LEVEL_SCHED);
   }
-
-#ifdef ENABLE_TASK_ACCOUNTING
-  if(task_trace) {
-    printf("Switch to %p : ", t);
-    uint32_t *sp = t->t_sp;
-    printf("%s [sp:%p PC:%x]\n",
-           t->t_name, t->t_sp, sp[14]);
-
-  }
-#endif
 
   t->t_task.t_state = TASK_STATE_RUNNING;
   cpu->sched.current = t;
