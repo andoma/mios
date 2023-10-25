@@ -154,6 +154,8 @@ void irq_enable_fn(int irq, int level, void (*fn)(void));
 
 void irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg);
 
+void irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg);
+
 void irq_disable(int irq);
 
 inline void  __attribute__((always_inline))

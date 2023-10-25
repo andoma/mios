@@ -70,6 +70,44 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
   irq_permit(q);
 }
 
+
+/*
+        push    {r4, r5, r6, lr}
+        mov.w   r4, #0xe000e000
+        mov.w   r3, #0xf00000
+        ldr.w   r5, [r4, #0xd88]
+        str.w   r3, [r4, #0xd88]
+        isb     sy
+        vmrs    r6, fpscr
+        vpush   {s0-s15}
+        ldr     r3, [pc, #20]
+        ldr     r0, [pc, #20]
+        blx     r3
+        vpop    {s0-s15}
+        vmsr    fpscr, r6
+        str.w   r5, [r4, #0xd88]
+        pop     {r4, r5, r6, pc}
+ */
+static const uint8_t irq_fpu_trampoline[] = {
+  0x70, 0xb5, 0x4f, 0xf0, 0xe0, 0x24, 0x4f, 0xf4,
+  0x70, 0x03, 0xd4, 0xf8, 0x88, 0x5d, 0xc4, 0xf8,
+  0x88, 0x3d, 0xbf, 0xf3, 0x6f, 0x8f, 0xf1, 0xee,
+  0x10, 0x6a, 0x2d, 0xed, 0x10, 0x0a, 0x05, 0x4b,
+  0x05, 0x48, 0x98, 0x47, 0xbd, 0xec, 0x10, 0x0a,
+  0xe1, 0xee, 0x10, 0x6a, 0xc4, 0xf8, 0x88, 0x5d,
+  0x70, 0xbd
+};
+
+void
+irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg)
+{
+  uint32_t *p = malloc(60);
+  memcpy(p, irq_fpu_trampoline, sizeof(irq_fpu_trampoline));
+  p[13] = (uint32_t)fn;
+  p[14] = (uint32_t)arg;
+  irq_enable_fn(irq, level, (void *)p + 1);
+}
+
 void
 irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg)
 {
