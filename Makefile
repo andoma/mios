@@ -57,6 +57,7 @@ ENABLE_NET_BLE ?= no
 ENABLE_NET_FPU_USAGE ?= no
 ENABLE_OTA ?= no
 ENABLE_PKV ?= no
+ENABLE_METRIC ?= no
 
 ALL_ENABLE_VARS := $(filter ENABLE_%, $(.VARIABLES))
 
@@ -75,6 +76,7 @@ include ${SRC}/lib/littlefs.mk
 include ${SRC}/lib/usb/usb.mk
 include ${SRC}/lib/gui/gui.mk
 include ${SRC}/lib/tig/tig.mk
+include ${SRC}/lib/metric/metric.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
