@@ -160,33 +160,4 @@ rpc_close(void *opaque)
 SERVICE_DEF("rpc", 0, 1, SERVICE_TYPE_DGRAM,
             rpc_open, rpc_push, rpc_may_push, rpc_pull, rpc_close);
 
-
-static error_t
-rpc_ping(const void *in, void *out, size_t in_size)
-{
-  return 0;
-}
-
-RPC_DEF("ping", 0, 0, rpc_ping, 0);
-
-static error_t
-rpc_buildid(const void *in, void *out, size_t in_size)
-{
-  memcpy(out, mios_build_id(), 20);
-  return 0;
-}
-
-RPC_DEF("buildid", 0, 20, rpc_buildid, 0);
-
-static error_t
-rpc_appname(const void *in, void *out, size_t in_size)
-{
-  const char *appname = mios_get_app_name();
-  strlcpy(out, appname, 24);
-  return 0;
-}
-
-RPC_DEF("appname", 0, 24, rpc_appname, 0);
-
-
 #endif
