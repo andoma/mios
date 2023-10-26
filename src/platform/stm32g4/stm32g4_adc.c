@@ -39,7 +39,7 @@ stm32g4_adc_init(uint32_t base)
     panic("Unsupported ADC");
   }
 
-  if(reg_get_bit(base + ADCx_CR, 29))
+  if(reg_get_bit(base + ADCx_CR, 29) == 0)
     return; // Already initialized
 
   reg_clr_bit(base + ADCx_CR, 29); // Turn off DEEPPWD
