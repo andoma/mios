@@ -153,6 +153,10 @@ ssd1306_print_locked(ssd1306_t *dev, int row, const char *str)
   send_command(dev, row * 2);
   send_command(dev, row * 2 + 1);
 
+  if(str == NULL) {
+    return draw_space(dev, row, 128);
+  }
+
   size_t len = strlen(str);
 
   int total_width = 0;
