@@ -156,17 +156,11 @@ rpc_cbor_get_bytestring(uint8_t *cbor, size_t cborlen, rpc_args_t *ra)
   return used + len;
 }
 
-
-
-#include <stdio.h>
-
 error_t
 rpc_dispatch_cbor(rpc_result_t *rr, const char *method, size_t namelen,
                   uint8_t *cbor, size_t cborlen)
 {
   int cborargcount = 0;
-
-  ///  hexdump("CBOR", cbor, cborlen);
 
   if(cborlen) {
     // Expect array
