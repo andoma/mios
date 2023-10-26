@@ -41,6 +41,8 @@ typedef struct metric {
   unsigned int count;
   uint8_t update_counter;
   uint8_t enabled;
+  uint8_t warning;
+  uint8_t alert;
 } metric_t;
 
 void metric_init(metric_t *m, const metric_def_t *def, uint8_t enabled);
@@ -49,3 +51,5 @@ void metric_reset(metric_t *m, int enable);
 
 // irq_forbid(m->def->irq_level) is assumed
 void metric_collect(metric_t *m, float v);
+
+void metric_update_fault(metric_t *m, float v);

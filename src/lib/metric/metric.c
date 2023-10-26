@@ -18,6 +18,8 @@ metric_reset(metric_t *m, int enable)
   m->m2 = 0;
   m->count = 0;
   m->enabled = enable;
+  m->alert = 1;
+  m->warning = 1;
   irq_permit(q);
 }
 
@@ -28,6 +30,8 @@ metric_init(metric_t *m, const metric_def_t *def, uint8_t enabled)
   m->min = INFINITY;
   m->max = -INFINITY;
   m->enabled = enabled;
+  m->alert = 1;
+  m->warning = 1;
   SLIST_INSERT_HEAD(&metrics, m, link);
 }
 
@@ -46,6 +50,14 @@ metric_collect(metric_t *m, float v)
   m->m2 += delta * delta2;
 }
 
+
+void
+metric_update_fault(metric_t *m, float v)
+{
+  const metric_def_t *md = m->def;
+  m->alert   = v > md->high_alert   || v < md->low_alert;
+  m->warning = v > md->high_warning || v < md->low_warning;
+}
 
 
 static error_t
