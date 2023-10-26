@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 
 #include "irq.h"
 
@@ -252,9 +253,11 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
                        int clkid, int irq, uint8_t flags,
                        uint32_t tx_dma_resouce_id)
 {
-  if(u == NULL)
-    u = calloc(1, sizeof(stm32_uart_stream_t));
-
+  if(u == NULL) {
+    u = xalloc(sizeof(stm32_uart_stream_t), 0,
+               flags & UART_TXDMA ? MEM_TYPE_DMA : 0);
+    memset(u, 0, sizeof(stm32_uart_stream_t));
+  }
   clk_enable(clkid);
 
   u->reg_base = reg_base;
