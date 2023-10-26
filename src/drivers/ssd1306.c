@@ -86,6 +86,10 @@ get_width(int cp)
   if(cp > 127)
     return 0;
 
+  if(cp < 33) {
+    return 6;
+  }
+
   cp -= 33;
 
   return fontoffset[cp + 1] - fontoffset[cp];
@@ -97,16 +101,22 @@ draw_char(ssd1306_t *dev, int col, int cp)
   if(cp > 127)
     return 0;
 
-  cp -= 33;
-
-  int offset = fontoffset[cp];
-  int w = fontoffset[cp + 1] - offset;
-
   send_command(dev, 0x21);
   send_command(dev, col);
   send_command(dev, 127);
 
-  const uint8_t *src = &fontbitmap[offset * 2];
+  int w = 0;
+  const uint8_t *src;
+  if(cp < 33) {
+    src = NULL;
+    w = 6;
+  } else {
+    cp -= 33;
+
+    int offset = fontoffset[cp];
+    w = fontoffset[cp + 1] - offset;
+    src = &fontbitmap[offset * 2];
+  }
   dev->buf[0] = 0x40;
   struct iovec tx[2] = {{&dev->buf, 1}, {(void *)src, w * 2}};
 
