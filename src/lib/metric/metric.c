@@ -9,17 +9,33 @@
 struct metric_slist metrics;
 
 void
-metric_init(metric_t *m, const metric_def_t *def)
+metric_reset(metric_t *m, int enable)
+{
+  int q = irq_forbid(m->def->irq_level);
+  m->min = INFINITY;
+  m->max = -INFINITY;
+  m->sum = 0;
+  m->sumsum = 0;
+  m->count = 0;
+  m->enabled = enable;
+  irq_permit(q);
+}
+
+void
+metric_init(metric_t *m, const metric_def_t *def, uint8_t enabled)
 {
   m->def = def;
   m->min = INFINITY;
   m->max = -INFINITY;
+  m->enabled = enabled;
   SLIST_INSERT_HEAD(&metrics, m, link);
 }
 
 void
 metric_collect(metric_t *m, float v)
 {
+  if(!m->enabled)
+    return;
   m->min = MIN(m->min, v);
   m->max = MAX(m->max, v);
   m->sum += v;
@@ -36,6 +52,8 @@ cmd_metric(cli_t *cli, int argc, char **argv)
   cli_printf(cli, "Name             Mean       Min        Max        Stddev     Samples\n");
 
   SLIST_FOREACH(m, &metrics, link) {
+    if(!m->enabled)
+      continue;
     const metric_def_t *md = m->def;
 
     int q = irq_forbid(md->irq_level);
