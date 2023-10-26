@@ -8,6 +8,7 @@ SRCS += ${SRC}/util/bumpalloc.c \
 	${SRC}/util/hdlc.c \
 	${SRC}/util/dsig.c \
 	${SRC}/util/ntcpoly.c \
+	${SRC}/util/pipe.c \
 
 SRCS-${ENABLE_OTA} += ${SRC}/util/ota.c
 
