@@ -19,15 +19,6 @@
 #define NAN __builtin_nanf("")
 #define INFINITY __builtin_inff()
 
-#ifdef MATH_PREFIX
-
-#define MATH_MANGLE(x) mios_##x
-#else
-
-#define MATH_MANGLE(x) x
-
-#endif
-
 #define M_PIf 3.14159265358979f
 
 #define M_HALF_PIf (0.5f * 3.14159265358979f)
@@ -41,7 +32,7 @@
 #if __ARM_FP & 4
 
 static inline float __attribute__((always_inline))
-MATH_MANGLE(fabsf)(float f)
+fabsf(float f)
 {
   float r;
   asm("vabs.f32 %0, %1" : "=t"(r) : "t" (f));
@@ -49,7 +40,7 @@ MATH_MANGLE(fabsf)(float f)
 }
 
 static inline float __attribute__((always_inline))
-MATH_MANGLE(sqrtf)(float f)
+sqrtf(float f)
 {
   float r;
   asm("vsqrt.f32 %0, %1" : "=t"(r) : "t" (f));
@@ -59,7 +50,7 @@ MATH_MANGLE(sqrtf)(float f)
 #else
 
 static inline float
-MATH_MANGLE(fabsf)(float x)
+fabsf(float x)
 {
   union {float f; uint32_t i;} u = {x};
   u.i &= 0x7fffffff;
@@ -79,7 +70,7 @@ float MATH_MANGLE(sqrtf)(float) __attribute__ ((const));
 #if __ARM_FP & 8
 
 static inline double __attribute__((always_inline))
-MATH_MANGLE(sqrt)(double f)
+sqrt(double f)
 {
   double r;
   asm("vsqrt.f64 %P0, %P1" : "=w"(r) : "w" (f));
@@ -90,18 +81,22 @@ MATH_MANGLE(sqrt)(double f)
 
 
 
+float sinf(float) __attribute__ ((const));
 
+float cosf(float) __attribute__ ((const));
 
-float MATH_MANGLE(sinf)(float) __attribute__ ((const));
+float frexprf(float x, int *e)  __attribute__ ((const));
 
-float MATH_MANGLE(cosf)(float) __attribute__ ((const));
+float logf(float x)  __attribute__ ((const));
 
-float MATH_MANGLE(powf)(float a, float b)  __attribute__ ((const));
+float expf(float x)  __attribute__ ((const));
 
-float MATH_MANGLE(atanf)(float)  __attribute__ ((const));
+float powf(float a, float b)  __attribute__ ((const));
 
-float MATH_MANGLE(atan2f)(float, float)  __attribute__ ((const));
+float atanf(float)  __attribute__ ((const));
 
-float MATH_MANGLE(asinf)(float)  __attribute__ ((const));
+float atan2f(float, float)  __attribute__ ((const));
+
+float asinf(float)  __attribute__ ((const));
 
 float fmodf(float x, float y) __attribute__ ((const));

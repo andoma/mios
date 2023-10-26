@@ -3,7 +3,7 @@
 #include "math.h"
 
 float
-MATH_MANGLE(sinf)(float x)
+sinf(float x)
 {
   const float spi = x < 0 ? -M_PIf : M_PIf;
   x = fmodf(x + spi, (2 * M_PIf)) - spi;
@@ -22,7 +22,7 @@ MATH_MANGLE(sinf)(float x)
 
 
 float
-MATH_MANGLE(cosf)(float x)
+cosf(float x)
 {
-  return MATH_MANGLE(sinf)(x + M_HALF_PIf);
+  return sinf(x + M_HALF_PIf);
 }
