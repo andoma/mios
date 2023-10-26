@@ -115,6 +115,9 @@ rpc_cbor_get_utf8(uint8_t *cbor, size_t cborlen, rpc_args_t *ra)
   if(ra->num_gpr == RPC_ARGS_MAX_GPR)
     return ERR_INVALID_RPC_ARGS;
 
+  if(*cbor < 0x60 || *cbor > 0x6f)
+    return ERR_INVALID_RPC_ARGS;
+
   int len;
   int used = cbor_decode_scalar(cbor, cborlen, &len, 0);
   if(used < 0)
@@ -135,6 +138,9 @@ static int
 rpc_cbor_get_bytestring(uint8_t *cbor, size_t cborlen, rpc_args_t *ra)
 {
   if(ra->num_gpr + 1 >= RPC_ARGS_MAX_GPR)
+    return ERR_INVALID_RPC_ARGS;
+
+  if(*cbor < 0x40 || *cbor > 0x4f)
     return ERR_INVALID_RPC_ARGS;
 
   int len;
