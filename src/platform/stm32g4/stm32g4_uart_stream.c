@@ -37,7 +37,7 @@ stm32g4_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
                              uart_config[instance].clkid,
                              uart_config[instance].irq,
                              flags,
-                             0);
+                             uart_config[instance].txdma);
 
   uarts[instance] = u;
 

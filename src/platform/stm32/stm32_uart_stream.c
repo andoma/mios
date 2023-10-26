@@ -164,7 +164,11 @@ uart_irq(void *arg)
       u->tx_busy = 0;
       u->tx_fifo_wrptr = 0;
       task_wakeup(&u->wait_tx, 1);
-      reg_clr_bit(u->reg_base + USART_SR, 6); // Clear TC
+#ifdef USART_ICR
+      reg_wr(u->reg_base + USART_ICR, (1 << 6));
+#else
+      reg_clr_bit(u->reg_base + USART_SR, 6);
+#endif
       stm32_dma_stop(u->tx_dma);
     }
 #endif
@@ -207,7 +211,7 @@ stm32_uart_write_dma(stream_t *s, const void *buf, size_t size)
   if(!can_sleep())
     return;
 
-  int q = irq_forbid(IRQ_LEVEL_IO);
+  int q = irq_forbid(IRQ_LEVEL_CONSOLE);
 
   if(size == 0) {
 
