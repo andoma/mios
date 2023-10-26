@@ -49,7 +49,7 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
 
 void
 hdlc_read(stream_t *s,
-          void (*cb)(void *opaque, const uint8_t *data, size_t len),
+          void (*cb)(void *opaque, uint8_t *data, size_t len),
           void *opaque, size_t max_frame_size)
 {
   uint8_t *buf;

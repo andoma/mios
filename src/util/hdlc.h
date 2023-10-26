@@ -10,7 +10,7 @@
 // Keeps reading from s and calls cb with deframed packets
 // This function never returns (call it from a thread)
 void hdlc_read(stream_t *s,
-               void (*cb)(void *opaque, const uint8_t *data, size_t len),
+               void (*cb)(void *opaque, uint8_t *data, size_t len),
                void *opaque, size_t max_frame_size)
   __attribute__((noreturn));
 
