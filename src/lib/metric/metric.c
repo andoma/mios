@@ -14,8 +14,8 @@ metric_reset(metric_t *m, int enable)
   int q = irq_forbid(m->def->irq_level);
   m->min = INFINITY;
   m->max = -INFINITY;
-  m->sum = 0;
-  m->sumsum = 0;
+  m->mean = 0;
+  m->m2 = 0;
   m->count = 0;
   m->enabled = enable;
   irq_permit(q);
@@ -38,9 +38,12 @@ metric_collect(metric_t *m, float v)
     return;
   m->min = MIN(m->min, v);
   m->max = MAX(m->max, v);
-  m->sum += v;
-  m->sumsum += v * v;
+
   m->count++;
+  float delta = v - m->mean;
+  m->mean += delta / m->count;
+  float delta2 = v - m->mean;
+  m->m2 += delta * delta2;
 }
 
 
@@ -59,13 +62,12 @@ cmd_metric(cli_t *cli, int argc, char **argv)
     int q = irq_forbid(md->irq_level);
     float min = m->min;
     float max = m->max;
-    float sum = m->sum;
-    float sumsum = m->sumsum;
+    float mean = m->mean;
+    float m2 = m->m2;
     unsigned int count = m->count;
     irq_permit(q);
 
-    float mean = sum / count;
-    float var = (sumsum - sum * sum / count) / count;
+    float var = m2 / count;
     float stddev = sqrtf(var);
 
     cli_printf(cli, "%-16s %-10f %-10f %-10f %-10f %d\n",

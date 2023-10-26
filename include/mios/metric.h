@@ -36,8 +36,8 @@ typedef struct metric {
   const metric_def_t *def;
   float min;
   float max;
-  float sum;
-  float sumsum;
+  float mean;
+  float m2;
   unsigned int count;
   uint8_t update_counter;
   uint8_t enabled;
