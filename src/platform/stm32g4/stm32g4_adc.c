@@ -39,8 +39,11 @@ stm32g4_adc_init(uint32_t base)
     panic("Unsupported ADC");
   }
 
+  if(reg_get_bit(base + ADCx_CR, 29))
+    return; // Already initialized
+
   reg_clr_bit(base + ADCx_CR, 29); // Turn off DEEPPWD
-  reg_set_bit(base+ ADCx_CR, 28);  // Turn on voltage regulator
+  reg_set_bit(base + ADCx_CR, 28);  // Turn on voltage regulator
 
   udelay(200); // Wait for voltage regulator to stabilize
 
