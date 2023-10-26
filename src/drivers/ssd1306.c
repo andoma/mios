@@ -195,6 +195,8 @@ ssd1306_print_locked(ssd1306_t *dev, int row, const char *str)
 error_t
 ssd1306_print(ssd1306_t *dev, int row, const char *str)
 {
+  if(row < 0 || row > 3)
+    return ERR_INVALID_ARGS;
   mutex_lock(&dev->mutex);
   error_t err = ssd1306_print_locked(dev, row, str);
   mutex_unlock(&dev->mutex);
