@@ -7,6 +7,7 @@
 
 struct stream;
 
+typedef struct http_connection http_connection_t;
 
 typedef enum {
   HST_HTTP_REQ,
@@ -30,9 +31,7 @@ typedef struct http_server_task {
 typedef struct http_server_wsp {
   http_server_task_t hsw_hst;
 
-  size_t hsw_capacity;
-  size_t hsw_used;
-  uint8_t hsw_data[0];
+  balloc_t hsw_bumpalloc;
 
 } http_server_wsp_t;
 
@@ -58,6 +57,7 @@ typedef struct http_request {
   uint16_t hr_header_match;
   uint8_t hr_header_match_len;
   uint8_t hr_should_keep_alive;
+  uint8_t hr_upgrade_to_websocket;
 
   balloc_t hr_bumpalloc;
 
@@ -68,6 +68,19 @@ struct stream *http_response_begin(struct http_request *hr,
                                    const char *content_type);
 
 int http_response_end(struct http_request *hr);
+
+int http_request_accept_websocket(http_request_t *hr,
+                                  int (*cb)(void *opaque,
+                                            int opcode,
+                                            void *data,
+                                            size_t size,
+                                            http_connection_t *hc,
+                                            balloc_t *ba),
+                                  void *opaque,
+                                  http_connection_t **hcp);
+
+void http_websocket_send(http_connection_t *hc, uint8_t opcode,
+                         const void *data, size_t len, int fin);
 
 typedef struct http_route {
 
