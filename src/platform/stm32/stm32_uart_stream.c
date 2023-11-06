@@ -137,6 +137,25 @@ uart_irq(void *arg)
     u->rx_fifo_wrptr++;
 
     task_wakeup(&u->wait_rx, 1);
+
+    if(sr & (1 << 1)) {
+      u->rx_framing_error++;
+#ifdef USART_ICR
+      reg_wr(u->reg_base + USART_ICR, (1 << 1));
+#endif
+    }
+    if(sr & (1 << 2)) {
+      u->rx_noise++;
+#ifdef USART_ICR
+      reg_wr(u->reg_base + USART_ICR, (1 << 2));
+#endif
+    }
+    if(sr & (1 << 3)) {
+      u->rx_overrun++;
+#ifdef USART_ICR
+      reg_wr(u->reg_base + USART_ICR, (1 << 3));
+#endif
+    }
   }
 
   if(u->tx_dma == STM32_DMA_INSTANCE_NONE) {

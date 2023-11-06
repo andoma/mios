@@ -29,6 +29,10 @@ typedef struct stm32_uart_stream {
   uint8_t tx_fifo[TX_FIFO_SIZE];
   uint8_t rx_fifo[RX_FIFO_SIZE];
 
+  uint32_t rx_overrun;
+  uint32_t rx_noise;
+  uint32_t rx_framing_error;
+
 } stm32_uart_stream_t;
 
 
