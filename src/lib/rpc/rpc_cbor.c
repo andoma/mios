@@ -18,6 +18,19 @@ cbor_decode_float(const uint8_t *cbor, size_t cborlen, float *store)
     memcpy(store, &u32, 4);
     return 5;
   }
+  if(*cbor == 0xfb) {
+    if(cborlen < 9)
+      return ERR_INVALID_RPC_ARGS;
+    uint64_t u64;
+    memcpy(&u64, cbor + 1, 8);
+#if !defined(__BIG_ENDIAN__)
+    u64 = __builtin_bswap64(u64);
+#endif
+    double dbl;
+    memcpy(&dbl, &u64, 8);
+    *store = dbl;
+    return 9;
+  }
   return ERR_INVALID_ARGS;
 }
 #endif
