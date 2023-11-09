@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <usb/usb_desc.h>
 #include <usb/usb.h>
@@ -19,6 +20,7 @@ typedef struct usb_cdc {
 
   stream_t s;
 
+  uint8_t line_state;
   uint8_t enabled;
   uint8_t rx_nak;
   uint8_t tx_on;
@@ -126,7 +128,7 @@ static const struct cdc_comm_desc cdc_comm_desc = {
     .bFunctionLength = sizeof(struct usb_cdc_acm_desc),
     .bDescriptorType = USB_DESC_TYPE_CS_INTERFACE,
     .bDescriptorSubType = 2, // CDC_ACM
-    .bmCapabilities = 0,
+    .bmCapabilities = 2      // CAP_LINE
   },
   .u = {
     .bFunctionLength = sizeof(struct usb_cdc_union_desc),
@@ -136,6 +138,10 @@ static const struct cdc_comm_desc cdc_comm_desc = {
     .bSlaveInterface0 = 1,
   }
 };
+
+#define USB_CDC_SET_CONTROL_LINE_STATE		0x22
+#define USB_CDC_LINE_STATE_DTR 0x1
+#define USB_CDC_LINE_STATE_RTS 0x2
 
 
 static size_t
@@ -285,6 +291,18 @@ cdc_write(struct stream *s, const void *buf, size_t size)
   const uint8_t *b = buf;
   int q = irq_forbid(IRQ_LEVEL_NET);
 
+  while(!(uc->line_state & USB_CDC_LINE_STATE_DTR)) {
+    task_sleep(&uc->tx_waitq);
+
+    /* Linux have this strange idea of echoing back characters
+       until the TTY is set in RAW mode.
+       Thus we sleep for a while to give it a chance to get
+       things in order.
+    */
+
+    usleep(10000);
+  }
+
   for(size_t i = 0; i < size; i++) {
     while(fifo_is_full(&uc->tx_fifo))
       task_sleep(&uc->tx_waitq);
@@ -312,6 +330,15 @@ cdc_shell_thread(void *arg)
 }
 
 
+static void
+usb_cdc_iface_cfg(void *opaque, int req, int value)
+{
+  usb_cdc_t *cdc = opaque;
+  if(req == USB_CDC_SET_CONTROL_LINE_STATE) {
+    cdc->line_state = value;
+    task_wakeup(&cdc->tx_waitq, 1);
+  }
+}
 
 struct stream *
 usb_cdc_create_stream(struct usb_interface_queue *q)
@@ -325,6 +352,8 @@ usb_cdc_create_stream(struct usb_interface_queue *q)
 
   cdc->comm_iface =
     usb_alloc_interface(q, cdc_gen_comm_desc, cdc, 1, "cdc-comm");
+
+  cdc->comm_iface->ui_iface_cfg = usb_cdc_iface_cfg;
 
   usb_init_endpoint(&cdc->comm_iface->ui_endpoints[0],
                     NULL, NULL, NULL,

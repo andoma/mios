@@ -74,6 +74,7 @@ struct usb_ep {
 
 typedef size_t (usb_gen_desc_t)(void *buf, void *opaque, int iface_index);
 
+typedef void (usb_iface_config_t)(void *opaque, int request, int value);
 
 STAILQ_HEAD(usb_interface_queue, usb_interface);
 
@@ -81,7 +82,11 @@ typedef struct usb_interface {
 
   STAILQ_ENTRY(usb_interface) ui_link;
 
+  int ui_index;
+
   usb_gen_desc_t *ui_gen_desc;
+  usb_iface_config_t *ui_iface_cfg;
+
   void *ui_opaque;
   const char *ui_name;
 

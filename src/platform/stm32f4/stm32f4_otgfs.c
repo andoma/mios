@@ -102,13 +102,7 @@ typedef struct ep0_out {
     uint32_t setup_words[2];
     uint8_t setup_u8[8];
 
-    struct {
-      uint8_t request_type;
-      uint8_t request;
-      uint16_t value;
-      uint16_t index;
-      uint16_t length;
-    } setup_pkt;
+    struct usb_setup_packet setup_pkt;
   };
 } ep0_out_t;
 
@@ -141,6 +135,7 @@ struct usb_ctrl {
   uint32_t uc_enumerations;
   uint32_t uc_erratic_errors;
 
+  struct usb_interface_queue uc_ifaces;
 };
 
 
@@ -489,8 +484,9 @@ ep0_handle_set_config(usb_ctrl_t *uc)
 static void
 ep0_handle_setup(usb_ctrl_t *uc)
 {
-  int recipient = uc->uc_ep0_out.setup_pkt.request_type & 0x1f;
-  int type = (uc->uc_ep0_out.setup_pkt.request_type >> 5) & 3;
+  const struct usb_setup_packet *usp = &uc->uc_ep0_out.setup_pkt;
+  int recipient = usp->request_type & 0x1f;
+  int type = (usp->request_type >> 5) & 3;
 
   if(type == 0 && recipient == 0) {
 
@@ -519,9 +515,20 @@ ep0_handle_setup(usb_ctrl_t *uc)
       panic("Can't handle setup %d",
             uc->uc_ep0_out.setup_pkt.request);
     }
-  } else {
-    send_zlp(0);
+    return;
   }
+
+
+  if(type == 1 && recipient == 1) {
+
+    usb_interface_t *ui;
+    STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
+      if(ui->ui_index == usp->index && ui->ui_iface_cfg) {
+        ui->ui_iface_cfg(ui->ui_opaque, usp->request, usp->value);
+      }
+    }
+  }
+  send_zlp(0);
 }
 
 
@@ -941,7 +948,7 @@ static const usb_ctrl_vtable_t stm32f4_otgfs_vtable =
 
 
 void
-init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
+init_interfaces(usb_ctrl_t *uc)
 {
   size_t total_desc_size = sizeof(struct usb_config_descriptor);
 
@@ -951,7 +958,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
   usb_interface_t *ui;
   int num_interfaces = 0;
 
-  STAILQ_FOREACH(ui, q, ui_link) {
+  STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
     total_desc_size += ui->ui_gen_desc(NULL, ui->ui_opaque, 0);
     total_desc_size +=
       ui->ui_num_endpoints * sizeof(struct usb_endpoint_descriptor);
@@ -976,7 +983,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 
   int iface_index = 0;
 
-  STAILQ_FOREACH(ui, q, ui_link) {
+  STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
 
     o += ui->ui_gen_desc(o, ui->ui_opaque, iface_index);
     iface_index++;
@@ -1135,6 +1142,9 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
 
   usb_ctrl_t *uc = &g_usb_ctrl;
 
+  uc->uc_ifaces = *q;
+  STAILQ_INIT(q);
+
   uc->uc_dev.d_class = &stm32f4_otgfs_class;
   uc->uc_dev.d_name = "usb";
   device_register(&uc->uc_dev);
@@ -1146,7 +1156,7 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
 
   clk_enable(CLK_OTGFS);
 
-  init_interfaces(uc, q);
+  init_interfaces(uc);
 
   reset_peripheral(RST_OTGFS);
   while(!reg_get_bit(OTG_FS_GRSTCTL, 31)) {}

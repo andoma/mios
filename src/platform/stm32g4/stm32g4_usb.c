@@ -96,6 +96,8 @@ typedef struct usb_ctrl {
   uint8_t *txbuf[MAX_NUM_ENDPOINTS];
   uint8_t txsiz[MAX_NUM_ENDPOINTS];
 
+  struct usb_interface_queue uc_ifaces;
+
 } usb_ctrl_t;
 
 
@@ -463,9 +465,19 @@ ep0_handle_setup(usb_ctrl_t *uc, const struct usb_setup_packet *usp)
       panic("Can't handle setup %d",
             usp->request);
     }
-  } else {
-    send_zlp(uc, 0);
+    return;
   }
+
+  if(type == 1 && recipient == 1) {
+
+    usb_interface_t *ui;
+    STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
+      if(ui->ui_index == usp->index && ui->ui_iface_cfg) {
+        ui->ui_iface_cfg(ui->ui_opaque, usp->request, usp->value);
+      }
+    }
+  }
+  send_zlp(uc, 0);
 }
 
 
@@ -781,7 +793,7 @@ alloc_ep(usb_ctrl_t *uc, int out, usb_ep_t *ep)
 
 
 void
-init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
+init_interfaces(usb_ctrl_t *uc)
 {
   size_t total_desc_size = sizeof(struct usb_config_descriptor);
 
@@ -800,7 +812,7 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
   sramptr += 8;
   reg_wr16(USB_COUNT_RX(0), (4 << 10)); // 8 byte buffer
 
-  STAILQ_FOREACH(ui, q, ui_link) {
+  STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
     total_desc_size += ui->ui_gen_desc(NULL, ui->ui_opaque, 0);
     total_desc_size +=
       ui->ui_num_endpoints * sizeof(struct usb_endpoint_descriptor);
@@ -825,9 +837,11 @@ init_interfaces(usb_ctrl_t *uc, struct usb_interface_queue *q)
 
   int iface_index = 0;
 
-  STAILQ_FOREACH(ui, q, ui_link) {
+  STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
 
     o += ui->ui_gen_desc(o, ui->ui_opaque, iface_index);
+    ui->ui_index = iface_index;
+
     iface_index++;
 
     for(size_t j = 0; j < ui->ui_num_endpoints; j++)  {
@@ -884,6 +898,9 @@ stm32g4_usb_create(uint16_t vid, uint16_t pid,
                    struct usb_interface_queue *q)
 {
   usb_ctrl_t *uc = &g_usb_ctrl;
+  uc->uc_ifaces = *q;
+  STAILQ_INIT(q);
+
   uc->uc_ud.ud_dev.d_class = &stm32g4_otgfs_class;
   uc->uc_ud.ud_dev.d_name = "usb";
   device_register(&uc->uc_ud.ud_dev);
@@ -900,7 +917,7 @@ stm32g4_usb_create(uint16_t vid, uint16_t pid,
     reg_wr16(USB_SRAM + i, 0);
   }
 
-  init_interfaces(uc, q);
+  init_interfaces(uc);
 
   reg_wr(USB_CNTR, 1);
   udelay(1);
