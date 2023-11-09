@@ -269,32 +269,28 @@ heap_free(void *ptr)
 }
 
 
-static heap_block_t *
-heap_find(int type)
-{
-  heap_header_t *hh;
-  SLIST_FOREACH(hh, &heaps, link) {
-    if(type == 0 || type == hh->type) {
-      return hh->blocks;
-    }
-  }
-  return NULL;
-}
-
-
-
-
-
 static void *
 malloc0(size_t size, size_t align, int type)
 {
   mutex_lock(&heap_mutex);
-  heap_block_t *hb = heap_find(type & 0xf);
-  void *x = hb ? heap_alloc(hb, size, align) : NULL;
+
+  int heap_type = type & 0xf;
+
+  heap_header_t *hh;
+  SLIST_FOREACH(hh, &heaps, link) {
+    heap_block_t *hb = hh->blocks;
+    if(hb != NULL && (heap_type == 0 || heap_type == hh->type)) {
+      void *x = heap_alloc(hb, size, align);
+      if(x) {
+        mutex_unlock(&heap_mutex);
+        return x;
+      }
+    }
+  }
   mutex_unlock(&heap_mutex);
-  if(x == NULL && !(type & MEM_MAY_FAIL))
+  if(!(type & MEM_MAY_FAIL))
     panic("Out of memory (s=%d a=%d t=%d)", size, align, type & 0xf);
-  return x;
+  return NULL;
 }
 
 
