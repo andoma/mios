@@ -142,7 +142,7 @@ evlog0(event_level_t level, stream_t *st, const char *fmt, ...)
     va_copy(ap2, ap);
     vstprintf(st, fmt, ap2);
     va_end(ap2);
-    st->write(st, "\n", 1);
+    st->write(st, "\n", 1, 0);
   }
 
   mutex_lock(&ef->mutex);
@@ -235,7 +235,7 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
     if(ptr == ef->head) {
       if(!follow)
         break;
-      st->write(st, NULL, 0);
+      st->write(st, NULL, 0, 0);
       if(cond_wait_timeout(&sf.c, &ef->mutex, clock_get() + 100000)) {}
       uint8_t dummy;
       int r = st->read(st, &dummy, 1, STREAM_READ_WAIT_NONE);
@@ -260,12 +260,12 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
              -(ms_ago / 1000), ms_ago % 1000,  level2str[level]);
 
     if(msgend >= msgstart) {
-      st->write(st, ef->data + msgstart, msglen);
+      st->write(st, ef->data + msgstart, msglen, 0);
     } else {
-      st->write(st, ef->data + msgstart, EVENTLOG_SIZE - msgstart);
-      st->write(st, ef->data, msgend);
+      st->write(st, ef->data + msgstart, EVENTLOG_SIZE - msgstart, 0);
+      st->write(st, ef->data, msgend, 0);
     }
-    st->write(st, "\n", 1);
+    st->write(st, "\n", 1, 0);
 
     sf.f.ptr = ptr + len;
   }

@@ -48,7 +48,7 @@ printchar(char c)
 }
 
 static void
-nrf52_uart_write(stream_t *s, const void *buf, size_t size)
+nrf52_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 {
   nrf52_uart_t *u = (nrf52_uart_t *)s;
   if(size == 0)

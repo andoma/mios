@@ -69,7 +69,7 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
   const uint8_t byte_7e = 0x7e;
   uint8_t esc[2] = {0x7d, 0};
 
-  s->write(s, &byte_7e, 1);
+  s->write(s, &byte_7e, 1, 0);
 
   for(size_t v = 0; v < count; v++) {
 
@@ -80,19 +80,19 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
       if(buf[i] == 0x7e || buf[i] == 0x7d) {
 
         if(i - b)
-          s->write(s, buf + b, i - b);
+          s->write(s, buf + b, i - b, 0);
 
         esc[1] = buf[i] ^ 0x20;
-        s->write(s, esc, 2);
+        s->write(s, esc, 2, 0);
 
         b = i + 1;
       }
     }
     if(i - b)
-      s->write(s, buf + b, i - b);
+      s->write(s, buf + b, i - b, 0);
   }
-  s->write(s, &byte_7e, 1);
-  s->write(s, NULL, 0);
+  s->write(s, &byte_7e, 1, 0);
+  s->write(s, NULL, 0, 0);
 }
 
 

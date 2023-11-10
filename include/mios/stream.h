@@ -6,7 +6,8 @@
 #define STREAM_READ_WAIT_ONE  1
 #define STREAM_READ_WAIT_ALL  2
 
-
+#define STREAM_WRITE_NO_WAIT  0x1
+#define STREAM_WRITE_WAIT_DTR 0x2
 
 typedef struct stream {
 
@@ -14,7 +15,7 @@ typedef struct stream {
   int (*read)(struct stream *s, void *buf, size_t size, int wait);
 
   __attribute__((access(read_only, 2, 3)))
-  void (*write)(struct stream *s, const void *buf, size_t size);
+  void (*write)(struct stream *s, const void *buf, size_t size, int flags);
 
 } stream_t;
 

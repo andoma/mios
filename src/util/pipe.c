@@ -24,7 +24,7 @@ pipe_thread(void *arg)
   free(p);
   while(1) {
     int r = from->read(from, buf, sizeof(buf), STREAM_READ_WAIT_ONE);
-    to->write(to, buf, r);
+    to->write(to, buf, r, 0);
   }
 }
 

@@ -79,7 +79,8 @@ socket_stream_read(struct stream *s, void *buf, size_t size, int wait)
 
 
 static void
-socket_stream_write(struct stream *s, const void *buf, size_t size)
+socket_stream_write(struct stream *s, const void *buf, size_t size,
+                    int flags)
 {
   socket_stream_t *ss = (socket_stream_t *)s;
 
@@ -323,26 +324,27 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
 
 
 static void
-telnet_write_filter(struct stream *s, const void *buf, size_t size)
+telnet_write_filter(struct stream *s, const void *buf, size_t size,
+                    int flags)
 {
   static const uint8_t crlf[2] = {0x0d, 0x0a};
 
   if(buf == NULL) {
-    socket_stream_write(s, buf, size);
+    socket_stream_write(s, buf, size, flags);
   } else {
     const uint8_t *c = buf;
     size_t s0 = 0, i;
     for(i = 0; i < size; i++) {
       if(c[i] == 0x0a) {
         size_t len = i - s0;
-        socket_stream_write(s, buf + s0, len);
-        socket_stream_write(s, crlf, 2);
+        socket_stream_write(s, buf + s0, len, flags);
+        socket_stream_write(s, crlf, 2, flags);
         s0 = i + 1;
       }
     }
     size_t len = i - s0;
     if(len) {
-      socket_stream_write(s, buf + s0, len);
+      socket_stream_write(s, buf + s0, len, flags);
     }
   }
 }

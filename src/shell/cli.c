@@ -193,7 +193,8 @@ cli_on_stream(stream_t *s, char promptchar)
   cli_t cli = {
     .cl_stream = s
   };
-  stprintf(s, "\n");
+
+  s->write(s, "\n", 1, STREAM_WRITE_WAIT_DTR);
   mios_print_version(s);
   cli_prompt(&cli, promptchar);
   while(1) {

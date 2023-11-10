@@ -21,7 +21,7 @@ typedef struct usb_cdc {
   stream_t s;
 
   uint8_t line_state;
-  uint8_t enabled;
+  uint8_t flags;
   uint8_t rx_nak;
   uint8_t tx_on;
 
@@ -190,6 +190,11 @@ cdc_rx(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
   if(flags)
     panic("cdc_rx_pkt: flags:%x", flags);
   usb_cdc_t *uc = ue->ue_iface_aux;
+
+  if(uc->flags & USB_CDC_DISCARD_RX) {
+    ue->ue_vtable->cnak(ue->ue_dev, ue);
+    return;
+  }
   cdc_rx_pkt(d, ue, uc, bytes);
   uc->rx_nak = 1;
   task_wakeup(&uc->rx_waitq, 0);
@@ -280,7 +285,7 @@ cdc_read(struct stream *s, void *buf, size_t size, int wait)
 
 
 static void
-cdc_write(struct stream *s, const void *buf, size_t size)
+cdc_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   if(size == 0)
     return;
@@ -291,21 +296,25 @@ cdc_write(struct stream *s, const void *buf, size_t size)
   const uint8_t *b = buf;
   int q = irq_forbid(IRQ_LEVEL_NET);
 
-  while(!(uc->line_state & USB_CDC_LINE_STATE_DTR)) {
-    task_sleep(&uc->tx_waitq);
+  if(flags & STREAM_WRITE_WAIT_DTR) {
+    while(!(uc->line_state & USB_CDC_LINE_STATE_DTR)) {
+      task_sleep(&uc->tx_waitq);
 
-    /* Linux have this strange idea of echoing back characters
-       until the TTY is set in RAW mode.
-       Thus we sleep for a while to give it a chance to get
-       things in order.
-    */
-
-    usleep(10000);
+      /* Linux have this strange idea of echoing back characters
+         until the TTY is set in RAW mode.
+         Thus we sleep for a while to give it a chance to get
+         things in order.
+      */
+      usleep(10000);
+    }
   }
 
   for(size_t i = 0; i < size; i++) {
-    while(fifo_is_full(&uc->tx_fifo))
+    while(fifo_is_full(&uc->tx_fifo)) {
+      if(flags & STREAM_WRITE_NO_WAIT)
+        goto done;
       task_sleep(&uc->tx_waitq);
+    }
 
     fifo_wr(&uc->tx_fifo, b[i]);
 
@@ -314,7 +323,7 @@ cdc_write(struct stream *s, const void *buf, size_t size)
       uc->tx_on = 1;
     }
   }
-
+ done:
   irq_permit(q);
 }
 
@@ -323,9 +332,10 @@ __attribute__((noreturn))
 static void *
 cdc_shell_thread(void *arg)
 {
-  stream_t *s = arg;
+  usb_cdc_t *cdc = arg;
+
   while(1) {
-    cli_on_stream(s, '>');
+    cli_on_stream(&cdc->s, '>');
   }
 }
 
@@ -341,12 +351,12 @@ usb_cdc_iface_cfg(void *opaque, int req, int value)
 }
 
 struct stream *
-usb_cdc_create_stream(struct usb_interface_queue *q)
+usb_cdc_create_stream(struct usb_interface_queue *q, int flags)
 {
   usb_cdc_t *cdc = calloc(1, sizeof(usb_cdc_t));
   cdc->s.read = cdc_read;
   cdc->s.write = cdc_write;
-
+  cdc->flags = flags;
   task_waitable_init(&cdc->rx_waitq, "cdcrx");
   task_waitable_init(&cdc->tx_waitq, "cdctx");
 
@@ -377,6 +387,6 @@ usb_cdc_create_stream(struct usb_interface_queue *q)
 void
 usb_cdc_create_shell(struct usb_interface_queue *q)
 {
-  struct stream *s = usb_cdc_create_stream(q);
+  struct stream *s = usb_cdc_create_stream(q, 0);
   task_create_shell(cdc_shell_thread, s, "cdc-cli", 0);
 }

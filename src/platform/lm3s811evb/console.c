@@ -55,7 +55,7 @@ uart_read(struct stream *s, void *buf, size_t size, int wait)
 
 
 static void
-uart_write(struct stream *s, const void *buf, size_t size)
+uart_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   const char *d = buf;
   for(size_t i = 0; i < size; i++) {

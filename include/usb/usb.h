@@ -128,7 +128,10 @@ usb_init_endpoint(usb_ep_t *ue, void *aux,
 }
 
 
-struct stream *usb_cdc_create_stream(struct usb_interface_queue *q);
+#define USB_CDC_DISCARD_RX 0x1
+
+struct stream *usb_cdc_create_stream(struct usb_interface_queue *q,
+                                     int flags);
 
 void usb_cdc_create_shell(struct usb_interface_queue *q);
 

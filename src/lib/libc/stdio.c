@@ -326,7 +326,7 @@ static size_t
 stream_fmt(void *arg, const char *buf, size_t len)
 {
   stream_t *s = arg;
-  s->write(s, buf, len);
+  s->write(s, buf, len, 0);
   return len;
 }
 
@@ -335,7 +335,7 @@ int
 vstprintf(stream_t *s, const char *fmt, va_list ap)
 {
   if(fmt == NULL) {
-    s->write(s, NULL, 0);
+    s->write(s, NULL, 0, 0);
     return 0;
   }
 
@@ -398,9 +398,9 @@ stprintflags(stream_t *s, const char *str, uint32_t flags, const char *sep)
       break;
     if(flags & (1 << i)) {
       if(need_sep) {
-        s->write(s, sep, seplen);
+        s->write(s, sep, seplen, 0);
       }
-      s->write(s, str, n);
+      s->write(s, str, n, 0);
       need_sep = 1;
     }
     str += n + 1;
@@ -476,7 +476,7 @@ static size_t
 stdout_cb(void *aux, const char *s, size_t len)
 {
   if(stdio != NULL)
-    stdio->write(stdio, s, len);
+    stdio->write(stdio, s, len, 0);
   return len;
 }
 
@@ -503,7 +503,7 @@ putchar(int c)
 {
   if(stdio) {
     char s8 = c;
-    stdio->write(stdio, &s8, 1);
+    stdio->write(stdio, &s8, 1, 0);
   }
   return c;
 }
@@ -514,8 +514,8 @@ puts(const char *s)
 {
   if(stdio) {
     size_t len = strlen(s);
-    stdio->write(stdio, s, len);
-    stdio->write(stdio, "\n", 1);
+    stdio->write(stdio, s, len, 0);
+    stdio->write(stdio, "\n", 1, 0);
   }
   return 0;
 }

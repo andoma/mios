@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
+#include <stdio.h>
 
 #include "irq.h"
 
@@ -22,7 +23,7 @@
 
 
 static void
-stm32_uart_write(stream_t *s, const void *buf, size_t size)
+stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 {
   if(size == 0)
     return;
@@ -223,7 +224,7 @@ stm32_uart_tx_dma_wait(stm32_uart_stream_t *u)
 
 
 static void
-stm32_uart_write_dma(stream_t *s, const void *buf, size_t size)
+stm32_uart_write_dma(stream_t *s, const void *buf, size_t size, int flags)
 {
   stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
 
