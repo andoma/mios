@@ -272,10 +272,25 @@ stm32_uart_write_dma(stream_t *s, const void *buf, size_t size, int flags)
 #endif
 
 
+static void
+stm32_uart_print_info(struct device *dev, struct stream *st)
+{
+  stm32_uart_stream_t *u = (void *)dev - offsetof(stm32_uart_stream_t, device);
+  stprintf(st, "\tOverrun:%d Noise:%d Framing:%d\n",
+           u->rx_overrun,
+           u->rx_noise,
+           u->rx_framing_error);
+}
+
+
+static const device_class_t stm32_uart_class = {
+  .dc_print_info = stm32_uart_print_info,
+};
+
 stm32_uart_stream_t *
 stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
                        int clkid, int irq, uint8_t flags,
-                       uint32_t tx_dma_resouce_id)
+                       uint32_t tx_dma_resouce_id, const char *name)
 {
   if(u == NULL) {
     u = xalloc(sizeof(stm32_uart_stream_t), 0,
@@ -283,6 +298,10 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
     memset(u, 0, sizeof(stm32_uart_stream_t));
   }
   clk_enable(clkid);
+
+  u->device.d_name = name;
+  u->device.d_class = &stm32_uart_class;
+  device_register(&u->device);
 
   u->reg_base = reg_base;
   u->flags = flags;

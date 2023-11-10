@@ -18,7 +18,7 @@ board_init_console(void)
 {
   static stm32_uart_stream_t console;
   stdio = stm32f4_uart_stream_init(&console, 2, 115200, GPIO_PA(2), GPIO_PA(3),
-                                   UART_CTRLD_IS_PANIC);
+                                   UART_CTRLD_IS_PANIC, "console");
 }
 
 

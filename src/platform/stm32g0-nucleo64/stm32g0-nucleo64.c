@@ -26,7 +26,7 @@ board_init(void)
   stdio = stm32g0_uart_stream_init(&console, 2, 115200,
                                    stm32g0_uart_tx(2, GPIO_PA(2)),
                                    stm32g0_uart_rx(2, GPIO_PA(3)),
-                                   UART_CTRLD_IS_PANIC);
+                                   UART_CTRLD_IS_PANIC, "console");
 }
 
 struct {

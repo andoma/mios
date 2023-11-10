@@ -2,6 +2,7 @@
 
 #include <mios/stream.h>
 #include <mios/task.h>
+#include <mios/device.h>
 
 #include "stm32_dma.h"
 
@@ -10,6 +11,8 @@
 
 typedef struct stm32_uart_stream {
   stream_t stream;
+
+  device_t device;
 
   uint32_t reg_base;
 

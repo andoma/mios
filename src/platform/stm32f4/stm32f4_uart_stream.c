@@ -26,7 +26,8 @@ static stm32_uart_stream_t *uarts[6];
 
 stream_t *
 stm32f4_uart_stream_init(stm32_uart_stream_t *u, int instance, int baudrate,
-                         gpio_t tx, gpio_t rx, uint8_t flags)
+                         gpio_t tx, gpio_t rx, uint8_t flags,
+                         const char *name)
 {
   const int index = instance - 1;
   const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
@@ -41,7 +42,8 @@ stm32f4_uart_stream_init(stm32_uart_stream_t *u, int instance, int baudrate,
                              cfg->clkid,
                              cfg->irq,
                              flags,
-                             cfg->txdma);
+                             cfg->txdma,
+                             name);
 
   uarts[index] = u;
 

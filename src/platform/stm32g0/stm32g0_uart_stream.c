@@ -63,7 +63,8 @@ void irq_29(void) { uart_irq(uarts[2]); }
 
 stream_t *
 stm32g0_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
-                         int baudrate, gpio_t tx, gpio_t rx, uint8_t flags)
+                         int baudrate, gpio_t tx, gpio_t rx, uint8_t flags,
+                         const char *name)
 {
   const stm32g0_uart_cfg_t *cfg = stm32g0_uart_config_get(instance);
   const int tx_af = stm32g0_uart_tx(instance, tx);
@@ -82,7 +83,8 @@ stm32g0_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
                              cfg->clkid,
                              cfg->irq,
                              flags,
-                             0);
+                             0,
+                             name);
 
   if(flags & UART_HALF_DUPLEX)
     reg_wr(u->reg_base + USART_CR3, 0x8); // HDSEL

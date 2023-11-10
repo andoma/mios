@@ -42,7 +42,7 @@ int stm32g0_uart_rx(int instance, gpio_t pin);
 stream_t *stm32g0_uart_stream_init(stm32_uart_stream_t *u,
                                    unsigned int instance,
                                    int baudrate, gpio_t tx, gpio_t rex,
-                                   uint8_t flags);
+                                   uint8_t flags, const char *name);
 
 void stm32g0_uart_mbus_multidrop_create(unsigned int instance,
                                         gpio_t tx, gpio_t rx, gpio_t txe,

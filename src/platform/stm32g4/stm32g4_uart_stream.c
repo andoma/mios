@@ -19,7 +19,8 @@ stm32g4_uart_get_config(int index)
 
 stream_t *
 stm32g4_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
-                         int baudrate, gpio_t tx, gpio_t rx, uint8_t flags)
+                         int baudrate, gpio_t tx, gpio_t rx, uint8_t flags,
+                         const char *name)
 {
   instance--;
 
@@ -37,7 +38,8 @@ stm32g4_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
                              uart_config[instance].clkid,
                              uart_config[instance].irq,
                              flags,
-                             uart_config[instance].txdma);
+                             uart_config[instance].txdma,
+                             name);
 
   uarts[instance] = u;
 

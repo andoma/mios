@@ -34,7 +34,8 @@ typedef struct {
 
 stream_t *stm32g4_uart_stream_init(struct stm32_uart_stream *uart,
                                    unsigned int instance, int baudrate,
-                                   gpio_t tx, gpio_t rx, uint8_t flags);
+                                   gpio_t tx, gpio_t rx, uint8_t flags,
+                                   const char *name);
 
 void stm32g4_uart_mbus_multidrop_create(unsigned int instance,
                                         gpio_t tx, gpio_t rx, gpio_t txe);
