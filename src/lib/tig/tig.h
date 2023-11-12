@@ -41,7 +41,9 @@ void tig_indent(tig_ctx_t *tc);
 
 void tig_unindent(tig_ctx_t *tc);
 
-int tig_button(tig_ctx_t *tc, const char *str);
+int tig_button(tig_ctx_t *tc, int flags, int width, const char *str);
+
+void tig_nextline(tig_ctx_t *tc, int height);
 
 // Interactions
 
@@ -71,6 +73,8 @@ void tig_scroll_end(tig_ctx_t *tc, tig_scroll_state_t *tss);
 
 #define TIG_VIEW_CENTERED (TIG_HALIGN_VIEW_CENTERED | \
                            TIG_VALIGN_VIEW_CENTERED)
+
+#define TIG_INLINE 0x20
 
 void tig_text(tig_ctx_t *ctx, int flags, const char *fmt, ...)
   __attribute__ ((format(printf, 3, 4)));

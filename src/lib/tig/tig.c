@@ -214,9 +214,12 @@ void
 tig_move_abs(tig_ctx_t *tc, int x, int y)
 {
   tig_state_t *ts = &tc->tc_state[tc->tc_sptr];
-  ts->ts_pos.x = ts->ts_view.pos.x + x;
-  ts->ts_pos.y = ts->ts_view.pos.y + y;
+  if(x != INT32_MIN)
+    ts->ts_pos.x = ts->ts_view.pos.x + x;
+  if(y != INT32_MIN)
+    ts->ts_pos.y = ts->ts_view.pos.y + y;
 }
+
 
 void
 tig_move_rel(tig_ctx_t *tc, int x, int y)
@@ -298,7 +301,12 @@ tig_text(tig_ctx_t *tc, int flags, const char *fmt, ...)
     gdc->text(gd, &pos, ts->ts_font, tmp, len);
   }
 
-  ts->ts_pos.y += size.height;
+  if(flags & TIG_INLINE) {
+    ts->ts_pos.x += size.width;
+  }  else {
+    ts->ts_pos.x = ts->ts_view.pos.x;
+    ts->ts_pos.y += size.height;
+  }
 }
 
 
@@ -423,7 +431,7 @@ tig_scroll_end(tig_ctx_t *tc, tig_scroll_state_t *tss)
 }
 
 int
-tig_button(tig_ctx_t *tc, const char *str)
+tig_button(tig_ctx_t *tc, int flags, int width, const char *str)
 {
   tig_state_t *ts = &tc->tc_state[tc->tc_sptr];
   gfx_position_t pos = ts->ts_pos;
@@ -438,15 +446,34 @@ tig_button(tig_ctx_t *tc, const char *str)
 
   int hit = 0;
 
+  int margin = 5;
+  int padding = 5;
+
+  int avail_width = ts->ts_view.siz.width;
+  if(!(flags & TIG_NO_INDENT)) {
+    pos.x += ts->ts_indent * 20;
+    avail_width -= ts->ts_indent * 40;
+  }
+
+  if(width == 0)
+    width = avail_width;
+
+  pos.x += margin;
+  if(!(flags & TIG_INLINE)) {
+    pos.y += margin;
+  }
+
   if(pos.y + size.height >= ts->ts_view.pos.y &&
      pos.y < ts->ts_view.pos.y + ts->ts_view.siz.height) {
 
-    pos.x += ts->ts_indent * 20;
 
+    gfx_rect_t rect; // Rectangle for border
 
-    gfx_rect_t rect = {{pos.x+5, pos.y+5},
-                       {ts->ts_view.siz.width - ts->ts_indent * 40 - 10,
-                        20 + size.height - 10}};
+    rect.pos.x = pos.x;
+    rect.pos.y = pos.y - padding;
+
+    rect.siz.width = width - margin * 2;
+    rect.siz.height = size.height + padding * 2;
 
     if(tig_pressed(tc, &rect)) {
       if(tc->tc_tts == TTS_RELEASE) {
@@ -459,13 +486,27 @@ tig_button(tig_ctx_t *tc, const char *str)
     }
     gdc->rect(gd, &rect, 1);
 
-    pos.x += (ts->ts_view.siz.width - ts->ts_indent * 40) / 2 - size.width / 2;
-    pos.y += 10;
+    pos.x += rect.siz.width / 2 - size.width / 2;
     gdc->text(gd, &pos, ts->ts_font, str, len);
   }
 
-  ts->ts_pos.y += size.height + 20;
+  if(flags & TIG_INLINE) {
+    ts->ts_pos.x += width;
+  }  else {
+    ts->ts_pos.x = ts->ts_view.pos.x;
+    ts->ts_pos.y += size.height;
+  }
+
   return hit;
+}
+
+
+void
+tig_nextline(tig_ctx_t *tc, int height)
+{
+  tig_state_t *ts = &tc->tc_state[tc->tc_sptr];
+  ts->ts_pos.x = ts->ts_view.pos.x;
+  ts->ts_pos.y += height;
 }
 
 
