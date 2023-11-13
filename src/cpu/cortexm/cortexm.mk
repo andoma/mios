@@ -23,9 +23,10 @@ SRCS += ${C}/isr.s \
 ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}
 
 GDB_PORT ?= 3333
+GDB_HOST ?= 127.0.0.1
 
 stlink: ${O}/build.elf
-	${GDB} -ex "target extended-remote localhost:${GDB_PORT}" -x ${T}/gdb/macros $<
+	${GDB} -ex "target extended-remote ${GDB_HOST}:${GDB_PORT}" -x ${T}/gdb/macros $<
 
 dfu: ${O}/build.bin
 	dfu-util -a 0 -D $< -s 0x08000000:leave
