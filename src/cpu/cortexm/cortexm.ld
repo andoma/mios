@@ -19,6 +19,12 @@ SECTIONS {
                 _ota_flasher_end = .;
         } >FLASH
 
+        .ARM.exidx : {
+                . = ALIGN(4);
+                 *(.ARM.exidx*)
+                 *(.gnu.linkonce.armexidx.*)
+        } >FLASH
+
         .inits : {
                 . = ALIGN(4);
                 _init_array_begin = .;
@@ -73,12 +79,6 @@ SECTIONS {
                 . = ALIGN(4);
                 PROVIDE(_appname = .);
                 KEEP(*(appname))
-        } >FLASH
-
-        .ARM.exidx : {
-                . = ALIGN(4);
-                 *(.ARM.exidx*)
-                 *(.gnu.linkonce.armexidx.*)
                 . = ALIGN(8);
                  _etext = .;
         } >FLASH
