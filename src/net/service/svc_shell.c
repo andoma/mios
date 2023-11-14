@@ -252,7 +252,7 @@ shell_thread(void *arg)
 
 #ifdef ENABLE_NET_IPV4
   if(ss->ss_telnet_mode) {
-    ss->s.ss_stream.write(&ss->s.ss_stream, telnet_init, sizeof(telnet_init));
+    ss->s.ss_stream.write(&ss->s.ss_stream, telnet_init, sizeof(telnet_init), 0);
   }
 #endif
 
