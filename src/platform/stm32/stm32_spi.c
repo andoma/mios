@@ -21,11 +21,6 @@ typedef struct stm32_spi {
   uint16_t clkid;
 } stm32_spi_t;
 
-#define SPI_CR1  0x00
-#define SPI_CR2  0x04
-#define SPI_SR   0x08
-#define SPI_DR   0x0c
-
 #define CR2_VALUE (1 << 12) // Should be set for 8 bit wide transfers
 
 static uint32_t tx_zero;

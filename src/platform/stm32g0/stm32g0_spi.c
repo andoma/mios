@@ -1,5 +1,6 @@
 #include "stm32g0_reg.h"
 #include "stm32g0_clk.h"
+#include "stm32g0_spi.h"
 
 #include "platform/stm32/stm32_spi.c"
 

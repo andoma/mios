@@ -1,6 +1,7 @@
 #include "stm32f4_reg.h"
 #include "stm32f4_clk.h"
 #include "stm32f4_dma.h"
+#include "stm32f4_spi.h"
 
 #include "platform/stm32/stm32_spi.c"
 
@@ -11,7 +12,7 @@ static const struct {
   uint16_t clkid;
   uint8_t af;
 } spi_config[] = {
-  { 0x40013000, STM32F4_DMA_SPI1_TX, STM32F4_DMA_SPI1_RX, CLK_SPI1, 5 }
+  { SPI1_BASE, STM32F4_DMA_SPI1_TX, STM32F4_DMA_SPI1_RX, CLK_SPI1, 5 }
 };
 
 

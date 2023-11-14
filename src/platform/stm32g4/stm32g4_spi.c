@@ -1,5 +1,6 @@
 #include "stm32g4_reg.h"
 #include "stm32g4_clk.h"
+#include "stm32g4_spi.h"
 
 #include "platform/stm32/stm32_spi.c"
 
