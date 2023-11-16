@@ -14,7 +14,7 @@ static void
 wdog_timer_cb(void *opaque, uint64_t expire)
 {
   timer_arm_abs(&wdog_timer, expire + 10000000);
-  softirq_trig(&wdog_task);
+  task_run(&wdog_task);
 }
 
 static void

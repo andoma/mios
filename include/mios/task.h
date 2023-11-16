@@ -35,7 +35,7 @@ typedef struct task {
 } task_t;
 
 
-void softirq_trig(task_t *t);
+void task_run(task_t *t);
 
  /*
  * Per thread memory block

@@ -804,7 +804,7 @@ irq_67(void)
 
       if(reg_rd(OTG_FS_DSTS) & 8) {
         // Erratic error, trig reset
-        softirq_trig(&g_usb_ctrl.uc_softirq);
+        task_run(&g_usb_ctrl.uc_softirq);
         uc->uc_erratic_errors++;
       }
     }
@@ -1176,7 +1176,7 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
 static error_t
 usbreset(cli_t *cli, int argc, char **argv)
 {
-  softirq_trig(&g_usb_ctrl.uc_softirq);
+  task_run(&g_usb_ctrl.uc_softirq);
   return 0;
 }
 

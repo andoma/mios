@@ -179,7 +179,7 @@ task_switch(void *cur_sp)
 
 
 void
-softirq_trig(task_t *t)
+task_run(task_t *t)
 {
   int q = irq_forbid(IRQ_LEVEL_SCHED);
   if(likely(t->t_state == TASK_STATE_NONE)) {
