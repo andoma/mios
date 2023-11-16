@@ -29,6 +29,43 @@ static cond_t thread_mgmt_cond = COND_INITIALIZER("taskmgmt");
 static task_waitable_t join_wait;
 
 
+
+#if NUM_SOFTIRQ > 0
+
+static struct {
+  void (*fn)(void *arg);
+  void *arg;
+} softirq[NUM_SOFTIRQ];
+
+static uint32_t softirq_pending;
+
+uint32_t
+softirq_alloc(void (*fn)(void *arg), void *arg)
+{
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+
+  for(uint32_t i = 0; i < NUM_SOFTIRQ; i++) {
+    if(softirq[i].fn == NULL) {
+      softirq[i].fn = fn;
+      softirq[i].arg = arg;
+      irq_permit(q);
+      return i;
+    }
+  }
+
+  panic("Out of softirq");
+}
+
+void
+softirq_raise(uint32_t id)
+{
+  __atomic_or_fetch(&softirq_pending, (1 << id), __ATOMIC_SEQ_CST);
+  schedule();
+}
+
+#endif
+
+
 inline thread_t *
 thread_current(void)
 {
@@ -40,7 +77,6 @@ task_current(void)
 {
   return &thread_current()->t_task;
 }
-
 
 #ifdef ENABLE_TASK_DEBUG
 
@@ -113,8 +149,23 @@ task_switch(void *cur_sp)
   curthread->t_cycle_acc += cpu_cycle_counter() - curthread->t_cycle_enter;
 #endif
 
-  int q = irq_forbid(IRQ_LEVEL_SCHED);
 
+#if NUM_SOFTIRQ > 0
+
+  uint32_t pending = __atomic_fetch_and(&softirq_pending, 0, __ATOMIC_SEQ_CST);
+
+  while(1) {
+    int which = __builtin_clz(pending);
+    if(which == 32)
+      break;
+    which = 31 - which;
+    softirq[which].fn(softirq[which].arg);
+    pending &= ~(1 << which);
+  }
+
+#endif
+
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
 
   thread_t *t;
 

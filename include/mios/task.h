@@ -257,3 +257,22 @@ int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
 
 error_t task_create_shell(void *(*entry)(void *arg), void *arg,
                           const char *name, size_t stack_size);
+
+/*
+ * SoftIRQs can be raised from any context (even > IRQ_LEVEL_SCHED)
+ * as opposed to task_run() which can only be called from IRQ_LEVEL_SCHED
+ * and below
+ */
+
+
+#ifndef NUM_SOFTIRQ
+#define NUM_SOFTIRQ 0
+#endif
+
+#if NUM_SOFTIRQ > 0
+
+void softirq_raise(uint32_t id);
+
+uint32_t softirq_alloc(void (*fn)(void *arg), void *arg);
+
+#endif
