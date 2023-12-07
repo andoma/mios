@@ -30,10 +30,12 @@ typedef struct stm32_i2c {
   task_waitable_t wait;
 
   error_t result;
-  const uint8_t *write;
-  size_t write_len;
-  uint8_t *read;
-  size_t read_len;
+  const struct iovec *txiov;
+  const struct iovec *rxiov;
+  size_t count;
+  size_t iov_off;
+  size_t data_off;
+  uint8_t txdone;
 
   mutex_t mutex;
 
@@ -149,6 +151,42 @@ CLI_CMD_DEF("i2clog", cmd_i2clog);
 #endif
 
 
+static void
+i2c_init_off(stm32_i2c_t *i2c)
+{
+  i2c->iov_off = 0;
+  i2c->data_off = 0;
+}
+
+static size_t
+iov_len(stm32_i2c_t *i2c, const struct iovec *iov)
+{
+  if(iov == NULL)
+    return 0;
+
+  size_t total = 0;
+  int first = 1;
+  for(size_t i = i2c->iov_off; i < i2c->count; i++) {
+    total += iov[i].iov_len - (first ? i2c->data_off : 0);
+    first = 0;
+  }
+  return total;
+}
+
+
+const struct iovec *
+iov_inc(stm32_i2c_t *i2c, const struct iovec *iov)
+{
+  i2c->data_off++;
+  if(i2c->data_off == iov[i2c->iov_off].iov_len) {
+    i2c->iov_off++;
+    i2c->data_off = 0;
+    if(i2c->iov_off == i2c->count) {
+      return NULL;
+    }
+  }
+  return iov;
+}
 
 
 static void
@@ -161,7 +199,7 @@ i2c_irq_result(stm32_i2c_t *i2c, error_t result)
 static void
 set_read_ack(stm32_i2c_t *i2c)
 {
-  if(i2c->read_len > 1) {
+  if(iov_len(i2c, i2c->rxiov) > 1) {
     reg_set_bit(i2c->base_addr + I2C_CR1, 10);
   } else {
     reg_clr_bit(i2c->base_addr + I2C_CR1, 10);
@@ -176,11 +214,12 @@ i2c_irq_ev(stm32_i2c_t *i2c)
   uint32_t sr1 = reg_rd(i2c->base_addr + I2C_SR1);
 
   i2c_log_append(I2C_LOG_EVENT_EV, sr1);
-
+  size_t read_len;
   if(sr1 & (1 << 0)) {
     sr1 &= ~(1 << 0);
     // SB
-    const int read_bit = i2c->write_len == 0;
+    size_t write_len = iov_len(i2c, i2c->txiov);
+    const int read_bit = write_len == 0;
 
     uint8_t byte = (i2c->addr << 1) | read_bit;
     i2c_log_append(I2C_LOG_EVENT_SB, byte);
@@ -188,9 +227,9 @@ i2c_irq_ev(stm32_i2c_t *i2c)
     reg_wr(i2c->base_addr + I2C_DR, byte);
     return;
   }
-
   if(sr1 & (1 << 1)) {
     sr1 &= ~(1 << 1);
+    size_t write_len = iov_len(i2c, i2c->txiov);
 
     // ADDR complete
 
@@ -198,21 +237,21 @@ i2c_irq_ev(stm32_i2c_t *i2c)
 
     reg_rd(i2c->base_addr + I2C_SR2);
 
-    if(i2c->write_len == 0) {
-      i2c_log_append(I2C_LOG_EVENT_WC, i2c->read_len);
+    if(write_len == 0) {
+      read_len = iov_len(i2c, i2c->rxiov);
+      i2c_log_append(I2C_LOG_EVENT_WC, read_len);
       set_read_ack(i2c);
       reg_set_bit(i2c->base_addr + I2C_CR2, 10);
     }
   }
-
-  if(sr1 & (1 << 6) && i2c->read_len) {
+  if(sr1 & (1 << 6) && (read_len = iov_len(i2c, i2c->rxiov))) {
     sr1 &= ~(1 << 6);
+    uint8_t *base = i2c->rxiov[i2c->iov_off].iov_base;
+    base[i2c->data_off] = reg_rd(i2c->base_addr + I2C_DR);
+    i2c->rxiov = iov_inc(i2c, i2c->rxiov);
+    read_len--;
 
-    *i2c->read = reg_rd(i2c->base_addr + I2C_DR);
-    i2c->read++;
-    i2c->read_len--;
-
-    if(i2c->read_len == 0) {
+    if(read_len == 0) {
       i2c_log_append(I2C_LOG_EVENT_RC, 0);
       reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_STOP_BIT);
       reg_clr_bit(i2c->base_addr + I2C_CR2, 10);
@@ -223,37 +262,38 @@ i2c_irq_ev(stm32_i2c_t *i2c)
     return;
   }
 
-  if(sr1 & (1 << 7) && i2c->write) {
+  if(sr1 & (1 << 7) && !i2c->txdone) {
     sr1 &= ~(1 << 7);
     // TxE
-
-    if(i2c->write_len == 0) {
-      i2c->write = NULL;
-      i2c_log_append(I2C_LOG_EVENT_WC, i2c->read_len);
+    if(!i2c->txiov) {
+      // need to re-read read_len
+      i2c_init_off(i2c);
+      read_len = iov_len(i2c, i2c->rxiov);
+      i2c_log_append(I2C_LOG_EVENT_WC, read_len);
 
       if(sr1 & 0x4) {
         reg_rd(i2c->base_addr + I2C_DR);
       }
 
-      if(i2c->read_len) {
+      if(read_len) {
         reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_START_BIT);
       } else {
         reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_STOP_BIT);
         i2c_irq_result(i2c, 0);
       }
-
+      i2c->txdone = 1;
     } else {
-
-      i2c->write_len--;
-      if(i2c->write_len == 0) {
+      size_t write_len = iov_len(i2c, i2c->txiov);
+      write_len--;
+      if(write_len == 0) {
         reg_clr_bit(i2c->base_addr + I2C_CR2, 10);
       } else {
         reg_set_bit(i2c->base_addr + I2C_CR2, 10);
       }
-
-      i2c_log_append(I2C_LOG_EVENT_WR, *i2c->write);
-      reg_wr(i2c->base_addr + I2C_DR, *i2c->write);
-      i2c->write++;
+      const uint8_t *base = i2c->txiov[i2c->iov_off].iov_base;
+      i2c_log_append(I2C_LOG_EVENT_WR, base ? base[i2c->data_off] : 0);
+      reg_wr(i2c->base_addr + I2C_DR, base ? base[i2c->data_off] : 0);
+      i2c->txiov = iov_inc(i2c, i2c->txiov);
     }
   }
 }
@@ -317,15 +357,13 @@ i2c_rwv(struct i2c *d, uint8_t addr,
 {
   stm32_i2c_t *i2c = (stm32_i2c_t *)d;
 
-  assert(count == 1);
-
   mutex_lock(&i2c->mutex);
 
   i2c->addr = addr;
-  i2c->write = txiov ? txiov->iov_base : NULL;
-  i2c->write_len = txiov ? txiov->iov_len : 0;
-  i2c->read = rxiov ? rxiov->iov_base : NULL;
-  i2c->read_len = rxiov ? rxiov->iov_len : 0;
+  i2c->txiov = txiov;
+  i2c->rxiov = rxiov;
+  i2c->count = count;
+  i2c->txdone = txiov ? 0 : 1;
 
   const int64_t deadline = clock_get() + 100000;
 
@@ -337,12 +375,12 @@ i2c_rwv(struct i2c *d, uint8_t addr,
 
   reg_set_bit(i2c->base_addr + I2C_CR1, I2C_CR1_START_BIT);
 
+  i2c_init_off(i2c);
+
   error_t err;
   while((err = i2c->result) == 1) {
     if(task_sleep_deadline(&i2c->wait, deadline)) {
       i2c->result = 0;
-      i2c->read_len = 0;
-      i2c->write_len = 0;
       i2c_initialize(i2c);
       err = ERR_TIMEOUT;
       break;
