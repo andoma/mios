@@ -67,6 +67,14 @@ SECTIONS {
                 KEEP(*(udpinput))
                 _udpinput_array_end = .;
                 . = ALIGN(4);
+
+                . = ALIGN(4);
+                _dhcpv4update_array_begin = .;
+                KEEP(*(dhcpv4update))
+                _dhcpv4update_array_end = .;
+                . = ALIGN(4);
+
+
         } >FLASH
 
         .build_id : {

@@ -121,6 +121,17 @@ append_parameter_request_list(pbuf_t *pb)
 }
 
 
+static void
+dhcpv4_update(netif_t *ni)
+{
+  extern unsigned long _dhcpv4update_array_begin;
+  extern unsigned long _dhcpv4update_array_end;
+
+  const dhcpv4_update_t *update = (void *)&_dhcpv4update_array_begin;
+  for(; update != (const void *)&_dhcpv4update_array_end; update++)
+    (*update)(ni);
+}
+
 static pbuf_t *
 dhcpv4_make(ether_netif_t *eni)
 {
@@ -473,7 +484,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
       eni->eni_ni.ni_local_addr = yiaddr;
       eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
-
+      dhcpv4_update(&eni->eni_ni);
       net_timer_arm(&eni->eni_dhcp_timer,
                     clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
       break;
@@ -514,10 +525,10 @@ dhcpv4_init(ether_netif_t *eni)
 }
 
 
-
 void
 dhcpv4_status_change(ether_netif_t *eni)
 {
+  dhcpv4_update(&eni->eni_ni);
   if(!(eni->eni_ni.ni_flags & NETIF_F_UP))
     return; // Interface is not up, don't do anything just now
 
