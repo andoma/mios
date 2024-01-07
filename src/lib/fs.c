@@ -347,7 +347,7 @@ cmd_cat(cli_t *cli, int argc, char **argv)
     }
     if(r == 0)
       break;
-    st->write(st, buf, r);
+    st->write(st, buf, r, 0);
   }
   fs_close(fp);
   return err;
