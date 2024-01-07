@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #include "error.h"
 
 typedef enum {
@@ -27,3 +29,8 @@ typedef struct block_iface {
   error_t (*ctrl)(struct block_iface *bi, block_ctrl_op_t op);
 
 } block_iface_t;
+
+
+block_iface_t *block_create_partition(block_iface_t *parent,
+                                      size_t block_offset,
+                                      size_t num_blocks);
