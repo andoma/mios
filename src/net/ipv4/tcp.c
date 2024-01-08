@@ -20,6 +20,7 @@
 #include <mios/eventlog.h>
 #include <mios/cli.h>
 
+#define TCP_EVENT_CONNECT (1 << SOCKET_EVENT_PROTO)
 /*
  * Based on these RFCs:
  *
@@ -70,7 +71,6 @@ typedef struct tcb {
     uint16_t up;
     uint32_t wl1;
     uint32_t wl2;
-    uint16_t mss;
   } tcb_snd;
   uint32_t tcb_iss;
 
@@ -115,6 +115,8 @@ typedef struct tcb {
 
 static void tcp_close(tcb_t *tcb, const char *reason);
 
+static const char *tcp_state_to_str(int state);
+
 
 static void
 tcp_set_state(tcb_t *tcb, int state, const char *reason)
@@ -133,6 +135,9 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
     return;
   }
   netif_t *ni = nh->nh_netif;
+
+  if(local_addr == 0)
+    local_addr = ni->ni_local_addr;
 
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
@@ -418,10 +423,51 @@ tcp_destroy(tcb_t *tcb)
 }
 
 
+static tcb_t *
+tcb_find(uint32_t remote_addr, uint16_t remote_port, uint16_t local_port)
+{
+  tcb_t *tcb;
+  LIST_FOREACH(tcb, &tcbs, tcb_link) {
+    if(tcb->tcb_remote_addr == remote_addr &&
+       tcb->tcb_remote_port == remote_port &&
+       tcb->tcb_local_port == local_port) {
+      return tcb;
+    }
+  }
+  return NULL;
+}
+
+static void
+tcp_do_connect(tcb_t *tcb)
+{
+  while(1) {
+    uint16_t local_port = rand();
+    if(local_port < 1024)
+      continue;
+    local_port = htons(local_port);
+    if(tcb_find(tcb->tcb_remote_addr, tcb->tcb_remote_port, local_port))
+      continue;
+    tcb->tcb_local_port = local_port;
+    break;
+  }
+
+  tcp_send_flag(tcb, TCP_F_SYN);
+  tcp_set_state(tcb, TCP_STATE_SYN_SENT, "syn-sent");
+
+  mutex_lock(&tcbs_mutex);
+  LIST_INSERT_HEAD(&tcbs, tcb, tcb_link);
+  mutex_unlock(&tcbs_mutex);
+}
+
+
 static void
 tcp_task_cb(net_task_t *nt, uint32_t signals)
 {
   tcb_t *tcb = (tcb_t *)nt;
+
+  if(signals & TCP_EVENT_CONNECT) {
+    tcp_do_connect(tcb);
+  }
 
   if(signals & SOCKET_EVENT_WAKEUP) {
     tcp_send_data(tcb);
@@ -574,7 +620,7 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
 
     switch(opt) {
     case 2:
-      tcb->tcb_snd.mss = buf[3] | (buf[2] << 8);
+      tcb->tcb_sock.max_fragment_size = buf[3] | (buf[2] << 8);
       break;
     }
     buf += optlen;
@@ -585,6 +631,53 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
 static const socket_net_fn_t tcp_net_fn = {
   .event = tcp_service_event_cb,
 };
+
+
+static tcb_t *
+tcb_create(const char *name)
+{
+  tcb_t *tcb = xalloc(sizeof(tcb_t), 0, MEM_MAY_FAIL);
+  if(tcb == NULL)
+    return NULL;
+
+  memset(tcb, 0, sizeof(tcb_t));
+
+  tcb->tcb_name = name;
+
+  STAILQ_INIT(&tcb->tcb_unaq);
+
+  tcb->tcb_task.nt_cb = tcp_task_cb;
+
+  tcb->tcb_sock.preferred_offset = TCP_PBUF_HEADROOM;
+  tcb->tcb_sock.net = &tcp_net_fn;
+  tcb->tcb_sock.net_opaque = tcb;
+
+  tcb->tcb_rto = 250;
+
+  tcb->tcb_time_wait_timer.t_cb = tcp_time_wait_cb;
+  tcb->tcb_time_wait_timer.t_opaque = tcb;
+  tcb->tcb_time_wait_timer.t_name = "tcp";
+
+  tcb->tcb_delayed_ack_timer.t_cb = tcp_delayed_ack_cb;
+  tcb->tcb_delayed_ack_timer.t_opaque = tcb;
+  tcb->tcb_delayed_ack_timer.t_name = "tcp";
+
+  tcb->tcb_rtx_timer.t_cb = tcp_rtx_cb;
+  tcb->tcb_rtx_timer.t_opaque = tcb;
+  tcb->tcb_rtx_timer.t_name = "tcp";
+
+  tcb->tcb_rcv.mss = 1460;
+  tcb->tcb_rcv.wnd = tcb->tcb_rcv.mss;
+
+  tcb->tcb_iss = rand();
+  tcb->tcb_snd.nxt = tcb->tcb_iss;
+  tcb->tcb_snd.una = tcb->tcb_iss;
+
+  return tcb;
+}
+
+
+
 
 struct pbuf *
 tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
@@ -617,18 +710,10 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   if(th->flg & TCP_F_FIN)
     seg_len++;
 
-  tcb_t *tcb;
-
   const uint16_t local_port = th->dst_port;
   const uint16_t remote_port = th->src_port;
 
-  LIST_FOREACH(tcb, &tcbs, tcb_link) {
-    if(tcb->tcb_remote_addr == remote_addr &&
-       tcb->tcb_remote_port == remote_port &&
-       tcb->tcb_local_port == local_port) {
-      break;
-    }
-  }
+  tcb_t *tcb = tcb_find(remote_addr, remote_port, local_port);
 
   const uint32_t seq = ntohl(th->seq);
   const uint32_t ack = ntohl(th->ack);
@@ -665,16 +750,21 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         "no service");
     }
 
-    tcb_t *tcb = xalloc(sizeof(tcb_t), 0, MEM_MAY_FAIL);
+    tcb_t *tcb = tcb_create(svc->name);
     if(tcb == NULL) {
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
                         "no memory");
     }
-    memset(tcb, 0, sizeof(tcb_t));
-    tcb->tcb_name = svc->name;
 
-    tcb->tcb_snd.mss = 536;
-    tcb->tcb_rcv.mss = 1460;
+    tcb->tcb_sock.max_fragment_size = 536;
+
+    tcb->tcb_local_addr = ni->ni_local_addr;
+    tcb->tcb_remote_addr = remote_addr;
+
+    tcb->tcb_local_port = local_port;
+    tcb->tcb_remote_port = remote_port;
+    tcb->tcb_irs = seq;
+    tcb->tcb_rcv.nxt = tcb->tcb_irs + 1;
 
     if(!pbuf_pullup(pb, hdr_len)) {
       tcp_parse_options(tcb,
@@ -682,49 +772,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         hdr_len - sizeof(tcp_hdr_t));
     }
 
-    STAILQ_INIT(&tcb->tcb_unaq);
-
-    tcb->tcb_task.nt_cb = tcp_task_cb;
-
-    tcb->tcb_sock.max_fragment_size = tcb->tcb_snd.mss;
-    tcb->tcb_sock.preferred_offset = TCP_PBUF_HEADROOM;
-    tcb->tcb_sock.net = &tcp_net_fn;
-    tcb->tcb_sock.net_opaque = tcb;
-
     error_t err = svc->open(&tcb->tcb_sock);
     if(err) {
       free(tcb);
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
                         error_to_string(err));
     }
-
-    tcb->tcb_rto = 250;
-
-    tcb->tcb_time_wait_timer.t_cb = tcp_time_wait_cb;
-    tcb->tcb_time_wait_timer.t_opaque = tcb;
-    tcb->tcb_time_wait_timer.t_name = "tcp";
-
-    tcb->tcb_delayed_ack_timer.t_cb = tcp_delayed_ack_cb;
-    tcb->tcb_delayed_ack_timer.t_opaque = tcb;
-    tcb->tcb_delayed_ack_timer.t_name = "tcp";
-
-    tcb->tcb_rtx_timer.t_cb = tcp_rtx_cb;
-    tcb->tcb_rtx_timer.t_opaque = tcb;
-    tcb->tcb_rtx_timer.t_name = "tcp";
-
-    tcb->tcb_local_addr = ni->ni_local_addr;
-    tcb->tcb_remote_addr = remote_addr;
-
-    tcb->tcb_local_port = local_port;
-    tcb->tcb_remote_port = remote_port;
-
-    tcb->tcb_irs = seq;
-    tcb->tcb_rcv.nxt = tcb->tcb_irs + 1;
-
-    tcb->tcb_rcv.wnd = tcb->tcb_rcv.mss;
-    tcb->tcb_iss = rand();
-    tcb->tcb_snd.nxt = tcb->tcb_iss;
-    tcb->tcb_snd.una = tcb->tcb_iss;
 
     tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK);
 
@@ -735,28 +788,74 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     return pb;
   }
 
+  const int una_ack = ack - tcb->tcb_snd.una;
+  const int ack_nxt = tcb->tcb_snd.nxt - ack;
+
+  if(tcb->tcb_state == TCP_STATE_SYN_SENT) {
+
+    int ack_acceptance = 0;
+
+    // 3.10.7.3 SYN-SENT STATE
+
+    // First check ACK bit
+    if(flag & TCP_F_ACK) {
+      int ack_iss = ack - tcb->tcb_iss;
+      int ack_nxt = ack - tcb->tcb_snd.nxt;
+
+      if(ack_iss <= 0 || ack_nxt > 0) {
+        if(flag & TCP_F_RST) {
+          return pb;
+        }
+        return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
+                         0, TCP_F_RST, 0);
+      }
+
+      ack_acceptance = una_ack > 0 && ack_nxt >= 0;
+    }
+
+    if(flag & TCP_F_RST) {
+      if(ack_acceptance) {
+        tcp_close(tcb, "Got RST");
+        return pb;
+      }
+      return pb;
+    }
+
+    if(flag & TCP_F_SYN) {
+
+      tcb->tcb_rcv.nxt = seq + 1;
+      tcb->tcb_irs = seq;
+
+      if(flag & TCP_F_ACK) {
+        tcp_ack(tcb, una_ack);
+      }
+
+      const int una_iss = tcb->tcb_snd.una - tcb->tcb_iss;
+      if(una_iss > 0) {
+        tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
+        return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
+                         tcb->tcb_rcv.nxt, TCP_F_ACK, tcb->tcb_rcv.wnd);
+      }
+
+      tcb->tcb_snd.wnd = wnd;
+      tcb->tcb_snd.wl1 = seq;
+      tcb->tcb_snd.wl2 = ack;
+      tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK);
+      tcp_set_state(tcb, TCP_STATE_SYN_RECEIVED, "syn-recvd");
+      return pb;
+    }
+
+    // Neither SYN or RST is set, drop segment
+    return pb;
+  }
+
+
   //
   // Step 1: Sequence acceptance check
   //
 
-  switch(tcb->tcb_state) {
-  default:
-    return pb;
-
-  case TCP_STATE_SYN_RECEIVED:
-  case TCP_STATE_ESTABLISHED:
-  case TCP_STATE_FIN_WAIT1:
-  case TCP_STATE_FIN_WAIT2:
-  case TCP_STATE_CLOSE_WAIT:
-  case TCP_STATE_CLOSING:
-  case TCP_STATE_LAST_ACK:
-  case TCP_STATE_TIME_WAIT:
-    break;
-  }
-
   int acceptance = 0;
   int nxt_seq = seq - tcb->tcb_rcv.nxt;
-
   if(seg_len == 0) {
 
     if(tcb->tcb_rcv.wnd == 0) {
@@ -823,8 +922,6 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
   int try_send_more = 0;
 
-  int una_ack = ack - tcb->tcb_snd.una;
-  int ack_nxt = tcb->tcb_snd.nxt - ack;
   switch(tcb->tcb_state) {
   case TCP_STATE_SYN_RECEIVED:
     if(una_ack >= 0 && ack_nxt <= 0) {
@@ -934,7 +1031,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
           tcp_send_flag(tcb, TCP_F_ACK);
         } else {
           net_timer_arm(&tcb->tcb_delayed_ack_timer,
-                      tcb->tcb_last_rx + 20000);
+                        tcb->tcb_last_rx + 20000);
         }
       } else {
         try_send_more = 0;
@@ -998,6 +1095,26 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 }
 
 
+struct socket *
+tcp_create_socket(const char *name)
+{
+  tcb_t *tcb = tcb_create(name);
+  if(tcb == NULL)
+    return NULL;
+  return &tcb->tcb_sock;
+}
+
+
+void
+tcp_connect(struct socket *sk, uint32_t dst_addr, uint16_t dst_port)
+{
+  tcb_t *tcb = sk->net_opaque;
+  tcb->tcb_remote_addr = dst_addr;
+  tcb->tcb_remote_port = htons(dst_port);
+  net_task_raise(&tcb->tcb_task, TCP_EVENT_CONNECT);
+}
+
+
 static const char *tcp_statenames =
   "CLOSED\0"
   "LISTEN\0"
@@ -1010,6 +1127,13 @@ static const char *tcp_statenames =
   "TIME_WAIT\0"
   "CLOSE_WAIT\0"
   "LAST_ACK\0";
+
+
+static const char *
+tcp_state_to_str(int state)
+{
+  return strtbl(tcp_statenames, state);
+}
 
 
 static error_t
@@ -1027,7 +1151,7 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                tcb->tcb_remote_addr,
                ntohs(tcb->tcb_remote_port));
     cli_printf(cli, "\t%s  TX:%lld RX:%lld  ReTX:%lld\n",
-               strtbl(tcp_statenames, tcb->tcb_state),
+               tcp_state_to_str(tcb->tcb_state),
                tcb->tcb_tx_bytes,
                tcb->tcb_rx_bytes,
                tcb->tcb_rtx_bytes);

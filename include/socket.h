@@ -23,8 +23,10 @@ typedef struct socket_app_fn {
 } socket_app_fn_t;
 
 
-#define SOCKET_EVENT_WAKEUP 0x1
-#define SOCKET_EVENT_CLOSE  0x2
+#define SOCKET_EVENT_WAKEUP (1 << 0)
+#define SOCKET_EVENT_CLOSE  (1 << 1)
+
+#define SOCKET_EVENT_PROTO 16
 
 // Functions defined by the network side
 typedef struct socket_net_fn {
