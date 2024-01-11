@@ -26,8 +26,8 @@ SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ipv4/dhcpv4.c \
 	${SRC}/net/ipv4/cmd_ipv4.c \
 
-SRCS-${ENABLE_NET_HTTP_SERVER} += \
-       ${SRC}/net/http/http_server.c \
+SRCS-${ENABLE_NET_HTTP} += \
+       ${SRC}/net/http/http.c \
        ${SRC}/net/http/http_parser.c \
 
 SRCS-${ENABLE_NET_MBUS_GW} += ${SRCS_net} \
