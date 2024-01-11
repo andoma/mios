@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include <mios/task.h>
 #include <mios/timer.h>
@@ -218,4 +219,20 @@ net_init(void)
   flags |= TASK_FPU;
 #endif
   thread_create(net_thread, NULL, 768, "net", flags, 10);
+}
+
+
+uint32_t
+inet_addr(const char *s)
+{
+  uint32_t r = 0;
+  for(int i = 0; i < 4; i++) {
+    int v = atoi(s);
+    r |= v << (i * 8);
+    s = strchr(s, '.');
+    if(s == NULL)
+      break;
+    s++;
+  }
+  return r;
 }
