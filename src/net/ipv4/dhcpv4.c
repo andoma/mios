@@ -326,7 +326,6 @@ dhcpv4_request(ether_netif_t *eni, const char *reason)
 {
   if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING) {
     eni->eni_dhcp_state = DHCP_STATE_REQUESTING;
-    evlog(LOG_INFO, "dhcp: requesting");
     eni->eni_dhcp_retries = 0;
   }
 
@@ -467,28 +466,31 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 
   case DHCPACK:
 
-    if(eni->eni_dhcp_state == DHCP_STATE_REQUESTING ||
-       eni->eni_dhcp_state == DHCP_STATE_BOUND) {
+    if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING &&
+       eni->eni_dhcp_state != DHCP_STATE_BOUND)
+      break;
+
+    if(eni->eni_ni.ni_local_addr != yiaddr) {
+      // Only log when something changes from our bound address
       evlog(LOG_INFO, "dhcp: ACK %Id from %Id", yiaddr, from);
+    }
 
-      if(eni->eni_dhcp_requested_ip != yiaddr) {
-        evlog(LOG_INFO, "dhcp: rejected, not requested ip");
-        break;
-      }
-
-      if(eni->eni_dhcp_server_ip != from) {
-        evlog(LOG_INFO, "dhcp: rejected, not correct source");
-        break;
-      }
-
-      eni->eni_ni.ni_local_addr = yiaddr;
-      eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
-      eni->eni_dhcp_state = DHCP_STATE_BOUND;
-      dhcpv4_update(&eni->eni_ni);
-      net_timer_arm(&eni->eni_dhcp_timer,
-                    clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
+    if(eni->eni_dhcp_requested_ip != yiaddr) {
+      evlog(LOG_INFO, "dhcp: rejected, not requested ip");
       break;
     }
+
+    if(eni->eni_dhcp_server_ip != from) {
+      evlog(LOG_INFO, "dhcp: rejected, not correct source");
+      break;
+    }
+
+    eni->eni_ni.ni_local_addr = yiaddr;
+    eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
+    eni->eni_dhcp_state = DHCP_STATE_BOUND;
+    dhcpv4_update(&eni->eni_ni);
+    net_timer_arm(&eni->eni_dhcp_timer,
+                  clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
     break;
   }
   return pb;
