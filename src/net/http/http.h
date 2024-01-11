@@ -80,12 +80,24 @@ int http_request_accept_websocket(http_request_t *hr,
                                   http_connection_t **hcp);
 
 
-struct stream *http_server_websocket_output_begin(http_connection_t *hc,
-                                                  int opcode);
+struct stream *http_websocket_output_begin(http_connection_t *hc,
+                                           int opcode);
 
-int http_server_websocket_output_end(http_connection_t *hc);
+int http_websocket_output_end(http_connection_t *hc);
 
 void http_connection_release(http_connection_t *hc);
+
+http_connection_t *http_websocket_create(int (*cb)(void *opaque,
+                                                   int opcode,
+                                                   void *data,
+                                                   size_t size,
+                                                   http_connection_t *hc,
+                                                   balloc_t *ba),
+                                         void *opaque);
+
+void http_websocket_start(http_connection_t *hc, uint32_t addr,
+                          uint16_t port, const char *path);
+
 
 typedef struct http_route {
 
