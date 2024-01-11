@@ -470,7 +470,14 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
   }
 
   if(signals & SOCKET_EVENT_WAKEUP) {
-    tcp_send_data(tcb);
+    switch(tcb->tcb_state) {
+    case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_CLOSE_WAIT:
+      tcp_send_data(tcb);
+      break;
+    default:
+      break;
+    }
   }
 
   if(signals & SOCKET_EVENT_CLOSE) {
@@ -673,6 +680,8 @@ tcb_create(const char *name)
   tcb->tcb_snd.nxt = tcb->tcb_iss;
   tcb->tcb_snd.una = tcb->tcb_iss;
 
+  tcb->tcb_sock.max_fragment_size = 536;
+
   return tcb;
 }
 
@@ -756,8 +765,6 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         "no memory");
     }
 
-    tcb->tcb_sock.max_fragment_size = 536;
-
     tcb->tcb_local_addr = ni->ni_local_addr;
     tcb->tcb_remote_addr = remote_addr;
 
@@ -823,6 +830,8 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
     if(flag & TCP_F_SYN) {
 
+      tcb->tcb_last_rx = clock_get();
+
       tcb->tcb_rcv.nxt = seq + 1;
       tcb->tcb_irs = seq;
 
@@ -831,15 +840,17 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       }
 
       const int una_iss = tcb->tcb_snd.una - tcb->tcb_iss;
-      if(una_iss > 0) {
-        tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
-        return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
-                         tcb->tcb_rcv.nxt, TCP_F_ACK, tcb->tcb_rcv.wnd);
-      }
 
       tcb->tcb_snd.wnd = wnd;
       tcb->tcb_snd.wl1 = seq;
       tcb->tcb_snd.wl2 = ack;
+
+      if(una_iss > 0) {
+        tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
+        tcp_send_data_or_ack(tcb);
+        return pb;
+      }
+
       tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK);
       tcp_set_state(tcb, TCP_STATE_SYN_RECEIVED, "syn-recvd");
       return pb;
