@@ -518,6 +518,7 @@ http_close_locked(http_connection_t *hc)
   if(hc->hc_sock != NULL) {
     hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_CLOSE);
     hc->hc_sock = NULL;
+    cond_signal(&hc->hc_txbuf_cond);
   }
 }
 
@@ -639,7 +640,7 @@ http_close(void *opaque)
   mutex_lock(&http_mutex);
   http_close_locked(hc);
 
-  if(hc->hc_websocket_mode) {
+  if(hc->hc_ws_cb) {
     http_websocket_enqueue_close(hc);
   }
   mutex_unlock(&http_mutex);
@@ -820,7 +821,7 @@ http_websocket_send_locked(http_connection_t *hc, uint8_t opcode,
                            const void *data, size_t len)
 {
   while(len) {
-    while(hc->hc_txbuf_head) {
+    while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
 
@@ -874,7 +875,7 @@ http_process_websocket_packet(http_server_wsp_t *hsw)
   }
 
   mutex_unlock(&http_mutex);
-  int err = hc->hc_ws_cb(hc->hc_ws_cb, hsw->hsw_hst.hst_opcode,
+  int err = hc->hc_ws_cb(hc->hc_ws_opaque, hsw->hsw_hst.hst_opcode,
                          hsw->hsw_bumpalloc.data, hsw->hsw_bumpalloc.used, hc,
                          &hsw->hsw_bumpalloc);
   mutex_lock(&http_mutex);
@@ -898,15 +899,18 @@ http_process_request(http_request_t *hr)
   if(return_code) {
     // Send a simple response
 
-    while(hc->hc_txbuf_head) {
+    while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
+    if(hc->hc_sock == NULL)
+      return;
+
     send_response_simple(hc, return_code, !hr->hr_should_keep_alive);
   }
 
   while(hr->hr_piggyback_503) {
 
-    while(hc->hc_txbuf_head) {
+    while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
 
@@ -1147,7 +1151,7 @@ http_response_begin(struct http_request *hr, int status_code,
 
   mutex_lock(&http_mutex);
 
-  while(hc->hc_txbuf_head) {
+  while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
 
@@ -1167,7 +1171,7 @@ http_response_begin(struct http_request *hr, int status_code,
 
     hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
 
-    while(hc->hc_txbuf_head) {
+    while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
     hc->hc_output_encoding = OUTPUT_ENCODING_CHUNKED;
@@ -1188,7 +1192,7 @@ http_response_end(struct http_request *hr)
   if(hc->hc_hold)
     http_stream_release_packet(hc, 1);
 
-  while(hc->hc_txbuf_head) {
+  while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
 
@@ -1214,7 +1218,7 @@ http_websocket_output_begin(http_connection_t *hc, int opcode)
 {
   mutex_lock(&http_mutex);
 
-  while(hc->hc_txbuf_head) {
+  while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
   hc->hc_output_encoding = OUTPUT_ENCODING_WEBSOCKET;
@@ -1231,7 +1235,7 @@ http_websocket_output_end(http_connection_t *hc)
   if(hc->hc_hold)
     http_stream_release_packet(hc, 1);
 
-  while(hc->hc_txbuf_head) {
+  while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
   hc->hc_output_encoding = 0;
@@ -1276,7 +1280,7 @@ http_request_accept_websocket(http_request_t *hr,
 
   mutex_lock(&http_mutex);
 
-  while(hc->hc_txbuf_head) {
+  while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
 
