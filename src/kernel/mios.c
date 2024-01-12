@@ -2,6 +2,8 @@
 #include <mios/mios.h>
 #include <mios/cli.h>
 #include <mios/sys.h>
+#include <mios/eventlog.h>
+#include <mios/version.h>
 #include <stdio.h>
 #include <string.h>
 #include "irq.h"
@@ -19,6 +21,33 @@ main(void)
   printf("No console input\n");
   return 0;
 }
+
+__attribute__((noinline))
+static void
+log_sysinfo(void)
+{
+  evlog(LOG_NOTICE, "System booted");
+
+  const unsigned char *bid = mios_build_id();
+
+  evlog(LOG_NOTICE, "Mios: %s Build: [%02x%02x%02x%02x]",
+        mios_get_version(), bid[0], bid[1], bid[2], bid[3]);
+
+  const char *appname = mios_get_app_name();
+  if(appname[0]) {
+    evlog(LOG_NOTICE, "App: %s (%s)", appname, mios_get_app_version());
+  }
+}
+
+__attribute__((noreturn))
+static void *
+main_trampoline(void *opaque)
+{
+  log_sysinfo();
+  main();
+  thread_exit(0);
+}
+
 
 static void
 call_array_fwd(void **p, void **end)
@@ -59,7 +88,7 @@ init(void)
 #ifdef MAIN_STACK_SIZE
   stack_size = MAIN_STACK_SIZE;
 #endif
-  task_create_shell((void *)&main, NULL, "main", stack_size);
+  task_create_shell(main_trampoline, NULL, "main", stack_size);
 }
 
 
