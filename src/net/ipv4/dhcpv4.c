@@ -157,11 +157,16 @@ dhcpv4_make(ether_netif_t *eni)
 
 
 static void
-dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
-           const char *why)
+dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr)
 {
   netif_t *ni = &eni->eni_ni;
   nexthop_t *nh = NULL;
+
+  const size_t autopad = PBUF_DATA_SIZE - (pb->pb_buflen + pb->pb_offset);
+  memset(pbuf_data(pb, pb->pb_buflen), 0, autopad);
+  pb->pb_pktlen += autopad;
+  pb->pb_buflen += autopad;
+
 
   if(dst_addr != 0xffffffff) {
     nh = ipv4_nexthop_resolve(dst_addr);
@@ -172,47 +177,7 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr,
     ni = nh->nh_netif;
   }
 
-  const size_t autopad = PBUF_DATA_SIZE - (pb->pb_buflen + pb->pb_offset);
-
-  memset(pbuf_data(pb, pb->pb_buflen), 0, autopad);
-  pb->pb_pktlen += autopad;
-  pb->pb_buflen += autopad;
-
-  pb = pbuf_prepend(pb, sizeof(udp_hdr_t), 1, sizeof(ipv4_header_t));
-
-  udp_hdr_t *udp = pbuf_data(pb, 0);
-  udp->dst_port = htons(67);
-  udp->src_port = htons(68);
-  udp->length = htons(pb->pb_pktlen);
-
-  udp->cksum = 0;
-
-  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
-    udp->cksum =
-      ipv4_cksum_pbuf(ipv4_cksum_pseudo(ni->ni_local_addr, dst_addr,
-                                        IPPROTO_UDP, pb->pb_pktlen),
-                      pb, 0, pb->pb_pktlen);
-  }
-
-  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
-  ipv4_header_t *ip = pbuf_data(pb, 0);
-
-  ip->ver_ihl = 0x45;
-  ip->tos = 0;
-  ip->total_length = htons(pb->pb_pktlen);
-  ip->id = rand();
-  ip->fragment_info = 0;
-  ip->ttl = 255;
-  ip->proto = IPPROTO_UDP;
-  ip->src_addr = ni->ni_local_addr;
-  ip->dst_addr = dst_addr;
-
-  ip->cksum = 0;
-  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
-    ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
-  }
-
-  ni->ni_output(ni, nh, pb);
+  udp_send(ni, pb, dst_addr, nh, 68, 67);
 }
 
 
@@ -277,12 +242,12 @@ dhcpv4_send_discover(struct ether_netif *eni)
   append_default_options(pb, eni);
 
   append_end(pb);
-  dhcpv4_send(eni, pb, 0xffffffff, "Discover");
+  dhcpv4_send(eni, pb, 0xffffffff);
 }
 
 
 static void
-dhcpv4_send_request(struct ether_netif *eni, const char *why)
+dhcpv4_send_request(struct ether_netif *eni)
 {
   pbuf_t *pb = dhcpv4_make(eni);
   if(pb == NULL)
@@ -300,7 +265,7 @@ dhcpv4_send_request(struct ether_netif *eni, const char *why)
 
   append_end(pb);
   dhcpv4_send(eni, pb, eni->eni_ni.ni_local_addr ?
-              eni->eni_dhcp_server_ip : 0xffffffff, why);
+              eni->eni_dhcp_server_ip : 0xffffffff);
 }
 
 
@@ -322,14 +287,14 @@ dhcpv4_discover(ether_netif_t *eni)
 
 
 static void
-dhcpv4_request(ether_netif_t *eni, const char *reason)
+dhcpv4_request(ether_netif_t *eni)
 {
   if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING) {
     eni->eni_dhcp_state = DHCP_STATE_REQUESTING;
     eni->eni_dhcp_retries = 0;
   }
 
-  dhcpv4_send_request(eni, reason);
+  dhcpv4_send_request(eni);
   eni->eni_dhcp_retries++;
   net_timer_arm(&eni->eni_dhcp_timer,
                 clock_get() + 500000 * eni->eni_dhcp_retries);
@@ -461,7 +426,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
     eni->eni_dhcp_server_ip = po.server_identifer;
 
     eni->eni_dhcp_retries = 0;
-    dhcpv4_request(eni, "got-offer");
+    dhcpv4_request(eni);
     break;
 
   case DHCPACK:
@@ -510,10 +475,10 @@ dhcp_timer_cb(void *opaque, uint64_t now)
     if(eni->eni_dhcp_retries >= 5)
       dhcpv4_discover(eni);
     else
-      dhcpv4_request(eni, "retry");
+      dhcpv4_request(eni);
     break;
   case DHCP_STATE_BOUND:
-    dhcpv4_request(eni, "renewal");
+    dhcpv4_request(eni);
     break;
   }
 }
@@ -542,7 +507,7 @@ dhcpv4_status_change(ether_netif_t *eni)
     break;
   case DHCP_STATE_REQUESTING:
   case DHCP_STATE_BOUND:
-    dhcpv4_request(eni, "link-up");
+    dhcpv4_request(eni);
     break;
   }
 

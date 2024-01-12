@@ -6,9 +6,13 @@
 
 struct netif;
 struct pbuf;
+struct nexthop;
 
 struct pbuf *udp_input_ipv4(struct netif *ni, struct pbuf *pb,
                             size_t udp_offset);
+
+void udp_send(struct netif *ni, struct pbuf *pb, uint32_t dst_addr,
+              struct nexthop *nh, int src_port, int dst_port);
 
 typedef struct {
   struct pbuf *(*input)(struct netif *ni, struct pbuf *pb, size_t udp_offset);
