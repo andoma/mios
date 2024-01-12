@@ -152,7 +152,7 @@ cmd_sysinfo(cli_t *cli, int argc, char **argv)
   if(sn.len) {
     cli_printf(cli, "Serial number: ");
     const uint8_t *d8 = sn.data;
-    for(int i = 0; i < 12 ; i++) {
+    for(int i = 0; i < sn.len ; i++) {
       cli_printf(cli, "%02x", d8[i]);
     }
     cli_printf(cli, "\n");
