@@ -1388,3 +1388,16 @@ http_websocket_start(http_connection_t *hc, uint32_t addr,
 
   mutex_unlock(&http_mutex);
 }
+
+
+void
+http_websocket_close(http_connection_t *hc, uint16_t status_code,
+                     const char *message)
+{
+  mutex_lock(&http_mutex);
+
+  uint8_t close_reason[2] = {status_code >> 8, status_code};
+  http_websocket_send_locked(hc, WS_OPCODE_CLOSE, close_reason,
+                             sizeof(close_reason));
+  mutex_unlock(&http_mutex);
+}

@@ -99,6 +99,9 @@ void http_websocket_start(http_connection_t *hc, uint32_t addr,
                           uint16_t port, const char *path);
 
 
+void http_websocket_close(http_connection_t *hc, uint16_t status_code,
+                          const char *message);
+
 typedef struct http_route {
 
   const char *hr_path;
