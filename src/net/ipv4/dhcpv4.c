@@ -69,7 +69,7 @@ make_option(pbuf_t *pb, uint8_t code, uint8_t len)
 
 
 static void
-append_option_copy(pbuf_t *pb, uint8_t code, uint8_t len, void *data)
+append_option_copy(pbuf_t *pb, uint8_t code, uint8_t len, const void *data)
 {
   uint8_t *dst = make_option(pb, code, len);
   if(dst != NULL)
@@ -188,46 +188,10 @@ append_default_options(pbuf_t *pb, struct ether_netif *eni)
   append_client_identifier(pb, eni);
   append_parameter_request_list(pb);
 
-  const char *mios_ver = mios_get_version();
-  const char *app_name = mios_get_app_name();
-  const char *app_ver = mios_get_app_version();
-
-  if(*app_ver == 0)
-    app_ver = "none";
-
-  if(*app_name == 0)
-    app_name = "none";
-
-  const size_t mios_ver_len = strlen(mios_ver);
-  const size_t app_name_len = strlen(app_name);
-  const size_t app_ver_len = strlen(app_ver);
-
-  const size_t vcidlen = strlen("mios") + 1 + mios_ver_len + 1 +
-    app_name_len + 1 + app_ver_len;
-
-  if(vcidlen > 255)
-    return;
-
-  uint8_t *vcid = pbuf_append(pb, vcidlen + 2);
-  if(vcid == NULL)
-    return;
-
-  vcid[0] = DHCP_VENDOR_CLASS_ID;
-  vcid[1] = vcidlen;
-  vcid += 2;
-
-  memcpy(vcid, "mios:", 5);
-  vcid += 5;
-
-  memcpy(vcid, mios_ver, mios_ver_len);
-  vcid += mios_ver_len;
-  *vcid++ = ':';
-
-  memcpy(vcid, app_name, app_name_len);
-  vcid += app_name_len;
-  *vcid++ = ':';
-
-  memcpy(vcid, app_ver, app_ver_len);
+#ifdef DHCPV4_VCID
+  append_option_copy(pb, DHCP_VENDOR_CLASS_ID, strlen(DHCPV4_VCID),
+                     DHCPV4_VCID);
+#endif
 }
 
 
