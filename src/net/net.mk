@@ -24,6 +24,7 @@ SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ipv4/udp.c \
 	${SRC}/net/ipv4/tcp.c \
 	${SRC}/net/ipv4/dhcpv4.c \
+	${SRC}/net/ipv4/ntp.c \
 	${SRC}/net/ipv4/cmd_ipv4.c \
 
 SRCS-${ENABLE_NET_HTTP} += \

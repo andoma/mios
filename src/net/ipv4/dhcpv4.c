@@ -1,11 +1,13 @@
 #include "dhcpv4.h"
 
 #include "udp.h"
+#include "ntp.h"
 
 #include <mios/eventlog.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
 #include <mios/version.h>
+#include <mios/ghook.h>
 
 #include <unistd.h>
 #include <stdio.h>
@@ -42,6 +44,7 @@ typedef struct dhcp_hdr {
 
 #define DHCP_SUBNET_MASK               1
 #define DHCP_GATEWAY                   3
+#define DHCP_NTP_SERVER                42
 #define DHCP_REQUESTED_IP_ADDRESS      50
 #define DHCP_LEASE_TIME                51
 #define DHCP_MESSAGE_TYPE              53
@@ -124,12 +127,7 @@ append_parameter_request_list(pbuf_t *pb)
 static void
 dhcpv4_update(netif_t *ni)
 {
-  extern unsigned long _dhcpv4update_array_begin;
-  extern unsigned long _dhcpv4update_array_end;
-
-  const dhcpv4_update_t *update = (void *)&_dhcpv4update_array_begin;
-  for(; update != (const void *)&_dhcpv4update_array_end; update++)
-    (*update)(ni);
+  ghook_invoke(GHOOK_DHCP_UPDATE, ni);
 }
 
 static pbuf_t *
@@ -237,7 +235,12 @@ static void
 dhcpv4_discover(ether_netif_t *eni)
 {
   if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
-    evlog(LOG_INFO, "dhcp: selecting");
+#ifdef DHCPV4_VCID
+    const char *vcid = DHCPV4_VCID;
+#else
+    const char *vcid = "<unset>";
+#endif
+    evlog(LOG_INFO, "dhcp: selecting (vcid:%s)", vcid);
     eni->eni_dhcp_state = DHCP_STATE_SELECTING;
   }
   eni->eni_ni.ni_local_addr = 0;
@@ -272,12 +275,14 @@ typedef struct parsed_opts {
 #define PO_GATEWAY           0x4
 #define PO_LEASE_TIME        0x8
 #define PO_SERVER_IDENTIFIER 0x10
+#define PO_NTP_SERVER        0x20
   uint8_t msgtype;
 
   uint32_t gateway;
   uint32_t netmask;
   uint32_t lease_time;
   uint32_t server_identifer;
+  uint32_t ntp_server;
 } parsed_opts_t;
 
 
@@ -291,15 +296,12 @@ static const struct {
   { PO_NETMASK, DHCP_SUBNET_MASK, 4, offsetof(parsed_opts_t, netmask) },
   { PO_GATEWAY, DHCP_GATEWAY, 4, offsetof(parsed_opts_t, gateway) },
   { PO_LEASE_TIME, DHCP_LEASE_TIME, 4, offsetof(parsed_opts_t, lease_time) },
-  { PO_SERVER_IDENTIFIER, DHCP_SERVER_IDENTIFIER, 4, offsetof(parsed_opts_t, server_identifer) }
+  { PO_SERVER_IDENTIFIER, DHCP_SERVER_IDENTIFIER, 4, offsetof(parsed_opts_t, server_identifer) },
+  { PO_NTP_SERVER, DHCP_NTP_SERVER, 4, offsetof(parsed_opts_t, ntp_server) }
 };
-
 
 #define REQUIRED_OPTIONS_FROM_SERVER \
   (PO_MSGTYPE | PO_NETMASK | PO_GATEWAY | PO_LEASE_TIME | PO_SERVER_IDENTIFIER)
-
-
-
 
 
 pbuf_t *
@@ -420,6 +422,10 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
     dhcpv4_update(&eni->eni_ni);
     net_timer_arm(&eni->eni_dhcp_timer,
                   clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
+
+    if(po.valid & PO_NTP_SERVER) {
+      ntp_set_server(po.ntp_server);
+    }
     break;
   }
   return pb;

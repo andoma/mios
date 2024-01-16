@@ -5,6 +5,7 @@
 #include <mios/task.h>
 #include <mios/mios.h>
 #include <mios/service.h>
+#include <mios/datetime.h>
 
 #include <sys/param.h>
 
@@ -211,6 +212,43 @@ stream_follower_wakeup(follower_t *f)
   cond_signal(&st->c);
 }
 
+
+static void
+print_timestamp(stream_t *st, int64_t ts)
+{
+  int64_t now = clock_get();
+  if(wallclock.source) {
+    datetime_t dt;
+    ts += wallclock.utc_offset;
+    int secs = ts / 1000000;
+    int usecs = ts % 1000000;
+    datetime_from_unixtime(secs + wallclock.tz_offset,
+                           &dt);
+
+    stprintf(st, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+             dt.year,
+             dt.mon,
+             dt.mday,
+             dt.hour,
+             dt.min,
+             dt.sec,
+             usecs / 1000);
+    if(wallclock.tz_offset == 0) {
+      stprintf(st, "Z");
+    } else {
+      stprintf(st, " +%02d:%02d",
+               wallclock.tz_offset / 60,
+               wallclock.tz_offset % 60);
+    }
+  } else {
+    const int ms_ago = (now - ts) / 1000;
+    stprintf(st, "%5d.%03d",
+             -(ms_ago / 1000), ms_ago % 1000);
+  }
+}
+
+
+
 static void
 stream_log(evlogfifo_t *ef, stream_t *st, int follow)
 {
@@ -254,10 +292,9 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
 
     ts += evl_read_delta_ts(ef, ptr);
 
-    const int ms_ago = (clock_get() - ts) / 1000;
+    print_timestamp(st, ts);
 
-    stprintf(st, "%5d.%03d %s : ",
-             -(ms_ago / 1000), ms_ago % 1000,  level2str[level]);
+    stprintf(st, " %s : ", level2str[level]);
 
     if(msgend >= msgstart) {
       st->write(st, ef->data + msgstart, msglen, 0);
