@@ -5,6 +5,7 @@
 #define RCC_BASE    0x40021000
 
 #define RCC_CR        (RCC_BASE + 0x00)
+#define RCC_ICSCR     (RCC_BASE + 0x04)
 #define RCC_CFGR      (RCC_BASE + 0x08)
 #define RCC_PLLCFGR   (RCC_BASE + 0x0c)
 #define RCC_CCIPR     (RCC_BASE + 0x88)

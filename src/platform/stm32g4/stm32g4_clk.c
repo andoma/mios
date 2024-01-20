@@ -37,6 +37,8 @@ clk_get_freq(uint16_t id)
 void
 stm32g4_init_pll(int hse_freq, int p_freq)
 {
+  reg_wr(RCC_ICSCR, 0x40000000);
+
   int pll_m = 4; // Internal 16MHz / 4
   uint32_t pllcfgr = 2;
 
