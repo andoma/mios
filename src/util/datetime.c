@@ -95,12 +95,13 @@ datetime_adj(datetime_adj_hand_t which, int delta)
 void
 datetime_set_utc_offset(int64_t offset, const char *source)
 {
-  if(!wallclock.utc_offset) {
-    wallclock.source = source;
-    wallclock.utc_offset = offset;
+  int dolog = !wallclock.utc_offset;
+
+  wallclock.source = source;
+  wallclock.utc_offset = offset;
+  if(dolog)
     evlog(LOG_INFO, "Clock updated via %s (uptime:%lld µs)",
           source, clock_get());
-  }
 }
 
 
