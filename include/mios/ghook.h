@@ -6,7 +6,7 @@ typedef enum {
   GHOOK_DHCP_UPDATE,
 } ghook_type_t;
 
-typedef int (*ghook_t)(ghook_type_t type, ...);
+typedef void (*ghook_t)(ghook_type_t type, ...);
 
 #define GHOOK(cb)                                                  \
   static const ghook_t MIOS_JOIN(ghook, __LINE__) __attribute__ ((used, section("ghook"))) = (void *)cb;

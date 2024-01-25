@@ -45,6 +45,7 @@ typedef struct dhcp_hdr {
 #define DHCP_SUBNET_MASK               1
 #define DHCP_GATEWAY                   3
 #define DHCP_NTP_SERVER                42
+#define DHCP_VENDOR_SPECIFIC_INFO      43
 #define DHCP_REQUESTED_IP_ADDRESS      50
 #define DHCP_LEASE_TIME                51
 #define DHCP_MESSAGE_TYPE              53
@@ -125,9 +126,11 @@ append_parameter_request_list(pbuf_t *pb)
 
 
 static void
-dhcpv4_update(netif_t *ni)
+dhcpv4_update(netif_t *ni, pbuf_t *vsi)
 {
-  ghook_invoke(GHOOK_DHCP_UPDATE, ni);
+  const void *vsidata = vsi ? pbuf_data(vsi, 0) : NULL;
+  size_t vsisize = vsi ? vsi->pb_buflen : 0;
+  ghook_invoke(GHOOK_DHCP_UPDATE, ni, vsidata, vsisize);
 }
 
 static pbuf_t *
@@ -276,6 +279,7 @@ typedef struct parsed_opts {
 #define PO_LEASE_TIME        0x8
 #define PO_SERVER_IDENTIFIER 0x10
 #define PO_NTP_SERVER        0x20
+#define PO_VENDOR_INFO       0x40
   uint8_t msgtype;
 
   uint32_t gateway;
@@ -283,6 +287,7 @@ typedef struct parsed_opts {
   uint32_t lease_time;
   uint32_t server_identifer;
   uint32_t ntp_server;
+  pbuf_t *vsi; // Vendor specific info
 } parsed_opts_t;
 
 
@@ -308,6 +313,7 @@ pbuf_t *
 parse_opts(pbuf_t *pb, struct parsed_opts *po)
 {
   po->valid = 0;
+  po->vsi = NULL;
 
   while(pb) {
     if(pbuf_pullup(pb, 1))
@@ -335,6 +341,14 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
       printf("%02x ", dx[j]);
     printf("\n");
 #endif
+
+    if(type == DHCP_VENDOR_SPECIFIC_INFO && po->vsi == NULL) {
+      po->vsi = pbuf_make(0, 0);
+      if(po->vsi != NULL) {
+        memcpy(pbuf_append(po->vsi, length), pbuf_data(pb, 0), length);
+      }
+    }
+
     for(size_t i = 0; i < ARRAYSIZE(options); i++) {
       if(options[i].type == type && options[i].length == length) {
 
@@ -374,60 +388,60 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
   pb = pbuf_drop(pb, sizeof(dhcp_hdr_t));
 
   parsed_opts_t po;
-  if((pb = parse_opts(pb, &po)) == NULL)
-    return pb;
+  if((pb = parse_opts(pb, &po)) != NULL &&
+     (po.valid & REQUIRED_OPTIONS_FROM_SERVER) ==
+     REQUIRED_OPTIONS_FROM_SERVER) {
 
-  if((po.valid & REQUIRED_OPTIONS_FROM_SERVER) != REQUIRED_OPTIONS_FROM_SERVER)
-    return pb;
+    switch(po.msgtype) {
+    case DHCPOFFER:
+      if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
+        evlog(LOG_INFO, "dhcp: Got OFFER but we are not selecting");
+        break;
+      }
 
-  switch(po.msgtype) {
-  case DHCPOFFER:
-    if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
-      evlog(LOG_INFO, "dhcp: Got OFFER but we are not selecting");
-      return pb;
-    }
+      evlog(LOG_INFO, "dhcp: OFFER %Id from %Id", yiaddr, from);
+      eni->eni_dhcp_requested_ip = yiaddr;
+      eni->eni_dhcp_server_ip = po.server_identifer;
 
-    evlog(LOG_INFO, "dhcp: OFFER %Id from %Id", yiaddr, from);
-    eni->eni_dhcp_requested_ip = yiaddr;
-    eni->eni_dhcp_server_ip = po.server_identifer;
-
-    eni->eni_dhcp_retries = 0;
-    dhcpv4_request(eni);
-    break;
-
-  case DHCPACK:
-
-    if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING &&
-       eni->eni_dhcp_state != DHCP_STATE_BOUND)
+      eni->eni_dhcp_retries = 0;
+      dhcpv4_request(eni);
       break;
 
-    if(eni->eni_ni.ni_local_addr != yiaddr) {
-      // Only log when something changes from our bound address
-      evlog(LOG_INFO, "dhcp: ACK %Id from %Id", yiaddr, from);
-    }
+    case DHCPACK:
 
-    if(eni->eni_dhcp_requested_ip != yiaddr) {
-      evlog(LOG_INFO, "dhcp: rejected, not requested ip");
+      if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING &&
+         eni->eni_dhcp_state != DHCP_STATE_BOUND)
+        break;
+
+      if(eni->eni_ni.ni_local_addr != yiaddr) {
+        // Only log when something changes from our bound address
+        evlog(LOG_INFO, "dhcp: ACK %Id from %Id", yiaddr, from);
+      }
+
+      if(eni->eni_dhcp_requested_ip != yiaddr) {
+        evlog(LOG_INFO, "dhcp: rejected, not requested ip");
+        break;
+      }
+
+      if(eni->eni_dhcp_server_ip != from) {
+        evlog(LOG_INFO, "dhcp: rejected, not correct source");
+        break;
+      }
+
+      eni->eni_ni.ni_local_addr = yiaddr;
+      eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
+      eni->eni_dhcp_state = DHCP_STATE_BOUND;
+      dhcpv4_update(&eni->eni_ni, po.vsi);
+      net_timer_arm(&eni->eni_dhcp_timer,
+                    clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
+
+      if(po.valid & PO_NTP_SERVER) {
+        ntp_set_server(po.ntp_server);
+      }
       break;
     }
-
-    if(eni->eni_dhcp_server_ip != from) {
-      evlog(LOG_INFO, "dhcp: rejected, not correct source");
-      break;
-    }
-
-    eni->eni_ni.ni_local_addr = yiaddr;
-    eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
-    eni->eni_dhcp_state = DHCP_STATE_BOUND;
-    dhcpv4_update(&eni->eni_ni);
-    net_timer_arm(&eni->eni_dhcp_timer,
-                  clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
-
-    if(po.valid & PO_NTP_SERVER) {
-      ntp_set_server(po.ntp_server);
-    }
-    break;
   }
+  pbuf_free(po.vsi);
   return pb;
 }
 
@@ -465,7 +479,7 @@ dhcpv4_init(ether_netif_t *eni)
 void
 dhcpv4_status_change(ether_netif_t *eni)
 {
-  dhcpv4_update(&eni->eni_ni);
+  dhcpv4_update(&eni->eni_ni, NULL);
   if(!(eni->eni_ni.ni_flags & NETIF_F_UP))
     return; // Interface is not up, don't do anything just now
 
