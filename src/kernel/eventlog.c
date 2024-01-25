@@ -214,9 +214,8 @@ stream_follower_wakeup(follower_t *f)
 
 
 static void
-print_timestamp(stream_t *st, int64_t ts)
+print_timestamp_to_stream(stream_t *st, int64_t ts)
 {
-  int64_t now = clock_get();
   if(wallclock.source) {
     datetime_t dt;
     ts += wallclock.utc_offset;
@@ -241,6 +240,7 @@ print_timestamp(stream_t *st, int64_t ts)
                wallclock.tz_offset % 60);
     }
   } else {
+    int64_t now = clock_get();
     const int ms_ago = (now - ts) / 1000;
     stprintf(st, "%5d.%03d",
              -(ms_ago / 1000), ms_ago % 1000);
@@ -292,7 +292,7 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
 
     ts += evl_read_delta_ts(ef, ptr);
 
-    print_timestamp(st, ts);
+    print_timestamp_to_stream(st, ts);
 
     stprintf(st, " %s : ", level2str[level]);
 
@@ -501,6 +501,45 @@ SERVICE_DEF("log", 2, 2, SERVICE_TYPE_DGRAM, evlog_svc_open);
 
 static size_t g_logfile_max_size;
 
+static size_t
+print_timestamp_to_buf(char *buf, size_t buflen, int64_t ts)
+{
+  size_t used = 0;
+  if(wallclock.source) {
+    datetime_t dt;
+    ts += wallclock.utc_offset;
+    int secs = ts / 1000000;
+    int usecs = ts % 1000000;
+    datetime_from_unixtime(secs + wallclock.tz_offset,
+                           &dt);
+
+    used += snprintf(buf, buflen, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+             dt.year,
+             dt.mon,
+             dt.mday,
+             dt.hour,
+             dt.min,
+             dt.sec,
+             usecs / 1000);
+
+    if(used >= buflen)
+      return used;
+
+    if(wallclock.tz_offset == 0) {
+      used += snprintf(buf + used, buflen - used, "Z");
+    } else {
+      used += snprintf(buf + used, buflen - used, " +%02d:%02d",
+                       wallclock.tz_offset / 60,
+                       wallclock.tz_offset % 60);
+    }
+    return used;
+  } else {
+    const int ms = ts / 1000;
+    return snprintf(buf, buflen, "%d", ms);
+  }
+}
+
+
 __attribute__((noreturn))
 static void *
 eventlog_to_fs_thread(void *arg)
@@ -546,11 +585,14 @@ eventlog_to_fs_thread(void *arg)
 
     ts += evl_read_delta_ts(ef, ptr);
 
-    //    const int ms_ago = (clock_get() - ts) / 1000;
-
     size_t buflen = 0;
-    buflen += snprintf(linebuf, sizeof(linebuf),
-                       "%d\t%s\t", (int)(ts / 1000), level2str[level]);
+    buflen += print_timestamp_to_buf(linebuf, sizeof(linebuf), ts);
+
+    if(buflen < sizeof(linebuf)) {
+      buflen += snprintf(linebuf + buflen, sizeof(linebuf) - buflen,
+                         "\t%s\t", level2str[level]);
+    }
+
     msglen = MIN(msglen, sizeof(linebuf) - buflen - 1);
 
     const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
