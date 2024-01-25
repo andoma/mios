@@ -29,8 +29,8 @@ typedef struct follower {
 } follower_t;
 
 typedef struct {
-  uint64_t ts_tail;
-  uint64_t ts_head;
+  int64_t ts_tail;
+  int64_t ts_head;
   mutex_t mutex;
   LIST_HEAD(, follower) followers;
   uint16_t head;
@@ -162,6 +162,8 @@ evlog0(event_level_t level, stream_t *st, const char *fmt, ...)
 
   int msg_len = ef->data[(head + 0) & EVENTLOG_MASK];
   int64_t delta_ts = now - ef->ts_head;
+  if(delta_ts < 0)
+    delta_ts = 0;
   int64_t dts = delta_ts;
   int ts_len = 0;
   while(dts) {
