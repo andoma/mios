@@ -1,6 +1,3 @@
-[submodule "src/drivers/sx1280"]
-	path = src/drivers/sx1280
-	url = https://github.com/andoma/sx1280
 [submodule "src/lib/libfixmath"]
 	path = src/lib/libfixmath
 	url = https://github.com/PetteriAimonen/libfixmath.git
