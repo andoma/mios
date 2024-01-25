@@ -451,7 +451,7 @@ evlog_svc_wakeup(follower_t *f)
 
 
 static void
-evlog_svc_close(void *opaque)
+evlog_svc_close(void *opaque, const char *errmsg)
 {
   evlog_svc_follower_t *esf = opaque;
   evlogfifo_t *ef = &ef0;

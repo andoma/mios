@@ -39,7 +39,7 @@ echo_pull(void *opaque)
 
 
 static void
-echo_close(void *opaque)
+echo_close(void *opaque, const char *reason)
 {
   svc_echo_t *se = opaque;
   socket_t *s = se->se_sock;

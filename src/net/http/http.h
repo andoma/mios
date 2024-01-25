@@ -96,7 +96,8 @@ http_connection_t *http_websocket_create(int (*cb)(void *opaque,
                                          void *opaque);
 
 void http_websocket_start(http_connection_t *hc, uint32_t addr,
-                          uint16_t port, const char *path);
+                          uint16_t port, const char *path,
+                          const char *protocol);
 
 
 void http_websocket_close(http_connection_t *hc, uint16_t status_code,

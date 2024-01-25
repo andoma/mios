@@ -207,7 +207,7 @@ socket_stream_may_push(void *opaque)
 
 
 static void
-socket_stream_close(void *opaque)
+socket_stream_close(void *opaque, const char *reason)
 {
   socket_stream_t *ss = opaque;
   mutex_lock(&ss->ss_mutex);

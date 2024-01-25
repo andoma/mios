@@ -33,7 +33,7 @@ discard_pull(void *opaque)
 
 
 static void
-discard_close(void *opaque)
+discard_close(void *opaque, const char *reason)
 {
   socket_t *s = opaque;
   s->net->event(s->net_opaque, SOCKET_EVENT_CLOSE);

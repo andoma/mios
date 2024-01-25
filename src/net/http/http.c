@@ -82,8 +82,7 @@ struct http_connection {
   timer_t hc_timer;
 
   const http_parser_settings *hc_parser_settings;
-
-
+  const char *hc_close_reason;
 };
 
 #define OUTPUT_ENCODING_NONE      0
@@ -513,21 +512,24 @@ websocket_parser_execute(http_connection_t *hc,
 
 
 static void
-http_close_locked(http_connection_t *hc)
+http_close_locked(http_connection_t *hc, const char *reason)
 {
   if(hc->hc_sock != NULL) {
     hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_CLOSE);
     hc->hc_sock = NULL;
+    if(hc->hc_close_reason == NULL)
+      hc->hc_close_reason = reason;
     cond_signal(&hc->hc_txbuf_cond);
   }
 }
 
 
 static size_t
-http_push_error(http_connection_t *hc, struct pbuf *pb0)
+http_push_error(http_connection_t *hc, struct pbuf *pb0,
+                const char *reason)
 {
   mutex_lock(&http_mutex);
-  http_close_locked(hc);
+  http_close_locked(hc, reason);
   mutex_unlock(&http_mutex);
   return pb0->pb_pktlen;
 }
@@ -555,7 +557,7 @@ http_push_partial(void *opaque, struct pbuf * const pb0)
         size_t offered = pb->pb_buflen - offset;
         r = websocket_parser_execute(hc, pbuf_cdata(pb, offset), offered);
         if(r < 0) {
-          return http_push_error(hc, pb0);
+          return http_push_error(hc, pb0, "parser error");
         }
 
         if(r != offered)
@@ -567,7 +569,7 @@ http_push_partial(void *opaque, struct pbuf * const pb0)
                                 pbuf_cdata(pb, offset),
                                 pb->pb_buflen - offset);
         if(hc->hc_hp.http_errno) {
-          return http_push_error(hc, pb0);
+          return http_push_error(hc, pb0, "parser error");
         }
       }
       offset += r;
@@ -621,7 +623,7 @@ http_websocket_enqueue_close(http_connection_t *hc)
 
 
 static void
-http_close(void *opaque)
+http_close(void *opaque, const char *reason)
 {
   http_connection_t *hc = opaque;
 
@@ -638,7 +640,7 @@ http_close(void *opaque)
   timer_disarm(&hc->hc_timer);
 
   mutex_lock(&http_mutex);
-  http_close_locked(hc);
+  http_close_locked(hc, reason);
 
   if(hc->hc_ws_cb) {
     http_websocket_enqueue_close(hc);
@@ -693,7 +695,7 @@ http_timer_locked(http_connection_t *hc)
       return;
     }
   }
-  http_close_locked(hc);
+  http_close_locked(hc, "keep alive timeout");
 }
 
 static void
@@ -864,6 +866,16 @@ http_websocket_send_locked(http_connection_t *hc, uint8_t opcode,
 
 
 static void
+websocket_close_locked(http_connection_t *hc, uint16_t code)
+{
+  if(hc->hc_close_reason == NULL)
+    hc->hc_close_reason = "Sending websocket close";
+
+  uint8_t payload[2] = {code >> 8, code};
+  http_websocket_send_locked(hc, WS_OPCODE_CLOSE, payload, sizeof(payload));
+}
+
+static void
 http_process_websocket_packet(http_server_wsp_t *hsw)
 {
   http_connection_t *hc = hsw->hsw_hst.hst_hc;
@@ -881,9 +893,7 @@ http_process_websocket_packet(http_server_wsp_t *hsw)
   mutex_lock(&http_mutex);
 
   if(err) {
-    uint8_t close_reason[2] = {err >> 8, err};
-    http_websocket_send_locked(hc, WS_OPCODE_CLOSE, close_reason,
-                               sizeof(close_reason));
+    websocket_close_locked(hc, err);
   }
 }
 
@@ -934,9 +944,10 @@ http_thread(void *arg)
       http_connection_t *hc = STAILQ_FIRST(&closing_websocket_connections);
       if(hc != NULL) {
         STAILQ_REMOVE_HEAD(&closing_websocket_connections, hc_ws_close_link);
+        const char *reason = hc->hc_close_reason;
         mutex_unlock(&http_mutex);
         if(hc->hc_ws_cb) {
-          hc->hc_ws_cb(hc->hc_ws_opaque, -1, NULL, 0, hc, NULL);
+          hc->hc_ws_cb(hc->hc_ws_opaque, -1, (char *)reason, 0, hc, NULL);
         }
         mutex_lock(&http_mutex);
         http_connection_release(hc);
@@ -1319,8 +1330,8 @@ http_client_headers_complete(http_parser *p)
     http_timer_arm(hc, 5);
   } else {
     mutex_lock(&http_mutex);
+    http_close_locked(hc, http_status_str(p->status_code));
     http_websocket_enqueue_close(hc);
-    http_close_locked(hc);
     mutex_unlock(&http_mutex);
     return 1;
   }
@@ -1368,7 +1379,8 @@ http_websocket_create(int (*cb)(void *opaque,
 
 void
 http_websocket_start(http_connection_t *hc, uint32_t addr,
-                     uint16_t port, const char *path)
+                     uint16_t port, const char *path,
+                     const char *protocol)
 {
   tcp_connect(hc->hc_sock, addr, port);
 
@@ -1381,8 +1393,13 @@ http_websocket_start(http_connection_t *hc, uint32_t addr,
                 "Upgrade: websocket\r\n"
                 "Sec-WebSocket-Version: 13\r\n"
                 "Sec-WebSocket-Key: Aoetmg2mBDsoQUGZN05WLQ==\r\n"
+                "%s%s%s"
                 "\r\n",
-                path);
+                path,
+                protocol ? "Sec-WebSocket-Protocol: " : "",
+                protocol ?: "",
+                protocol ? "\r\n" : "");
+
 
   hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
 
@@ -1395,9 +1412,6 @@ http_websocket_close(http_connection_t *hc, uint16_t status_code,
                      const char *message)
 {
   mutex_lock(&http_mutex);
-
-  uint8_t close_reason[2] = {status_code >> 8, status_code};
-  http_websocket_send_locked(hc, WS_OPCODE_CLOSE, close_reason,
-                             sizeof(close_reason));
+  websocket_close_locked(hc, status_code);
   mutex_unlock(&http_mutex);
 }

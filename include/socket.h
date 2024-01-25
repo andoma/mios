@@ -19,7 +19,8 @@ typedef struct socket_app_fn {
 
   // Once called by then network side,
   // The network side will not call anything again
-  void (*close)(void *opaque);
+  // reason is only compile-time-constants (no dynamic allocation)
+  void (*close)(void *opaque, const char *reason);
 } socket_app_fn_t;
 
 

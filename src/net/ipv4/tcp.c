@@ -267,7 +267,7 @@ tcp_rtx_cb(void *opaque, uint64_t now)
   tcb_t *tcb = opaque;
 
   if(now > tcb->tcb_last_rx + TCP_TIMEOUT_INTERVAL * 1000) {
-    tcp_close(tcb, "Timeout");
+    tcp_close(tcb, "TCP Timeout");
     return;
   }
 
@@ -544,10 +544,10 @@ tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
 
 
 static void
-tcp_close_app(tcb_t *tcb)
+tcp_close_app(tcb_t *tcb, const char *errmsg)
 {
   if(tcb->tcb_sock.app_opaque) {
-    tcb->tcb_sock.app->close(tcb->tcb_sock.app_opaque);
+    tcb->tcb_sock.app->close(tcb->tcb_sock.app_opaque, errmsg);
     tcb->tcb_sock.app_opaque = NULL;
   }
 }
@@ -575,7 +575,7 @@ tcp_close(tcb_t *tcb, const char *reason)
 
   tcp_set_state(tcb, TCP_STATE_CLOSED, reason);
 
-  tcp_close_app(tcb);
+  tcp_close_app(tcb, reason);
 
   tcp_destroy(tcb);
 }
@@ -822,7 +822,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
     if(flag & TCP_F_RST) {
       if(ack_acceptance) {
-        tcp_close(tcb, "Got RST");
+        tcp_close(tcb, "Connection refused");
         return pb;
       }
       return pb;
@@ -1062,7 +1062,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   if(flag & TCP_F_FIN) {
 
     try_send_more = 0;
-    tcp_close_app(tcb);
+    tcp_close_app(tcb, "Connection closed by peer");
 
     switch(tcb->tcb_state) {
     case TCP_STATE_CLOSED:

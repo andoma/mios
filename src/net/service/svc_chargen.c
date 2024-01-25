@@ -36,7 +36,7 @@ chargen_pull(void *opaque)
 
 
 static void
-chargen_close(void *opaque)
+chargen_close(void *opaque, const char *reason)
 {
   free(opaque);
 }
