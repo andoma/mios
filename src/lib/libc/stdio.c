@@ -168,7 +168,7 @@ emit_s64(fmtcb_t *cb, void *aux,
          const fmtparam_t *fp, int64_t x)
 {
   if(x < 0)
-    return emit_u64(cb, aux, fp, 1, x);
+    return emit_u64(cb, aux, fp, 1, -x);
   else
     return emit_u64(cb, aux, fp, 0, x);
 }
