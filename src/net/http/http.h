@@ -67,8 +67,6 @@ struct stream *http_response_begin(struct http_request *hr,
                                    int status_code,
                                    const char *content_type);
 
-int http_response_end(struct http_request *hr);
-
 int http_request_accept_websocket(http_request_t *hr,
                                   int (*cb)(void *opaque,
                                             int opcode,
@@ -82,8 +80,6 @@ int http_request_accept_websocket(http_request_t *hr,
 
 struct stream *http_websocket_output_begin(http_connection_t *hc,
                                            int opcode);
-
-int http_websocket_output_end(http_connection_t *hc);
 
 void http_connection_release(http_connection_t *hc);
 

@@ -17,6 +17,8 @@ typedef struct stream {
   __attribute__((access(read_only, 2, 3)))
   void (*write)(struct stream *s, const void *buf, size_t size, int flags);
 
+  void (*close)(struct stream *s);
+
 } stream_t;
 
 

@@ -1154,6 +1154,37 @@ http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
   mutex_unlock(&http_mutex);
 }
 
+static void
+http_response_close(stream_t *st)
+{
+  http_connection_t *hc = (http_connection_t *)st;
+  pbuf_t *pb;
+
+  mutex_lock(&http_mutex);
+
+  if(hc->hc_hold)
+    http_stream_release_packet(hc, 1);
+
+  while(hc->hc_txbuf_head && hc->hc_sock) {
+    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+  }
+
+  socket_t *sk = hc->hc_sock;
+  if(sk != NULL && hc->hc_output_encoding == OUTPUT_ENCODING_CHUNKED) {
+    pb = pbuf_make(sk->preferred_offset, 1);
+    memcpy(pbuf_data(pb, 0), "0\r\n\r\n", 5);
+
+    pb->pb_pktlen += 5;
+    pb->pb_buflen += 5;
+
+    hc->hc_txbuf_head = pb;
+    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+  }
+
+  hc->hc_output_encoding = 0;
+  mutex_unlock(&http_mutex);
+}
+
 struct stream *
 http_response_begin(struct http_request *hr, int status_code,
                     const char *content_type)
@@ -1189,15 +1220,15 @@ http_response_begin(struct http_request *hr, int status_code,
   }
 
   mutex_unlock(&http_mutex);
+  hc->s.close = http_response_close;
   return &hc->s;
 }
 
-int
-http_response_end(struct http_request *hr)
-{
-  http_connection_t *hc = hr->hr_hst.hst_hc;
-  pbuf_t *pb;
 
+static void
+http_websocket_output_end(stream_t *st)
+{
+  http_connection_t *hc = (http_connection_t *)st;
   mutex_lock(&http_mutex);
 
   if(hc->hc_hold)
@@ -1206,22 +1237,8 @@ http_response_end(struct http_request *hr)
   while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
-
-  socket_t *sk = hc->hc_sock;
-  if(sk != NULL && hc->hc_output_encoding == OUTPUT_ENCODING_CHUNKED) {
-    pb = pbuf_make(sk->preferred_offset, 1);
-    memcpy(pbuf_data(pb, 0), "0\r\n\r\n", 5);
-
-    pb->pb_pktlen += 5;
-    pb->pb_buflen += 5;
-
-    hc->hc_txbuf_head = pb;
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
-  }
-
   hc->hc_output_encoding = 0;
   mutex_unlock(&http_mutex);
-  return 0;
 }
 
 struct stream *
@@ -1235,24 +1252,8 @@ http_websocket_output_begin(http_connection_t *hc, int opcode)
   hc->hc_output_encoding = OUTPUT_ENCODING_WEBSOCKET;
   hc->hc_ws_opcode = opcode;
   mutex_unlock(&http_mutex);
+  hc->s.close = http_websocket_output_end;
   return &hc->s;
-}
-
-int
-http_websocket_output_end(http_connection_t *hc)
-{
-  mutex_lock(&http_mutex);
-
-  if(hc->hc_hold)
-    http_stream_release_packet(hc, 1);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-  hc->hc_output_encoding = 0;
-  mutex_unlock(&http_mutex);
-  return 0;
-
 }
 
 
@@ -1321,7 +1322,7 @@ http_request_accept_websocket(http_request_t *hr,
 
 
 static int
-http_client_headers_complete(http_parser *p)
+websocket_response_headers_complete(http_parser *p)
 {
   http_connection_t *hc = p->data;
 
@@ -1339,8 +1340,8 @@ http_client_headers_complete(http_parser *p)
 }
 
 
-static const http_parser_settings client_parser = {
-  .on_headers_complete = http_client_headers_complete,
+static const http_parser_settings websocket_response_parser = {
+  .on_headers_complete = websocket_response_headers_complete,
 };
 
 
@@ -1354,7 +1355,7 @@ http_websocket_create(int (*cb)(void *opaque,
                       void *opaque)
 {
   http_connection_t *hc = http_connection_create(HTTP_RESPONSE,
-                                                 &client_parser);
+                                                 &websocket_response_parser);
   if(hc == NULL)
     return NULL;
 
