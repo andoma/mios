@@ -1389,7 +1389,7 @@ http_websocket_start(http_connection_t *hc, uint32_t addr,
 
   hc->hc_txbuf_head =
     make_output(hc->hc_sock,
-                "GET %s HTTP/1.1\n"
+                "GET %s HTTP/1.1\r\n"
                 "Connection: Upgrade\r\n"
                 "Upgrade: websocket\r\n"
                 "Sec-WebSocket-Version: 13\r\n"
