@@ -14,6 +14,7 @@
 #include "net/net_task.h"
 
 #include "http_parser.h"
+#include "http_util.h"
 #include "websocket.h"
 
 #include "lib/crypto/sha1.h"
@@ -144,20 +145,59 @@ http_server_url(http_parser *p, const char *at, size_t length)
   return 0;
 }
 
-
-static void
-match_header(http_request_t *hr, char c, const char *name, size_t len,
-             uint16_t mask)
+__attribute__((noinline))
+static int
+header_append(http_request_t *hr, const char *str, size_t len, void **p)
 {
-  if(!(hr->hr_header_match & mask))
-    return;
-
-  if(hr->hr_header_match_len > len || name[hr->hr_header_match_len] != c) {
-    hr->hr_header_match &= ~mask;
-    return;
-  }
+  void *x = balloc_append_data(&hr->hr_bumpalloc, str, len, p, NULL);
+  if(x == NULL)
+    hr->hr_header_err = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
+  return 0;
 }
 
+
+static int
+header_host(void *opaque, const char *str, size_t len)
+{
+  http_request_t *hr = opaque;
+  return header_append(hr, str, len, (void **)&hr->hr_host);
+}
+
+static int
+header_sec_websocket_key(void *opaque, const char *str, size_t len)
+{
+  http_request_t *hr = opaque;
+  return header_append(hr, str, len, (void **)&hr->hr_wskey);
+}
+
+static int
+header_content_type(void *opaque, const char *str, size_t len)
+{
+  http_request_t *hr = opaque;
+  return header_append(hr, str, len, (void **)&hr->hr_content_type);
+}
+
+static int
+header_connection(void *opaque, const char *str, size_t len)
+{
+  http_request_t *hr = opaque;
+  return header_append(hr, str, len, (void **)&hr->hr_connection);
+}
+
+static int
+header_upgrade(void *opaque, const char *str, size_t len)
+{
+  http_request_t *hr = opaque;
+  return header_append(hr, str, len, (void **)&hr->hr_upgrade);
+}
+
+static const http_header_callback_t server_headers[] = {
+  { "host", header_host },
+  { "sec-websocket-key", header_sec_websocket_key },
+  { "content-type", header_content_type },
+  { "connection", header_connection },
+  { "upgrade", header_upgrade },
+};
 
 static int
 http_server_header_field(http_parser *p, const char *at, size_t length)
@@ -167,32 +207,9 @@ http_server_header_field(http_parser *p, const char *at, size_t length)
   if(hr == NULL || hr->hr_header_err)
     return 0;
 
-  if(hr->hr_header_match_len == 0) {
-    hr->hr_header_match = HEADER_ALL;
-  }
-
-  if(hr->hr_header_match_len == 255)
-    return 0;
-
-  for(size_t i = 0; i < length; i++) {
-    char c = at[i];
-    if(c >= 'A' && c <= 'Z')
-      c += 32;
-    match_header(hr, c, "host", strlen("host"),
-                 HEADER_HOST);
-    match_header(hr, c, "sec-websocket-key", strlen("sec-websocket-key"),
-                 HEADER_SEC_WEBSOCKET_KEY);
-    match_header(hr, c, "content-type", strlen("content-type"),
-                 HEADER_CONTENT_TYPE);
-    match_header(hr, c, "connection", strlen("connection"),
-                 HEADER_CONNECTION);
-    match_header(hr, c, "upgrade", strlen("upgrade"),
-                 HEADER_UPGRADE);
-    hr->hr_header_match_len++;
-  }
-  return 0;
+  return http_match_header_field(&hr->hr_header_matcher, at, length,
+                                 server_headers, ARRAYSIZE(server_headers));
 }
-
 
 static int
 http_server_header_value(http_parser *p, const char *at, size_t length)
@@ -202,36 +219,9 @@ http_server_header_value(http_parser *p, const char *at, size_t length)
   if(hr == NULL || hr->hr_header_err)
     return 0;
 
-  hr->hr_header_match_len = 0;
-
-  void *dst;
-  switch(hr->hr_header_match) {
-  case HEADER_HOST:
-    dst = balloc_append_data(&hr->hr_bumpalloc, at, length,
-                             (void **)&hr->hr_host, NULL);
-    break;
-  case HEADER_SEC_WEBSOCKET_KEY:
-    dst = balloc_append_data(&hr->hr_bumpalloc, at, length,
-                             (void **)&hr->hr_wskey, NULL);
-    break;
-  case HEADER_CONTENT_TYPE:
-    dst = balloc_append_data(&hr->hr_bumpalloc, at, length,
-                             (void **)&hr->hr_content_type, NULL);
-    break;
-  case HEADER_UPGRADE:
-    dst = balloc_append_data(&hr->hr_bumpalloc, at, length,
-                             (void **)&hr->hr_upgrade, NULL);
-    break;
-  case HEADER_CONNECTION:
-    dst = balloc_append_data(&hr->hr_bumpalloc, at, length,
-                             (void **)&hr->hr_connection, NULL);
-    break;
-  default:
-    return 0;
-  }
-  if(dst == NULL)
-    hr->hr_header_err = HTTP_STATUS_REQUEST_HEADER_FIELDS_TOO_LARGE;
-  return 0;
+  return http_match_header_value(&hr->hr_header_matcher, at, length,
+                                 server_headers, ARRAYSIZE(server_headers),
+                                 hr);
 }
 
 

@@ -30,6 +30,8 @@ SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 SRCS-${ENABLE_NET_HTTP} += \
        ${SRC}/net/http/http.c \
        ${SRC}/net/http/http_parser.c \
+       ${SRC}/net/http/http_stream.c \
+       ${SRC}/net/http/http_util.c \
 
 SRCS-${ENABLE_NET_MBUS_GW} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus_gateway.c \

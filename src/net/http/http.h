@@ -5,6 +5,8 @@
 #include <mios/bumpalloc.h>
 #include <sys/queue.h>
 
+#include "http_util.h"
+
 struct stream;
 
 typedef struct http_connection http_connection_t;
@@ -54,10 +56,10 @@ typedef struct http_request {
   uint16_t hr_header_err;
   uint16_t hr_piggyback_503;
 
-  uint16_t hr_header_match;
-  uint8_t hr_header_match_len;
   uint8_t hr_should_keep_alive;
   uint8_t hr_upgrade_to_websocket;
+
+  http_header_matcher_t hr_header_matcher;
 
   balloc_t hr_bumpalloc;
 
