@@ -119,20 +119,39 @@ spiflash_write(struct block_iface *bi, size_t block,
                size_t offset, const void *data, size_t length)
 {
   spiflash_t *sf = (spiflash_t *)bi;
+  const size_t page_size = 256;
 
-  error_t err = spiflash_wait_ready(sf);
-  if(!err) {
-    err = spiflash_we(sf);
-  }
+  error_t err = 0;
+  while(length) {
 
-  if(!err) {
+    if((err = spiflash_wait_ready(sf)) != 0)
+      break;
+    if((err = spiflash_we(sf)) != 0)
+      break;
+
+    size_t to_copy = length;
+
+    if(to_copy > page_size)
+      to_copy = page_size;
+
+    size_t last_byte = offset + to_copy - 1;
+    if((last_byte & ~(page_size - 1)) != (offset & ~(page_size - 1))) {
+      to_copy = page_size - (offset & (page_size - 1));
+    }
 
     uint32_t addr = block * bi->block_size + offset;
     uint8_t cmd[4] = {0x2, addr >> 16, addr >> 8, addr};
 
-    struct iovec tx[2] = {{cmd, 4}, {(void *)data, length}};
+    struct iovec tx[2] = {{cmd, 4}, {(void *)data, to_copy}};
     err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
     sf->state = SPIFLASH_STATE_BUSY;
+
+    if(err)
+      break;
+
+    length -= to_copy;
+    data += to_copy;
+    offset += to_copy;
   }
   return err;
 }
