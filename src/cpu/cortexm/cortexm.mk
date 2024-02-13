@@ -10,7 +10,8 @@ TOOLCHAIN := arm-none-eabi-
 
 GDB ?= ${TOOLCHAIN}gdb
 
-LDFLAGS += -e start
+ENTRYPOINT ?= start
+LDFLAGS += -e ${ENTRYPOINT}
 
 NOFPU := -mgeneral-regs-only
 

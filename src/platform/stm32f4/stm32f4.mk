@@ -4,7 +4,8 @@ GLOBALDEPS += ${P}/stm32f4.mk
 
 CPPFLAGS += -iquote${P} -include ${P}/stm32f4.h
 
-LDSCRIPT = ${P}/stm32f4.ld
+LDSCRIPT = ${P}/stm32f4$(if $(subst no,,${ENABLE_OTA}),_ota,).ld
+ENTRYPOINT = $(if $(subst no,,${ENABLE_OTA}),bl_,)start
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
@@ -29,4 +30,12 @@ SRCS-${ENABLE_NET_IPV4} += \
 SRCS-${ENABLE_NET_MBUS} += \
 	${P}/stm32f4_uart_mbus.c
 
+SRCS-${ENABLE_OTA} += \
+	${P}/boot/isr.s \
+	${P}/boot/bootloader.c \
+
 ${MOS}/platform/stm32f4/%.o : CFLAGS += ${NOFPU}
+
+${MOS}/platform/stm32f4/boot/bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -include ${BOOTLOADER_DEFS}
+
+${P}/boot/bootloader.c : ${O}/version_git.h
