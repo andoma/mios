@@ -21,6 +21,9 @@
 #define RCC_PLLCFGR (RCC_BASE + 0x04)
 #define RCC_PLLI2S  (RCC_BASE + 0x84)
 
+#define RCC_APB2ENR (RCC_BASE + CLK_APB2)
+#define RCC_AHB1ENR (RCC_BASE + CLK_AHB1)
+
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 
 #define CLK_SPI1 CLK_ID(CLK_APB2, 12)
