@@ -445,7 +445,7 @@ static void
 evlog_svc_wakeup(follower_t *f)
 {
   evlog_svc_follower_t *svc = (evlog_svc_follower_t *)f;
-  svc->s->net->event(svc->s->net_opaque, SOCKET_EVENT_WAKEUP);
+  svc->s->net->event(svc->s->net_opaque, SOCKET_EVENT_PULL);
 }
 
 

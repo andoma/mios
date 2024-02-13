@@ -60,7 +60,7 @@ socket_stream_read(struct stream *s, void *buf, size_t size, int wait)
       if(stream_wait_is_done(wait, off, size)) {
         break;
       }
-      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PUSH);
       cond_wait(&ss->ss_cond, &ss->ss_mutex);
       continue;
     }
@@ -91,7 +91,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
 
     if(ss->ss_txbuf_head != NULL) {
       ss->ss_flushed = 1;
-      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
     }
 
   } else {
@@ -105,7 +105,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
         ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 0);
         if(ss->ss_txbuf_head == NULL) {
           ss->ss_flushed = 1;
-          ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+          ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
           ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 1);
         }
         ss->ss_txbuf_tail = ss->ss_txbuf_head;
@@ -134,7 +134,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
 
       if(remain == 0) {
         ss->ss_flushed = 1;
-        ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+        ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
         cond_wait(&ss->ss_cond, &ss->ss_mutex);
         continue;
       }
@@ -185,7 +185,7 @@ socket_stream_pull(void *opaque)
 }
 
 
-static pbuf_t *
+static uint32_t
 socket_stream_push(void *opaque, struct pbuf *pb)
 {
   socket_stream_t *ss = opaque;
@@ -195,7 +195,7 @@ socket_stream_push(void *opaque, struct pbuf *pb)
   ss->ss_rxbuf = pb;
   cond_signal(&ss->ss_cond);
   mutex_unlock(&ss->ss_mutex);
-  return NULL;
+  return 0;
 }
 
 static int

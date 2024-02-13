@@ -63,23 +63,29 @@ http_client_close(void *opaque, const char *reason)
 
 
 
-static pbuf_t *
+static uint32_t
 http_client_push(void *opaque, struct pbuf *pb)
 {
   http_client_t *hc = opaque;
   mutex_lock(&hc->hc_mutex);
-  hc->hc_rxbuf = pb;
-  cond_signal(&hc->hc_rxcond);
+  if(hc->hc_rxbuf == NULL) {
+    hc->hc_rxbuf = pb;
+    cond_signal(&hc->hc_rxcond);
+  } else {
+    pbuf_t *tail = hc->hc_rxbuf;
+    while(tail->pb_next) {
+      tail = tail->pb_next;
+    }
+    tail->pb_next = pb;
+  }
   mutex_unlock(&hc->hc_mutex);
-  return NULL;
+  return 0;
 }
 
 static int
 http_client_may_push(void *opaque)
 {
-  http_client_t *hc = opaque;
-  int r = hc->hc_rxbuf == NULL;
-  return r;
+  return 1;
 }
 
 static const socket_app_fn_t http_client_sock_fn = {
@@ -237,7 +243,7 @@ http_get(const char *url, stream_t *output, uint16_t flags,
     hc->hc_rxbuf = NULL;
     mutex_unlock(&hc->hc_mutex);
 
-    sk->net->event(sk->net_opaque, SOCKET_EVENT_WAKEUP);
+    sk->net->event(sk->net_opaque, SOCKET_EVENT_PUSH);
 
     for(pbuf_t *pb = pb0 ; pb != NULL; pb = pb->pb_next) {
       size_t offset = 0;

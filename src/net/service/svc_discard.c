@@ -8,14 +8,15 @@
 #include "net/pbuf.h"
 
 
-static pbuf_t *
+static uint32_t
 discard_push(void *opaque, struct pbuf *pb)
 {
   int id = -1;
   if(pb->pb_buflen >= 4)
     memcpy(&id, pbuf_cdata(pb, 0), 4);
   //  evlog(LOG_DEBUG, "Disc-0x%x %d bytes", id, pb->pb_pktlen);
-  return pb;
+  pbuf_free(pb);
+  return SOCKET_EVENT_PUSH;
 }
 
 static int

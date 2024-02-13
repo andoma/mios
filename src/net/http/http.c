@@ -292,7 +292,7 @@ send_response_simple(http_connection_t *hc, int code, int do_close)
                 code, http_status_str(code),
                 do_close ? "Connection: close\r\n": "");
 
-  sk->net->event(sk->net_opaque, SOCKET_EVENT_WAKEUP);
+  sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
 }
 
 
@@ -680,7 +680,7 @@ http_timer_locked(http_connection_t *hc)
       }
       hc->hc_txbuf_head = pb;
 
-      sk->net->event(sk->net_opaque, SOCKET_EVENT_WAKEUP);
+      sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
       hc->hc_ping_counter++;
       return;
     }
@@ -850,7 +850,7 @@ http_websocket_send_locked(http_connection_t *hc, uint8_t opcode,
       hdr[0] |= 0x80;
 
     hc->hc_txbuf_head = pb;
-    sk->net->event(sk->net_opaque, SOCKET_EVENT_WAKEUP);
+    sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
   }
 }
 
@@ -1071,7 +1071,7 @@ http_stream_release_packet(http_connection_t *hc, int fin)
   }
   hc->hc_hold = 0;
 
-  sk->net->event(sk->net_opaque, SOCKET_EVENT_WAKEUP);
+  sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
 }
 
 
@@ -1168,7 +1168,7 @@ http_response_close(stream_t *st)
     pb->pb_buflen += 5;
 
     hc->hc_txbuf_head = pb;
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
   }
 
   hc->hc_output_encoding = 0;
@@ -1201,7 +1201,7 @@ http_response_begin(struct http_request *hr, int status_code,
                   !hr->hr_should_keep_alive ?
                   "Connection: close\r\n": "");
 
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
 
     while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
@@ -1295,7 +1295,7 @@ http_request_accept_websocket(http_request_t *hr,
                                     "\r\n",
                                     101, http_status_str(101),
                                     sig);
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+    hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
   }
 
   hc->hc_ws_cb = cb;
@@ -1392,7 +1392,7 @@ http_websocket_start(http_connection_t *hc, uint32_t addr,
                 protocol ? "\r\n" : "");
 
 
-  hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+  hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
 
   mutex_unlock(&http_mutex);
 }

@@ -100,6 +100,8 @@ typedef struct tcb {
   int tcb_srtt;
   int tcb_rttvar;
 
+  uint32_t tcb_app_pending;
+
   uint64_t tcb_tx_bytes;
   uint64_t tcb_rx_bytes;
   uint64_t tcb_rtx_bytes;
@@ -469,10 +471,11 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     tcp_do_connect(tcb);
   }
 
-  if(signals & SOCKET_EVENT_WAKEUP) {
+  if(signals & SOCKET_EVENT_PULL) {
     switch(tcb->tcb_state) {
     case TCP_STATE_ESTABLISHED:
     case TCP_STATE_CLOSE_WAIT:
+      signals &= ~SOCKET_EVENT_PUSH;
       tcp_send_data(tcb);
       break;
     default:
@@ -480,8 +483,17 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     }
   }
 
+  if(signals & SOCKET_EVENT_PUSH) {
+    if(tcb->tcb_app_pending) {
+      tcb->tcb_rx_bytes += tcb->tcb_app_pending;
+      tcb->tcb_app_pending = 0;
+      tcp_send_flag(tcb, TCP_F_ACK);
+    }
+  }
+
   if(signals & SOCKET_EVENT_CLOSE) {
 
+    tcb->tcb_app_pending = 0;
     tcb->tcb_app_closed = 1;
 
     switch(tcb->tcb_state) {
@@ -1020,6 +1032,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       break;
 
     size_t bytes = 0;
+    uint32_t events = 0;
     if(tcb->tcb_sock.app->push_partial) {
 
       bytes = tcb->tcb_sock.app->push_partial(tcb->tcb_sock.app_opaque, pb);
@@ -1027,7 +1040,17 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     } else if(tcb->tcb_sock.app->may_push(tcb->tcb_sock.app_opaque)) {
 
       bytes = pb->pb_pktlen;
-      pb = tcb->tcb_sock.app->push(tcb->tcb_sock.app_opaque, pb);
+      events = tcb->tcb_sock.app->push(tcb->tcb_sock.app_opaque, pb);
+
+      pb = NULL;
+
+      if(!events && bytes) {
+        tcb->tcb_app_pending += bytes;
+        tcb->tcb_rcv.nxt = seq + bytes;
+        timer_disarm(&tcb->tcb_delayed_ack_timer);
+        try_send_more = 0;
+        break;
+      }
     }
 
     if(bytes) {
@@ -1074,7 +1097,8 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     }
 
     tcb->tcb_rcv.nxt++;
-    tcp_send_flag(tcb, TCP_F_ACK);
+    if(tcb->tcb_app_pending == 0)
+      tcp_send_flag(tcb, TCP_F_ACK);
 
     switch(tcb->tcb_state) {
     case TCP_STATE_SYN_RECEIVED:

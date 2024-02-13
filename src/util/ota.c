@@ -59,7 +59,7 @@ ota_get_next_pkt(svc_ota_t *sa)
   }
   sa->sa_rxbuf = NULL;
   mutex_unlock(&sa->sa_mutex);
-  sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_PUSH);
   return pb;
 }
 
@@ -73,7 +73,7 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
     mutex_lock(&sa->sa_mutex);
     sa->sa_info = reply;
     mutex_unlock(&sa->sa_mutex);
-    sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_WAKEUP);
+    sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_PULL);
   }
 }
 
@@ -238,7 +238,7 @@ ota_pull(void *opaque)
 
 
 
-static pbuf_t *
+static uint32_t
 ota_push(void *opaque, struct pbuf *pb)
 {
   svc_ota_t *sa = opaque;
@@ -250,8 +250,10 @@ ota_push(void *opaque, struct pbuf *pb)
 
     // This can take over the transfer and if so, it won't return
     error_t err = ota_platform_start(fh, pb);
-    if(err)
-      return pb;
+    if(err) {
+      pbuf_free(pb);
+      return SOCKET_EVENT_PUSH;
+    }
 
     sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
   }
@@ -259,7 +261,7 @@ ota_push(void *opaque, struct pbuf *pb)
   sa->sa_rxbuf = pb;
   cond_signal(&sa->sa_cond);
   mutex_unlock(&sa->sa_mutex);
-  return NULL;
+  return 0;
 }
 
 
@@ -271,7 +273,7 @@ ota_may_push(void *opaque)
 }
 
 static void
-ota_close(void *opaque)
+ota_close(void *opaque, const char *reason)
 {
   svc_ota_t *sa = opaque;
 

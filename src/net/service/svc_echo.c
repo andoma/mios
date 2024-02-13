@@ -11,13 +11,13 @@ typedef struct svc_echo {
   socket_t *se_sock;
 } svc_echo_t;
 
-static pbuf_t *
+static uint32_t
 echo_push(void *opaque, struct pbuf *pb)
 {
   svc_echo_t *se = opaque;
   assert(se->se_pb == NULL);
   se->se_pb = pb;
-  return NULL;
+  return 0;
 }
 
 static int
@@ -32,8 +32,10 @@ static pbuf_t *
 echo_pull(void *opaque)
 {
   svc_echo_t *se = opaque;
+  socket_t *s = se->se_sock;
   pbuf_t *pb = se->se_pb;
   se->se_pb = NULL;
+  s->net->event(s->net_opaque, SOCKET_EVENT_PUSH);
   return pb;
 }
 
