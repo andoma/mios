@@ -52,4 +52,5 @@ void metric_reset(metric_t *m, int enable);
 // irq_forbid(m->def->irq_level) is assumed
 void metric_collect(metric_t *m, float v);
 
-void metric_update_fault(metric_t *m, float v);
+// Returns 1 if fault state changed
+int metric_update_fault(metric_t *m, float v);

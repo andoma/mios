@@ -51,12 +51,20 @@ metric_collect(metric_t *m, float v)
 }
 
 
-void
+int
 metric_update_fault(metric_t *m, float v)
 {
   const metric_def_t *md = m->def;
-  m->alert   = v > md->high_alert   || v < md->low_alert;
-  m->warning = v > md->high_warning || v < md->low_warning;
+
+  int alert   = v > md->high_alert   || v < md->low_alert;
+  int warning = v > md->high_warning || v < md->low_warning;
+
+  int changed = (alert ^ m->alert) || (warning ^ m->warning);
+
+  m->alert   = alert;
+  m->warning = warning;
+
+  return changed;
 }
 
 
