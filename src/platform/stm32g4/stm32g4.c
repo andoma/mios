@@ -78,6 +78,7 @@ void
 dfu(void)
 {
   irq_forbid(IRQ_LEVEL_ALL);
+  fini();
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
   stm32g4_usb_stop();
   stm32g4_deinit_clk();
