@@ -16,6 +16,9 @@ typedef struct metric_def {
   float low_warning;  // Set to NAN if not applicable
   float low_alert;    // Set to NAN if not applicable
 
+  char unit;              /* ASCII char representing unit (V=voltage, etc)
+                             No significance other than for presentation */
+
   uint8_t alert_bit;      // Will raise alert if value is outside threshold
 
   uint8_t emit_period;    // Seconds
