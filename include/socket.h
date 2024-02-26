@@ -57,3 +57,9 @@ typedef struct socket {
   uint16_t preferred_offset;
 
 } socket_t;
+
+static inline void
+socket_wakeup(socket_t *s, uint32_t flags)
+{
+  s->net->event(s->net_opaque, flags);
+}
