@@ -12,6 +12,8 @@ static error_t
 partition_erase(struct block_iface *bi, size_t block)
 {
   partition_t *p = (partition_t *)bi;
+  if (block >= p->iface.num_blocks)
+   return ERR_NOSPC;
   return p->parent->erase(p->parent, block + p->offset);
 }
 
@@ -20,6 +22,12 @@ partition_write(struct block_iface *bi, size_t block,
                size_t offset, const void *data, size_t length)
 {
   partition_t *p = (partition_t *)bi;
+  if (block >= p->iface.num_blocks)
+    return ERR_NOSPC;
+
+  if (offset + length > p->iface.block_size)
+    return ERR_INVALID_LENGTH;
+
   return p->parent->write(p->parent, block + p->offset, offset, data, length);
 }
 
