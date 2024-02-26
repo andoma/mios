@@ -93,6 +93,8 @@ rpc_method_resovle(const char *name, size_t namelen)
 error_t
 rpc_trampoline(rpc_result_t *rr, const rpc_args_t *ra, const rpc_method_t *rm)
 {
+  rr->type = RPC_TYPE_VOID;
+
 #ifdef RPC_ARGS_MAX_FLT
   error_t (*fn)(rpc_result_t *rr, long l1, long l2, long l3,
                 float f1, float f2, float f3, float f4) = rm->invoke;
