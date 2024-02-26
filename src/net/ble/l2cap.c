@@ -211,7 +211,7 @@ connection_close(l2cap_connection_t *lc, const char *why)
 
   lc->lc_l2c = NULL;
   LIST_REMOVE(lc, lc_link);
-  lc->lc_socket.app->close(lc->lc_socket.app_opaque);
+  lc->lc_socket.app->close(lc->lc_socket.app_opaque, why);
   lc->lc_socket.app_opaque = NULL;
 }
 
@@ -295,13 +295,19 @@ connection_push(l2cap_connection_t *lc)
         lc->lc_credit_deficit += credits;
         lc->lc_queued_credits -= credits;
         assert(lc->lc_queued_credits >= 0);
-        pb = lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb);
+        if(lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb)) {
+
+        }
+        pb = NULL;
       }
     } else {
       int credits = count_credits(pb);
       lc->lc_credit_deficit += credits;
 
-      pb = lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb);
+      if(lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb)) {
+
+      }
+      pb = NULL;
     }
   }
 }
@@ -342,7 +348,7 @@ connection_task_cb(net_task_t *task, uint32_t signals)
     return;
   }
 
-  if(signals & SOCKET_EVENT_WAKEUP && l2c) {
+  if(signals & SOCKET_EVENT_PULL && l2c) {
     connection_pull(lc);
   }
 }
