@@ -48,8 +48,7 @@ typedef struct mbus_seqpkt_con {
 
   mbus_flow_t msc_flow;  // Must be first
 
-  void *msc_app_opaque;
-  const void *msc_app_vtable;
+  socket_t msc_sock;
 
   net_task_t msc_task;
 

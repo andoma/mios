@@ -84,15 +84,16 @@ mbus_seqpkt_service_prep_send(mbus_seqpkt_con_t *msc)
   if(msc->msc_app_closed)
     return 0;
 
-  if(msc->msc_app_opaque == NULL)
+  if(msc->msc_sock.app_opaque == NULL)
     return 0;
 
-  const service_t *s = msc->msc_app_vtable;
-  if(s->pull == NULL)
+  const socket_app_fn_t *app = msc->msc_sock.app;
+
+  if(app->pull == NULL)
     return 0;
 
   while(msc->msc_txq_len < 2) {
-    pbuf_t *p = s->pull(msc->msc_app_opaque);
+    pbuf_t *p = app->pull(msc->msc_sock.app_opaque);
     if(p == NULL)
       break;
     mbus_seqpkt_txq_enq(msc, p);
@@ -104,10 +105,10 @@ static uint8_t
 mbus_seqpkt_service_update_cts(mbus_seqpkt_con_t *msc)
 {
   uint8_t prev = msc->msc_local_flags;
-  const service_t *s = msc->msc_app_vtable;
+  const socket_app_fn_t *app = msc->msc_sock.app;
 
-  if(msc->msc_app_opaque != NULL && s->may_push &&
-     s->may_push(msc->msc_app_opaque)) {
+  if(msc->msc_sock.app_opaque != NULL && app->may_push &&
+     app->may_push(msc->msc_sock.app_opaque)) {
     msc->msc_local_flags |= SP_CTS;
   } else {
     msc->msc_local_flags &= ~SP_CTS;
@@ -119,18 +120,20 @@ mbus_seqpkt_service_update_cts(mbus_seqpkt_con_t *msc)
 static pbuf_t *
 mbus_seqpkt_service_recv(pbuf_t *pb, mbus_seqpkt_con_t *msc)
 {
-  const service_t *s = msc->msc_app_vtable;
+  const socket_app_fn_t *app = msc->msc_sock.app;
 
-  if(s->push != NULL && msc->msc_app_opaque != NULL) {
+  if(msc->msc_sock.app_opaque != NULL && app->push != NULL) {
 
     STAILQ_INSERT_TAIL(&msc->msc_rxq, pb, pb_link);
 
     if(pb->pb_flags & PBUF_EOP) {
       pb = pbuf_splice(&msc->msc_rxq);
-      pb = s->push(msc->msc_app_opaque, pb);
-    } else {
-      pb = NULL;
+      uint32_t events = app->push(msc->msc_sock.app_opaque, pb);
+      if(events)
+        net_task_raise(&msc->msc_task, events);
+
     }
+    pb = NULL;
   }
   return pb;
 }
@@ -138,14 +141,11 @@ mbus_seqpkt_service_recv(pbuf_t *pb, mbus_seqpkt_con_t *msc)
 static void
 mbus_seqpkt_service_shut(mbus_seqpkt_con_t *msc, const char *reason)
 {
-  if(msc->msc_app_opaque) {
+  if(msc->msc_sock.app_opaque) {
 
-    const service_t *s = msc->msc_app_vtable;
-    evlog(LOG_INFO, "seqpkt/%s: Connection %d from %d -- %s",
-          s->name, msc->msc_flow.mf_flow,
-          msc->msc_flow.mf_remote_addr, reason);
-    s->close(msc->msc_app_opaque);
-    msc->msc_app_opaque = NULL;
+    const socket_app_fn_t *app = msc->msc_sock.app;
+    app->close(msc->msc_sock.app_opaque, reason);
+    msc->msc_sock.app_opaque = NULL;
   }
 }
 
@@ -189,6 +189,11 @@ mbus_seqpkt_con_init(mbus_seqpkt_con_t *msc)
   net_timer_arm(&msc->msc_ka_timer, msc->msc_last_rx + SP_TIME_FAST_ACK);
 }
 
+static const socket_net_fn_t mbus_seqpkt_fn = {
+  .event = mbus_seqpkt_service_event_cb,
+  .get_flow_header = mbus_seqpkt_local_flow_get_header,
+};
+
 
 pbuf_t *
 mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
@@ -214,12 +219,12 @@ mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   }
   memset(msc, 0, sizeof(mbus_seqpkt_con_t));
 
-  svc_pbuf_policy_t spp = {MBUS_FRAGMENT_SIZE, 0};
+  msc->msc_sock.max_fragment_size = MBUS_FRAGMENT_SIZE;
+  msc->msc_sock.net = &mbus_seqpkt_fn;
+  msc->msc_sock.net_opaque = msc;
 
-  msc->msc_app_opaque = s->open(msc, mbus_seqpkt_service_event_cb, spp,
-                                mbus_seqpkt_local_flow_get_header);
-
-  if(msc->msc_app_opaque == NULL) {
+  error_t err = s->open(&msc->msc_sock);
+  if(err) {
     free(msc);
     mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
     return pb;
@@ -235,7 +240,6 @@ mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   msc->msc_prep_send = mbus_seqpkt_service_prep_send;
   msc->msc_recv = mbus_seqpkt_service_recv;
   msc->msc_shut_app = mbus_seqpkt_service_shut;
-  msc->msc_app_vtable = s;
 
   mbus_seqpkt_con_init(msc);
 
@@ -427,7 +431,7 @@ mbus_seqpkt_input(mbus_flow_t *mf, pbuf_t *pb)
 static void
 mbus_seqpkt_maybe_destroy(mbus_seqpkt_con_t *msc)
 {
-  if(!msc->msc_app_closed || msc->msc_app_opaque)
+  if(!msc->msc_app_closed || msc->msc_sock.app_opaque)
     return;
 
   pbuf_free(STAILQ_FIRST(&msc->msc_rxq));
@@ -455,7 +459,7 @@ mbus_seqpkt_task_cb(net_task_t *nt, uint32_t signals)
   mbus_seqpkt_con_t *msc =
     ((void *)nt) - offsetof(mbus_seqpkt_con_t, msc_task);
 
-  if(signals & SERVICE_EVENT_CLOSE) {
+  if(signals & SOCKET_EVENT_CLOSE) {
     evlog(LOG_DEBUG, "seqpkt/%s: App side closed", msc->msc_name);
     msc->msc_app_closed = 1;
   }
