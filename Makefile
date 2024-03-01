@@ -119,7 +119,7 @@ ${CONFIG_H}: ${GLOBALDEPS}
 	@echo "\tGEN\t$@"
 	@echo >$@ ${CONFIG_H_CONTENTS}
 
-clean:
+clean::
 	rm -rf "${O}"
 
 
