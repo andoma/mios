@@ -4,7 +4,7 @@ GLOBALDEPS += ${P}/stm32f4.mk
 
 CPPFLAGS += -iquote${P} -include ${P}/stm32f4.h
 
-LDSCRIPT = ${P}/stm32f4$(if $(subst no,,${ENABLE_OTA}),_ota,).ld
+LDSCRIPT ?= ${P}/stm32f4$(if $(subst no,,${ENABLE_OTA}),_ota,).ld
 ENTRYPOINT = $(if $(subst no,,${ENABLE_OTA}),bl_,)start
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
