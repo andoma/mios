@@ -11,6 +11,8 @@ typedef struct websocket_parser {
 
 
 
+#define WS_OPCODE_OPEN   -2
+#define WS_OPCODE_DISCONNECT  -1
 #define WS_OPCODE_TEXT   1
 #define WS_OPCODE_BINARY 2
 #define WS_OPCODE_CLOSE  8
