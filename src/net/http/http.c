@@ -975,8 +975,8 @@ static void __attribute__((constructor(300)))
 http_init(void)
 {
   STAILQ_INIT(&http_task_queue);
-  STAILQ_INIT(&closing_websocket_connections);
-  thread_create(http_thread, NULL, 1024, "http", TASK_FPU | TASK_DETACHED, 8);
+  STAILQ_INIT(&notifying_websocket_connections);
+  thread_create(http_thread, NULL, 4096, "http", TASK_FPU | TASK_DETACHED, 8);
 }
 
 
