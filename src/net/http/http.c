@@ -38,7 +38,7 @@ static cond_t http_task_queue_cond = COND_INITIALIZER("rq");
 
 static void http_stream_write(struct stream *s, const void *buf, size_t size, int flags);
 
-static struct http_connection_squeue closing_websocket_connections;
+static struct http_connection_squeue notifying_websocket_connections;
 
 struct http_connection {
 
@@ -48,7 +48,7 @@ struct http_connection {
     struct http_parser hc_hp;
     struct {
       struct websocket_parser hc_wp;
-      STAILQ_ENTRY(http_connection) hc_ws_close_link;
+      STAILQ_ENTRY(http_connection) hc_ws_notify_link;
     };
   };
 
@@ -76,7 +76,8 @@ struct http_connection {
   uint8_t hc_websocket_mode;
   uint8_t hc_ping_counter;
 
-  uint8_t hc_hold;
+  uint8_t hc_hold : 1;
+  uint8_t hc_notify : 1;
   uint8_t hc_ws_opcode;
   uint8_t hc_output_mask_bit; // Set to 0x80 if we should do masking
 
@@ -604,10 +605,13 @@ http_connection_release(http_connection_t *hc)
 }
 
 static void
-http_websocket_enqueue_close(http_connection_t *hc)
+http_websocket_enqueue_notify(http_connection_t *hc)
 {
+  if (hc->hc_notify)
+    return;
   atomic_inc(&hc->hc_refcount);
-  STAILQ_INSERT_TAIL(&closing_websocket_connections, hc, hc_ws_close_link);
+  STAILQ_INSERT_TAIL(&notifying_websocket_connections, hc, hc_ws_notify_link);
+  hc->hc_notify = 1;
   cond_signal(&http_task_queue_cond);
 }
 
@@ -633,7 +637,7 @@ http_close(void *opaque, const char *reason)
   http_close_locked(hc, reason);
 
   if(hc->hc_ws_cb) {
-    http_websocket_enqueue_close(hc);
+    http_websocket_enqueue_notify(hc);
   }
   mutex_unlock(&http_mutex);
   http_connection_release(hc);
@@ -931,13 +935,15 @@ http_thread(void *arg)
   while(1) {
     http_server_task_t *hst = STAILQ_FIRST(&http_task_queue);
     if(hst == NULL) {
-      http_connection_t *hc = STAILQ_FIRST(&closing_websocket_connections);
+      http_connection_t *hc = STAILQ_FIRST(&notifying_websocket_connections);
       if(hc != NULL) {
-        STAILQ_REMOVE_HEAD(&closing_websocket_connections, hc_ws_close_link);
+        STAILQ_REMOVE_HEAD(&notifying_websocket_connections, hc_ws_notify_link);
+        hc->hc_notify = 0;
         const char *reason = hc->hc_close_reason;
+        int opcode =  hc->hc_sock ? WS_OPCODE_OPEN : WS_OPCODE_DISCONNECT;
         mutex_unlock(&http_mutex);
         if(hc->hc_ws_cb) {
-          hc->hc_ws_cb(hc->hc_ws_opaque, -1, (char *)reason, 0, hc, NULL);
+          hc->hc_ws_cb(hc->hc_ws_opaque, opcode, (char *)reason, 0, hc, NULL);
         }
         mutex_lock(&http_mutex);
         http_connection_release(hc);
@@ -1317,12 +1323,13 @@ websocket_response_headers_complete(http_parser *p)
   http_connection_t *hc = p->data;
 
   if(p->status_code == HTTP_STATUS_SWITCHING_PROTOCOLS) {
+    http_websocket_enqueue_notify(hc);
     hc->hc_websocket_mode = 1;
     http_timer_arm(hc, 5);
   } else {
     mutex_lock(&http_mutex);
     http_close_locked(hc, http_status_str(p->status_code));
-    http_websocket_enqueue_close(hc);
+    http_websocket_enqueue_notify(hc);
     mutex_unlock(&http_mutex);
     return 1;
   }
