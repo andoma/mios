@@ -46,12 +46,10 @@ struct http_connection {
 
   union {
     struct http_parser hc_hp;
-    struct {
-      struct websocket_parser hc_wp;
-      STAILQ_ENTRY(http_connection) hc_ws_notify_link;
-    };
+    struct websocket_parser hc_wp;
   };
 
+  STAILQ_ENTRY(http_connection) hc_ws_notify_link;
   int (*hc_ws_cb)(void *opaque,
                   int opcode,
                   void *data,
