@@ -84,11 +84,7 @@ init(void)
 
   call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
 
-  size_t stack_size = 0;
-#ifdef MAIN_STACK_SIZE
-  stack_size = MAIN_STACK_SIZE;
-#endif
-  task_create_shell(main_trampoline, NULL, "main", stack_size);
+  task_create_shell(main_trampoline, NULL, "main", 0);
 }
 
 
