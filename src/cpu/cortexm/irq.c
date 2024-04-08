@@ -21,6 +21,7 @@ static volatile unsigned int * const NVIC_ISER = (unsigned int *)0xe000e100;
 static volatile unsigned int * const NVIC_ICER = (unsigned int *)0xe000e180;
 static volatile unsigned int * const NVIC_ICPR = (unsigned int *)0xe000e280;
 static volatile unsigned int * const VTOR  = (unsigned int *)0xe000ed08;
+static volatile unsigned int * const MPU_CTRL = (unsigned int *)0xe000ed94;
 
 #ifdef HAVE_BASEPRI
 static volatile uint8_t * const NVIC_IPR  = (uint8_t *)0xe000e400;
@@ -148,6 +149,8 @@ extern void cpu_softreset(void) __attribute__((noreturn));
 void
 softreset(void)
 {
+  *MPU_CTRL = 0;      // Disable MPU
+
   asm volatile ("cpsid i;isb;dsb");
 
   *VTOR = 0;
