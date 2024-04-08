@@ -11,10 +11,11 @@ extern struct metric_slist metrics;
 typedef struct metric_def {
   const char *name;
 
-  float high_alert;   // Set to NAN if not applicable
-  float high_warning; // Set to NAN if not applicable
-  float low_warning;  // Set to NAN if not applicable
-  float low_alert;    // Set to NAN if not applicable
+  float hi_error;    // Set to NAN if not applicable
+  float hi_warning;  // Set to NAN if not applicable
+  float lo_warning;  // Set to NAN if not applicable
+  float lo_error;    // Set to NAN if not applicable
+  float hysteresis;  // error/warning trip hysersis
 
   char unit;              /* ASCII char representing unit (V=voltage, etc)
                              No significance other than for presentation */
@@ -31,6 +32,10 @@ typedef struct metric_def {
                            * If metric is only modified on thread context
                            * IRQ_LEVEL_SWITCH is the correct choice.
                            */
+
+  uint8_t alert_lockout_duration; /* Seconds before we start send
+                                     alerts after metric_reset() */
+
 } metric_def_t;
 
 
@@ -44,9 +49,15 @@ typedef struct metric {
   unsigned int count;
   uint8_t update_counter;
   uint8_t enabled;
-  uint8_t warning;
-  uint8_t alert;
+  uint8_t raised_alerts;
+  uint8_t alert_lockout;
 } metric_t;
+
+#define METRIC_HI_ERROR   0x1
+#define METRIC_HI_WARNING 0x2
+#define METRIC_LO_WARNING 0x4
+#define METRIC_LO_ERROR   0x8
+
 
 void metric_init(metric_t *m, const metric_def_t *def, uint8_t enabled);
 
