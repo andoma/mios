@@ -26,3 +26,5 @@ struct serial_number {
 const struct serial_number sys_get_serial_number(void);
 
 void sys_watchdog_start(gpio_t blink);
+
+extern const char *reset_reasons;
