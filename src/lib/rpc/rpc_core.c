@@ -1,6 +1,7 @@
 #include "rpc_core.h"
 
 #include <mios/version.h>
+#include <mios/sys.h>
 
 #include <string.h>
 
@@ -35,39 +36,18 @@ rpc_appname(rpc_result_t *rr)
 RPC_DEF("appname()", rpc_appname);
 
 
-
-
-
-
 static error_t
-rpc_add(rpc_result_t *rr, int a, int b)
+rpc_serialnum(rpc_result_t *rr)
 {
-  rr->type = RPC_TYPE_INT;
-  rr->i32 = a + b;
+  rr->type = RPC_TYPE_CONST_BINARY;
+
+  const struct serial_number sn = sys_get_serial_number();
+  rr->data = (void *)sn.data;
+  rr->size = sn.len;
   return 0;
 }
 
-RPC_DEF("add(ii)", rpc_add);
-
-static error_t
-rpc_fadd(rpc_result_t *rr, float a, float b)
-{
-  rr->type = RPC_TYPE_FLOAT;
-  rr->flt = a + b;
-  return 0;
-}
-
-RPC_DEF("fadd(ff)", rpc_fadd);
-
-static error_t
-rpc_combo(rpc_result_t *rr, float a, int b, int c, float d)
-{
-  rr->type = RPC_TYPE_FLOAT;
-  rr->flt = a + b + c + d;
-  return 0;
-}
-
-RPC_DEF("combo(fiif)", rpc_combo);
+RPC_DEF("serialnum()", rpc_serialnum);
 
 
 
