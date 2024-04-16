@@ -330,6 +330,10 @@ pbuf_prepend(pbuf_t *pb, size_t bytes, int wait, size_t extra_offset)
   }
 
   pbuf_t *pre = pbuf_make(extra_offset, wait);
+  if(pre == NULL) {
+    pbuf_free(pb);
+    return NULL;
+  }
   pb->pb_flags &= ~PBUF_SOP;
   pre->pb_next = pb;
   pre->pb_flags = PBUF_SOP;
