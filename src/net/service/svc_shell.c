@@ -280,9 +280,8 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
     r = socket_stream_read(s, buf, size, wait);
     if(r > 0) {
       uint8_t *b = buf;
-
-      size_t cut = 0;
       size_t wrptr = 0;
+      size_t cut = 0;
       for(size_t i = 0; i < r; i++) {
         uint8_t c = b[i];
         switch(ss->ss_iac_state) {
@@ -291,7 +290,10 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
             cut++;
             ss->ss_iac_state = c;
           } else {
-            b[wrptr++] = c;
+            if(c)
+              b[wrptr++] = c;
+            else
+              cut++;
           }
           break;
         case 255:
