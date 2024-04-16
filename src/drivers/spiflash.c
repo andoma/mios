@@ -251,8 +251,9 @@ spiflash_create(spi_t *spi, gpio_t cs)
   if(id < 0)
     goto bad;
 
-  if(read_sfdp(sf, 0) != 0x50444653) {
-    printf("Invalid SFDP signature  ");
+  uint32_t sfdp_signature = read_sfdp(sf, 0);
+  if(sfdp_signature != 0x50444653) {
+    printf("Invalid SFDP signature [0x%x] ", sfdp_signature);
     goto bad;
   }
   uint32_t hdr2 = read_sfdp(sf, 4);
