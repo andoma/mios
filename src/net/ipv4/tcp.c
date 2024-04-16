@@ -167,7 +167,10 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
                       pb, 0, pb->pb_pktlen);
   }
 
-  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
+  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 0, 0);
+  if(pb == NULL)
+    return;
+
   ipv4_header_t *ip = pbuf_data(pb, 0);
 
   ip->ver_ihl = 0x45;
@@ -230,16 +233,21 @@ tcp_send(tcb_t *tcb, pbuf_t *pb, int seg_len, uint8_t flag)
       net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + tcb->tcb_rto * 1000);
     }
 
-    pbuf_t *q = pbuf_copy_pkt(pb, 1);
-    while(q) {
-      pbuf_t *n = q->pb_next;
-      STAILQ_INSERT_TAIL(&tcb->tcb_unaq, q, pb_link);
+    pbuf_t *tx = pbuf_copy_pkt(pb, 0);
+    while(pb) {
+      pbuf_t *n = pb->pb_next;
+      STAILQ_INSERT_TAIL(&tcb->tcb_unaq, pb, pb_link);
       tcb->tcb_unaq_buffers++;
-      q = n;
+      pb = n;
     }
+    if(tx == NULL)
+      return;
+    pb = tx;
   }
 
-  pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
+  pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
+  if(pb == NULL)
+    return;
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
   th->flg = flag;
@@ -286,7 +294,9 @@ tcp_rtx_cb(void *opaque, uint64_t now)
       if(pb == NULL)
         return;
 
-      pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
+      pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
+      if(pb == NULL)
+        return;
       tcp_hdr_t *th = pbuf_data(pb, 0);
       th->flg = TCP_F_ACK | TCP_F_PSH;
 
@@ -296,18 +306,21 @@ tcp_rtx_cb(void *opaque, uint64_t now)
   } else {
     // Retransmit data
 
-    pb = pbuf_copy_pkt(q, 1);
-    pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 1, 0);
-    tcp_hdr_t *th = pbuf_data(pb, 0);
+    pb = pbuf_copy_pkt(q, 0);
+    if(pb != NULL) {
+      pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
+      if(pb == NULL) {
+        tcp_hdr_t *th = pbuf_data(pb, 0);
 
-    if(pb->pb_flags & PBUF_SEQ) {
-      th->flg = *(const uint8_t *)pbuf_cdata(pb, sizeof(tcp_hdr_t));
-    } else {
-      th->flg = TCP_F_ACK | TCP_F_PSH;
-      tcb->tcb_rtx_bytes += q->pb_pktlen;
+        if(pb->pb_flags & PBUF_SEQ) {
+          th->flg = *(const uint8_t *)pbuf_cdata(pb, sizeof(tcp_hdr_t));
+        } else {
+          th->flg = TCP_F_ACK | TCP_F_PSH;
+          tcb->tcb_rtx_bytes += q->pb_pktlen;
+        }
+        th->seq = htonl(tcb->tcb_snd.una);
+      }
     }
-    th->seq = htonl(tcb->tcb_snd.una);
-
   }
 
   if(pb)
@@ -386,7 +399,9 @@ tcp_send_data(tcb_t *tcb)
 static void
 tcp_send_flag(tcb_t *tcb, uint8_t flag)
 {
-  pbuf_t *pb = pbuf_make(16 + sizeof(ipv4_header_t) + sizeof(tcp_hdr_t), 1);
+  pbuf_t *pb = pbuf_make(16 + sizeof(ipv4_header_t) + sizeof(tcp_hdr_t), 0);
+  if(pb == NULL)
+    return;
 
   int seg_len = 0;
   if(flag & (TCP_F_SYN | TCP_F_FIN)) {
