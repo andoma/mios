@@ -78,6 +78,7 @@ struct http_connection {
   uint8_t hc_notify : 1;
   uint8_t hc_ws_opcode;
   uint8_t hc_output_mask_bit; // Set to 0x80 if we should do masking
+  uint8_t hc_sock_preferred_offset;
 
   timer_t hc_timer;
 
@@ -263,12 +264,14 @@ http_server_body(http_parser *p, const char *at, size_t length)
 }
 
 static pbuf_t *
-make_output(socket_t *sk, const char *fmt, ...)
+make_output(http_connection_t *hc, int wait, const char *fmt, ...)
 {
+  pbuf_t *pb = pbuf_make(hc->hc_sock_preferred_offset, wait);
+  if(pb == NULL)
+    return NULL;
+
   va_list ap;
   va_start(ap, fmt);
-
-  pbuf_t *pb = pbuf_make(sk->preferred_offset, 1);
   size_t len = vsnprintf(pbuf_data(pb, 0), PBUF_DATA_SIZE - pb->pb_offset,
                          fmt, ap);
   va_end(ap);
@@ -277,23 +280,14 @@ make_output(socket_t *sk, const char *fmt, ...)
   return pb;
 }
 
-
-
-static void
-send_response_simple(http_connection_t *hc, int code, int do_close)
+static pbuf_t *
+make_simple_output(http_connection_t *hc, int wait,
+                   int http_status_code, int do_close)
 {
-  socket_t *sk = hc->hc_sock;
-  if(sk == NULL)
-    return;
-
-  hc->hc_txbuf_head =
-    make_output(sk, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\n%s\r\n",
-                code, http_status_str(code),
-                do_close ? "Connection: close\r\n": "");
-
-  sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
+  return make_output(hc, wait, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\n%s\r\n",
+                     http_status_code, http_status_str(http_status_code),
+                     do_close ? "Connection: close\r\n": "");
 }
-
 
 static void
 http_task_enqueue(http_server_task_t *hst, http_connection_t *hc,
@@ -316,6 +310,7 @@ http_server_message_complete(http_parser *p)
   mutex_lock(&http_mutex);
 
   if(hr == NULL) {
+    // We didn't manage to allocate a request struct,
 
     http_server_task_t *last =
       TAILQ_LAST(&hc->hc_tasks, http_server_task_queue);
@@ -323,10 +318,21 @@ http_server_message_complete(http_parser *p)
     // We do some trickery here to correct deal with HTTP/1 pipelining
     // It's almost never used, but it's not really much extra work for us
     if(last == NULL) {
-      // No requests are queued, we can respond directly
-      send_response_simple(hc, 503, 1);
+      // No other requests are queued, we can respond directly
+
+      // This executes on net-thread, so don't wait
+      pbuf_t *pb = make_simple_output(hc, 0, 503, 1);
+      if(pb == NULL) {
+        // Failed to allocate, bail out
+        mutex_unlock(&http_mutex);
+        return 1;
+      }
+
+      hc->hc_txbuf_head = pb;
+      socket_t *sk = hc->hc_sock;
+      sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
+
     } else {
-      // We didn't manage to allocate a request struct,
       // Ask the request last in queue to also send a 503 when it completed
       http_request_t *hr = (http_request_t *)last;
       hr->hr_piggyback_503++;
@@ -334,7 +340,6 @@ http_server_message_complete(http_parser *p)
   } else {
 
     hr->hr_should_keep_alive = http_should_keep_alive(p);
-
     http_task_enqueue(&hr->hr_hst, hc, HST_HTTP_REQ);
     hc->hc_task = NULL;
   }
@@ -735,6 +740,7 @@ http_accept(socket_t *s)
     return ERR_NO_MEMORY;
 
   hc->hc_sock = s;
+  hc->hc_sock_preferred_offset = s->preferred_offset;
   s->app = &http_sock_fn;
   s->app_opaque = hc;
 
@@ -893,33 +899,51 @@ static void
 http_process_request(http_request_t *hr)
 {
   mutex_unlock(&http_mutex);
-  int return_code = find_route(hr, hr->hr_url);
-  mutex_lock(&http_mutex);
+  int http_status_code = find_route(hr, hr->hr_url);
 
   http_connection_t *hc = hr->hr_hst.hst_hc;
+  pbuf_t *pb = NULL;
+  if(http_status_code) {
+    pb = make_simple_output(hc, 1, http_status_code, !hr->hr_should_keep_alive);
+  }
 
-  if(return_code) {
-    // Send a simple response
+  mutex_lock(&http_mutex);
+
+  if(pb) {
+    // Send the simple response
 
     while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
-    if(hc->hc_sock == NULL)
-      return;
 
-    send_response_simple(hc, return_code, !hr->hr_should_keep_alive);
+    socket_t *sk = hc->hc_sock;
+    if(sk == NULL) {
+      pbuf_free(pb);
+      return;
+    }
+    hc->hc_txbuf_head = pb;
+    sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
   }
+
 
   while(hr->hr_piggyback_503) {
 
+    mutex_unlock(&http_mutex);
+    pb = make_simple_output(hc, 1, 503, 1);
+    mutex_lock(&http_mutex);
+
     while(hc->hc_txbuf_head && hc->hc_sock) {
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
 
-    if(hc->hc_sock == NULL)
+    socket_t *sk = hc->hc_sock;
+    if(sk == NULL) {
+      pbuf_free(pb);
       break;
+    }
+    hc->hc_txbuf_head = pb;
+    sk->net->event(sk->net_opaque, SOCKET_EVENT_PULL);
 
-    send_response_simple(hc, 503, 1);
     hr->hr_piggyback_503--;
   }
 }
@@ -1185,6 +1209,17 @@ http_response_begin(struct http_request *hr, int status_code,
 {
   http_connection_t *hc = hr->hr_hst.hst_hc;
 
+  pbuf_t *pb =
+    make_output(hc, 1, "HTTP/1.1 %d %s\r\n"
+                "Transfer-Encoding: chunked\r\n"
+                "Content-Type: %s\r\n"
+                "%s"
+                "\r\n",
+                status_code, http_status_str(status_code),
+                content_type,
+                !hr->hr_should_keep_alive ?
+                "Connection: close\r\n": "");
+
   mutex_lock(&http_mutex);
 
   while(hc->hc_txbuf_head && hc->hc_sock) {
@@ -1194,16 +1229,7 @@ http_response_begin(struct http_request *hr, int status_code,
   socket_t *sk = hc->hc_sock;
   if(sk != NULL) {
 
-    hc->hc_txbuf_head =
-      make_output(sk, "HTTP/1.1 %d %s\r\n"
-                  "Transfer-Encoding: chunked\r\n"
-                  "Content-Type: %s\r\n"
-                  "%s"
-                  "\r\n",
-                  status_code, http_status_str(status_code),
-                  content_type,
-                  !hr->hr_should_keep_alive ?
-                  "Connection: close\r\n": "");
+    hc->hc_txbuf_head = pb;
 
     hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
 
@@ -1211,6 +1237,8 @@ http_response_begin(struct http_request *hr, int status_code,
       cond_wait(&hc->hc_txbuf_cond, &http_mutex);
     }
     hc->hc_output_encoding = OUTPUT_ENCODING_CHUNKED;
+  } else {
+    pbuf_free(pb);
   }
 
   mutex_unlock(&http_mutex);
@@ -1284,6 +1312,14 @@ http_request_accept_websocket(http_request_t *hr,
 
   http_connection_t *hc = hr->hr_hst.hst_hc;
 
+  pbuf_t *pb = make_output(hc, 1, "HTTP/1.1 %d %s\r\n"
+                           "Connection: Upgrade\r\n"
+                           "Upgrade: websocket\r\n"
+                           "Sec-WebSocket-Accept: %s\r\n"
+                           "\r\n",
+                           101, http_status_str(101),
+                           sig);
+
   mutex_lock(&http_mutex);
 
   while(hc->hc_txbuf_head && hc->hc_sock) {
@@ -1292,14 +1328,10 @@ http_request_accept_websocket(http_request_t *hr,
 
   socket_t *sk = hc->hc_sock;
   if(sk != NULL) {
-    hc->hc_txbuf_head = make_output(sk, "HTTP/1.1 %d %s\r\n"
-                                    "Connection: Upgrade\r\n"
-                                    "Upgrade: websocket\r\n"
-                                    "Sec-WebSocket-Accept: %s\r\n"
-                                    "\r\n",
-                                    101, http_status_str(101),
-                                    sig);
+    hc->hc_txbuf_head = pb;
     hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
+  } else {
+    pbuf_free(pb);
   }
 
   hc->hc_ws_cb = cb;
@@ -1364,6 +1396,7 @@ http_websocket_create(int (*cb)(void *opaque,
 
   hc->hc_output_mask_bit = 0x80;
   hc->hc_sock = sk;
+  hc->hc_sock_preferred_offset = sk->preferred_offset;
   hc->hc_ws_cb = cb;
   hc->hc_ws_opaque = opaque;
 
@@ -1380,10 +1413,7 @@ http_websocket_start(http_connection_t *hc, uint32_t addr,
 {
   tcp_connect(hc->hc_sock, addr, port);
 
-  mutex_lock(&http_mutex);
-
-  hc->hc_txbuf_head =
-    make_output(hc->hc_sock,
+  pbuf_t *pb = make_output(hc, 1,
                 "GET %s HTTP/1.1\r\n"
                 "Connection: Upgrade\r\n"
                 "Upgrade: websocket\r\n"
@@ -1396,9 +1426,9 @@ http_websocket_start(http_connection_t *hc, uint32_t addr,
                 protocol ?: "",
                 protocol ? "\r\n" : "");
 
-
+  mutex_lock(&http_mutex);
+  hc->hc_txbuf_head = pb;
   hc->hc_sock->net->event(hc->hc_sock->net_opaque, SOCKET_EVENT_PULL);
-
   mutex_unlock(&http_mutex);
 }
 
