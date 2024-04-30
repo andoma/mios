@@ -575,9 +575,14 @@ struct pbuf *
 tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
            uint16_t port, uint32_t ack, const char *reason)
 {
-  evlog(LOG_NOTICE, "Connection from %Id to port %d rejected -- %s",
-        remote_addr, port, reason);
 
+  static int64_t last_log;
+  int64_t now = clock_get();
+  if(now > last_log + 250000) {
+    last_log = now;
+    evlog(LOG_NOTICE, "Connection from %Id to port %d rejected -- %s",
+          remote_addr, port, reason);
+  }
   return tcp_reply(ni, pb, remote_addr, 0, ack, TCP_F_ACK | TCP_F_RST, 0);
 }
 
