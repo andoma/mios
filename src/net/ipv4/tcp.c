@@ -397,11 +397,17 @@ tcp_send_data(tcb_t *tcb)
 
 
 static void
-tcp_send_flag(tcb_t *tcb, uint8_t flag)
+tcp_send_flag(tcb_t *tcb, uint8_t flag, pbuf_t *pb)
 {
-  pbuf_t *pb = pbuf_make(16 + sizeof(ipv4_header_t) + sizeof(tcp_hdr_t), 0);
-  if(pb == NULL)
-    return;
+  if(pb == NULL) {
+    pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
+    if(pb == NULL) {
+      return;
+    }
+  } else {
+    // Recycle packet
+    pbuf_reset(pb, TCP_PBUF_HEADROOM, 0);
+  }
 
   int seg_len = 0;
   if(flag & (TCP_F_SYN | TCP_F_FIN)) {
@@ -417,13 +423,14 @@ tcp_send_flag(tcb_t *tcb, uint8_t flag)
 
 
 
-static int
-tcp_send_data_or_ack(tcb_t *tcb)
+static pbuf_t *
+tcp_send_data_or_ack(tcb_t *tcb, pbuf_t *pb)
 {
-  if(tcp_send_data(tcb))
-    return 1;
-  tcp_send_flag(tcb, TCP_F_ACK);
-  return 0;
+  if(tcp_send_data(tcb)) {
+    return pb;
+  }
+  tcp_send_flag(tcb, TCP_F_ACK, pb);
+  return NULL;
 }
 
 
@@ -468,7 +475,12 @@ tcp_do_connect(tcb_t *tcb)
     break;
   }
 
-  tcp_send_flag(tcb, TCP_F_SYN);
+  // A buffer has been preallocated for us in tcp_connect() and parked
+  // on the unaq queue
+  pbuf_t *pb = STAILQ_FIRST(&tcb->tcb_unaq);
+  STAILQ_INIT(&tcb->tcb_unaq);
+
+  tcp_send_flag(tcb, TCP_F_SYN, pb);
   tcp_set_state(tcb, TCP_STATE_SYN_SENT, "syn-sent");
 
   mutex_lock(&tcbs_mutex);
@@ -502,7 +514,7 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     if(tcb->tcb_app_pending) {
       tcb->tcb_rx_bytes += tcb->tcb_app_pending;
       tcb->tcb_app_pending = 0;
-      tcp_send_flag(tcb, TCP_F_ACK);
+      tcp_send_flag(tcb, TCP_F_ACK, NULL);
     }
   }
 
@@ -515,11 +527,11 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     case TCP_STATE_ESTABLISHED:
     case TCP_STATE_SYN_RECEIVED:
       tcp_set_state(tcb, TCP_STATE_FIN_WAIT1, "service_close");
-      tcp_send_flag(tcb, TCP_F_FIN | TCP_F_ACK);
+      tcp_send_flag(tcb, TCP_F_FIN | TCP_F_ACK, NULL);
       break;
     case TCP_STATE_CLOSE_WAIT:
       tcp_set_state(tcb, TCP_STATE_LAST_ACK, "service_close");
-      tcp_send_flag(tcb, TCP_F_FIN | TCP_F_ACK);
+      tcp_send_flag(tcb, TCP_F_FIN | TCP_F_ACK, NULL);
       break;
     }
 
@@ -629,7 +641,7 @@ static void
 tcp_delayed_ack_cb(void *opaque, uint64_t now)
 {
   tcb_t *tcb = opaque;
-  tcp_send_flag(tcb, TCP_F_ACK);
+  tcp_send_flag(tcb, TCP_F_ACK, NULL);
 }
 
 static void
@@ -813,13 +825,13 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         error_to_string(err));
     }
 
-    tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK);
+    tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK, pb);
 
     tcp_set_state(tcb, TCP_STATE_SYN_RECEIVED, "syn-recvd");
     mutex_lock(&tcbs_mutex);
     LIST_INSERT_HEAD(&tcbs, tcb, tcb_link);
     mutex_unlock(&tcbs_mutex);
-    return pb;
+    return NULL;
   }
 
   const int una_ack = ack - tcb->tcb_snd.una;
@@ -874,13 +886,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
       if(una_iss > 0) {
         tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
-        tcp_send_data_or_ack(tcb);
-        return pb;
+        return tcp_send_data_or_ack(tcb, pb);
       }
 
-      tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK);
+      tcp_send_flag(tcb, TCP_F_SYN | TCP_F_ACK, pb);
       tcp_set_state(tcb, TCP_STATE_SYN_RECEIVED, "syn-recvd");
-      return pb;
+      return NULL;
     }
 
     // Neither SYN or RST is set, drop segment
@@ -1077,7 +1088,8 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       if(!piggybacked_ack_sent) {
         if(!timer_disarm(&tcb->tcb_delayed_ack_timer)) {
           // Already waited once, don't wait more, send now
-          tcp_send_flag(tcb, TCP_F_ACK);
+          tcp_send_flag(tcb, TCP_F_ACK, pb);
+          pb = NULL;
         } else {
           net_timer_arm(&tcb->tcb_delayed_ack_timer,
                         tcb->tcb_last_rx + 20000);
@@ -1087,8 +1099,10 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       }
     } else {
 
-      if(tcp_send_data_or_ack(tcb)) {
+      if(tcp_send_data_or_ack(tcb, pb)) {
         try_send_more = 0;
+      } else {
+        pb = NULL;
       }
     }
     break;
@@ -1112,8 +1126,10 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     }
 
     tcb->tcb_rcv.nxt++;
-    if(tcb->tcb_app_pending == 0)
-      tcp_send_flag(tcb, TCP_F_ACK);
+    if(tcb->tcb_app_pending == 0) {
+      tcp_send_flag(tcb, TCP_F_ACK, pb);
+      pb = NULL;
+    }
 
     switch(tcb->tcb_state) {
     case TCP_STATE_SYN_RECEIVED:
@@ -1161,6 +1177,11 @@ tcp_connect(struct socket *sk, uint32_t dst_addr, uint16_t dst_port)
   tcb_t *tcb = sk->net_opaque;
   tcb->tcb_remote_addr = dst_addr;
   tcb->tcb_remote_port = htons(dst_port);
+
+  // Allocate a buffer for the SYN packet here where we might sleep
+  pbuf_t *pb = pbuf_make(TCP_PBUF_HEADROOM, 1);
+  STAILQ_INSERT_TAIL(&tcb->tcb_unaq, pb, pb_link);
+
   net_task_raise(&tcb->tcb_task, TCP_EVENT_CONNECT);
 }
 
