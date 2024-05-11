@@ -9,31 +9,33 @@
 struct metric_slist metrics;
 
 void
-metric_reset(metric_t *m, int enable)
+metric_reset(metric_t *m, int state)
 {
   int q = irq_forbid(m->def->irq_level);
-  m->mean = 0;
-  m->m2 = 0;
-  m->count = 0;
-  m->enabled = enable;
+  if(state == METRIC_STATE_ON) {
+    m->mean = 0;
+    m->m2 = 0;
+    m->count = 0;
+  }
+  m->state = state;
   m->alert_lockout = m->def->alert_lockout_duration;
   irq_permit(q);
 }
 
 void
-metric_init(metric_t *m, const metric_def_t *def, uint8_t enabled)
+metric_init(metric_t *m, const metric_def_t *def, uint8_t state)
 {
   m->def = def;
   m->min = INFINITY;
   m->max = -INFINITY;
-  m->enabled = enabled;
+  m->state = state;
   SLIST_INSERT_HEAD(&metrics, m, link);
 }
 
 void
 metric_collect(metric_t *m, float v)
 {
-  if(!m->enabled)
+  if(m->state != METRIC_STATE_ON)
     return;
   m->min = MIN(m->min, v);
   m->max = MAX(m->max, v);
@@ -53,6 +55,9 @@ metric_update_fault(metric_t *m, float v)
 
   uint8_t clr = 0;
   uint8_t set = 0;
+
+  if(m->state == METRIC_STATE_FREEZED)
+    return 0;
 
   if(v > md->hi_error + md->hysteresis) {
     set |= METRIC_HI_ERROR;
@@ -78,7 +83,7 @@ metric_update_fault(metric_t *m, float v)
     clr |= METRIC_LO_ERROR;
   }
 
-  if(m->enabled && !m->alert_lockout) {
+  if(m->state == METRIC_STATE_ON && !m->alert_lockout) {
     set |= set << 4;
     clr |= clr << 4;
   }
@@ -94,11 +99,9 @@ static error_t
 cmd_metric(cli_t *cli, int argc, char **argv)
 {
   const metric_t *m;
-  cli_printf(cli, "Name         Mean       Min        Max        Stddev     Samples\n");
+  cli_printf(cli, "Name             Mean       Min        Max        Stddev     Samples\n");
 
   SLIST_FOREACH(m, &metrics, link) {
-    if(!m->enabled)
-      continue;
     const metric_def_t *md = m->def;
 
     int q = irq_forbid(md->irq_level);
@@ -112,9 +115,16 @@ cmd_metric(cli_t *cli, int argc, char **argv)
     float var = m2 / count;
     float stddev = sqrtf(var);
 
-    cli_printf(cli, "%-10s %c %-10f %-10f %-10f %-10f %d %c%c%c%c\n",
+    const char *statestr = "OFF";
+    if(m->state == METRIC_STATE_ON)
+      statestr = "ON";
+    else if(m->state == METRIC_STATE_FREEZED)
+      statestr = "FRZ";
+
+    cli_printf(cli, "%-10s %c %-3s %-10f %-10f %-10f %-10f %-7d %c%c%c%c\n",
                md->name,
                md->unit,
+               statestr,
                mean,
                min,
                max,

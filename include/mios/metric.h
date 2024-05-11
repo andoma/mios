@@ -48,7 +48,7 @@ typedef struct metric {
   float m2;
   unsigned int count;
   uint8_t update_counter;
-  uint8_t enabled;
+  uint8_t state;
   uint8_t raised_alerts;
   uint8_t alert_lockout;
 } metric_t;
@@ -58,8 +58,11 @@ typedef struct metric {
 #define METRIC_LO_WARNING 0x4
 #define METRIC_LO_ERROR   0x8
 
+#define METRIC_STATE_OFF     0
+#define METRIC_STATE_ON      1
+#define METRIC_STATE_FREEZED 2
 
-void metric_init(metric_t *m, const metric_def_t *def, uint8_t enabled);
+void metric_init(metric_t *m, const metric_def_t *def, uint8_t state);
 
 void metric_reset(metric_t *m, int enable);
 
