@@ -30,8 +30,7 @@ typedef struct mbus_svc {
 
   struct pbuf_queue ms_tx_queue;
 
-  void *ms_opaque;
-  service_event_cb_t *ms_cb;
+  socket_t *ms_sock; // This is interfacing with BLE or similar
 
   struct mbus_flow_list ms_flows;
 
@@ -41,7 +40,7 @@ typedef struct mbus_svc {
 static pbuf_t *
 mbus_seqpkt_inter_flow_xmit(pbuf_t *pb, mbus_seqpkt_con_t *msc)
 {
-  mbus_svc_t *ms = msc->msc_app_opaque;
+  mbus_svc_t *ms = msc->msc_sock.app_opaque;
   if(ms == NULL)
     return pb;
 
@@ -73,7 +72,7 @@ mbus_seqpkt_inter_update_cts(mbus_seqpkt_con_t *msc)
 static pbuf_t *
 mbus_seqpkt_inter_recv(pbuf_t *pb, mbus_seqpkt_con_t *msc)
 {
-  mbus_svc_t *ms = msc->msc_app_opaque;
+  mbus_svc_t *ms = msc->msc_sock.app_opaque;
   if(ms == NULL)
     return pb;
 
@@ -99,7 +98,7 @@ mbus_seqpkt_inter_recv(pbuf_t *pb, mbus_seqpkt_con_t *msc)
   mbus_append_crc(pb);
 
   STAILQ_INSERT_TAIL(&ms->ms_tx_queue, pb, pb_link);
-  ms->ms_cb(ms->ms_opaque, SERVICE_EVENT_WAKEUP);
+  socket_wakeup(ms->ms_sock, SOCKET_EVENT_PULL);
 
   msc->msc_remote_avail_credits -= creds;
   msc->msc_remote_xmit_credits += creds;
@@ -113,7 +112,7 @@ give_credits(mbus_seqpkt_con_t *msc, int num_credits)
 {
   assert(num_credits < 16);
 
-  mbus_svc_t *ms = msc->msc_app_opaque;
+  mbus_svc_t *ms = msc->msc_sock.app_opaque;
   if(ms == NULL)
     return 1;
 
@@ -134,7 +133,7 @@ give_credits(mbus_seqpkt_con_t *msc, int num_credits)
   mbus_append_crc(pb);
 
   STAILQ_INSERT_TAIL(&ms->ms_tx_queue, pb, pb_link);
-  ms->ms_cb(ms->ms_opaque, SERVICE_EVENT_WAKEUP);
+  socket_wakeup(ms->ms_sock, SOCKET_EVENT_PULL);
 
   msc->msc_remote_xmit_credits += num_credits;
   return 0;
@@ -159,7 +158,7 @@ mbus_seqpkt_inter_post_send(mbus_seqpkt_con_t *msc)
 static void
 mbus_seqpkt_inter_svc_shut(mbus_seqpkt_con_t *msc, const char *reason)
 {
-  mbus_svc_t *ms = msc->msc_app_opaque;
+  mbus_svc_t *ms = msc->msc_sock.app_opaque;
   evlog(LOG_DEBUG, "%s: %s ms=%p", __FUNCTION__, reason, ms);
   if(ms == NULL)
     return;
@@ -179,8 +178,9 @@ mbus_seqpkt_inter_svc_shut(mbus_seqpkt_con_t *msc, const char *reason)
   mbus_append_crc(pb);
 
   STAILQ_INSERT_TAIL(&ms->ms_tx_queue, pb, pb_link);
-  ms->ms_cb(ms->ms_opaque, SERVICE_EVENT_WAKEUP);
-  msc->msc_app_opaque = NULL;
+  socket_wakeup(ms->ms_sock, SOCKET_EVENT_PULL);
+
+  msc->msc_sock.app_opaque = NULL;
 }
 
 static mbus_seqpkt_con_t *
@@ -215,7 +215,7 @@ flow_find(mbus_svc_t *ms, uint32_t tag, int create)
   msc->msc_shut_app = mbus_seqpkt_inter_svc_shut;
   msc->msc_post_send = mbus_seqpkt_inter_post_send;
 
-  msc->msc_app_opaque = ms;
+  msc->msc_sock.app_opaque = ms;
 
   return msc;
 }
@@ -226,8 +226,8 @@ ms_remove_all_flows(mbus_svc_t *ms)
   mbus_flow_t *mf;
   while((mf = LIST_FIRST(&ms->ms_flows)) != NULL) {
     mbus_seqpkt_con_t *msc = (mbus_seqpkt_con_t *)mf;
-    if(msc->msc_app_opaque)
-      net_task_raise(&msc->msc_task, SERVICE_EVENT_CLOSE);
+    if(msc->msc_sock.app_opaque)
+      net_task_raise(&msc->msc_task, SOCKET_EVENT_CLOSE);
     mbus_flow_remove(mf);
   }
 }
@@ -274,13 +274,13 @@ ms_inspect_from_svc(mbus_svc_t *ms, pbuf_t *pb)
   pb = pbuf_drop(pb, 4);
   if(flags & SP_EOS) {
     evlog(LOG_DEBUG, "%s: SP_EOS", msc->msc_name);
-    net_task_raise(&msc->msc_task, SERVICE_EVENT_CLOSE);
+    net_task_raise(&msc->msc_task, SOCKET_EVENT_CLOSE);
     pbuf_free(pb);
   } else {
     msc->msc_remote_xmit_credits--;
     pb->pb_flags = (pb->pb_flags & ~3) | (flags & 3);
     mbus_seqpkt_txq_enq(msc, pb);
-    net_task_raise(&msc->msc_task, SERVICE_EVENT_WAKEUP);
+    net_task_raise(&msc->msc_task, SOCKET_EVENT_PUSH);
   }
   return NULL;
 }
@@ -338,31 +338,11 @@ ms_output(struct mbus_netif *mni, pbuf_t *pb)
     }
   }
   STAILQ_INSERT_TAIL(&ms->ms_tx_queue, pb, pb_link);
-  ms->ms_cb(ms->ms_opaque, SERVICE_EVENT_WAKEUP);
+  socket_wakeup(ms->ms_sock, SOCKET_EVENT_PULL);
   return NULL;
 }
 
 
-static void *
-ms_open(void *opaque, service_event_cb_t *cb,
-        svc_pbuf_policy_t pbuf_policy,
-        service_get_flow_header_t *get_flow_hdr)
-{
-  mbus_svc_t *ms = xalloc(sizeof(mbus_svc_t), 0, MEM_MAY_FAIL);
-  if(ms == NULL)
-    return NULL;
-
-  memset(ms, 0, sizeof(mbus_svc_t));
-  STAILQ_INIT(&ms->ms_tx_queue);
-
-  ms->ms_mni.mni_output = ms_output;
-  mbus_netif_attach(&ms->ms_mni, "svcmbus", &mbus_svc_device_class);
-
-  ms->ms_opaque = opaque;
-  ms->ms_cb = cb;
-
-  return ms;
-}
 
 
 static int
@@ -380,30 +360,60 @@ ms_pull(void *opaque)
 }
 
 
-static pbuf_t *
+static uint32_t
 ms_push(void *opaque, struct pbuf *pb)
 {
   mbus_svc_t *ms = opaque;
 
   pb = ms_inspect_from_svc(ms, pb);
   if(pb == NULL)
-    return NULL;
+    return 0;
 
   STAILQ_INSERT_TAIL(&ms->ms_mni.mni_ni.ni_rx_queue, pb, pb_link);
   netif_wakeup(&ms->ms_mni.mni_ni);
-  return NULL;
+  return 0;
 }
 
 
 static void
-ms_close(void *opaque)
+ms_close(void *opaque, const char *reason)
 {
   mbus_svc_t *ms = opaque;
   ms_remove_all_flows(ms);
-  ms->ms_cb(ms->ms_opaque, SERVICE_EVENT_CLOSE);
+
+  socket_wakeup(ms->ms_sock, SOCKET_EVENT_CLOSE);
   mbus_netif_detach(&ms->ms_mni); // also does free(ms)
 }
 
 
-SERVICE_DEF("mbus", 0, 3, SERVICE_TYPE_DGRAM,
-            ms_open, ms_push, ms_may_push, ms_pull, ms_close);
+
+static const socket_app_fn_t mbus_gateway_fn = {
+  .push = ms_push,
+  .may_push = ms_may_push,
+  .pull = ms_pull,
+  .close = ms_close,
+};
+
+
+static error_t
+ms_open(socket_t *s)
+{
+  mbus_svc_t *ms = xalloc(sizeof(mbus_svc_t), 0, MEM_MAY_FAIL);
+  if(ms == NULL)
+    return ERR_NO_MEMORY;
+
+  memset(ms, 0, sizeof(mbus_svc_t));
+  STAILQ_INIT(&ms->ms_tx_queue);
+
+  ms->ms_mni.mni_output = ms_output;
+  mbus_netif_attach(&ms->ms_mni, "svcmbus", &mbus_svc_device_class);
+
+  s->app = &mbus_gateway_fn;
+  s->app_opaque = ms;
+
+  ms->ms_sock = s;
+  return 0;
+}
+
+
+SERVICE_DEF("mbus", 0, 3, SERVICE_TYPE_DGRAM, ms_open);

@@ -7,6 +7,8 @@
 #include <mios/error.h>
 #include <mios/rpc.h>
 
+#include "lib/rpc/rpc_core.h"
+
 #include <string.h>
 
 static pbuf_t *
@@ -35,23 +37,18 @@ mbus_rpc_dispatch(struct pbuf *pb, uint8_t src_addr, uint16_t flow)
   if(pb->pb_buflen < 1 + namelen)
     return pb;
 
-  const rpc_method_t *rm = rpc_method_resovle(pkt + 1, namelen);
+  const rpc_method_t *rm = rpc_method_resovle((const char *)pkt + 1, namelen);
   if(rm == NULL)
     return mbus_rpc_err(pb, &mf, ERR_INVALID_RPC_ID);
-
-  const int skip = (namelen + 1 + 3) & ~3;
-  if(skip > pb->pb_pktlen) {
-    return mbus_rpc_err(pb, &mf, ERR_MALFORMED);
-  }
-
-  pkt += skip;
-  size_t len = pb->pb_pktlen - skip;
 
   pbuf_t *reply = pbuf_make(4, 0);
   if(reply == NULL)
     return mbus_rpc_err(pb, &mf, ERR_NO_BUFFER);
 
-  error_t err = rm->invoke(pkt, pbuf_data(reply, 0), len);
+  rpc_result_t rr;
+  rpc_args_t ra = {};
+
+  error_t err = rpc_trampoline(&rr, &ra, rm);
   if(err) {
     pbuf_free(reply);
     return mbus_rpc_err(pb, &mf, ERR_NO_BUFFER);
