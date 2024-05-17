@@ -578,8 +578,20 @@ bt81x_thread(void *arg)
     if(!b->enabled) {
       bt81x_wr16(b, EVE_REG_PWM_DUTY, 0);
       usleep(1000);
+
+      gpio_disconnect(b->gpio_ncs);
       gpio_set_output(b->gpio_pd, 0);
+      gpio_disconnect(b->gpio_irq);
+
       task_sleep(&b->irq_waitq);
+
+      gpio_conf_output(b->gpio_ncs, GPIO_PUSH_PULL,
+                       GPIO_SPEED_LOW, GPIO_PULL_NONE);
+      gpio_set_output(b->gpio_ncs, 1);
+      gpio_conf_output(b->gpio_pd, GPIO_PUSH_PULL,
+                       GPIO_SPEED_LOW, GPIO_PULL_NONE);
+      gpio_conf_input(b->gpio_irq, GPIO_PULL_UP);
+
       continue;
     }
 
