@@ -1,3 +1,5 @@
+#include "nrf52_gpio.h"
+
 #include <mios/io.h>
 
 #include "nrf52_reg.h"
@@ -5,14 +7,6 @@
 #include "irq.h"
 
 #include <stdio.h>
-
-#define GPIO_BASE 0x50000000
-
-#define GPIO_PIN_CNF(x) (GPIO_BASE + 0x700 + (x) * 4)
-
-#define GPIO_OUTSET (GPIO_BASE + 0x508)
-#define GPIO_OUTCLR (GPIO_BASE + 0x50c)
-#define GPIO_IN     (GPIO_BASE + 0x510)
 
 static const uint8_t pullmap[3] = {0, 3, 1};
 

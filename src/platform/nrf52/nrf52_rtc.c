@@ -66,8 +66,6 @@ udelay(unsigned int usec)
 static void  __attribute__((constructor(130)))
 nrf52_rtc_init(void)
 {
-  nrf52_lfclk_enable();
-
   reg_wr(RTC2_BASE + RTC_TASKS_START, 1);
   reg_wr(RTC2_BASE + RTC_INTENSET, (1 << 1)); // overflow
   irq_enable(36, IRQ_LEVEL_CLOCK);

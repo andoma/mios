@@ -131,9 +131,17 @@ mbus_uart_enable(uart_mbus_t *um)
 static void
 mbus_uart_disable(uart_mbus_t *um)
 {
+  reg_wr(UARTE_PSELTXD, 1 << 31);
+  reg_wr(UARTE_PSELRXD, 1 << 31);
   gpio_disconnect(um->txe_pin);
   gpio_disconnect(um->rxe_pin);
+
+  reg_wr(UARTE_STOPRX, 1);
+  reg_wr(UARTE_STOPTX, 1);
+  reg_wr(UARTE_INTEN, 0);
   reg_wr(UARTE_ENABLE, 0);
+
+  reg_wr(MBUS_UART_TIMER_BASE + TIMER_TASKS_STOP, 1);
   um->state = MBUS_STATE_DISABLED;
 }
 

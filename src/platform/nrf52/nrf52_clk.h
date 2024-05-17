@@ -3,14 +3,20 @@
 #define CLOCK_BASE 0x40000000
 
 #define CLOCK_TASKS_HFCLKSTART    (CLOCK_BASE + 0x000)
+#define CLOCK_TASKS_HFCLKSTOP     (CLOCK_BASE + 0x004)
 #define CLOCK_TASKS_LFCLKSTART    (CLOCK_BASE + 0x008)
 #define CLOCK_TASKS_CAL           (CLOCK_BASE + 0x010)
+#define CLOCK_TASKS_CTSTART       (CLOCK_BASE + 0x014)
 
 #define CLOCK_EVENTS_HFCLKSTARTED (CLOCK_BASE + 0x100)
-
 #define CLOCK_EVENTS_LFCLKSTARTED (CLOCK_BASE + 0x104)
+#define CLOCK_EVENTS_DONE         (CLOCK_BASE + 0x10c)
+#define CLOCK_EVENTS_CTTO         (CLOCK_BASE + 0x110)
 
+#define CLOCK_INTENSET            (CLOCK_BASE + 0x304)
+#define CLOCK_INTENCLR            (CLOCK_BASE + 0x308)
 
-void nrf52_xtal_enable(void);
+#define CLOCK_LFCLKSRC            (CLOCK_BASE + 0x518)
+#define CLOCK_CTIV                (CLOCK_BASE + 0x538)
 
-void nrf52_lfclk_enable(void);
+void nrf52_clk_radio_xtal(int on);

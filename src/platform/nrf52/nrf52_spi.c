@@ -6,6 +6,7 @@
 #include <sys/uio.h>
 #include <mios/io.h>
 #include <mios/task.h>
+#include <mios/device.h>
 
 #include <stdlib.h>
 
@@ -14,11 +15,16 @@
 #include "nrf52_reg.h"
 
 #define SPIM_TASKS_START 0x010
+#define SPIM_TASKS_STOP  0x014
 
 #define SPIM_INTENSET   0x304
 #define SPIM_INTENCLR   0x308
 
-#define SPIM_EVENTS_END 0x118
+#define SPIM_EVENTS_STOPPED 0x104
+#define SPIM_EVENTS_ENDRX   0x110
+#define SPIM_EVENTS_END     0x118
+#define SPIM_EVENTS_ENDTX   0x120
+#define SPIM_EVENTS_STARTED 0x14c
 
 #define SPIM_ENABLE     0x500
 #define SPIM_PSEL_SCK   0x508
@@ -39,10 +45,17 @@
 
 typedef struct nrf52_spi {
   spi_t spi;
+  device_t device;
   uint32_t base_addr;
   mutex_t mutex;
   task_waitable_t waitq;
-  int done;
+  uint8_t done;
+  uint8_t active;
+  uint8_t shutdown;
+  uint8_t running;
+  gpio_t clk;
+  gpio_t miso;
+  gpio_t mosi;
   uint8_t bounce_buffer[32];
 } nrf52_spi_t;
 
@@ -50,15 +63,39 @@ typedef struct nrf52_spi {
 static void
 spi_xfer_init(nrf52_spi_t *spi, gpio_t nss, int config)
 {
+  spi->active = 1;
+  if(!spi->running) {
+    spi->running = 1;
+    reg_wr(spi->base_addr + SPIM_PSEL_SCK, spi->clk);
+    reg_wr(spi->base_addr + SPIM_PSEL_MISO, spi->miso);
+    reg_wr(spi->base_addr + SPIM_PSEL_MOSI, spi->mosi);
+
+    reg_wr(spi->base_addr + SPIM_ENABLE, 7); // SPIM
+    reg_wr(spi->base_addr + SPIM_INTENSET, (1 << 6)); // END interrupt
+  }
+
   reg_wr(spi->base_addr + SPIM_CONFIG, config & 0x7);
   reg_wr(spi->base_addr + SPIM_FREQUENCY, config & 0xff000000);
   gpio_set_output(nss, 0);
 }
 
 static void
+spi_reset(nrf52_spi_t *spi)
+{
+  reg_wr(spi->base_addr + 0xffc, 0);
+  reg_rd(spi->base_addr + 0xffc);
+  reg_wr(spi->base_addr + 0xffc, 1);
+  spi->running = 0;
+}
+
+static void
 spi_xfer_fini(nrf52_spi_t *spi, gpio_t nss)
 {
   gpio_set_output(nss, 1);
+  spi->active = 0;
+  if(spi->shutdown) {
+    spi_reset(spi);
+  }
 }
 
 
@@ -198,6 +235,23 @@ spi_lock(spi_t *dev, int acquire)
 }
 
 
+static void
+nrf52_spi_power_state(struct device *dev, device_power_state_t state)
+{
+  nrf52_spi_t *spi = (void *)dev -offsetof(nrf52_spi_t, device);
+  mutex_lock(&spi->mutex);
+  spi->shutdown = state == DEVICE_POWER_STATE_SUSPEND;
+  if(spi->shutdown && !spi->active) {
+    spi_reset(spi);
+  }
+  mutex_unlock(&spi->mutex);
+}
+
+static const device_class_t nrf52_spi_device_class = {
+  .dc_power_state = nrf52_spi_power_state,
+};
+
+
 static const uint8_t spi_instance_to_sysid[3] = {3, 4, 35};
 
 spi_t *
@@ -215,12 +269,9 @@ nrf52_spi_create(unsigned int spi_instance, gpio_t clk, gpio_t miso,
   mutex_init(&spi->mutex, "spi");
   task_waitable_init(&spi->waitq, "spi");
 
-  reg_wr(spi->base_addr + SPIM_PSEL_SCK, clk);
-  reg_wr(spi->base_addr + SPIM_PSEL_MISO, miso);
-  reg_wr(spi->base_addr + SPIM_PSEL_MOSI, mosi);
-
-  reg_wr(spi->base_addr + SPIM_ENABLE, 7); // SPIM
-  reg_wr(spi->base_addr + SPIM_INTENSET, (1 << 6)); // END interrupt
+  spi->clk = clk;
+  spi->miso = miso;
+  spi->mosi = mosi;
 
   spi->spi.rw = spi_rw;
   spi->spi.rwv = spi_rwv;
@@ -229,6 +280,12 @@ nrf52_spi_create(unsigned int spi_instance, gpio_t clk, gpio_t miso,
   spi->spi.get_config = spi_get_config;
   irq_enable_fn_arg(sysid, IRQ_LEVEL_SCHED, spi_irq, spi);
   printf("SPI%d at 0x%x IRQ %d\n", spi_instance, spi->base_addr, sysid);
+
+  spi->device.d_name = "spi";
+  spi->device.d_class = &nrf52_spi_device_class;
+
+  device_register(&spi->device);
+
   return &spi->spi;
 }
 

@@ -15,43 +15,49 @@
 
 #include "nrf52_reg.h"
 #include "nrf52_timer.h"
+#include "nrf52_rtc.h"
 
-static struct timer_list systim_timers;
+static struct timer_list systim_rtc1_timers;
 
 static void
-systim_rearm(timer_t *t, int64_t now)
+systim_rtc1_rearm(timer_t *t, int64_t now)
 {
   const int64_t delta = t->t_expire - now;
   uint32_t delta32;
+
   if(delta < 2) {
     delta32 = 2;
-  } else if(delta > 0xffffffffu) {
-    delta32 = 0xffffffff;
+  } else if(delta > 0x1fffffff) {
+    delta32 = 0xffffff;
   } else {
-    delta32 = delta;
+    // Convert from 1MHz to 32678Hz
+    delta32 = (delta * (uint64_t)140738560) >> 32;
+    delta32++;
+    if(delta32 > 0xffffff)
+      delta32 = 0xffffff;
   }
 
-  reg_wr(TIMER1_BASE + TIMER_TASKS_CLEAR, 1);
-  reg_wr(TIMER1_BASE + TIMER_CC(0), delta32);
-  reg_wr(TIMER1_BASE + TIMER_TASKS_START, 1);
+  reg_wr(RTC1_BASE + TIMER_TASKS_CLEAR, 1);
+  reg_wr(RTC1_BASE + TIMER_CC(0), delta32);
+  reg_wr(RTC1_BASE + TIMER_TASKS_START, 1);
 }
 
 
 void
-irq_9(void)
+irq_17(void)
 {
-  if(reg_rd(TIMER1_BASE + TIMER_EVENTS_COMPARE(0))) {
-    reg_wr(TIMER1_BASE + TIMER_EVENTS_COMPARE(0), 0);
+  if(reg_rd(RTC1_BASE + TIMER_EVENTS_COMPARE(0))) {
+    reg_wr(RTC1_BASE + TIMER_EVENTS_COMPARE(0), 0);
 
     const int64_t now = clock_get_irq_blocked();
 
     while(1) {
-      timer_t *t = LIST_FIRST(&systim_timers);
+      timer_t *t = LIST_FIRST(&systim_rtc1_timers);
       if(t == NULL)
         break;
 
       if(t->t_expire > now) {
-        systim_rearm(t, now);
+        systim_rtc1_rearm(t, now);
         break;
       }
 
@@ -77,17 +83,15 @@ timer_arm_abs(timer_t *t, uint64_t deadline)
   timer_disarm(t);
 
   t->t_expire = deadline;
-  LIST_INSERT_SORTED(&systim_timers, t, t_link, systim_cmp);
-  if(t == LIST_FIRST(&systim_timers))
-    systim_rearm(t, clock_get_irq_blocked());
+  LIST_INSERT_SORTED(&systim_rtc1_timers, t, t_link, systim_cmp);
+  if(t == LIST_FIRST(&systim_rtc1_timers))
+    systim_rtc1_rearm(t, clock_get_irq_blocked());
 }
 
 
-
-static void  __attribute__((constructor(121)))
+static void  __attribute__((constructor(131)))
 nrf52_systim_init(void)
 {
-  reg_wr(TIMER1_BASE + TIMER_BITMODE, 3);        // 32 bit width
-  reg_wr(TIMER1_BASE + TIMER_INTENSET, 1 << 16); // Compare0 -> IRQ
-  irq_enable(TIMER1_IRQ, IRQ_LEVEL_CLOCK);
+  irq_enable(17, IRQ_LEVEL_CLOCK);
+  reg_wr(RTC1_BASE + RTC_INTENSET, 1 << 16); // Compare0 -> IRQ
 }
