@@ -106,7 +106,7 @@ datetime_set_utc_offset(int64_t offset, const char *source)
 
 
 static error_t
-cmd_time(cli_t *cli, int argc, char **argv)
+cmd_date(cli_t *cli, int argc, char **argv)
 {
   datetime_t dt;
 
@@ -115,7 +115,8 @@ cmd_time(cli_t *cli, int argc, char **argv)
   while(1) {
 
     int64_t t = datetime_get_utc_usec();
-    datetime_from_unixtime(t / 1000000, &dt);
+    datetime_from_unixtime(t / 1000000 + wallclock.tz_offset, &dt);
+    int tzm = wallclock.tz_offset / 60;
     cli_printf(cli, "%04d-%02d-%02d %02d:%02d:%02d.%06d +%02d:%02d (%s)\n",
                dt.year,
                dt.mon,
@@ -124,8 +125,8 @@ cmd_time(cli_t *cli, int argc, char **argv)
                dt.min,
                dt.sec,
                (int)(t % 1000000),
-               wallclock.tz_offset / 60,
-               wallclock.tz_offset % 60,
+               tzm / 60,
+               tzm % 60,
                wallclock.source ?: "not-synchronized");
     if(!loop)
       break;
@@ -134,4 +135,4 @@ cmd_time(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("time", cmd_time);
+CLI_CMD_DEF("date", cmd_date);

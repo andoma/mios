@@ -237,9 +237,8 @@ print_timestamp_to_stream(stream_t *st, int64_t ts)
     if(wallclock.tz_offset == 0) {
       stprintf(st, "Z");
     } else {
-      stprintf(st, " +%02d:%02d",
-               wallclock.tz_offset / 60,
-               wallclock.tz_offset % 60);
+      int tzm = wallclock.tz_offset / 60;
+      stprintf(st, " +%02d:%02d", tzm / 60, tzm % 60);
     }
   } else {
     int64_t now = clock_get();
@@ -530,9 +529,9 @@ print_timestamp_to_buf(char *buf, size_t buflen, int64_t ts)
     if(wallclock.tz_offset == 0) {
       used += snprintf(buf + used, buflen - used, "Z");
     } else {
+      int tzm = wallclock.tz_offset / 60;
       used += snprintf(buf + used, buflen - used, " +%02d:%02d",
-                       wallclock.tz_offset / 60,
-                       wallclock.tz_offset % 60);
+                       tzm / 60, tzm % 60);
     }
     return used;
   } else {
