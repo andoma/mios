@@ -226,7 +226,7 @@ mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   error_t err = s->open(&msc->msc_sock);
   if(err) {
     free(msc);
-    mbus_seqpkt_accept_err(name, "Failed to open", remote_addr);
+    mbus_seqpkt_accept_err(name, error_to_string(err), remote_addr);
     return pb;
   }
 
