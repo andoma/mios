@@ -4,7 +4,9 @@ GLOBALDEPS += ${P}/nrf52.mk
 
 CPPFLAGS += -iquote${P} -include ${P}/nrf52.h
 
-LDSCRIPT = ${P}/nrf52.ld
+LDSCRIPT ?= ${P}/nrf52$(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),_bootloader,).ld
+
+ENTRYPOINT ?= $(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),bl_start,start)
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
@@ -23,5 +25,11 @@ SRCS += ${P}/nrf52.c \
 
 SRCS-${ENABLE_NET_BLE} += \
 	${P}/nrf52_radio.c \
+
+SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
+	${P}/boot/bootloader.c \
+	${P}/boot/isr.s \
+
+${MOS}/platform/nrf52/boot/bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mgeneral-regs-only -include ${BOOTLOADER_DEFS}
 
 ${MOS}/platform/nrf52/%.o : CFLAGS += ${NOFPU}
