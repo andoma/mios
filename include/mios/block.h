@@ -30,7 +30,9 @@ typedef struct block_iface {
 
 } block_iface_t;
 
+#define BLOCK_PARTITION_AUTOLOCK 0x1
 
 block_iface_t *block_create_partition(block_iface_t *parent,
                                       size_t block_offset,
-                                      size_t num_blocks);
+                                      size_t num_blocks,
+                                      int partition_flags);
