@@ -2,33 +2,54 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include <mios/service.h>
 #include <mios/version.h>
 #include <mios/task.h>
-#include <mios/flash.h>
 #include <mios/eventlog.h>
+#include <mios/block.h>
 
 #include "net/pbuf.h"
 
 #include "util/crc32.h"
 #include "irq.h"
 
-#define OTA_BLOCKSIZE 32
+// #define OTA_BLOCKSIZE 32
+
+static char ota_busy;
+
+
+typedef struct {
+  uint8_t magic[4];
+  uint32_t size;
+  uint32_t image_crc;
+  uint32_t header_crc;
+} otahdr_t;
+
 
 typedef struct svc_ota {
   socket_t *sa_sock;
 
   pbuf_t *sa_info;
-  int sa_shutdown;
+  uint8_t sa_blockshift;
+  uint8_t sa_shutdown;
 
   thread_t *sa_thread;
   mutex_t sa_mutex;
   cond_t sa_cond;
   pbuf_t *sa_rxbuf;
+
+  otahdr_t sa_otahdr;
+
+  block_iface_t *sa_partition;
+
+  void (*sa_platform_upgrade)(uint32_t flow_header,
+                              pbuf_t *pb);
+
 } svc_ota_t;
 
-
+#if 0
 error_t  __attribute__((weak))
 ota_platform_start(uint32_t flow_header, struct pbuf *pb)
 {
@@ -39,14 +60,11 @@ void __attribute__((weak))
 ota_platform_info(uint8_t *hdr)
 {
   hdr[0] = 0;
-  hdr[1] = 's';
-  hdr[2] = 32;
-  hdr[3] = 0;
+  hdr[1] = 'r';            // raw image
+  hdr[2] = OTA_BLOCKSIZE;  // 32 byte xfer size
+  hdr[3] = 4;              // Skip first 4kb
 }
-
-
-static char ota_busy;
-
+#endif
 
 
 static pbuf_t *
@@ -77,12 +95,14 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
   }
 }
 
-#include <stdio.h>
+
+
 
 static error_t
 ota_perform(svc_ota_t *sa)
 {
-  evlog(LOG_DEBUG, "OTA: Waiting for init");
+  size_t blocksize = 1 << sa->sa_blockshift;
+  evlog(LOG_DEBUG, "OTA: Waiting for init (blocksize: %d)", blocksize);
   pbuf_t *pb = ota_get_next_pkt(sa);
   if(pb == NULL)
     return ERR_NOT_CONNECTED;
@@ -100,93 +120,52 @@ ota_perform(svc_ota_t *sa)
   memcpy(&crc, pbuf_cdata(pb, 4), 4);
   pbuf_free(pb);
 
-  const size_t size = num_blocks * OTA_BLOCKSIZE;
+  error_t err;
 
-  const flash_iface_t *fif = flash_get_primary();
+  block_iface_t *bi = sa->sa_partition;
 
-  // First, figure out number of sectors
+  err = bi->erase(bi, 0);
+  if(err)
+    return err;
 
-  int total_sectors = 0;
-  size_t total_size = 0;
-  while(1) {
-    size_t siz = fif->get_sector_size(fif, total_sectors);
-    if(siz == 0)
-      break;
-    total_size += siz;
-    total_sectors++;
-  }
-
-  evlog(LOG_NOTICE, "OTA: Flash total %d sectors (%d bytes)",
-        total_sectors, total_size);
-
-  if(total_sectors == 0)
-    return ERR_NOSPC;
-
-  int first_sector = -1;
-  int last_sector = -1;
-  size_t consecutive_size = 0;
-
-  // Start from the end or we risk overwriting ourself
-  for(int i = total_sectors - 1; i >= 0; i--) {
-    const int type = fif->get_sector_type(fif, i);
-    if(type == FLASH_SECTOR_TYPE_AVAIL) {
-      if(last_sector == -1)
-        last_sector = i;
-      consecutive_size += fif->get_sector_size(fif, i);
-      first_sector = i;
-      if(consecutive_size >= size)
-        break;
-    } else {
-      last_sector = -1;
-      first_sector = -1;
-      consecutive_size = 0;
-    }
-  }
-
-  evlog(LOG_NOTICE,
-        "OTA: %d bytes available for upgrade buffer (need %d) CRC:%08x",
-        consecutive_size, size, crc);
-
-  if(consecutive_size < size)
-    return ERR_NOSPC;
-
-  const int num_sectors = last_sector - first_sector + 1;
-  for(int i = 0; i < num_sectors; i++) {
-    evlog(LOG_DEBUG, "OTA: Erasing sector %d", first_sector + i);
-    usleep(10000);
-    error_t err = fif->erase_sector(fif, first_sector + i);
-    evlog(LOG_DEBUG, "OTA: Erase sector %d -- %s", first_sector + i,
-          error_to_string(err));
-    if(err)
-      return err;
-    usleep(10000);
-  }
-
-  int cur_sector = first_sector;
-  int cur_sector_size = fif->get_sector_size(fif, cur_sector);
-  int cur_offset = 0;
   uint32_t crc_acc = 0;
+
+  const size_t xfers_per_block = 4096 >> sa->sa_blockshift;
+
   for(int i = 0; i < num_blocks; i++) {
     pbuf_t *pb = ota_get_next_pkt(sa);
     if(pb == NULL) {
       return ERR_NOT_CONNECTED;
     }
-    error_t err =
-      fif->write(fif, cur_sector, cur_offset, pbuf_cdata(pb, 0), OTA_BLOCKSIZE);
-    pbuf_free(pb);
-    if(err)
-      return err;
 
-    const void *mem = fif->get_addr(fif, cur_sector) + cur_offset;
-    crc_acc = crc32(crc_acc, mem, OTA_BLOCKSIZE);
+    size_t block = 1 + (i / xfers_per_block);
+    size_t byte_offset = (i & (xfers_per_block - 1)) << sa->sa_blockshift;
 
-    cur_offset += OTA_BLOCKSIZE;
-
-    if(cur_offset == cur_sector_size) {
-      cur_sector++;
-      cur_offset = 0;
-      cur_sector_size = fif->get_sector_size(fif, cur_sector);
+    if(byte_offset == 0) {
+      evlog(LOG_DEBUG, "Erase block %d", block);
+      err = bi->erase(bi, block);
+      if(err) {
+        pbuf_free(pb);
+        return err;
+      }
     }
+
+    void *buf = pbuf_data(pb, 0);
+    err = bi->write(bi, block, byte_offset, buf, blocksize);
+    if(err) {
+      pbuf_free(pb);
+      return err;
+    }
+
+    // Readback
+    err = bi->read(bi,  block, byte_offset, buf, blocksize);
+    if(err) {
+      pbuf_free(pb);
+      return err;
+    }
+
+    crc_acc = crc32(crc_acc, buf, blocksize);
+    pbuf_free(pb);
   }
 
   crc_acc = ~crc_acc;
@@ -197,18 +176,24 @@ ota_perform(svc_ota_t *sa)
   if(crc != crc_acc)
     return ERR_CHECKSUM_ERROR;
 
+  memcpy(sa->sa_otahdr.magic, "OTA1", 4);
+  sa->sa_otahdr.size = num_blocks << sa->sa_blockshift;
+  sa->sa_otahdr.image_crc = crc;
+  sa->sa_otahdr.header_crc = ~crc32(0, &sa->sa_otahdr, sizeof(otahdr_t) - 4);
+
+  err = bi->write(bi, 0, 0, &sa->sa_otahdr, sizeof(otahdr_t));
+  if(err)
+    return err;
+
+  bi->ctrl(bi, BLOCK_SUSPEND);
+
   ota_send_final_status(sa, 0);
-
   evlog(LOG_NOTICE, "OTA: Transfer OK");
-  printf("\n\t*** Reboot due to OTA\n");
+  printf("\n\t*** Reboot to OTA\n");
   usleep(50000);
-
-  const void *src = fif->get_addr(fif, first_sector);
 
   irq_forbid(IRQ_LEVEL_ALL);
   fini();
-
-  fif->multi_write(fif, src, src, FLASH_MULTI_WRITE_CPU_REBOOT);
   reboot();
   return 0;
 }
@@ -245,14 +230,11 @@ ota_push(void *opaque, struct pbuf *pb)
 
   if(!sa->sa_thread) {
 
-    uint32_t fh = sa->sa_sock->net->get_flow_header  ?
-      sa->sa_sock->net->get_flow_header(sa->sa_sock->net_opaque) : 0;
-
-    // This can take over the transfer and if so, it won't return
-    error_t err = ota_platform_start(fh, pb);
-    if(err) {
-      pbuf_free(pb);
-      return SOCKET_EVENT_PUSH;
+    if(sa->sa_platform_upgrade && pb->pb_pktlen >= 8 &&
+       sa->sa_sock->net->get_flow_header) {
+      uint32_t fh = sa->sa_sock->net->get_flow_header(sa->sa_sock->net_opaque);
+      sa->sa_platform_upgrade(fh, pb); // Will not return
+      return 0;
     }
 
     sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
@@ -301,25 +283,31 @@ static const socket_app_fn_t ota_fn = {
   .close = ota_close
 };
 
-static error_t
-ota_open(socket_t *s)
+
+
+error_t
+ota_open_with_args(socket_t *s,
+                   struct block_iface *partition,
+                   int skip_kb,
+                   void (*platform_upgrade)(uint32_t flow_header,
+                                            pbuf_t *pb))
 {
-  if(ota_busy)
+  if(ota_busy) {
     return ERR_NOT_READY;
+  }
 
   svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0, MEM_MAY_FAIL);
   if(sa == NULL)
     return ERR_NO_MEMORY;
   memset(sa, 0, sizeof(svc_ota_t));
-
-  sa->sa_sock = s;
-  s->app = &ota_fn;
-  s->app_opaque = sa;
+  sa->sa_partition = partition;
+  sa->sa_platform_upgrade = platform_upgrade;
+  sa->sa_blockshift = 5; // Compute this from s->max_fragment_size perhaps
 
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb != NULL) {
-    uint8_t hdr[4];
-    ota_platform_info(hdr);
+    uint8_t hdr[4] = {0, 'r', 1 << sa->sa_blockshift, skip_kb};
+
     pb = pbuf_write(pb, hdr, sizeof(hdr), s->max_fragment_size);
     pb = pbuf_write(pb, mios_build_id(), 20, s->max_fragment_size);
     const char *appname = mios_get_app_name();
@@ -330,11 +318,14 @@ ota_open(socket_t *s)
     free(sa);
     return ERR_NO_BUFFER;
   }
+
+  sa->sa_sock = s;
+  s->app = &ota_fn;
+  s->app_opaque = sa;
+
   ota_busy = 1;
   sa->sa_info = pb;
   mutex_init(&sa->sa_mutex, "ota");
   cond_init(&sa->sa_cond, "ota");
   return 0;
 }
-
-SERVICE_DEF("ota", 0, 9, SERVICE_TYPE_DGRAM, ota_open);

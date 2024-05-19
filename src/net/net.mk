@@ -11,6 +11,7 @@ SRCS_net += \
 	${SRC}/net/service/svc_chargen.c \
 	${SRC}/net/service/svc_rpc.c \
 	${SRC}/net/service/svc_discard.c \
+	${SRC}/net/service/svc_ota.c \
 
 SRCS-${ENABLE_NET_MBUS} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus.c \
