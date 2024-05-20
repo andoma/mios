@@ -1236,7 +1236,7 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
   mutex_lock(&tcbs_mutex);
 
   LIST_FOREACH(tcb, &tcbs, tcb_link) {
-    cli_printf(cli, "%s\tLocal: %Id:%-5d\tRemote: %Id:%-5d\n",
+    cli_printf(cli, "%s\n\tLocal: %Id:%-5d\tRemote: %Id:%-5d\n",
                tcb->tcb_name,
                tcb->tcb_local_addr,
                ntohs(tcb->tcb_local_port),
