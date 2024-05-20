@@ -649,7 +649,10 @@ mutex_lock_sched_locked(mutex_t *m, task_t *curtask)
 
     if(curtask->t_state != TASK_STATE_SLEEPING) {
       curtask->t_state = TASK_STATE_SLEEPING;
-
+#ifdef ENABLE_TASK_WCHAN
+      thread_t *curthread = (thread_t *)curtask;
+      curthread->t_wchan = m->waiters.name ?: __FUNCTION__;
+#endif
       // We need to clear the lockbit or list manipulation will fail
       // as they share the same memory address
       m->lock &= ~1;
