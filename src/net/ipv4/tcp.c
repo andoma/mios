@@ -318,7 +318,7 @@ tcp_rtx_cb(void *opaque, uint64_t now)
     pb = pbuf_copy_pkt(q, 0);
     if(pb != NULL) {
       pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
-      if(pb == NULL) {
+      if(pb != NULL) {
         tcp_hdr_t *th = pbuf_data(pb, 0);
 
         if(pb->pb_flags & PBUF_SEQ) {
