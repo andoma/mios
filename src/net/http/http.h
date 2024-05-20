@@ -85,13 +85,15 @@ struct stream *http_websocket_output_begin(http_connection_t *hc,
 
 void http_connection_release(http_connection_t *hc);
 
+// name must be compile time constant
 http_connection_t *http_websocket_create(int (*cb)(void *opaque,
                                                    int opcode,
                                                    void *data,
                                                    size_t size,
                                                    http_connection_t *hc,
                                                    balloc_t *ba),
-                                         void *opaque);
+                                         void *opaque,
+                                         const char *name);
 
 void http_websocket_start(http_connection_t *hc, uint32_t addr,
                           uint16_t port, const char *path,

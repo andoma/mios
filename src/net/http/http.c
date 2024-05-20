@@ -1379,14 +1379,15 @@ http_websocket_create(int (*cb)(void *opaque,
                                 size_t size,
                                 http_connection_t *hc,
                                 balloc_t *ba),
-                      void *opaque)
+                      void *opaque,
+                      const char *name)
 {
   http_connection_t *hc = http_connection_create(HTTP_RESPONSE,
                                                  &websocket_response_parser);
   if(hc == NULL)
     return NULL;
 
-  socket_t *sk = tcp_create_socket("websocket");
+  socket_t *sk = tcp_create_socket(name);
   if(sk == NULL) {
     free(hc);
     return NULL;
