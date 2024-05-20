@@ -522,10 +522,10 @@ pbuf_copy_pkt(const pbuf_t *src, int wait)
 
 
 void
-pbuf_status(void)
+pbuf_status(stream_t *st)
 {
-  printf("pbuf: %d avail\n", pbufs.pp_avail);
-  printf("pbuf_data: %d avail\n", pbuf_datas.pp_avail);
+  stprintf(st, "pbuf: %d avail\n", pbufs.pp_avail);
+  stprintf(st, "pbuf_data: %d avail\n", pbuf_datas.pp_avail);
 }
 
 

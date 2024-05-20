@@ -82,7 +82,8 @@ pbuf_t *pbuf_write(pbuf_t *pb, const void *ptr, size_t len, size_t max_fill);
 // Debug helpers
 // =========================================================
 
-void pbuf_status(void);
+struct stream;
+void pbuf_status(struct stream *st);
 
 void pbuf_dump(const char *prefix, const pbuf_t *pb, int full);
 

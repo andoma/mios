@@ -7,6 +7,7 @@
 #include <mios/task.h>
 #include <mios/timer.h>
 #include <mios/eventlog.h>
+#include <mios/cli.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -236,3 +237,13 @@ inet_addr(const char *s)
   }
   return r;
 }
+
+
+static error_t
+cmd_netstat(cli_t *cli, int argc, char **argv)
+{
+  pbuf_status(cli->cl_stream);
+  return 0;
+}
+
+CLI_CMD_DEF("netstat", cmd_netstat);
