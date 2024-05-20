@@ -1,3 +1,5 @@
+#include "svc_ota.h"
+
 #include <string.h>
 #include <malloc.h>
 #include <stdlib.h>
@@ -48,23 +50,6 @@ typedef struct svc_ota {
                               pbuf_t *pb);
 
 } svc_ota_t;
-
-#if 0
-error_t  __attribute__((weak))
-ota_platform_start(uint32_t flow_header, struct pbuf *pb)
-{
-  return 0;
-}
-
-void __attribute__((weak))
-ota_platform_info(uint8_t *hdr)
-{
-  hdr[0] = 0;
-  hdr[1] = 'r';            // raw image
-  hdr[2] = OTA_BLOCKSIZE;  // 32 byte xfer size
-  hdr[3] = 4;              // Skip first 4kb
-}
-#endif
 
 
 static pbuf_t *
