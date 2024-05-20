@@ -15,14 +15,6 @@ SECTIONS {
                 . = ALIGN(8);
 		_ebltext = .;
         } >BOOT
-
-	.bootdata : AT ( _ebltext ) {
-                . = ALIGN(8);
-                _sbldata = .;
-                *(blramcode)
-                . = ALIGN(4);
-                _ebldata = .;
-        } >RAM
 }
 
 INCLUDE cpu/cortexm/cortexm.ld
