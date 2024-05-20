@@ -127,6 +127,13 @@ tcp_set_state(tcb_t *tcb, int state, const char *reason)
 {
   if(tcb->tcb_state == state)
     return;
+#if 0
+  evlog(LOG_DEBUG, "%s: %s->%s (%s)",
+        tcb->tcb_name,
+        tcp_state_to_str(tcb->tcb_state),
+        tcp_state_to_str(state),
+        reason);
+#endif
   tcb->tcb_state = state;
 }
 
