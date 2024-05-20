@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 
 #include "net/pbuf.h"
 #include "net/ether.h"
@@ -125,13 +126,55 @@ append_parameter_request_list(pbuf_t *pb)
 }
 
 
-static void
-dhcpv4_update(netif_t *ni, pbuf_t *vsi)
+typedef struct {
+  struct netif *ni;
+  pbuf_t *vsi; // vendor specific info
+} dhcp_update_aux_t;
+
+__attribute__((noreturn))
+static void *
+dhcpv4_update_thread(void *arg)
 {
+  dhcp_update_aux_t *dua = arg;
+  pbuf_t *vsi = dua->vsi;
   const void *vsidata = vsi ? pbuf_data(vsi, 0) : NULL;
   size_t vsisize = vsi ? vsi->pb_buflen : 0;
-  ghook_invoke(GHOOK_DHCP_UPDATE, ni, vsidata, vsisize);
+  ghook_invoke(GHOOK_DHCP_UPDATE, dua->ni, vsidata, vsisize);
+  pbuf_free(vsi);
+  device_release(&dua->ni->ni_dev);
+  free(dua);
+  thread_exit(0);
 }
+
+static void
+dhcpv4_update(netif_t *ni, pbuf_t **vsi)
+{
+  dhcp_update_aux_t *dua = xalloc(sizeof(dhcp_update_aux_t),
+                                  0, MEM_MAY_FAIL);
+  if(dua == NULL)
+    return;
+  if(vsi != NULL) {
+    dua->vsi = *vsi;
+    *vsi = NULL;
+  } else {
+    dua->vsi = NULL;
+  }
+  dua->ni = ni;
+  device_retain(&ni->ni_dev);
+
+  thread_t *t = thread_create(dhcpv4_update_thread, dua,
+                              512, "dhcpupdate", TASK_DETACHED
+#ifdef HAVE_FPU
+                              | TASK_FPU
+#endif
+                              , 1);
+  if(t == NULL) {
+    pbuf_free(dua->vsi);
+    device_release(&ni->ni_dev);
+    free(dua);
+  }
+}
+
 
 static pbuf_t *
 dhcpv4_make(ether_netif_t *eni)
@@ -431,7 +474,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
       eni->eni_ni.ni_local_addr = yiaddr;
       eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
-      dhcpv4_update(&eni->eni_ni, po.vsi);
+      dhcpv4_update(&eni->eni_ni, &po.vsi);
       net_timer_arm(&eni->eni_dhcp_timer,
                     clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
 
