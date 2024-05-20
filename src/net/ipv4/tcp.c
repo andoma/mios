@@ -35,6 +35,7 @@
 
 #define TCP_KEEPALIVE_INTERVAL 10000 // ms
 #define TCP_TIMEOUT_INTERVAL   21000 // ms
+#define TCP_TIMEOUT_HANDSHAKE   5000 // ms
 
 #define TCP_STATE_CLOSED       0
 #define TCP_STATE_LISTEN       1
@@ -107,6 +108,7 @@ typedef struct tcb {
   uint64_t tcb_rtx_bytes;
 
   uint64_t tcb_last_rx;
+  uint32_t tcb_timo;
 
   const char *tcb_name;
 
@@ -276,7 +278,7 @@ tcp_rtx_cb(void *opaque, uint64_t now)
 {
   tcb_t *tcb = opaque;
 
-  if(now > tcb->tcb_last_rx + TCP_TIMEOUT_INTERVAL * 1000) {
+  if(now > tcb->tcb_last_rx + tcb->tcb_timo) {
     tcp_close(tcb, "TCP Timeout");
     return;
   }
@@ -479,6 +481,10 @@ tcp_do_connect(tcb_t *tcb)
   // on the unaq queue
   pbuf_t *pb = STAILQ_FIRST(&tcb->tcb_unaq);
   STAILQ_INIT(&tcb->tcb_unaq);
+
+  // Set last_rx to now, otherwise we get an almost instant TCP timeout
+  // in tcp_rtx_cb()
+  tcb->tcb_last_rx = clock_get();
 
   tcp_send_flag(tcb, TCP_F_SYN, pb);
   tcp_set_state(tcb, TCP_STATE_SYN_SENT, "syn-sent");
@@ -726,6 +732,7 @@ tcb_create(const char *name)
 
   tcb->tcb_sock.max_fragment_size = 536;
 
+  tcb->tcb_timo = TCP_TIMEOUT_HANDSHAKE * 1000;
   return tcb;
 }
 
@@ -890,6 +897,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       tcb->tcb_snd.wl2 = ack;
 
       if(una_iss > 0) {
+        tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
         tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
         return tcp_send_data_or_ack(tcb, pb);
       }
@@ -979,6 +987,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   switch(tcb->tcb_state) {
   case TCP_STATE_SYN_RECEIVED:
     if(una_ack >= 0 && ack_nxt <= 0) {
+      tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
       tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
       tcb->tcb_snd.wnd = wnd;
       tcb->tcb_snd.wl1 = seq;
