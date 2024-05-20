@@ -171,20 +171,20 @@ stm32_dma_wait(stm32_dma_instance_t instance)
   const int64_t deadline = start + 1000000;
   dma_stream_t *ds = g_streams[instance];
   while(1) {
-    if(ds->status == 0) {
-      if(task_sleep_deadline(&ds->waitq, deadline)) {
-        stm32_dma_stop(instance);
-        ds->status = 0;
-        return ERR_TIMEOUT;
-      }
-      continue;
+    if(ds->status & DMA_STATUS_XFER_ERROR) {
+      ds->status = 0;
+      return ERR_DMA_XFER;
+    }
+    if(ds->status & DMA_STATUS_FULL_XFER) {
+      ds->status = 0;
+      return 0;
     }
 
-    uint32_t s = ds->status;
-    ds->status = 0;
-    if(s & DMA_STATUS_XFER_ERROR)
-      return ERR_DMA_XFER;
-    return 0;
+    if(task_sleep_deadline(&ds->waitq, deadline)) {
+      stm32_dma_stop(instance);
+      ds->status = 0;
+      return ERR_TIMEOUT;
+    }
   }
 }
 
