@@ -72,7 +72,7 @@ reg_rd(uint32_t addr)
 
 
 __attribute__((section("bldata")))
-static const uint32_t crc32table[256] = {
+static const uint32_t bl_crc32table[256] = {
   0xd202ef8d, 0xa505df1b, 0x3c0c8ea1, 0x4b0bbe37, 0xd56f2b94, 0xa2681b02,
   0x3b614ab8, 0x4c667a2e, 0xdcd967bf, 0xabde5729, 0x32d70693, 0x45d03605,
   0xdbb4a3a6, 0xacb39330, 0x35bac28a, 0x42bdf21c, 0xcfb5ffe9, 0xb8b2cf7f,
@@ -120,10 +120,10 @@ static const uint32_t crc32table[256] = {
 
 __attribute__((section("bltext"),noinline,unused))
 static uint32_t
-crc32(uint32_t crc, const void *data, size_t n_bytes)
+bl_crc32(uint32_t crc, const void *data, size_t n_bytes)
 {
   for(size_t i = 0; i < n_bytes; ++i)
-    crc = crc32table[(uint8_t)crc ^ ((uint8_t*)data)[i]] ^ crc >> 8;
+    crc = bl_crc32table[(uint8_t)crc ^ ((uint8_t*)data)[i]] ^ crc >> 8;
 
   return crc;
 }
@@ -198,18 +198,33 @@ spi_txrx(uint8_t out)
   return reg_rd(SPI_RXD);
 }
 
+
+__attribute__((always_inline,unused))
+static void
+spiflash_enable()
+{
+  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+}
+
+__attribute__((always_inline,unused))
+static void
+spiflash_disable()
+{
+  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+}
+
 __attribute__((section("bltext"),noinline))
 static uint8_t
 spiflash_wakeup(void)
 {
   delay();
 
-  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+  spiflash_enable();
   uint8_t id;
   for(int i = 0; i < 5; i++) {
     id = spi_txrx(0xab);
   }
-  gpio_set_output(GPIO_SPIFLASH_CS, 1);
+  spiflash_disable();
   return id;
 }
 
@@ -220,7 +235,7 @@ spiflash_read(void *ptr, uint32_t addr, size_t len)
   delay();
 
   uint8_t *u8 = ptr;
-  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+  spiflash_enable();
   spi_txrx(0x3);
   spi_txrx(addr >> 16);
   spi_txrx(addr >> 8);
@@ -228,7 +243,7 @@ spiflash_read(void *ptr, uint32_t addr, size_t len)
   for(size_t i = 0; i < len; i++) {
     u8[i] = spi_txrx(0);
   }
-  gpio_set_output(GPIO_SPIFLASH_CS, 1);
+  spiflash_disable();
 }
 
 __attribute__((section("bltext"),noinline))
@@ -237,10 +252,10 @@ spiflash_wait_ready(void)
 {
   while(1) {
     delay();
-    gpio_set_output(GPIO_SPIFLASH_CS, 0);
+    spiflash_enable();
     spi_txrx(5);
     uint8_t status = spi_txrx(0);
-    gpio_set_output(GPIO_SPIFLASH_CS, 1);
+    spiflash_disable();
     if((status & 1) == 0)
       break;
   }
@@ -253,20 +268,20 @@ spiflash_erase(uint32_t block)
 {
   spiflash_wait_ready();
 
-  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+  spiflash_enable();
   spi_txrx(0x6); // Write-enable
-  gpio_set_output(GPIO_SPIFLASH_CS, 1);
+  spiflash_disable();
 
   delay();
 
   uint32_t addr = block * 4096;
 
-  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+  spiflash_enable();
   spi_txrx(0x20);
   spi_txrx(addr >> 16);
   spi_txrx(addr >> 8);
   spi_txrx(addr);
-  gpio_set_output(GPIO_SPIFLASH_CS, 1);
+  spiflash_disable();
 
   spiflash_wait_ready();
 }
@@ -330,7 +345,7 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
 
   otahdr_t hdr;
   spiflash_read(&hdr, 0, 16);
-  uint32_t crc = ~crc32(0, &hdr, sizeof(hdr));
+  uint32_t crc = ~bl_crc32(0, &hdr, sizeof(hdr));
 
   if(!crc && hdr.magic == 0x3141544f) {
     // Upgrade header is valid
@@ -342,7 +357,7 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
     for(size_t i = 0; i < hdr.size; i += BLOCKSIZE) {
       size_t chunk = MIN(BLOCKSIZE, hdr.size - i);
       spiflash_read(block, 4096 + i, chunk);
-      crc = crc32(crc, block, chunk);
+      crc = bl_crc32(crc, block, chunk);
     }
     crc = ~crc;
     if(crc == hdr.image_crc) {
@@ -371,7 +386,7 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
           }
           reg_wr(NVMC_CONFIG, 0);
         }
-        crc = ~crc32(0, (void *)(intptr_t)4096, hdr.size);
+        crc = ~bl_crc32(0, (void *)(intptr_t)4096, hdr.size);
         if(crc == hdr.image_crc)
           break;
       }

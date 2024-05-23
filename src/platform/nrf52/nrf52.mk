@@ -27,9 +27,9 @@ SRCS-${ENABLE_NET_BLE} += \
 	${P}/nrf52_radio.c \
 
 SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
-	${P}/boot/bootloader.c \
+	${P}/boot/nrf52_bootloader.c \
 	${P}/boot/isr.s \
 
-${MOS}/platform/nrf52/boot/bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mgeneral-regs-only -include ${BOOTLOADER_DEFS}
+${MOS}/platform/nrf52/boot/nrf52_bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mgeneral-regs-only -include ${BOOTLOADER_DEFS}
 
 ${MOS}/platform/nrf52/%.o : CFLAGS += ${NOFPU}
