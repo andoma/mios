@@ -13,6 +13,5 @@ bootloader_vectors:
         .long bl_start
         .long bl_nmi
         .long bl_hard_fault
-        .long bl_ota_start0
         .size bootloader_vectors, . - bootloader_vectors
 
