@@ -36,6 +36,7 @@ typedef struct svc_ota {
   pbuf_t *sa_info;
   uint8_t sa_blockshift;
   uint8_t sa_shutdown;
+  uint16_t sa_skipped_blocks;
 
   thread_t *sa_thread;
   mutex_t sa_mutex;
@@ -97,7 +98,6 @@ ota_perform(svc_ota_t *sa)
     return ERR_BAD_PKT_SIZE;
   }
 
-
   int num_blocks;
   uint32_t crc;
 
@@ -109,13 +109,12 @@ ota_perform(svc_ota_t *sa)
 
   block_iface_t *bi = sa->sa_partition;
 
+  evlog(LOG_DEBUG, "Erase sector %d", 0);
   err = bi->erase(bi, 0);
   if(err)
     return err;
 
   uint32_t crc_acc = 0;
-
-  const size_t xfers_per_block = 4096 >> sa->sa_blockshift;
 
   for(int i = 0; i < num_blocks; i++) {
     pbuf_t *pb = ota_get_next_pkt(sa);
@@ -123,12 +122,14 @@ ota_perform(svc_ota_t *sa)
       return ERR_NOT_CONNECTED;
     }
 
-    size_t block = 1 + (i / xfers_per_block);
-    size_t byte_offset = (i & (xfers_per_block - 1)) << sa->sa_blockshift;
+    size_t byte_offset = (sa->sa_skipped_blocks + i) << sa->sa_blockshift;
 
-    if(byte_offset == 0) {
-      evlog(LOG_DEBUG, "Erase block %d", block);
-      err = bi->erase(bi, block);
+    size_t sector = byte_offset >> 12;
+    size_t sector_offset = byte_offset & 4095;
+
+    if(sector_offset == 0) {
+      evlog(LOG_DEBUG, "Erase sector %d", sector);
+      err = bi->erase(bi, sector);
       if(err) {
         pbuf_free(pb);
         return err;
@@ -136,14 +137,14 @@ ota_perform(svc_ota_t *sa)
     }
 
     void *buf = pbuf_data(pb, 0);
-    err = bi->write(bi, block, byte_offset, buf, blocksize);
+    err = bi->write(bi, sector, sector_offset, buf, blocksize);
     if(err) {
       pbuf_free(pb);
       return err;
     }
 
     // Readback
-    err = bi->read(bi,  block, byte_offset, buf, blocksize);
+    err = bi->read(bi, sector, sector_offset, buf, blocksize);
     if(err) {
       pbuf_free(pb);
       return err;
@@ -288,6 +289,8 @@ ota_open_with_args(socket_t *s,
   sa->sa_partition = partition;
   sa->sa_platform_upgrade = platform_upgrade;
   sa->sa_blockshift = 5; // Compute this from s->max_fragment_size perhaps
+
+  sa->sa_skipped_blocks = (skip_kb * 1024) >> sa->sa_blockshift;
 
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb != NULL) {
