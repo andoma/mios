@@ -77,13 +77,6 @@ stm32f4_init(void)
 }
 
 
-static void  __attribute__((destructor(120)))
-stm32f4_fini(void)
-{
-  if(*DBGMCU_CR & 7)
-    __asm("bkpt #2");
-}
-
 void  __attribute__((noreturn))
 cpu_idle(void)
 {
