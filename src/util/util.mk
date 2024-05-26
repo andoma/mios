@@ -13,6 +13,4 @@ SRCS += ${SRC}/util/bumpalloc.c \
 	${SRC}/util/block.c \
 	${SRC}/util/datetime.c \
 
-SRCS-${ENABLE_PKV} += ${SRC}/util/pkv.c
-
 ${MOS}/util/%.o : CFLAGS += ${NOFPU}
