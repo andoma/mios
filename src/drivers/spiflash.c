@@ -15,6 +15,7 @@ typedef struct spiflash {
   block_iface_t iface;
   spi_t *spi;
   mutex_t mutex;
+  int64_t busy_until;
   uint32_t sectors;
   uint32_t spicfg;
   gpio_t cs;
@@ -63,7 +64,11 @@ spiflash_wait_ready(spiflash_t *sf)
     return 0;
 
   case SPIFLASH_STATE_BUSY:
-    while(1) {
+    if(sf->busy_until) {
+      sleep_until(sf->busy_until);
+      sf->busy_until = 0;
+    }
+    for(int i = 0 ; i < 500; i++) {
       status = spiflash_get_status(sf);
       if(status < 0)
         return status;
@@ -71,7 +76,10 @@ spiflash_wait_ready(spiflash_t *sf)
         sf->state = SPIFLASH_STATE_IDLE;
         return 0;
       }
+      usleep(1000);
     }
+    return ERR_FLASH_TIMEOUT;
+
   case SPIFLASH_STATE_PD:
     status = spiflash_id(sf);
     if(status < 0)
@@ -106,8 +114,8 @@ spiflash_erase(struct block_iface *bi, size_t block)
     uint32_t addr = block * bi->block_size;
     uint8_t cmd[4] = {0x20, addr >> 16, addr >> 8, addr};
     err = sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
-    usleep(30000);
     sf->state = SPIFLASH_STATE_BUSY;
+    sf->busy_until = clock_get() + 45000;
   }
 
   return err;
