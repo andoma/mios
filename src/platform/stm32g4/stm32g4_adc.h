@@ -61,6 +61,8 @@ stm32_dma_instance_t stm32g4_adc_init_dma(uint32_t base, uint32_t channels);
 
 error_t stm32g4_adc_dma_transfer(uint32_t base, uint32_t dmainst, uint16_t *output);
 
+int stm32g4_adc_read_channel(uint32_t base, int channel);
+
 
 #define ADC12_EXT_TIM1_TRGO  9
 #define ADC12_EXT_TIM1_TRGO2 10

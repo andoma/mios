@@ -157,35 +157,23 @@ stm32g4_adc_dma_transfer(uint32_t base, uint32_t dmainst, uint16_t *output)
 }
 
 
+int
+stm32g4_adc_read_channel(uint32_t base, int channel)
+{
+  reg_wr(base + ADCx_SQR1, channel << 6);
+  reg_set_bit(base + ADCx_CR, 2);
+
+  while(1) {
+    if(reg_get_bit(base + ADCx_ISR, 2))
+      break;
+  }
+  return reg_rd(base + ADCx_DR);
+}
 
 
 #if 0
 
 #include <mios/cli.h>
-
-
-static int
-adc_read_channel(int channel)
-{
-  stm32g4_adc12_init();
-
-  reg_wr(ADC1_BASE + ADCx_SMPR2, 1 << 24);
-  reg_wr(ADC1_BASE + ADCx_SQR1, channel << 6);
-  reg_set_bit(ADC1_BASE + ADCx_CR, 2);
-
-  int64_t ts = clock_get();
-  while(1) {
-    if(reg_get_bit(ADC1_BASE + ADCx_ISR, 2))
-      break;
-  }
-  int r =  reg_rd(ADC1_BASE + ADCx_DR);
-  ts = clock_get() - ts;
-  printf("Readout took %dµs\n", (int)ts);
-  return r;
-}
-
-
-
 
 
 int
