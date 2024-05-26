@@ -109,7 +109,8 @@ ota_perform(svc_ota_t *sa)
 
   block_iface_t *bi = sa->sa_partition;
 
-  evlog(LOG_DEBUG, "Erase sector %d", 0);
+  evlog(LOG_DEBUG, "OTA: Transfer started %d bytes",
+        num_blocks << sa->sa_blockshift);
   err = bi->erase(bi, 0);
   if(err)
     return err;
@@ -117,23 +118,21 @@ ota_perform(svc_ota_t *sa)
   uint32_t crc_acc = 0;
 
   for(int i = 0; i < num_blocks; i++) {
-    pbuf_t *pb = ota_get_next_pkt(sa);
-    if(pb == NULL) {
-      return ERR_NOT_CONNECTED;
-    }
-
     size_t byte_offset = (sa->sa_skipped_blocks + i) << sa->sa_blockshift;
-
     size_t sector = byte_offset >> 12;
     size_t sector_offset = byte_offset & 4095;
 
     if(sector_offset == 0) {
-      evlog(LOG_DEBUG, "Erase sector %d", sector);
       err = bi->erase(bi, sector);
       if(err) {
         pbuf_free(pb);
         return err;
       }
+    }
+
+    pbuf_t *pb = ota_get_next_pkt(sa);
+    if(pb == NULL) {
+      return ERR_NOT_CONNECTED;
     }
 
     void *buf = pbuf_data(pb, 0);
