@@ -8,7 +8,6 @@
 #include "version_git.h"
 
 #define BLOCKSIZE 32
-#define BLOCKS_PER_SECTOR (2048 / 32)
 
 #ifndef GPIO_MODER_PA
 #define GPIO_MODER_PA 0
