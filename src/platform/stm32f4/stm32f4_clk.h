@@ -23,6 +23,7 @@
 
 #define RCC_APB2ENR (RCC_BASE + CLK_APB2)
 #define RCC_AHB1ENR (RCC_BASE + CLK_AHB1)
+#define RCC_APB1ENR (RCC_BASE + CLK_APB1)
 
 #define CLK_ID(reg, bit) (((reg & 0xff) << 8) | (bit))
 

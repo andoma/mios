@@ -9,6 +9,13 @@ reg_wr(uint32_t addr, uint32_t value)
   *ptr = value;
 }
 
+static inline void
+reg_wr8(uint32_t addr, uint8_t value)
+{
+  volatile uint8_t *ptr = (uint8_t *)addr;
+  *ptr = value;
+}
+
 static inline uint32_t
 reg_rd(uint32_t addr)
 {
