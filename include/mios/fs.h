@@ -30,6 +30,11 @@ error_t fs_fsync(fs_file_t *f);
 
 ssize_t fs_size(fs_file_t *f);
 
+error_t fs_load(const char *path, void *buffer, size_t len,
+                size_t *actual_size);
+
+error_t fs_save(const char *path, const void *buffer, size_t len);
+
 struct block_iface;
 
 void fs_init(struct block_iface *bi);

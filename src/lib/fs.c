@@ -244,6 +244,46 @@ fs_size(fs_file_t *f)
   return maperr(lfs_file_size(&g_fs->lfs, &f->file));
 }
 
+error_t
+fs_load(const char *path, void *buffer, size_t len, size_t *actual)
+{
+  fs_file_t *fp;
+  error_t err = fs_open(path, FS_RDONLY, &fp);
+  if(err)
+    return err;
+
+  ssize_t result = fs_read(fp, buffer, len);
+  fs_close(fp);
+  if(result < 0)
+    return result;
+  if(actual != NULL) {
+    *actual = result;
+  } else if(result != len) {
+    memset(buffer, 0, len);
+    return ERR_MALFORMED;
+  }
+  return 0;
+}
+
+error_t
+fs_save(const char *path, const void *buffer, size_t len)
+{
+  fs_file_t *fp;
+  error_t err = fs_open(path, FS_CREAT | FS_WRONLY | FS_TRUNC, &fp);
+  if(err)
+    return err;
+
+  ssize_t result = fs_write(fp, buffer, len);
+  fs_close(fp);
+  if(result == len)
+    return 0;
+
+  if(result >= 0)
+    err = ERR_MALFORMED;
+  fs_remove(path);
+  return err;
+}
+
 
 //--------------------------------------------------------------------
 
