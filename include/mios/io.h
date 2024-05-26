@@ -101,7 +101,7 @@ void gpio_conf_irq(gpio_t gpio, gpio_pull_t pull,
                    void (*cb)(void *arg), void *arg,
                    gpio_edge_t edge, int level);
 
-void gpio_conf_analog(gpio_t gpio);
+void gpio_conf_analog(gpio_t gpio, gpio_pull_t pull);
 
 void gpio_dir_output(gpio_t gpio);
 
