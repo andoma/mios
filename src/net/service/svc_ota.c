@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/param.h>
 
 #include <mios/service.h>
 #include <mios/version.h>
@@ -34,9 +35,9 @@ typedef struct svc_ota {
   socket_t *sa_sock;
 
   pbuf_t *sa_info;
-  uint8_t sa_blockshift;
+  uint8_t sa_blocksize;
   uint8_t sa_shutdown;
-  uint16_t sa_skipped_blocks;
+  uint16_t sa_skipped_bytes;
 
   thread_t *sa_thread;
   mutex_t sa_mutex;
@@ -87,13 +88,12 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
 static error_t
 ota_perform(svc_ota_t *sa)
 {
-  size_t blocksize = 1 << sa->sa_blockshift;
-  evlog(LOG_DEBUG, "OTA: Waiting for init (blocksize: %d)", blocksize);
+  evlog(LOG_DEBUG, "OTA: Waiting for init (blocksize: %d)", sa->sa_blocksize);
   pbuf_t *pb = ota_get_next_pkt(sa);
   if(pb == NULL)
     return ERR_NOT_CONNECTED;
 
-  if(pb->pb_pktlen != 8) {
+  if(pb->pb_pktlen < 8) {
     pbuf_free(pb);
     return ERR_BAD_PKT_SIZE;
   }
@@ -103,54 +103,73 @@ ota_perform(svc_ota_t *sa)
 
   memcpy(&num_blocks, pbuf_cdata(pb, 0), 4);
   memcpy(&crc, pbuf_cdata(pb, 4), 4);
-  pbuf_free(pb);
+  pb = pbuf_drop(pb, 8);
+  if(pb->pb_pktlen == 0) {
+    pbuf_free(pb);
+    pb = NULL;
+  }
 
   error_t err;
 
   block_iface_t *bi = sa->sa_partition;
 
-  evlog(LOG_DEBUG, "OTA: Transfer started %d bytes",
-        num_blocks << sa->sa_blockshift);
+  uint32_t total_bytes = num_blocks * sa->sa_blocksize;
+  evlog(LOG_DEBUG, "OTA: Transfer started %d bytes", total_bytes);
   err = bi->erase(bi, 0);
   if(err)
     return err;
 
+  uint32_t erased_sector = 0;
   uint32_t crc_acc = 0;
+  uint32_t current_byte = 0;
 
-  for(int i = 0; i < num_blocks; i++) {
-    size_t byte_offset = (sa->sa_skipped_blocks + i) << sa->sa_blockshift;
-    size_t sector = byte_offset >> 12;
-    size_t sector_offset = byte_offset & 4095;
 
-    if(sector_offset == 0) {
-      err = bi->erase(bi, sector);
+  while(1) {
+
+    if(current_byte >= total_bytes)
+      break;
+
+    if(pb == NULL) {
+      pb = ota_get_next_pkt(sa);
+      if(pb == NULL) {
+        return ERR_NOT_CONNECTED;
+      }
+    }
+
+    while(pb->pb_pktlen) {
+
+      uint32_t byte_offset = sa->sa_skipped_bytes + current_byte;
+      uint32_t sector = byte_offset >> 12;
+      uint32_t sector_offset = byte_offset & 4095;
+      if(sector > erased_sector) {
+        err = bi->erase(bi, sector);
+        if(err) {
+          pbuf_free(pb);
+          return err;
+        }
+        erased_sector = sector;
+      }
+
+      void *buf = pbuf_data(pb, 0);
+      size_t chunk_size = MIN(pb->pb_pktlen, 4096 - sector_offset);
+      err = bi->write(bi, sector, sector_offset, buf, chunk_size);
       if(err) {
         pbuf_free(pb);
         return err;
       }
-    }
+      // Readback
+      err = bi->read(bi, sector, sector_offset, buf, chunk_size);
+      if(err) {
+        pbuf_free(pb);
+        return err;
+      }
 
-    pbuf_t *pb = ota_get_next_pkt(sa);
-    if(pb == NULL) {
-      return ERR_NOT_CONNECTED;
+      crc_acc = crc32(crc_acc, buf, chunk_size);
+      pb = pbuf_drop(pb, chunk_size);
+      current_byte += chunk_size;
     }
-
-    void *buf = pbuf_data(pb, 0);
-    err = bi->write(bi, sector, sector_offset, buf, blocksize);
-    if(err) {
-      pbuf_free(pb);
-      return err;
-    }
-
-    // Readback
-    err = bi->read(bi, sector, sector_offset, buf, blocksize);
-    if(err) {
-      pbuf_free(pb);
-      return err;
-    }
-
-    crc_acc = crc32(crc_acc, buf, blocksize);
     pbuf_free(pb);
+    pb = NULL;
   }
 
   crc_acc = ~crc_acc;
@@ -162,7 +181,7 @@ ota_perform(svc_ota_t *sa)
     return ERR_CHECKSUM_ERROR;
 
   memcpy(sa->sa_otahdr.magic, "OTA1", 4);
-  sa->sa_otahdr.size = num_blocks << sa->sa_blockshift;
+  sa->sa_otahdr.size = total_bytes;
   sa->sa_otahdr.image_crc = crc;
   sa->sa_otahdr.header_crc = ~crc32(0, &sa->sa_otahdr, sizeof(otahdr_t) - 4);
 
@@ -225,7 +244,13 @@ ota_push(void *opaque, struct pbuf *pb)
     sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
   }
   mutex_lock(&sa->sa_mutex);
-  sa->sa_rxbuf = pb;
+  if(sa->sa_rxbuf == NULL) {
+    sa->sa_rxbuf = pb;
+  } else {
+    void *dst = pbuf_append(sa->sa_rxbuf, pb->pb_pktlen);
+    memcpy(dst, pbuf_data(pb, 0), pb->pb_pktlen);
+    pbuf_free(pb);
+  }
   cond_signal(&sa->sa_cond);
   mutex_unlock(&sa->sa_mutex);
   return 0;
@@ -236,7 +261,15 @@ static int
 ota_may_push(void *opaque)
 {
   svc_ota_t *sa = opaque;
-  return sa->sa_rxbuf == NULL;
+  int r = 1;
+  mutex_lock(&sa->sa_mutex);
+  pbuf_t *pb = sa->sa_rxbuf;
+  if(pb != NULL &&
+     pb->pb_offset + pb->pb_buflen + sa->sa_blocksize >= PBUF_DATA_SIZE) {
+    r = 0;
+  }
+  mutex_unlock(&sa->sa_mutex);
+  return r;
 }
 
 static void
@@ -287,13 +320,12 @@ ota_open_with_args(socket_t *s,
   memset(sa, 0, sizeof(svc_ota_t));
   sa->sa_partition = partition;
   sa->sa_platform_upgrade = platform_upgrade;
-  sa->sa_blockshift = 5; // Compute this from s->max_fragment_size perhaps
-
-  sa->sa_skipped_blocks = (skip_kb * 1024) >> sa->sa_blockshift;
+  sa->sa_blocksize = s->max_fragment_size;
+  sa->sa_skipped_bytes = skip_kb * 1024;
 
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb != NULL) {
-    uint8_t hdr[4] = {0, 'r', 1 << sa->sa_blockshift, skip_kb};
+    uint8_t hdr[4] = {0, 'r', sa->sa_blocksize, skip_kb};
 
     pb = pbuf_write(pb, hdr, sizeof(hdr), s->max_fragment_size);
     pb = pbuf_write(pb, mios_build_id(), 20, s->max_fragment_size);
