@@ -200,14 +200,14 @@ spi_txrx(uint8_t out)
 
 
 __attribute__((always_inline,unused))
-static void
+static inline void
 spiflash_enable()
 {
   gpio_set_output(GPIO_SPIFLASH_CS, 0);
 }
 
 __attribute__((always_inline,unused))
-static void
+static inline void
 spiflash_disable()
 {
   gpio_set_output(GPIO_SPIFLASH_CS, 0);
