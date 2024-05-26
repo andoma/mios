@@ -23,12 +23,7 @@ SLIST_HEAD(thread_slist, thread);
 
 static struct thread_slist allthreads;
 
-static mutex_t allthreads_mutex = MUTEX_INITIALIZER("alltasks");
-static cond_t thread_mgmt_cond = COND_INITIALIZER("taskmgmt");
-
 static task_waitable_t join_wait;
-
-
 
 #if NUM_SOFTIRQ > 0
 
@@ -234,20 +229,52 @@ task_run(task_t *t)
 {
   int q = irq_forbid(IRQ_LEVEL_SCHED);
   if(likely(t->t_state == TASK_STATE_NONE)) {
-    readyqueue_insert(curcpu(), t, "softirq");
+    readyqueue_insert(curcpu(), t, "task_run");
   }
   irq_permit(q);
   schedule();
 }
 
 
+static void
+thread_retain(thread_t *t)
+{
+  t->t_refcount++;
+}
+
+
+
+static void
+thread_exit2(task_t *ta)
+{
+  thread_t *t = (thread_t *)ta;
+  if(free_try(t->t_sp_bottom)) {
+    // Failed to free (malloc mutex held, keep trying)
+    readyqueue_insert(curcpu(), ta, "zombie");
+  }
+}
+
+static void
+thread_release(thread_t *t)
+{
+  t->t_refcount--;
+  if(t->t_refcount)
+    return;
+
+  cpu_t *cpu = curcpu();
+  t->t_task.t_flags &= ~TASK_THREAD;
+  t->t_task.t_run = thread_exit2;
+  t->t_task.t_prio = 1;
+  readyqueue_insert(cpu, &t->t_task, "zombie");
+}
 
 void
 thread_exit(void *arg)
 {
-  thread_t *const curthread = thread_current();
+  thread_t *curthread = thread_current();
 
   int s = irq_forbid(IRQ_LEVEL_SWITCH);
+  SLIST_REMOVE(&allthreads, curthread, thread, t_global_link);
 
 #ifdef HAVE_FPU
   cpu_t *cpu = curcpu();
@@ -256,11 +283,10 @@ thread_exit(void *arg)
     cpu_fpu_enable(0);
   }
 #endif
-  curthread->t_task.t_state = TASK_STATE_ZOMBIE;
-
   if(curthread->t_task.t_flags & TASK_DETACHED) {
-    cond_signal(&thread_mgmt_cond);
+    thread_release(curthread);
   } else {
+    curthread->t_task.t_state = TASK_STATE_ZOMBIE;
     task_wakeup(&join_wait, 1);
   }
   irq_permit(s);
@@ -271,13 +297,6 @@ thread_exit(void *arg)
   }
 }
 
-
-static void
-thread_destroy(thread_t *t)
-{
-  SLIST_REMOVE(&allthreads, t, thread, t_global_link);
-  free(t->t_sp_bottom);
-}
 
 void *
 thread_join(thread_t *t)
@@ -291,10 +310,7 @@ thread_join(thread_t *t)
 
   irq_permit(s);
 
-  mutex_lock(&allthreads_mutex);
-  thread_destroy(t);
-  mutex_unlock(&allthreads_mutex);
-
+  thread_release(t);
   return NULL;
 }
 
@@ -335,7 +351,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 #endif
 
   strlcpy(t->t_name, name, sizeof(t->t_name));
-
+  t->t_refcount = 1;
 
 #ifdef ENABLE_TASK_ACCOUNTING
   t->t_cycle_acc = 0;
@@ -365,11 +381,8 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   int s = irq_forbid(IRQ_LEVEL_SCHED);
   STAILQ_INSERT_TAIL(&cpu->sched.readyqueue[task->t_prio], task, t_ready_link);
   cpu->sched.active_queues |= 1 << task->t_prio;
-  irq_permit(s);
-
-  mutex_lock(&allthreads_mutex);
   SLIST_INSERT_HEAD(&allthreads, t, t_global_link);
-  mutex_unlock(&allthreads_mutex);
+  irq_permit(s);
 
   schedule();
   return t;
@@ -775,69 +788,93 @@ sched_cpu_init(sched_cpu_t *sc, thread_t *idle)
 
 
 
-__attribute__((noreturn))
-static void *
-task_mgmt_thread(void *arg)
+thread_t *
+thread_get_next(thread_t *cur)
 {
-#ifdef ENABLE_TASK_ACCOUNTING
-  int64_t ts = clock_get();
-  uint32_t prev_cc = cpu_cycle_counter();
-#endif
+  thread_t *t;
 
-  mutex_lock(&allthreads_mutex);
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
 
-  while(1) {
-
-
-#ifdef ENABLE_TASK_ACCOUNTING
-    ts += 1000000;
-    int do_accounting =
-      cond_wait_timeout(&thread_mgmt_cond, &allthreads_mutex, ts);
-    uint32_t cc = cpu_cycle_counter();
-    uint32_t cc_delta = (cc - prev_cc) / 10000;
-    prev_cc = cc;
-#else
-    cond_wait(&thread_mgmt_cond, &allthreads_mutex);
-#endif
-
-    int s = irq_forbid(IRQ_LEVEL_SWITCH);
-    thread_t *t, *n;
-    for(t = SLIST_FIRST(&allthreads); t != NULL; t = n) {
-      n = SLIST_NEXT(t, t_global_link);
-
-      if(t->t_task.t_state == TASK_STATE_ZOMBIE &&
-         t->t_task.t_flags & TASK_DETACHED) {
-        thread_destroy(t);
-        continue;
+  if(cur == NULL) {
+    t = SLIST_FIRST(&allthreads);
+  } else {
+    SLIST_FOREACH(t, &allthreads, t_global_link) {
+      if(t == cur) {
+        break;
       }
-
-#ifdef ENABLE_TASK_ACCOUNTING
-      if(do_accounting) {
-        t->t_load = cc_delta ? t->t_cycle_acc / cc_delta : 0;
-        t->t_cycle_acc = 0;
-        t->t_ctx_switches = t->t_ctx_switches_acc;
-        t->t_ctx_switches_acc = 0;
-      }
-#endif
     }
-    irq_permit(s);
+    if(t)
+      t = SLIST_NEXT(t, t_global_link);
+  }
+
+  if(t)
+    thread_retain(t);
+  if(cur)
+    thread_release(cur);
+  irq_permit(q);
+  return t;
+}
+
+#ifdef ENABLE_TASK_ACCOUNTING
+
+static uint32_t prev_cc;
+
+static void
+accounting_run(task_t *t_)
+{
+  thread_t *t;
+
+  uint32_t cc = cpu_cycle_counter();
+  uint32_t cc_delta = (cc - prev_cc) / 10000;
+  prev_cc = cc;
+
+  SLIST_FOREACH(t, &allthreads, t_global_link) {
+    t->t_load = cc_delta ? t->t_cycle_acc / cc_delta : 0;
+    t->t_cycle_acc = 0;
+    t->t_ctx_switches = t->t_ctx_switches_acc;
+    t->t_ctx_switches_acc = 0;
   }
 }
 
-static void __attribute__((constructor(900)))
-task_init_late(void)
+static task_t accounting_task = {
+  .t_run = accounting_run,
+  .t_prio = 10,
+};
+
+static void accounting_timer_cb(void *opaque, uint64_t deadline);
+
+static timer_t accounting_timer = {
+  .t_cb = accounting_timer_cb,
+  .t_opaque = &accounting_task,
+  .t_name = "accounting",
+};
+
+static uint64_t accounting_next = 1000000;
+
+static void
+accounting_timer_cb(void *opaque, uint64_t deadline)
 {
-  thread_create(task_mgmt_thread, NULL, 256, "taskmgmt", 0, 3);
+  accounting_next += 1000000;
+  timer_arm_abs(&accounting_timer, accounting_next);
+  task_run(opaque);
 }
 
+static void __attribute__((constructor(900)))
+task_init_accounting(void)
+{
+  prev_cc = cpu_cycle_counter();
+  timer_arm_abs(&accounting_timer, accounting_next);
+}
+#endif
 
 
 static error_t
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  thread_t *t;
   cli_printf(cli, " Name           Stack      Sp         Pri Sta CtxSwch Load\n");
-  SLIST_FOREACH(t, &allthreads, t_global_link) {
+
+  thread_t *t = NULL;
+  while((t = thread_get_next(t)) != NULL) {
     cli_printf(cli, " %-14s %p %p %3d %c%c%c "
 #ifdef ENABLE_TASK_ACCOUNTING
                "%-6d %3d.%-2d "

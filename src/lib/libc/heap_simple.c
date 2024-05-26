@@ -320,6 +320,17 @@ free(void *ptr)
 }
 
 
+int
+free_try(void *ptr)
+{
+  if(mutex_trylock(&heap_mutex))
+    return 1;
+  heap_free(ptr);
+  mutex_unlock(&heap_mutex);
+  return 0;
+}
+
+
 void *
 memalign(size_t size, size_t alignment)
 {

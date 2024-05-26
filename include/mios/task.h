@@ -76,8 +76,8 @@ typedef struct thread {
 
   SLIST_ENTRY(thread) t_global_link;
 
-  char t_name[12];
-
+  char t_name[11];
+  uint8_t t_refcount;
 } thread_t;
 
 typedef struct sched_cpu {
