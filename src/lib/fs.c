@@ -366,19 +366,16 @@ CLI_CMD_DEF("ls", cmd_ls);
 
 
 static error_t
-cmd_cat(cli_t *cli, int argc, char **argv)
+display_file(stream_t *st, const char *path, int hex)
 {
-  if(argc != 2)
-    return ERR_INVALID_ARGS;
-
-  char buf[32];
+  char buf[16];
 
   fs_file_t *fp;
-  error_t err = fs_open(argv[1], FS_RDONLY, &fp);
+  error_t err = fs_open(path, FS_RDONLY, &fp);
   if(err) {
     return err;
   }
-  stream_t *st = cli->cl_stream;
+  size_t offset = 0;
   while(1) {
     ssize_t r = fs_read(fp, buf, sizeof(buf));
     if(r < 0) {
@@ -387,13 +384,41 @@ cmd_cat(cli_t *cli, int argc, char **argv)
     }
     if(r == 0)
       break;
-    st->write(st, buf, r, 0);
+
+    if(hex) {
+      sthexdump(st, NULL, buf, r, offset);
+      offset += r;
+    } else {
+      st->write(st, buf, r, 0);
+    }
   }
   fs_close(fp);
   return err;
 }
 
+
+static error_t
+cmd_cat(cli_t *cli, int argc, char **argv)
+{
+  if(argc != 2)
+    return ERR_INVALID_ARGS;
+
+  return display_file(cli->cl_stream, argv[1], 0);
+}
+
 CLI_CMD_DEF("cat", cmd_cat);
+
+
+static error_t
+cmd_xxd(cli_t *cli, int argc, char **argv)
+{
+  if(argc != 2)
+    return ERR_INVALID_ARGS;
+
+  return display_file(cli->cl_stream, argv[1], 1);
+}
+
+CLI_CMD_DEF("xxd", cmd_xxd);
 
 
 #if 0
