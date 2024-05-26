@@ -20,8 +20,13 @@ typedef struct dma_stream {
 
 } dma_stream_t;
 
+#ifdef CLK_DMA2
+#define NUM_DMA_STREAMS 16
+#else
+#define NUM_DMA_STREAMS 8
+#endif
 
-static dma_stream_t *g_streams[16];
+static dma_stream_t *g_streams[NUM_DMA_STREAMS];
 
 
 
@@ -38,7 +43,7 @@ static stm32_dma_instance_t
 stm32_dma_alloc_instance(int eligible, const char *name)
 {
   int q = irq_forbid(IRQ_LEVEL_SWITCH);
-  for(int i = 0; i < 16; i++) {
+  for(int i = 0; i < NUM_DMA_STREAMS; i++) {
     if(!((1 << i) & eligible))
       continue;
     if(g_streams[i])
