@@ -16,7 +16,7 @@
 #define DMA_BASE(x) (0x40020000 + (x) * 0x400)
 
 
-static const uint8_t dma_irqmap[16] = { 9,10,10,11,11,11,11,11};
+static const uint8_t dma_irqmap[7] = { 9,10,10,11,11,11,11};
 
 #include "platform/stm32/stm32_dma_v2.c"
 
