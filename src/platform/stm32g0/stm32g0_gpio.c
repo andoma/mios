@@ -23,14 +23,14 @@
 
 
 void
-gpio_conf_analog(gpio_t gpio)
+gpio_conf_analog(gpio_t gpio, gpio_pull_t pull)
 {
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
   clk_enable(CLK_GPIO(port));
   int s = irq_forbid(IRQ_LEVEL_IO);
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 3);
-  reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, 0);
+  reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
   irq_permit(s);
 }
 
