@@ -25,6 +25,7 @@ SRCS-${ENABLE_NET_MBUS}-${ENABLE_RPC} += \
 SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ether.c \
 	${SRC}/net/ipv4/ipv4.c \
+	${SRC}/net/ipv4/igmp.c \
 	${SRC}/net/ipv4/udp.c \
 	${SRC}/net/ipv4/tcp.c \
 	${SRC}/net/ipv4/dhcpv4.c \

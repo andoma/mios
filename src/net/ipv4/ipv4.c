@@ -6,6 +6,7 @@
 
 #include "net/netif.h"
 #include "net/net.h"
+#include "igmp.h"
 #include "ipv4.h"
 #include "irq.h"
 #include "udp.h"
@@ -248,6 +249,8 @@ ipv4_input(netif_t *ni, pbuf_t *pb)
   switch(ip->proto) {
   case IPPROTO_ICMP:
     return ipv4_input_icmp(ni, pb, 20);
+  case  IPPROTO_IGMP:
+    return igmp_input_ipv4(ni, pb, 20);
   case IPPROTO_UDP:
     return udp_input_ipv4(ni, pb, 20);
   case IPPROTO_TCP:
