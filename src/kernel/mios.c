@@ -73,11 +73,6 @@ call_array_rev(void **p, void **start)
 void
 init(void)
 {
-  extern unsigned long _sdata;
-  extern unsigned long _etext;
-  extern unsigned long _edata;
-  memcpy(&_sdata, &_etext, (void *)&_edata - (void *)&_sdata);
-
   extern unsigned long _sbss;
   extern unsigned long _ebss;
   memset(&_sbss, 0, (void *)&_ebss - (void *)&_sbss);

@@ -4,6 +4,9 @@
         .thumb_func
         .global start
 start:
+        cpsid i
+
+        // Initialize MSP stack with known value
         ldr r0,=_sdata
         ldr r1,=#0x20000000
         ldr r2,=#0xdeadcafe
@@ -12,9 +15,18 @@ start:
         cmp r0, r1
         bne 1b
         mov sp, r0
-        cpsid i     // Disable interrupts
+
+        // Copy rw-data segment from Flash to RAM
+        ldr r1,=_etext
+        ldr r2,=_edata
+        subs r2, r2, r0
+        bl memcpy
+
+        // All initialization in C-land
         bl init
-        movs r0, #2  // Threaded mode
+
+        // Switch to PSP and start multitasking
+        movs r0, #2
         msr control, r0
         isb
         cpsie i     // Enable interrupts, off we go
