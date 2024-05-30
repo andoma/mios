@@ -1,6 +1,7 @@
 #include <mios/device.h>
 #include <mios/cli.h>
 #include <mios/task.h>
+#include <mios/mios.h>
 
 #include "irq.h"
 

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <mios/task.h>
+#include <mios/mios.h>
 #include <sys/queue.h>
 #include <sys/param.h>
 

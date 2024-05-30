@@ -1,8 +1,8 @@
-
 #include <mios/stream.h>
 #include <mios/task.h>
 #include <mios/fifo.h>
 #include <mios/cli.h>
+#include <mios/mios.h>
 
 #include <sys/param.h>
 
