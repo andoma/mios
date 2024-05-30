@@ -23,7 +23,7 @@
 
 static const float tiny = 1.0e-30;
 
-float MATH_MANGLE(sqrtf)(float x)
+float sqrtf(float x)
 {
 	float z;
 	int32_t sign = (int)0x80000000;

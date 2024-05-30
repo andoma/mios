@@ -57,7 +57,7 @@ fabsf(float x)
   return u.f;
 }
 
-float MATH_MANGLE(sqrtf)(float) __attribute__ ((const));
+float sqrtf(float) __attribute__ ((const));
 
 #endif
 
