@@ -17,3 +17,7 @@ SRCS += ${C}/systick.c \
 	${P}/lm3s811evb.c \
 	${P}/console.c \
 
+
+run: ${O}/build.elf
+	qemu-system-arm -nographic -serial mon:stdio -machine lm3s811evb -cpu cortex-m4 -kernel $<
+
