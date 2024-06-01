@@ -148,6 +148,14 @@ can_sleep(void)
 
 #endif
 
+inline void  __attribute__((always_inline))
+schedule(void)
+{
+  volatile unsigned int * const ICSR = (unsigned int *)0xe000ed04;
+  *ICSR = 1 << 28; // Raise PendSV interrupt
+  asm volatile("" ::: "memory");
+}
+
 void irq_enable(int irq, int level);
 
 void irq_enable_fn(int irq, int level, void (*fn)(void));

@@ -3,7 +3,6 @@
 #include <mios/mios.h>
 #include <mios/timer.h>
 
-#include "sys.h"
 #include "irq.h"
 #include "systick.h"
 #include "cpu.h"

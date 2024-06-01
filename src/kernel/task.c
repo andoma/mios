@@ -15,7 +15,6 @@
 #include <mios/cli.h>
 #include <mios/timer.h>
 
-#include "sys.h"
 #include "irq.h"
 #include "cpu.h"
 
