@@ -15,21 +15,6 @@ struct irqentry {
 
 struct irqentry irqvector[96];
 
-
-uint32_t
-irq_get_active(void)
-{
-  uint32_t pbase = cpu_get_periphbase();
-  return reg_rd(pbase + ICCIAR);
-}
-
-void
-irq_end(uint32_t irq)
-{
-  uint32_t pbase = cpu_get_periphbase();
-  reg_wr(pbase + ICCEOIR, irq);
-}
-
 void
 irq_enable(int irq, int level)
 {

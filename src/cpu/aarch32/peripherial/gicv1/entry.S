@@ -54,26 +54,18 @@ irq:
 	sub sp, sp, r3
 	push {r2, r3}
 
-//	mcr p15,4,r0,c15,c0,0
-//        ldr r0, [r0, #0x10c]
-//        push {r0, lr}
-
-        push {lr}
-        bl irq_get_active
-        push {r0}
+        mrc p15,#4,r0,c15,c0,0
+        ldr r0, [r0, #0x10c]
+        push {r0, lr}
 
         ldr r1, =#irqvector
         add r1, r1, r0, lsl #3
         ldm r1!,{r0,r3}
         blx r3
 
-//        pop {r0, lr}
-//	mcr p15,4,r1,c15,c0,0
-//        str r0, [r1, #0x110]
-
-        pop {r0}
-        bl irq_end
-        pop {lr}
+        pop {r0, lr}
+        mrc p15,4,r1,c15,c0,0
+        str r0, [r1, #0x110]
 
 	pop {r2, r3}
 	add sp, sp, r3
