@@ -30,7 +30,7 @@ static inline uint32_t
 cpu_get_periphbase(void)
 {
   uint32_t result;
-  asm volatile ("mrc p15, #4, %0, c15, c0, #0" : "=r" (result));
+  asm("mrc p15, #4, %0, c15, c0, #0" : "=r" (result));
   return result;
 }
 

@@ -51,8 +51,6 @@ void irq_disable(int irq);
 #define GICD_ICFGR(x)      (0x1c00 + (x) * 4)
 #define GICD_SGIR  0x1f00
 
-#if 0
-
 __attribute__((always_inline))
 static inline unsigned int
 irq_forbid(unsigned int level)
@@ -67,6 +65,7 @@ irq_forbid(unsigned int level)
   uint32_t pmr = reg_rd(pbase + ICCIPMR);
   if(pri < pmr) {
     reg_wr(pbase + ICCIPMR, pri);
+    asm volatile("isb" ::: "memory");
   }
   asm volatile ("msr cpsr, %0\n\r" :: "r" (cpsr));
   return pmr;
@@ -80,7 +79,6 @@ irq_permit(unsigned int old)
   reg_wr(pbase + ICCIPMR, old);
 }
 
-
 __attribute__((always_inline))
 static inline unsigned int
 irq_lower(void)
@@ -88,6 +86,7 @@ irq_lower(void)
   uint32_t pbase = cpu_get_periphbase();
   uint32_t old = reg_rd(pbase + ICCIPMR);
   reg_wr(pbase + ICCIPMR, 0xf8);
+  asm volatile("isb" ::: "memory");
   return old;
 }
 
@@ -97,8 +96,8 @@ schedule(void)
 {
   uint32_t pbase = cpu_get_periphbase();
   reg_wr(pbase + GICD_SGIR, (0b10 << 24));
+  asm volatile("" ::: "memory");
 }
-
 
 __attribute__((always_inline))
 static inline int
@@ -107,14 +106,3 @@ can_sleep(void)
   uint32_t pbase = cpu_get_periphbase();
   return reg_rd(pbase + ICCRPR) >= 0xf8;
 }
-#endif
-
-unsigned int irq_forbid(unsigned int level);
-
-void irq_permit(unsigned int old);
-
-unsigned int irq_lower(void);
-
-void schedule(void);
-
-int can_sleep(void);
