@@ -36,7 +36,7 @@ tick_irq(void)
 }
 
 uint64_t
-clock_get(void)
+clock_get_irq_blocked(void)
 {
   uint32_t pbase = cpu_get_periphbase();
 
@@ -60,7 +60,7 @@ clock_get(void)
 
 
 uint64_t
-clock_get_irq_blocked(void)
+clock_get(void)
 {
   int s = irq_forbid(IRQ_LEVEL_CLOCK);
   uint64_t r = clock_get_irq_blocked();
