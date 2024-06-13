@@ -35,4 +35,4 @@ qemu:
 	qemu-system-arm -S -s -M vexpress-a9 -m 32M -nographic
 
 gdb: ${O}/build.elf
-	gdb-multiarch -ex "target extended-remote localhost:1234" ${O}/build.elf
+	${GDB} -ex "target extended-remote localhost:1234" ${O}/build.elf
