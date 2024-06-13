@@ -148,11 +148,8 @@ task_switch(void *cur_sp)
 
   uint32_t pending = __atomic_fetch_and(&softirq_pending, 0, __ATOMIC_SEQ_CST);
 
-  while(1) {
-    int which = __builtin_clz(pending);
-    if(which == 32)
-      break;
-    which = 31 - which;
+  while(pending) {
+    int which = 31 - __builtin_clz(pending);
     softirq[which].fn(softirq[which].arg);
     pending &= ~(1 << which);
   }
@@ -171,15 +168,14 @@ task_switch(void *cur_sp)
     }
 
     task_t *task;
-    int which = __builtin_clz(cpu->sched.active_queues);
 
-    if(which == 32) {
+    if(!cpu->sched.active_queues) {
 
       task = cpu->sched.idle;
 
     } else {
 
-      which = 31 - which;
+      int which = 31 - __builtin_clz(cpu->sched.active_queues);
       task = STAILQ_FIRST(&cpu->sched.readyqueue[which]);
 #ifdef ENABLE_TASK_DEBUG
       if(task == NULL)
