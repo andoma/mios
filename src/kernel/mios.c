@@ -22,23 +22,6 @@ main(void)
   return 0;
 }
 
-__attribute__((noinline))
-static void
-log_sysinfo(void)
-{
-  evlog(LOG_NOTICE, "System booted");
-
-  const unsigned char *bid = mios_build_id();
-
-  evlog(LOG_NOTICE, "Mios: %s Build: [%02x%02x%02x%02x]",
-        mios_get_version(), bid[0], bid[1], bid[2], bid[3]);
-
-  const char *appname = mios_get_app_name();
-  if(appname[0]) {
-    evlog(LOG_NOTICE, "App: %s (%s)", appname, mios_get_app_version());
-  }
-}
-
 __attribute__((noreturn))
 static void *
 main_trampoline(void *opaque)

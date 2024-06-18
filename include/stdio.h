@@ -27,3 +27,5 @@ void hexdump(const char *prefix, const void *data, size_t len);
 
 void stprintflags(stream_t *s, const char *str,
                   unsigned int flags, const char *sep);
+
+void sthexstr(stream_t *s, const void *data, size_t len);

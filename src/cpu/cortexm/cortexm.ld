@@ -83,6 +83,18 @@ SECTIONS {
                 KEEP(*(.note.gnu.build-id))
         } >FLASH
 
+        .miosversion : {
+                . = ALIGN(4);
+                PROVIDE(_miosversion = .);
+                KEEP(*(miosversion))
+        } >FLASH
+
+        .appversion : {
+                . = ALIGN(4);
+                PROVIDE(_appversion = .);
+                KEEP(*(appversion))
+        } >FLASH
+
         .appname : {
                 . = ALIGN(4);
                 PROVIDE(_appname = .);

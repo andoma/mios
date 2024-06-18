@@ -81,6 +81,8 @@ include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
 
+include ${T}/support/version/gitver.mk
+
 SRCS += ${SRC}/version.c
 
 SRCS +=  ${SRCS-yes}
@@ -90,10 +92,13 @@ OBJS +=  ${SRCS:%.c=${O}/%.o}
 OBJS :=  ${OBJS:%.s=${O}/%.o}
 DEPS +=  ${OBJS:%.o=%.d}
 
-${O}/build.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT}
+
+${O}/build.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT} ${MIOSVER} ${APPVER}
 	@mkdir -p $(dir $@)
 	@echo "\tLINK\t$@"
 	${TOOLCHAIN}gcc -Wl,-T${LDSCRIPT} ${OBJS} -o $@ ${LDFLAGS}
+	${TOOLCHAIN}objcopy --update-section .miosversion=${MIOSVER} $@
+	${TOOLCHAIN}objcopy --update-section .appversion=${APPVER} $@
 
 ${O}/build.bin: ${O}/build.elf
 	@echo "\tBIN\t$@"
@@ -118,29 +123,11 @@ ${CONFIG_H}: ${GLOBALDEPS}
 	@mkdir -p $(dir $@)
 	@echo "\tGEN\t$@"
 	@echo >$@ ${CONFIG_H_CONTENTS}
+	@echo >>$@ "#define APPNAME \"${APPNAME}\""
 
 clean::
 	rm -rf "${O}"
 
-
-GITVER_VARGUARD = $(1)_GUARD_$(shell echo $($(1)) $($(2)) $($(3)) | ${MD5SUM} | cut -d ' ' -f 1)
-
-GIT_DESC_MIOS_OUTPUT ?= $(shell cd "$(T)" && git describe --always --dirty 2>/dev/null)
-GIT_DESC_APP_OUTPUT  ?= $(shell git describe --always --dirty 2>/dev/null)
-
-VERSION_DIGEST := $(call GITVER_VARGUARD,GIT_DESC_MIOS_OUTPUT,GIT_DESC_APP_OUTPUT,APPNAME)
-
-${O}/version_git.h: ${O}/.version_git/${VERSION_DIGEST}
-	echo >$@ "#define VERSION_MIOS_GIT \"${GIT_DESC_MIOS_OUTPUT}\""
-	echo >>$@ "#define VERSION_APP_GIT \"${GIT_DESC_APP_OUTPUT}\""
-	echo >>$@ "#define APPNAME \"${APPNAME}\""
-
-${O}/.version_git/${VERSION_DIGEST}:
-	rm -rf "${O}/.version_git"
-	mkdir -p "${O}/.version_git"
-	touch $@
-
-${SRC}/version.c : ${O}/version_git.h
 
 bin: ${O}/build.bin
 

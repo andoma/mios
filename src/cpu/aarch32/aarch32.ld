@@ -64,6 +64,18 @@ SECTIONS {
                 KEEP(*(.note.gnu.build-id))
         } >RAM
 
+        .miosversion : {
+                . = ALIGN(4);
+                PROVIDE(_miosversion = .);
+                KEEP(*(miosversion))
+        } >RAM
+
+        .appversion : {
+                . = ALIGN(4);
+                PROVIDE(_appversion = .);
+                KEEP(*(appversion))
+        } >RAM
+
         .appname : {
                 . = ALIGN(4);
                 PROVIDE(_appname = .);

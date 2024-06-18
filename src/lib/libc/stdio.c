@@ -409,6 +409,32 @@ stprintflags(stream_t *s, const char *str, uint32_t flags, const char *sep)
 }
 
 
+void
+sthexstr(stream_t *s, const void *data, size_t len)
+{
+  const uint8_t *u8 = data;
+  char buf[2];
+  for(size_t i = 0; i < len; i++) {
+    uint8_t v = u8[i];
+    buf[0] = "0123456789abcdef"[v >> 4];
+    buf[1] = "0123456789abcdef"[v & 0xf];
+    s->write(s, buf, 2, 0);
+  }
+}
+
+
+void
+bin2hex(char *s, const void *data, size_t len)
+{
+  const uint8_t *u8 = data;
+  for(size_t i = 0; i < len; i++) {
+    uint8_t v = u8[i];
+    *s++ = "0123456789abcdef"[v >> 4];
+    *s++ = "0123456789abcdef"[v & 0xf];
+  }
+  *s = 0;
+}
+
 #if WITH_MAIN
 
 static size_t
