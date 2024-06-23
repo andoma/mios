@@ -261,7 +261,7 @@ spiflash_create(spi_t *spi, gpio_t cs)
   spiflash_t *sf = xalloc(sizeof(spiflash_t), 0, MEM_TYPE_DMA | MEM_MAY_FAIL);
   if(sf == NULL)
     return NULL;
-
+  memset(sf, 0, sizeof(spiflash_t));
   gpio_conf_output(cs, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_set_output(cs, 1);
 
