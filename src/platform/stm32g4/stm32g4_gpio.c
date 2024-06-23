@@ -4,6 +4,7 @@
 
 #include "stm32g4_reg.h"
 #include "stm32g4_clk.h"
+#include "stm32g4_pwr.h"
 #include "irq.h"
 
 #define GPIO_PORT_ADDR(x) (0x48000000 + ((x) * 0x400))
@@ -91,6 +92,24 @@ gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
 
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 2);
   irq_permit(s);
+}
+
+void
+gpio_conf_standby(gpio_t gpio, gpio_pull_t pull)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  clk_enable(CLK_PWR);
+
+  reg_clr_bit(PWR_PUCRx(port), bit);
+  reg_clr_bit(PWR_PDCRx(port), bit);
+
+  if(pull == GPIO_PULL_UP) {
+    reg_set_bit(PWR_PUCRx(port), bit);
+  } else if(pull == GPIO_PULL_DOWN) {
+    reg_set_bit(PWR_PDCRx(port), bit);
+  }
 }
 
 

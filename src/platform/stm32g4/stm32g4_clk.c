@@ -32,13 +32,12 @@ clk_get_freq(uint16_t id)
   return r;
 }
 
-
+static uint8_t g_hse_freq;
+static uint8_t g_p_freq;
 
 void
-stm32g4_init_pll(int hse_freq, int p_freq)
+stm32g4_reinit_pll(void)
 {
-  reg_wr(RCC_ICSCR, 0x40000000);
-
   int pll_m = 4; // Internal 16MHz / 4
   uint32_t pllcfgr = 2;
 
@@ -52,18 +51,18 @@ stm32g4_init_pll(int hse_freq, int p_freq)
          (0x4 << 11) | // APB2 (High speed) prescaler = 2
          (0x5 << 8));  // APB1 (Low speed)  prescaler = 4
 
-  if(hse_freq) {
+  if(g_hse_freq) {
     reg_set_bit(RCC_CR, 16); // HSEON
     while(!(reg_rd(RCC_CR) & (1 << 17))) {} // Wait for external oscillator
-    pll_m = hse_freq / 4;
+    pll_m = g_hse_freq / 4;
     pllcfgr = 3;
   }
 
-  if(p_freq) {
+  if(g_p_freq) {
     pllcfgr |= (1 << 16); // PLLP Enable
 
     const int fvco = CPU_SYSCLK_MHZ * 2;
-    int pdiv = fvco / p_freq;
+    int pdiv = fvco / g_p_freq;
     assert(pdiv >= 2 && pdiv < 32);
     pllcfgr |= (pdiv << 27);
   }
@@ -84,6 +83,18 @@ stm32g4_init_pll(int hse_freq, int p_freq)
   reg_set_bits(RCC_CFGR, 0, 2, 3); // Use PLL as system clock
 
   while((reg_rd(RCC_CFGR) & 0xc) != 0xc) {}
+}
+
+
+
+void
+stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq)
+{
+  reg_wr(RCC_ICSCR, 0x40000000); // Reset clock trim
+
+  g_hse_freq = hse_freq;
+  g_p_freq = g_p_freq;
+  stm32g4_reinit_pll();
 }
 
 

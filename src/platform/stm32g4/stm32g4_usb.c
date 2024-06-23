@@ -645,8 +645,21 @@ usb_print_info(struct device *d, struct stream *st)
   }
 }
 
+
+static void
+usb_power_state(struct device *dev, device_power_state_t state)
+{
+  //  struct usb_ctrl *uc = (struct usb_ctrl *)dev;
+  if(state == DEVICE_POWER_STATE_RESUME) {
+    clk_enable_hsi48();
+  }
+}
+
+
+
 static const device_class_t stm32g4_otgfs_class = {
-  .dc_print_info = usb_print_info
+  .dc_print_info = usb_print_info,
+  .dc_power_state = usb_power_state,
 };
 
 

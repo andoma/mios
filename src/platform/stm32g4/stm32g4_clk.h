@@ -84,6 +84,9 @@
 
 #define CLK_SAI1    CLK_ID(RCC_APB2ENR, 21)
 
+#define CLK_PWR CLK_ID(RCC_APB1ENR1, 28)
+#define CLK_RTC CLK_ID(RCC_APB1ENR1, 10)
+
 
 static inline void
 clk_enable(uint16_t id)
@@ -105,7 +108,9 @@ clk_disable(uint16_t id)
 
 int clk_get_freq(uint16_t id);
 
-void stm32g4_init_pll(int hse_freq, int p_freq_mhz);
+void stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq);
+
+void stm32g4_reinit_pll(void);
 
 void clk_enable_hsi48(void);
 
