@@ -23,7 +23,7 @@ stprintversion(stream_t *s, const uint8_t *ver)
     or |= ver[i];
   }
   if(or == 0) {
-    stprintf(s, "no-version-info");
+    stprintf(s, "no-version-info\n");
     return;
   }
   sthexstr(s, ver, 20);
