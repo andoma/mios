@@ -16,8 +16,7 @@ stm32g0_uart_mbus_multidrop_create(unsigned int instance,
 
   gpio_conf_af(tx, tx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
   gpio_conf_af(rx, rx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
-  if(txe != GPIO_UNUSED)
-    gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_output(txe, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
 
   unsigned int freq = clk_get_freq(cfg->clkid);
