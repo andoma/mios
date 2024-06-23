@@ -1,17 +1,27 @@
 #include "littlefs/lfs.h"
 
 #include <malloc.h>
-
+#include <stdlib.h>
 #include <mios/block.h>
 #include <mios/task.h>
 #include <mios/cli.h>
 #include <mios/mios.h>
 #include <mios/fs.h>
 
+#define LFS_READ_SIZE 32
+
+#define LFS_CACHE_SIZE (LFS_READ_SIZE * 1)
+
+#define LFS_LOOKAHEAD_SIZE 32
+
 typedef struct fs {
   struct lfs_config cfg; // Must be first
   lfs_t lfs;
   mutex_t lock;
+  uint8_t lookahead_buffer[LFS_LOOKAHEAD_SIZE];
+  uint8_t read_buffer[LFS_CACHE_SIZE];
+  uint8_t prog_buffer[LFS_CACHE_SIZE];
+
 } fs_t;
 
 static fs_t *g_fs;
@@ -67,14 +77,16 @@ fs_blk_unlock(const struct lfs_config *c)
   return err ? LFS_ERR_IO : 0;
 }
 
-#define LFS_READ_SIZE 32
-
-#define LFS_CACHE_SIZE (LFS_READ_SIZE * 1)
 
 void
 fs_init(block_iface_t *bi)
 {
-  fs_t *fs = calloc(1, sizeof(fs_t));
+  fs_t *fs = xalloc(sizeof(fs_t), 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  if(fs == NULL) {
+    evlog(LOG_ERR, "fs_init: No memory");
+    return;
+  }
+  memset(fs, 0, sizeof(fs_t));
 
   fs->cfg.context = bi;
   fs->cfg.read = fs_blk_read;
@@ -90,6 +102,10 @@ fs_init(block_iface_t *bi)
   fs->cfg.block_count = bi->num_blocks;
   fs->cfg.cache_size = LFS_CACHE_SIZE;
   fs->cfg.lookahead_size = 32;
+  fs->cfg.read_buffer = fs->read_buffer;
+  fs->cfg.prog_buffer = fs->prog_buffer;
+  fs->cfg.lookahead_buffer = fs->lookahead_buffer;
+
   fs->cfg.block_cycles = 500;
   mutex_init(&fs->lock, "fs");
 
@@ -197,7 +213,7 @@ fs_open(const char *path, int flags, fs_file_t **fp)
   if(g_fs == NULL)
     return ERR_NO_DEVICE;
 
-  fs_file_t *f = xalloc(sizeof(fs_file_t), 0, MEM_MAY_FAIL);
+  fs_file_t *f = xalloc(sizeof(fs_file_t), 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(f == NULL)
     return ERR_NO_MEMORY;
   memset(f, 0, sizeof(fs_file_t));

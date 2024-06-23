@@ -4,6 +4,8 @@
 
 #include <mios/eventlog.h>
 
+#define LFS_NO_MALLOC
+
 #define LFS_NO_DEBUG
 
 #define LFS_WARN(fmt...) evlog0(LOG_WARNING, NULL, fmt)
