@@ -23,8 +23,11 @@ mbus_dsig_input(struct pbuf *pb, uint16_t signal)
 }
 
 void
-mbus_dsig_emit(uint16_t signal, const void *data, size_t len)
+mbus_dsig_emit(uint32_t signal, const void *data, size_t len)
 {
+  if(signal >= 4096)
+    return;
+
   if(len > PBUF_DATA_SIZE - 2)
     return;
 

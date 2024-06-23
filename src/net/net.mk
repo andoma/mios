@@ -18,6 +18,8 @@ SRCS-${ENABLE_NET_MBUS} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus_seqpkt.c \
 	${SRC}/net/mbus/mbus_dsig.c \
 
+SRCS-${ENABLE_NET_CAN} += ${SRCS_net} \
+	${SRC}/net/can/can.c \
 
 SRCS-${ENABLE_NET_MBUS}-${ENABLE_RPC} += \
 	${SRC}/net/mbus/mbus_rpc.c

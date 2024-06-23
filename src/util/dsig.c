@@ -9,6 +9,10 @@
 #include "net/mbus/mbus_dsig.h"
 #endif
 
+#ifdef ENABLE_NET_CAN
+#include "net/can/can.h"
+#endif
+
 #include "net/net_task.h"
 
 static SLIST_HEAD(, dsig_sub) dsig_subs;
@@ -22,11 +26,11 @@ struct dsig_sub {
   union {
     void (*ds_cb)(void *opaque, const void *data, size_t len);
     void (*ds_cbg)(void *opaque, const void *data, size_t len,
-                   uint16_t signal);
+                   uint32_t signal);
   };
   void *ds_opaque;
   timer_t ds_timer;
-  int16_t ds_signal;
+  uint32_t ds_signal;
   uint16_t ds_ttl;
 };
 
@@ -39,14 +43,13 @@ sub_timeout(void *opaque, uint64_t expire)
 
 
 void
-dsig_dispatch(uint16_t signal, const void *data, size_t len)
+dsig_dispatch(uint32_t signal, const void *data, size_t len)
 {
   uint64_t now = 0;
   dsig_sub_t *ds;
 
-  mutex_lock(&dsig_sub_mutex);
   SLIST_FOREACH(ds, &dsig_subs, ds_link) {
-    if(ds->ds_signal == -1) {
+    if(ds->ds_signal == UINT32_MAX) {
       ds->ds_cbg(ds->ds_opaque, data, len, signal);
     } else if(ds->ds_signal == signal) {
       if(!now)
@@ -55,16 +58,18 @@ dsig_dispatch(uint16_t signal, const void *data, size_t len)
       ds->ds_cb(ds->ds_opaque, data, len);
     }
   }
-  mutex_unlock(&dsig_sub_mutex);
 }
 
 
 
 void
-dsig_emit(uint16_t signal, const void *data, size_t len)
+dsig_emit(uint32_t signal, const void *data, size_t len)
 {
 #ifdef ENABLE_NET_MBUS
   mbus_dsig_emit(signal, data, len);
+#endif
+#ifdef ENABLE_NET_CAN
+  can_dsig_emit(signal, data, len);
 #endif
 }
 
@@ -72,11 +77,12 @@ dsig_emit(uint16_t signal, const void *data, size_t len)
 static void
 dsig_sub_insert_cb(net_task_t *nt, uint32_t signals)
 {
-  mutex_lock(&dsig_sub_mutex);
   while(1) {
+    mutex_lock(&dsig_sub_mutex);
     dsig_sub_t *ds = SLIST_FIRST(&dsig_pending_subs);
     if(ds != NULL)
       SLIST_REMOVE_HEAD(&dsig_pending_subs, ds_link);
+    mutex_unlock(&dsig_sub_mutex);
 
     if(ds == NULL)
       break;
@@ -86,7 +92,6 @@ dsig_sub_insert_cb(net_task_t *nt, uint32_t signals)
 
     SLIST_INSERT_HEAD(&dsig_subs, ds, ds_link);
   }
-  mutex_unlock(&dsig_sub_mutex);
 }
 
 
@@ -94,7 +99,7 @@ static net_task_t dsig_sub_insert_task = { dsig_sub_insert_cb };
 
 
 dsig_sub_t *
-dsig_sub(uint16_t signal, uint16_t ttl,
+dsig_sub(uint32_t signal, uint16_t ttl,
          void (*cb)(void *opaque, const void *data, size_t len),
          void *opaque)
 {
@@ -117,13 +122,13 @@ dsig_sub(uint16_t signal, uint16_t ttl,
 
 dsig_sub_t *
 dsig_sub_all(void (*cb)(void *opaque, const void *data, size_t len,
-                        uint16_t signal),
+                        uint32_t signal),
              void *opaque)
 {
   dsig_sub_t *ds = calloc(1, sizeof(dsig_sub_t));
   ds->ds_cbg = cb;
   ds->ds_opaque = opaque;
-  ds->ds_signal = -1;
+  ds->ds_signal = UINT32_MAX;
 
   mutex_lock(&dsig_sub_mutex);
   SLIST_INSERT_HEAD(&dsig_pending_subs, ds, ds_link);

@@ -25,6 +25,7 @@
 #define RCC_APB1ENR2  (RCC_BASE + 0x5c)
 #define RCC_APB2ENR   (RCC_BASE + 0x60)
 
+#define RCC_BDCR      (RCC_BASE + 0x90)
 #define RCC_CSR       (RCC_BASE + 0x94)
 
 #define CLK_ID(reg, bit) ((((reg) & 0xff) << 8) | (bit))
@@ -75,6 +76,8 @@
 #define CLK_I2C4  CLK_ID(RCC_APB1ENR2, 1)
 
 #define CLK_USB   CLK_ID(RCC_APB1ENR1, 23)
+
+#define CLK_FDCAN CLK_ID(RCC_APB1ENR1, 25)
 
 #define CLK_DMA1    CLK_ID(RCC_AHB1ENR, 0)
 #define CLK_DMA2    CLK_ID(RCC_AHB1ENR, 1)
