@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/uio.h>
-
+#include <malloc.h>
 #include <unistd.h>
 
 typedef struct spiflash {
@@ -20,6 +20,8 @@ typedef struct spiflash {
   uint32_t spicfg;
   gpio_t cs;
   uint8_t state;
+  uint8_t tx[9];
+  uint8_t rx[9];
 } spiflash_t;
 
 #define SPIFLASH_STATE_IDLE 0
@@ -31,23 +33,23 @@ typedef struct spiflash {
 static int
 spiflash_get_status(spiflash_t *sf)
 {
-  uint8_t tx[2] = {0x5};
-  uint8_t rx[2];
-  error_t err = sf->spi->rw(sf->spi, tx, rx, sizeof(tx), sf->cs, sf->spicfg);
+  sf->tx[0] = 5;
+  sf->tx[1] = 0;
+  error_t err = sf->spi->rw(sf->spi, sf->tx, sf->rx, 2, sf->cs, sf->spicfg);
   if(err)
     return err;
-  return rx[1];
+  return sf->rx[1];
 }
 
 static int
 spiflash_id(spiflash_t *sf)
 {
-  uint8_t tx[5] = {0xab};
-  uint8_t rx[5];
-  error_t err = sf->spi->rw(sf->spi, tx, rx, sizeof(tx), sf->cs, sf->spicfg);
+  memset(sf->tx, 0, 5);
+  sf->tx[0] = 0xab;
+  error_t err = sf->spi->rw(sf->spi, sf->tx, sf->rx, 5, sf->cs, sf->spicfg);
   if(err)
     return err;
-  return rx[4];
+  return sf->rx[4];
 }
 
 
@@ -95,8 +97,8 @@ spiflash_wait_ready(spiflash_t *sf)
 static error_t
 spiflash_we(spiflash_t *sf)
 {
-  uint8_t cmd[1] = {0x6};
-  return sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
+  sf->tx[0] = 0x6;
+  return sf->spi->rw(sf->spi, sf->tx, NULL, 1, sf->cs, sf->spicfg);
 }
 
 
@@ -112,8 +114,11 @@ spiflash_erase(struct block_iface *bi, size_t block)
 
   if(!err) {
     uint32_t addr = block * bi->block_size;
-    uint8_t cmd[4] = {0x20, addr >> 16, addr >> 8, addr};
-    err = sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
+    sf->tx[0] = 0x20;
+    sf->tx[1] = addr >> 16;
+    sf->tx[2] = addr >> 8;
+    sf->tx[3] = addr;
+    err = sf->spi->rw(sf->spi, sf->tx, NULL, 4, sf->cs, sf->spicfg);
     sf->state = SPIFLASH_STATE_BUSY;
     sf->busy_until = clock_get() + 45000;
   }
@@ -148,9 +153,13 @@ spiflash_write(struct block_iface *bi, size_t block,
     }
 
     uint32_t addr = block * bi->block_size + offset;
-    uint8_t cmd[4] = {0x2, addr >> 16, addr >> 8, addr};
 
-    struct iovec tx[2] = {{cmd, 4}, {(void *)data, to_copy}};
+    sf->tx[0] = 0x2;
+    sf->tx[1] = addr >> 16;
+    sf->tx[2] = addr >> 8;
+    sf->tx[3] = addr;
+
+    struct iovec tx[2] = {{sf->tx, 4}, {(void *)data, to_copy}};
     err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
     sf->state = SPIFLASH_STATE_BUSY;
 
@@ -175,9 +184,13 @@ spiflash_read(struct block_iface *bi, size_t block,
   if(!err) {
 
     uint32_t addr = block * bi->block_size + offset;
-    uint8_t cmd[4] = {0x3, addr >> 16, addr >> 8, addr};
 
-    struct iovec tx[2] = {{cmd, 4}, {NULL, length}};
+    sf->tx[0] = 0x3;
+    sf->tx[1] = addr >> 16;
+    sf->tx[2] = addr >> 8;
+    sf->tx[3] = addr;
+
+    struct iovec tx[2] = {{sf->tx, 4}, {NULL, length}};
     struct iovec rx[2] = {{NULL, 4}, {data, length}};
     err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
   }
@@ -188,8 +201,8 @@ spiflash_read(struct block_iface *bi, size_t block,
 static error_t
 spiflash_pd(spiflash_t *sf)
 {
-  uint8_t cmd[1] = {0xb9};
-  return sf->spi->rw(sf->spi, cmd, NULL, sizeof(cmd), sf->cs, sf->spicfg);
+  sf->tx[0] = 0xb9;
+  return sf->spi->rw(sf->spi, sf->tx, NULL, 1, sf->cs, sf->spicfg);
 }
 
 static error_t
@@ -228,15 +241,16 @@ spiflash_ctrl(struct block_iface *bi, block_ctrl_op_t op)
 static uint32_t
 read_sfdp(spiflash_t *sf, uint32_t addr)
 {
-  uint8_t tx[9] = {0x5a, 0, 0, addr, 0};
-  uint8_t rx[9];
-  error_t err = sf->spi->rw(sf->spi, tx, rx, sizeof(tx),
+  memset(sf->tx, 0, 9);
+  sf->tx[0] = 0x5a;
+  sf->tx[3] = addr;
+  error_t err = sf->spi->rw(sf->spi, sf->tx, sf->rx, 9,
                             sf->cs, sf->spicfg);
   if(err)
     return 0;
 
   uint32_t r;
-  memcpy(&r, rx + 5, 4);
+  memcpy(&r, sf->rx + 5, 4);
   return r;
 }
 
@@ -244,7 +258,9 @@ read_sfdp(spiflash_t *sf, uint32_t addr)
 block_iface_t *
 spiflash_create(spi_t *spi, gpio_t cs)
 {
-  spiflash_t *sf = calloc(1, sizeof(spiflash_t));
+  spiflash_t *sf = xalloc(sizeof(spiflash_t), 0, MEM_TYPE_DMA | MEM_MAY_FAIL);
+  if(sf == NULL)
+    return NULL;
 
   gpio_conf_output(cs, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_set_output(cs, 1);
