@@ -115,6 +115,8 @@ void stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq);
 
 void stm32g4_reinit_pll(void);
 
+void stm32g4_deinit_pll(void);
+
 void clk_enable_hsi48(void);
 
 void stm32g4_deinit_clk(void);

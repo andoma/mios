@@ -44,9 +44,6 @@ stm32g4_reinit_pll(void)
   // D-CACHE I-CACHE PREFETCH, 5 wait states
   reg_wr(FLASH_ACR, (1 << 18) | 0x705);
 
-  apb1clock = CPU_SYSTICK_RVR / 4;
-  apb2clock = CPU_SYSTICK_RVR / 2;
-
   reg_wr(RCC_CFGR,
          (0x4 << 11) | // APB2 (High speed) prescaler = 2
          (0x5 << 8));  // APB1 (Low speed)  prescaler = 4
@@ -92,6 +89,9 @@ stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq)
 {
   reg_wr(RCC_ICSCR, 0x40000000); // Reset clock trim
 
+  apb1clock = CPU_SYSTICK_RVR / 4;
+  apb2clock = CPU_SYSTICK_RVR / 2;
+
   g_hse_freq = hse_freq;
   g_p_freq = g_p_freq;
   stm32g4_reinit_pll();
@@ -105,6 +105,19 @@ clk_enable_hsi48(void)
   while(!(reg_rd(RCC_CRRCR) & (1 << 1))) {} // Wait for clock to become ready
 }
 
+void
+stm32g4_deinit_pll(void)
+{
+  // Use HSI16 as system clock
+  reg_set_bits(RCC_CFGR, 0, 2, 1);
+  while((reg_rd(RCC_CFGR) & 0x4) != 0x4) {}
+
+  reg_clr_bit(RCC_CR, 24);
+  while((reg_rd(RCC_CR) & (1 << 25))) {} // Wait for pll to stop
+
+  reg_wr(RCC_CFGR, 0x5); // Reset value (all prescalers reset)
+  reg_wr(RCC_PLLCFGR, 0x1000);
+}
 
 
 void
@@ -138,14 +151,7 @@ stm32g4_deinit_clk(void)
   reg_wr(RCC_CRRCR, 0);
   while((reg_rd(RCC_CRRCR) & (1 << 1))) {} // Wait for clock to stop
 
-  // Use HSI16 as system clock
-  reg_set_bits(RCC_CFGR, 0, 2, 1);
-  while((reg_rd(RCC_CFGR) & 0x4) != 0x4) {}
+  stm32g4_deinit_pll();
 
-  reg_clr_bit(RCC_CR, 24);
-  while((reg_rd(RCC_CR) & (1 << 25))) {} // Wait for pll to stop
-
-  reg_wr(RCC_CFGR, 0x5); // Reset value (all prescalers reset)
-  reg_wr(RCC_PLLCFGR, 0x1000);
   reg_wr(RCC_CCIPR, 0x0);
 }

@@ -8,6 +8,7 @@
 #include "stm32g4_pwr.h"
 #include "stm32g4_rtc.h"
 #include "stm32g4_wdog.h"
+#include "stm32g4_exti.h"
 
 #define WDOG_HZ 128
 #define RTC_HZ 2048
@@ -57,7 +58,7 @@ cpu_idle(void)
       asm volatile ("cpsid i");
       *SCR = 0x4;
       device_power_state(DEVICE_POWER_STATE_SUSPEND);
-      //      stm32g4_deinit_pll();
+      stm32g4_deinit_pll();
       asm volatile("wfi;isb");
       *SCR = 0x0;
       stm32g4_reinit_pll();
@@ -70,14 +71,14 @@ cpu_idle(void)
   }
 }
 
-
 void
-irq_2(void)
+irq_3(void)
 {
   uint32_t sr = reg_rd(RTC_SR);
   reg_wr(RTC_SCR, sr);
   if(!wakelock)
     reg_wr(IWDG_KR, 0xAAAA);
+  reg_wr(EXTI_PR1, 1 << 20);
 }
 
 
@@ -85,7 +86,17 @@ irq_2(void)
 static void
 enable_rtc_wakeups(void)
 {
+  clk_enable(CLK_SYSCFG);
+  reg_set_bit(EXTI_RTSR1, 20);
+  reg_set_bit(EXTI_IMR1, 20);
+  reg_wr(EXTI_PR1, 1 << 20);
+
   reg_set_bit(PWR_CR1, 8);
+  asm volatile("dsb");
+  reg_wr(RCC_BDCR,
+         (1 << 16));
+
+  reg_wr(RCC_BDCR, 0);
 
   reg_wr(RCC_BDCR,
          (1 << 15) |
@@ -93,12 +104,11 @@ enable_rtc_wakeups(void)
 
   clk_enable(CLK_RTC);
   reg_wr(RTC_SCR, -1);
-  irq_enable(2, IRQ_LEVEL_CLOCK);
+
+  irq_enable(3, IRQ_LEVEL_CLOCK);
 
   reg_wr(RTC_WPR, 0xCA);
   reg_wr(RTC_WPR, 0x53);
-
-  reg_clr_bit(RTC_CR, 10);
 
   reg_wr(RTC_CR, 0);
 

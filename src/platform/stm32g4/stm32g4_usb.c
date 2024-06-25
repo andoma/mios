@@ -650,8 +650,16 @@ static void
 usb_power_state(struct device *dev, device_power_state_t state)
 {
   //  struct usb_ctrl *uc = (struct usb_ctrl *)dev;
-  if(state == DEVICE_POWER_STATE_RESUME) {
+  if(state == DEVICE_POWER_STATE_SUSPEND) {
+    reg_set_bit(USB_CNTR, 0);
+    reg_set_bit(USB_CNTR, 2);
+    reg_set_bit(USB_CNTR, 1);
+
+  } else {
     clk_enable_hsi48();
+    reg_clr_bit(USB_CNTR, 0);
+    reg_clr_bit(USB_CNTR, 2);
+    reg_clr_bit(USB_CNTR, 1);
   }
 }
 

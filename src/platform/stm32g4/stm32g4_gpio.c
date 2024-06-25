@@ -5,6 +5,7 @@
 #include "stm32g4_reg.h"
 #include "stm32g4_clk.h"
 #include "stm32g4_pwr.h"
+#include "stm32g4_exti.h"
 #include "irq.h"
 
 #define GPIO_PORT_ADDR(x) (0x48000000 + ((x) * 0x400))
@@ -143,25 +144,6 @@ gpio_get_input(gpio_t gpio)
 
   return !!((1 << bit) & idr);
 }
-
-
-
-
-
-#define EXTI_BASE         0x40010400
-
-#define EXTI_IMR1       (EXTI_BASE + 0x00)
-#define EXTI_RTSR1      (EXTI_BASE + 0x08)
-#define EXTI_FTSR1      (EXTI_BASE + 0x0c)
-#define EXTI_PR1        (EXTI_BASE + 0x14)
-
-#define SYSCFG_BASE    0x40010000
-
-#define SYSCFG_EXTICR(x) (SYSCFG_BASE + 8 + 4 * (x))
-
-
-
-
 
 typedef struct {
   void (*cb)(void *arg);
