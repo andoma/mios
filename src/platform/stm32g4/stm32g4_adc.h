@@ -68,4 +68,5 @@ int stm32g4_adc_read_channel(uint32_t base, int channel);
 #define ADC12_EXT_TIM1_TRGO2 10
 
 #define ADC12_JEXT_TIM1_TRGO  0
+#define ADC12_JEXT_TIM1_TRGO2 8
 
