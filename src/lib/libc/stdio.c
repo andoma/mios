@@ -16,20 +16,13 @@
 #include <fixmath.h>
 #endif
 
-extern va_list fmt_double(va_list ap, char *buf, size_t buflen, int prec);
-
-va_list  __attribute__((weak))
-fmt_double(va_list ap, char *buf, size_t buflen, int prec)
-{
-  strlcpy(buf, "<nomath>", buflen);
-  return ap;
-}
-
 typedef struct {
   int16_t width;
   int16_t decimals;
   unsigned char lz:1;
   unsigned char la:1;
+  unsigned char plus:1;
+  unsigned char sign_pad:1;
 #ifdef ENABLE_NET_IPV4
   unsigned char ipv4:1;
 #endif
@@ -198,6 +191,151 @@ emit_x32(fmtcb_t *cb, void *aux, unsigned int x,
   return cb(aux, buf + 8 - digits, digits) + total;
 }
 
+#ifdef ENABLE_MATH
+static int
+flt_count_output_chars(int sign, int e10, int significands, const fmtparam_t *fp)
+{
+  int count = 0;
+  if(sign || fp->plus || fp->sign_pad)
+    count++;
+
+  if(e10 > 0) {
+    significands += e10;
+  } else {
+    count += 2;
+
+    for(int i = 0; i > e10; i--) {
+      count += 1;
+      significands--;
+    }
+    if(significands <= 0)
+      return count;
+  }
+
+  for(int i = 0; i < significands; i++) {
+
+    count ++;
+    e10--;
+    if(e10 == 0) {
+      count++;
+    }
+  }
+  return count;
+}
+
+
+static size_t
+float_to_str(fmtcb_t *cb, void *aux,
+             uint64_t bits,
+             const fmtparam_t *fp)
+{
+  int e10 = 0;
+
+  const int sign = bits >> 63;
+  uint64_t mantissa = bits & ((1ULL << 52) - 1);
+  int e2 = (bits >> 52) & 0x7ff;
+
+  if(e2 == 2047) {
+    const char *str;
+    if(mantissa) {
+      str = "nan";
+    } else if(sign) {
+      str = "-inf";
+    } else {
+      str = "+inf";
+    }
+    return emit_str(cb, aux, str, fp);
+  }
+
+  if(e2 == 0) {
+    e10 = 1;
+    mantissa = 0;
+  } else {
+
+    e2 -= 1022;
+    mantissa = mantissa << 11;
+    mantissa |= 1ULL << 63;
+
+    while(e2 < -2) {
+      do {
+        mantissa = mantissa >> 1;
+        e2++;
+      } while((uint32_t)(mantissa >> 32) >= 0x33333333);
+
+      mantissa *= 5;
+      e2++;
+      e10--;
+    }
+
+    while(e2 > 0) {
+      mantissa = (2 + mantissa) / 5;
+      e2--;
+      e10++;
+
+      do {
+        mantissa = mantissa << 1;
+        e2--;
+      } while(!(mantissa & (1ull << 63)));
+    }
+
+    mantissa = mantissa >> (4 - e2);
+  }
+  size_t total = 0;
+  int significands = fp->decimals > 0 ? fp->decimals : 6;
+
+  int chars = flt_count_output_chars(sign, e10, significands, fp);
+  int pad = fp->width - chars;
+
+  if(!fp->la)
+    total += emit_repeated_char(cb, aux, pad, ' ');
+
+  if(sign) {
+    total += cb(aux, "-", 1);
+  } else if(fp->plus) {
+    total += cb(aux, "+", 1);
+  } else if(fp->sign_pad) {
+    total += cb(aux, " ", 1);
+  }
+
+  if(e10 > 0) {
+    significands += e10;
+  } else {
+    total += cb(aux, "0.", 2);
+
+    for(int i = 0; i > e10; i--) {
+      total += cb(aux, "0", 1);
+      significands--;
+    }
+    if(significands <= 0)
+      goto done;
+  }
+
+  uint64_t r = 1ULL << 59;
+  for(int i = 0; i < significands; i++)
+    r /= 10;
+  mantissa += r;
+
+  for(int i = 0; i < significands; i++) {
+
+    mantissa *= 10;
+    char c = mantissa >> 60;
+    if(c > 9)
+      c = 9;
+    c += '0';
+    total += cb(aux, &c, 1);
+    mantissa &= 0x0fffffffffffffffull;
+    e10--;
+    if(e10 == 0) {
+      total += cb(aux, ".", 1);
+    }
+  }
+ done:
+  if(fp->la)
+    total += emit_repeated_char(cb, aux, pad, ' ');
+  return total;
+}
+#endif
+
 
 static int __attribute__((noinline))
 parse_dec(const char **fmt, int defval)
@@ -223,7 +361,10 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
   const char *s = fmt;
   char c;
   size_t total = 0;
-  char tmp[32];
+  union {
+    double dbl;
+    uint64_t u64;
+  } u;
 
   while((c = *fmt) != 0) {
     fmt++;
@@ -296,10 +437,12 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 #endif
         total += emit_u32(cb, aux, &fp, 0, va_arg(ap, unsigned int));
       break;
+#ifdef ENABLE_MATH
     case 'f':
-      ap = fmt_double(ap, tmp, sizeof(tmp), fp.decimals);
-      total += emit_str(cb, aux, tmp, &fp);
+      u.dbl = va_arg(ap, double);
+      total += float_to_str(cb, aux, u.u64, &fp);
       break;
+#endif
     case 'p':
       total += cb(aux, "0x", 2);
       total += emit_x32(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
