@@ -93,7 +93,7 @@ stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq)
   apb2clock = CPU_SYSTICK_RVR / 2;
 
   g_hse_freq = hse_freq;
-  g_p_freq = g_p_freq;
+  g_p_freq = p_freq;
   stm32g4_reinit_pll();
 }
 
