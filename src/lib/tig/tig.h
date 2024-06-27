@@ -12,7 +12,9 @@ typedef enum {
 
 typedef struct tig_ctx tig_ctx_t;
 
-void *tig_make_delegate(void (*draw)(tig_ctx_t *ctx));
+void *tig_make_delegate(void (*draw)(tig_ctx_t *ctx, void *opaque),
+                        void (*prep)(tig_ctx_t *ctx, void *opaque),
+                        void *opaque);
 
 extern const gfx_display_delegate_t tig_display_delegate;
 

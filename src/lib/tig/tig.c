@@ -22,7 +22,11 @@ struct tig_ctx {
 
   struct gfx_display *tc_gd;
 
-  void (*tc_draw)(tig_ctx_t *ctx);
+  void (*tc_prep)(tig_ctx_t *ctx, void *opaque);
+
+  void (*tc_draw)(tig_ctx_t *ctx, void *opaque);
+
+  void *tc_opaque;
 
   gfx_position_t tc_touch_pos;
 
@@ -35,10 +39,14 @@ struct tig_ctx {
 
 
 void *
-tig_make_delegate(void (*draw)(tig_ctx_t *ctx))
+tig_make_delegate(void (*draw)(tig_ctx_t *ctx, void *opaque),
+                  void (*prep)(tig_ctx_t *ctx, void *opaque),
+                  void *opaque)
 {
   tig_ctx_t *tc = calloc(1, sizeof(tig_ctx_t));
   tc->tc_draw = draw;
+  tc->tc_prep = prep;
+  tc->tc_opaque = opaque;
   return tc;
 }
 
@@ -67,6 +75,15 @@ tig_lazy_gfx_push(tig_ctx_t *tc)
  */
 
 static void
+tig_prep_display(void *opaque, struct gfx_display *gd,
+                 const gfx_rect_t *display_size)
+{
+  tig_ctx_t *tc = opaque;
+  tc->tc_prep(tc, tc->tc_opaque);
+}
+
+
+static void
 tig_draw_display(void *opaque, struct gfx_display *gd,
                  const gfx_rect_t *display_size)
 {
@@ -79,7 +96,7 @@ tig_draw_display(void *opaque, struct gfx_display *gd,
   ts->ts_pos.x = 0;
   ts->ts_pos.y = 0;
   ts->ts_lazy_gfx_push = 0;
-  tc->tc_draw(tc);
+  tc->tc_draw(tc, tc->tc_opaque);
 
   if(tc->tc_tts == TTS_RELEASE)
     tc->tc_tts = TTS_NONE;
@@ -104,6 +121,7 @@ tig_touch_press(void *opaque, struct gfx_display *gd,
 }
 
 const gfx_display_delegate_t tig_display_delegate = {
+  .gdd_prep = tig_prep_display,
   .gdd_draw = tig_draw_display,
   .gdd_touch_release = tig_touch_release,
   .gdd_touch_press = tig_touch_press,

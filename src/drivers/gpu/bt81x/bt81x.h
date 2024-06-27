@@ -32,9 +32,6 @@ typedef struct {
 
 } bt81x_timings_t;
 
-struct gui_display;
-
-
 __attribute__((access(read_only, 5), access(read_only, 6, 7)))
 struct gfx_display *bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
                                  const bt81x_timings_t *timings,

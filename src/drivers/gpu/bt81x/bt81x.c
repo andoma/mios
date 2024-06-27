@@ -523,6 +523,11 @@ static void
 draw_gui(bt81x_t *b)
 {
   gfx_display_t *gd = &b->gfx_display;
+
+  pthread_mutex_lock(&gd->gd_mutex);
+
+  gd->gd_gdd->gdd_prep(gd->gd_opaque, gd, &b->display_size);
+
   gd->gd_tab_offsets_size = 0;
   b->dlptr = 0;
 
@@ -534,8 +539,6 @@ draw_gui(bt81x_t *b)
   b->dl[b->dlptr++] = EVE_ENC_COLOR_A(255);
 
   b->dl[b->dlptr++] = EVE_ENC_CLEAR(1, 1, 1);
-
-  pthread_mutex_lock(&gd->gd_mutex);
 
   gd->gd_gdd->gdd_draw(gd->gd_opaque, gd, &b->display_size);
 

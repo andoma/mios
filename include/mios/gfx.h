@@ -24,7 +24,7 @@ typedef struct {
 } gfx_rect_t;
 
 
-#define GFX_DISPLAY_PALETTE_SIZE 4
+#define GFX_DISPLAY_PALETTE_SIZE 16
 #define GFX_COLOR_PALETTE(x) (0x80000000 | (x))
 
 typedef struct gfx_display_class {
@@ -77,6 +77,9 @@ typedef struct gfx_display_class {
 struct gfx_display;
 
 typedef struct gfx_display_delegate {
+
+  void (*gdd_prep)(void *opaque, struct gfx_display *gd,
+                   const gfx_rect_t *display_size);
 
   void (*gdd_draw)(void *opaque, struct gfx_display *gd,
                    const gfx_rect_t *display_size);

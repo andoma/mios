@@ -226,6 +226,7 @@ gui_touch_press(void *opaque, gfx_display_t *gd, const gfx_position_t *p)
 
 const gfx_display_delegate_t gui_display_delegate = {
   .gdd_draw = gui_draw_display,
+  .gdd_pre = gui_prep_display,
   .gdd_touch_release = gui_touch_release,
   .gdd_touch_press = gui_touch_press,
 };
