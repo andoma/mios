@@ -2,6 +2,7 @@
 #include <assert.h>
 
 #include "stm32g4_clk.h"
+#include "stm32g4_pwr.h"
 
 static uint32_t apb1clock;
 static uint32_t apb2clock;
@@ -95,6 +96,27 @@ stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq)
   g_hse_freq = hse_freq;
   g_p_freq = p_freq;
   stm32g4_reinit_pll();
+}
+
+void
+stm32g4_enable_backup_domain(void)
+{
+  if(reg_get_bit(PWR_CR1, 8))
+    return;
+
+  clk_enable(CLK_PWR);
+  reg_set_bit(PWR_CR1, 8);
+  reg_set_bit(RCC_BDCR, 16);
+  reg_clr_bit(RCC_BDCR, 16);
+}
+
+void
+stm32g4_lse_enable(void)
+{
+  stm32g4_enable_backup_domain();
+
+  reg_set_bit(RCC_BDCR, 0);
+  while((reg_rd(RCC_BDCR) & 2) == 0) {}
 }
 
 

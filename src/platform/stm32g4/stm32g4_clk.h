@@ -120,3 +120,7 @@ void stm32g4_deinit_pll(void);
 void clk_enable_hsi48(void);
 
 void stm32g4_deinit_clk(void);
+
+void stm32g4_lse_enable(void);
+
+void stm32g4_enable_backup_domain(void);

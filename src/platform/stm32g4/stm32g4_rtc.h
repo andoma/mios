@@ -8,3 +8,5 @@
 #define RTC_WPR  (RTC_BASE + 0x24)
 #define RTC_SR   (RTC_BASE + 0x50)
 #define RTC_SCR  (RTC_BASE + 0x5c)
+
+void stm32g4_rtc_enable(void);

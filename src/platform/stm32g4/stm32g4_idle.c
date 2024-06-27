@@ -91,19 +91,7 @@ enable_rtc_wakeups(void)
   reg_set_bit(EXTI_IMR1, 20);
   reg_wr(EXTI_PR1, 1 << 20);
 
-  reg_set_bit(PWR_CR1, 8);
-  asm volatile("dsb");
-  reg_wr(RCC_BDCR,
-         (1 << 16));
-
-  reg_wr(RCC_BDCR, 0);
-
-  reg_wr(RCC_BDCR,
-         (1 << 15) |
-         (2 << 8));
-
-  clk_enable(CLK_RTC);
-  reg_wr(RTC_SCR, -1);
+  stm32g4_rtc_enable();
 
   irq_enable(3, IRQ_LEVEL_CLOCK);
 
