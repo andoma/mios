@@ -314,7 +314,7 @@ ota_open_with_args(socket_t *s,
     return ERR_NOT_READY;
   }
 
-  svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0, MEM_MAY_FAIL);
+  svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(sa == NULL)
     return ERR_NO_MEMORY;
   memset(sa, 0, sizeof(svc_ota_t));
