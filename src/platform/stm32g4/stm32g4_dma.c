@@ -29,7 +29,10 @@ stm32_dma_alloc(uint32_t resource_id,
                 const char *name)
 {
   clk_enable(CLK_DMAMUX1);
-  stm32_dma_instance_t instance = stm32_dma_alloc_instance(-1, name);
+  // All devices have at least 6 + 6 channels
+  // Cat 3 and 4 devices have 8 + 8 channels but we'll cross that
+  // bridge when we get there
+  stm32_dma_instance_t instance = stm32_dma_alloc_instance(0x3f3f, name);
   reg_wr(DMAMUX1_CxCR(instance), resource_id);
   return instance;
 }

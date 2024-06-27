@@ -194,13 +194,14 @@ stm32_dma_wait(stm32_dma_instance_t instance)
 }
 
 static void __attribute__((noinline))
-dma_irq(int channel)
+dma_irq(int id)
 {
-  const uint32_t ctrl = channel >> 3;
+  const uint32_t ctrl = id >> 3;
+  const uint32_t channel = id & 0x7;
   const uint32_t bits = (reg_rd(DMA_ISR(ctrl)) >> (channel * 4)) & 0xe;
   reg_wr(DMA_IFCR(ctrl), bits << (channel * 4));
 
-  dma_stream_t *ds = g_streams[channel];
+  dma_stream_t *ds = g_streams[id];
   if(ds == NULL || ds->cb == NULL)
     return;
 
@@ -209,6 +210,6 @@ dma_irq(int channel)
     ((bits & 0x4) << 2) | // HALF
     ((bits & 0x2) << 4);  // FULL
 
-  ds->cb(channel, status, ds->arg);
+  ds->cb(id, status, ds->arg);
 }
 
