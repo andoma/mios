@@ -210,7 +210,7 @@ __attribute__((always_inline,unused))
 static inline void
 spiflash_disable()
 {
-  gpio_set_output(GPIO_SPIFLASH_CS, 0);
+  gpio_set_output(GPIO_SPIFLASH_CS, 1);
 }
 
 __attribute__((section("bltext"),noinline))
