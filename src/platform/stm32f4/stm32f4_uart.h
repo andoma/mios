@@ -33,6 +33,7 @@ stream_t *stm32f4_uart_stream_init(struct stm32_uart_stream *uart,
                                    const char *name);
 
 void stm32f4_uart_mbus_multidrop_create(unsigned int instance,
-                                        gpio_t tx, gpio_t rx, gpio_t txe);
+                                        gpio_t tx, gpio_t rx, gpio_t txe,
+                                        const char *name);
 
 const stm32f4_uart_config_t *stm32f4_uart_get_config(int index);

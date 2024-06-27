@@ -527,7 +527,8 @@ stm32_mbus_uart_create(uint32_t uart_reg_base,
                        int clkid, int uart_irq,
                        uint32_t tx_dma_resouce_id,
                        uint32_t rx_dma_resouce_id,
-                       gpio_t txe, int flags, uint32_t freq)
+                       gpio_t txe, int flags, uint32_t freq,
+                       const char *name)
 {
   clk_enable(clkid);
 
@@ -592,7 +593,7 @@ stm32_mbus_uart_create(uint32_t uart_reg_base,
   um->timer.t_cb = timer_fire;
   um->timer.t_opaque = um;
 
-  mbus_netif_attach(&um->um_mni, "uartmbus", &mbus_uart_device_class);
+  mbus_netif_attach(&um->um_mni, name, &mbus_uart_device_class);
 
   irq_enable_fn_arg(uart_irq, IRQ_LEVEL_CLOCK, stm32_mbus_uart_irq, um);
 }

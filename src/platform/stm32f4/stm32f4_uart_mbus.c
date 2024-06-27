@@ -7,7 +7,8 @@
 
 void
 stm32f4_uart_mbus_multidrop_create(unsigned int instance,
-                                   gpio_t tx, gpio_t rx, gpio_t txe)
+                                   gpio_t tx, gpio_t rx, gpio_t txe,
+                                   const char *name)
 {
   const int index = instance - 1;
   const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
@@ -23,5 +24,6 @@ stm32f4_uart_mbus_multidrop_create(unsigned int instance,
                          cfg->txdma,
                          cfg->rxdma,
                          txe, 0,
-                         clk_get_freq(cfg->clkid));
+                         clk_get_freq(cfg->clkid),
+                         name);
 }

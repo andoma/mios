@@ -46,4 +46,4 @@ stream_t *stm32g0_uart_stream_init(stm32_uart_stream_t *u,
 
 void stm32g0_uart_mbus_multidrop_create(unsigned int instance,
                                         gpio_t tx, gpio_t rx, gpio_t txe,
-                                        int flags);
+                                        int flags, const char *name);
