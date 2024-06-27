@@ -361,11 +361,12 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
   const char *s = fmt;
   char c;
   size_t total = 0;
+#ifdef ENABLE_MATH
   union {
     double dbl;
     uint64_t u64;
   } u;
-
+#endif
   while((c = *fmt) != 0) {
     fmt++;
     if(c != '%')
