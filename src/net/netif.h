@@ -59,6 +59,13 @@ typedef struct netif {
 
   SLIST_ENTRY(netif) ni_global_link;
 
+#ifdef ENABLE_NET_DSIG
+
+  pbuf_t *(*ni_dsig_output)(struct netif *ni, pbuf_t *pb, uint32_t group,
+                            uint32_t flags);
+  const struct dsig_output_filter *ni_dsig_output_filter;
+#endif
+
 } netif_t;
 
 

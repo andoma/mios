@@ -12,12 +12,13 @@
 #include <unistd.h>
 
 #include "mbus_rpc.h"
-#include "mbus_dsig.h"
 #include "mbus_flow.h"
 
 #include "mbus_seqpkt.h"
 
-#include <mios/io.h>
+#ifdef ENABLE_NET_DSIG
+#include "net/dsig.h"
+#endif
 
 
 SLIST_HEAD(mbus_netif_list, mbus_netif);
@@ -48,8 +49,9 @@ mbus_append_crc(struct pbuf *pb)
   trailer[3] = crc >> 24;
 }
 
-pbuf_t *
-mbus_output(pbuf_t *pb)
+
+static pbuf_t *
+mbus_output_unicast(pbuf_t *pb)
 {
   const uint8_t *hdr = pbuf_cdata(pb, 0);
   const int dst_addr = hdr[0];
@@ -57,25 +59,12 @@ mbus_output(pbuf_t *pb)
   mbus_append_crc(pb);
 
   mbus_netif_t *mni, *n;
-  if(dst_addr < 32) {
-    // Unicast
-    const uint32_t mask = 1 << dst_addr;
+  const uint32_t mask = 1 << dst_addr;
 
-    SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
-      if(mask & mni->mni_active_hosts) {
-        mni->mni_tx_bytes += pb->pb_pktlen;
-        return mni->mni_output(mni, pb);
-      }
-    }
-  } else {
-    // Multicast
-
-    const uint16_t group = ((hdr[0] & 0x1f) << 8) | (hdr[1]);
-    if(group < 4096) {
-      // We loop back dsig outputs to our input as well
-      pb = mbus_dsig_input(pb, group);
-      if(pb == NULL)
-        return pb;
+  SLIST_FOREACH(mni, &mbus_netifs, mni_global_link) {
+    if(mask & mni->mni_active_hosts) {
+      mni->mni_tx_bytes += pb->pb_pktlen;
+      return mni->mni_output(mni, pb);
     }
   }
 
@@ -110,7 +99,7 @@ mbus_output_flow(pbuf_t *pb, const mbus_flow_t *mf)
   hdr[0] = mf->mf_remote_addr;
   hdr[1] = mbus_local_addr | ((mf->mf_flow >> 3) & 0x60);
   hdr[2] = mf->mf_flow;
-  return mbus_output(pb);
+  return mbus_output_unicast(pb);
 }
 
 
@@ -122,7 +111,7 @@ mbus_ping(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   pkt[0] = remote_addr;
   pkt[1] = ((flow >> 3) & 0x60) | mbus_local_addr;
   pkt[2] = flow;
-  return mbus_output(pb);
+  return mbus_output_unicast(pb);
 }
 
 
@@ -140,7 +129,7 @@ mbus_send_cb(net_task_t *nt, uint32_t signals)
     mutex_unlock(&mbus_send_mutex);
     if(pb == NULL)
       break;
-    pb = mbus_output(pb);
+    pb = mbus_output_unicast(pb);
     if(pb != NULL)
       pbuf_free(pb);
   }
@@ -286,37 +275,40 @@ mbus_input(struct netif *ni, struct pbuf *pb)
   const uint32_t dst_addr = hdr[0] & 0x3f;
 
   if(dst_addr & 0x20) {
-
+#ifdef ENABLE_NET_DSIG
     const uint16_t group = ((dst_addr & 0x1f) << 8) | hdr[1];
-    if(group < 4096) {
-      pb = mbus_dsig_input(pb, group);
-    }
 
-  } else {
+    pb = pbuf_drop(pb, 2); // Drop header
+    pbuf_trim(pb, 4);      // Drop CRC
 
-    // Unicast
+    return dsig_input(group, pb, ni);
+#else
+    return pb;
+#endif
+  }
 
-    const uint8_t src_addr = hdr[1] & 0x1f;
-    const uint32_t src_mask = 1 << src_addr;
+  // Unicast
 
-    if(!(mni->mni_active_hosts & src_mask)) {
-      mbus_add_route(mni, src_mask);
-    }
+  const uint8_t src_addr = hdr[1] & 0x1f;
+  const uint32_t src_mask = 1 << src_addr;
 
-    if(dst_addr == mbus_local_addr) {
-      pbuf_trim(pb, 4); // Drop CRC
-      return mbus_local(mni, pb);
-    }
+  if(!(mni->mni_active_hosts & src_mask)) {
+    mbus_add_route(mni, src_mask);
+  }
 
-    // Forward if we know about the host on a different interface
-    mbus_netif_t *n;
-    SLIST_FOREACH(n, &mbus_netifs, mni_global_link) {
-      if(mni == n)
-        continue;
-      if(n->mni_active_hosts & (1 << dst_addr)) {
-        n->mni_tx_bytes += pb->pb_pktlen;
-        return n->mni_output(n, pb);
-      }
+  if(dst_addr == mbus_local_addr) {
+    pbuf_trim(pb, 4); // Drop CRC
+    return mbus_local(mni, pb);
+  }
+
+  // Forward if we know about the host on a different interface
+  mbus_netif_t *n;
+  SLIST_FOREACH(n, &mbus_netifs, mni_global_link) {
+    if(mni == n)
+      continue;
+    if(n->mni_active_hosts & (1 << dst_addr)) {
+      n->mni_tx_bytes += pb->pb_pktlen;
+      return n->mni_output(n, pb);
     }
   }
   return mbus_bcast(pb, mni);
@@ -356,6 +348,29 @@ mbus_set_host_address(uint8_t addr)
 }
 
 
+#ifdef ENABLE_NET_DSIG
+
+static pbuf_t *
+mbus_dsig_output(struct netif *ni, pbuf_t *pb, uint32_t group, uint32_t flags)
+{
+  if(group > 8191)
+    return pb;
+
+  pb = pbuf_prepend(pb, 2, 0, 0);
+  if(pb == NULL)
+    return pb;
+
+  uint8_t *hdr = pbuf_data(pb, 0);
+  hdr[0] = 0x20 | (group >> 8);
+  hdr[1] = group;
+
+  mbus_append_crc(pb);
+
+  mbus_netif_t *mni = (mbus_netif_t *)ni;
+  return mni->mni_output(mni, pb);
+}
+
+#endif
 
 void
 mbus_netif_attach(mbus_netif_t *mni, const char *name,
@@ -363,7 +378,9 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name,
 {
   mni->mni_ni.ni_input = mbus_input;
   mni->mni_ni.ni_mtu = 64;
-
+#ifdef ENABLE_NET_DSIG
+  mni->mni_ni.ni_dsig_output = mbus_dsig_output;
+#endif
   netif_attach(&mni->mni_ni, name, dc);
 
   SLIST_INSERT_HEAD(&mbus_netifs, mni, mni_global_link);

@@ -96,9 +96,12 @@ stm32g4_fdcan_irq(void *arg)
   if(bits & (1 << 9)) {
     return;
   }
+  return;
+#if 0
   if(bits == 0)
     return;
   panic("bits=0x%x", bits);
+#endif
 }
 
 
@@ -129,6 +132,9 @@ stm32_fdcan_output(struct netif *ni, struct nexthop *nh, pbuf_t *pb)
   uint32_t signal = rd32_le(data) & 0x1fffffff;
   uint32_t len = pb->pb_pktlen - 4;
 
+  if(len > 8)
+    return pb;
+
   int bufidx = (txfqs >> 16) & 3;
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), signal | (1 << 30));
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 1), len << 16);
@@ -149,7 +155,8 @@ static const device_class_t stm32_fdcan_device_class = {
 
 
 void
-stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx)
+stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
+                   const struct dsig_output_filter *output_filter)
 {
   fdcan_t *fc = calloc(1, sizeof(fdcan_t));
   fc->reg_base = FDCAN_BASE(instance);
@@ -171,7 +178,8 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx)
   reg_wr(fc->reg_base + FDCAN_CCCR, 3);
 
   reg_wr(fc->reg_base + FDCAN_IKE, 1);
-  reg_wr(fc->reg_base + FDCAN_IE, 0xffffffff);
+  reg_wr(fc->reg_base + FDCAN_IE,
+         (1 << 0));
 
   reg_wr(fc->reg_base + FDCAN_CKDIV, 0b0101);
   reg_set_bit(fc->reg_base + FDCAN_CCCR, 6);
@@ -183,13 +191,6 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx)
   }
 
   fc->cni.cni_ni.ni_output = stm32_fdcan_output;
-  can_netif_attach(&fc->cni, "can", &stm32_fdcan_device_class);
-
-#if 0
-  reg_wr(fc->ram_base + FDCAN_TXBUF(0, 0), 0x55 | (1 << 30));
-  reg_wr(fc->ram_base + FDCAN_TXBUF(0, 1), 0x40000);
-  reg_wr(fc->ram_base + FDCAN_TXBUF(0, 2), 0x11223344);
-
-  reg_wr(fc->reg_base + FDCAN_TXBAR, 0x1);
-#endif
+  can_netif_attach(&fc->cni, "can", &stm32_fdcan_device_class,
+                   output_filter);
 }

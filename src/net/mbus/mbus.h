@@ -37,8 +37,6 @@ void mbus_netif_attach(mbus_netif_t *mni, const char *name,
 
 void mbus_netif_detach(mbus_netif_t *mni);
 
-pbuf_t *mbus_output(pbuf_t *pb) __attribute__((warn_unused_result));
-
 pbuf_t *mbus_output_flow(pbuf_t *pb, const struct mbus_flow *mf)
   __attribute__((warn_unused_result));
 

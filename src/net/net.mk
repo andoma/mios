@@ -13,10 +13,12 @@ SRCS_net += \
 	${SRC}/net/service/svc_discard.c \
 	${SRC}/net/service/svc_ota.c \
 
+SRCS-${ENABLE_NET_DSIG} += ${SRCS_net} \
+	${SRC}/net/dsig.c
+
 SRCS-${ENABLE_NET_MBUS} += ${SRCS_net} \
 	${SRC}/net/mbus/mbus.c \
 	${SRC}/net/mbus/mbus_seqpkt.c \
-	${SRC}/net/mbus/mbus_dsig.c \
 
 SRCS-${ENABLE_NET_CAN} += ${SRCS_net} \
 	${SRC}/net/can/can.c \
