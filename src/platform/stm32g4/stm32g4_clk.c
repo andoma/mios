@@ -106,6 +106,9 @@ stm32g4_enable_backup_domain(void)
 
   clk_enable(CLK_PWR);
   reg_set_bit(PWR_CR1, 8);
+  if(reg_get_bit(RCC_BDCR, 15)) {
+    return;
+  }
   reg_set_bit(RCC_BDCR, 16);
   reg_clr_bit(RCC_BDCR, 16);
 }
