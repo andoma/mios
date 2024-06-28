@@ -2,6 +2,9 @@
 
 #define RTC_BASE 0x40002800
 
+#define RTC_TR   (RTC_BASE + 0x00)
+#define RTC_DR   (RTC_BASE + 0x04)
+#define RTC_SSR  (RTC_BASE + 0x08)
 #define RTC_ICSR (RTC_BASE + 0x0c)
 #define RTC_WUTR (RTC_BASE + 0x14)
 #define RTC_CR   (RTC_BASE + 0x18)
