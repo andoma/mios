@@ -13,6 +13,7 @@
 
 #include <mios/timer.h>
 #include <mios/task.h>
+#include <mios/ghook.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -166,8 +167,6 @@ typedef struct nrf52_radio {
   ll_state_t nr_ll_state;
 
   pbuf_t *nr_pbuf;
-
-  void (*status_cb)(int status);
 
   timer_t nr_slow_timer;
   uint32_t nr_softirq_enter_adv;
@@ -377,7 +376,7 @@ static void
 conn_disconnect(nrf52_radio_t *nr, uint32_t now)
 {
   softirq_raise(nr->nr_softirq_enter_adv);
-  nr->status_cb(0);
+  ghook_invoke(GHOOK_BLE_STATUS, 0);
 
   nr->nr_ll_state = LL_IDLE;
   reg_wr(TIMER0_BASE + TIMER_TASKS_STOP, 1);
@@ -440,8 +439,8 @@ handle_CONNECT_IND(nrf52_radio_t *nr, const uint8_t *pkt)
          37 + nr->nr_adv_ch);
 
   memset(&con->stat, 0, sizeof(con->stat));
-  nr->status_cb(NRF52_BLE_STATUS_CONNECTED);
 
+  ghook_invoke(GHOOK_BLE_STATUS, 1);
   return 1;
 }
 
@@ -1085,10 +1084,9 @@ radio_enter_adv(void *opaque)
 
 
 void
-nrf52_radio_ble_init(const char *name, void (*status_cb)(int flags))
+nrf52_radio_ble_init(const char *name)
 {
   nrf52_radio_t *nr = &g_radio;
-  nr->status_cb = status_cb;
   nr->nr_softirq_enter_adv = softirq_alloc(radio_enter_adv, nr);
 
   nr->nr_empty_packet[0] = 1;
