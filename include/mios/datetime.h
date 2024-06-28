@@ -21,6 +21,7 @@ typedef struct datetime {
 
 void datetime_from_unixtime(uint32_t t, datetime_t *dt);
 
+int datetime_day_of_week(const datetime_t *dt); // 1=Monday 7=Sunday (ISO)
 
 uint64_t datetime_get_utc_usec(void);
 

@@ -105,6 +105,28 @@ datetime_set_utc_offset(int64_t offset, const char *source)
 }
 
 
+
+int
+datetime_day_of_week(const datetime_t *dt)
+{
+  int year = dt->year;
+  int month = dt->mon;
+  int day = dt->mday;
+
+  // Zeller's Congruence
+  if(month < 3) {
+    month += 12;
+    year -= 1;
+  }
+
+  int k = year % 100;
+  int j = year / 100;
+  int h = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+  // Convert to ISO (1=Monday, ..., 7=Sunday)
+  int d = ((h + 5) % 7) + 1;
+  return d;
+}
+
 static error_t
 cmd_date(cli_t *cli, int argc, char **argv)
 {
