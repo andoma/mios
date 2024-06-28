@@ -95,19 +95,13 @@ enable_rtc_wakeups(void)
 
   irq_enable(3, IRQ_LEVEL_CLOCK);
 
-  reg_wr(RTC_WPR, 0xCA);
-  reg_wr(RTC_WPR, 0x53);
-
-  reg_wr(RTC_CR, 0);
-
   //wait for WUTWF is set
   while(!(reg_rd(RTC_ICSR) & 0x4)) {}
   // write WUT
   reg_wr(RTC_WUTR, RTC_HZ * (WDOG_TIMEOUT_SEC - 1));
 
-  reg_wr(RTC_CR,
-         (1 << 14) |
-         (1 << 10));
+  reg_set_bit(RTC_CR, 14);
+  reg_set_bit(RTC_CR, 10);
 }
 
 void
