@@ -27,7 +27,8 @@ uint64_t datetime_get_utc_usec(void);
 
 uint32_t datetime_get_utc_sec(void);
 
-void datetime_set_utc_offset(int64_t offset, const char *source);
+// Returns 1 if we changed offset > +-1 second
+int datetime_set_utc_offset(int64_t offset, const char *source);
 
 typedef enum {
   DATETIME_YEAR,
