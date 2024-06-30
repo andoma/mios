@@ -94,6 +94,10 @@ struct pbuf *
 dsig_output(uint32_t id, struct pbuf *pb, struct netif *exclude)
 {
   struct netif *ni;
+
+  // Local dispatch
+  dsig_dispatch(id, pbuf_cdata(pb, 0), pb->pb_pktlen);
+
   SLIST_FOREACH(ni, &netifs, ni_global_link) {
     if(ni == exclude || ni->ni_dsig_output == NULL)
       continue;
@@ -109,9 +113,6 @@ dsig_input(uint32_t id, struct pbuf *pb, struct netif *ni)
 {
   if(pbuf_pullup(pb, pb->pb_pktlen))
     return pb;
-
-  // Local dispatch
-  dsig_dispatch(id, pbuf_cdata(pb, 0), pb->pb_pktlen);
 
   // Forwarding
   return dsig_output(id, pb, ni);
