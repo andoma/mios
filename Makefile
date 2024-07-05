@@ -100,7 +100,9 @@ ${O}/build.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT} ${MIOSVER} ${APPVER}
 	@echo "\tLINK\t$@"
 	${TOOLCHAIN}gcc -Wl,-T${LDSCRIPT} ${OBJS} -o $@ ${LDFLAGS}
 	${TOOLCHAIN}objcopy --update-section .miosversion=${MIOSVER} $@
+ifdef APPNAME
 	${TOOLCHAIN}objcopy --update-section .appversion=${APPVER} $@
+endif
 
 ${O}/build.bin: ${O}/build.elf
 	@echo "\tBIN\t$@"
