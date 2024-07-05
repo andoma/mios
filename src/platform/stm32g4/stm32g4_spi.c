@@ -14,9 +14,10 @@ static const struct {
   uint16_t clkid;
   uint8_t af;
 } spi_config[] = {
-  { 0x40013000, 11, 10, CLK_SPI1, 5 }
+  { 0x40013000, 11, 10, CLK_SPI1, 5 },
+  { 0x40003800, 13, 12, CLK_SPI2, 6 },
+  { 0x40003c00, 15, 14, CLK_SPI3, 6 }
 };
-
 
 
 spi_t *
