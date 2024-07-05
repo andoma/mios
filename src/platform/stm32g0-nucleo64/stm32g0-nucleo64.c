@@ -13,6 +13,7 @@
 #include "stm32g0_clk.h"
 #include "stm32g0_uart.h"
 #include "stm32g0_i2c.h"
+#include "stm32g0_spi.h"
 
 #define BLINK_GPIO  GPIO_PA(5) // Green led (User LD1)
 
@@ -24,8 +25,8 @@ board_init(void)
 
   static stm32_uart_stream_t console;
   stdio = stm32g0_uart_stream_init(&console, 2, 115200,
-                                   stm32g0_uart_tx(2, GPIO_PA(2)),
-                                   stm32g0_uart_rx(2, GPIO_PA(3)),
+                                   GPIO_PA(2),
+                                   GPIO_PA(3),
                                    UART_CTRLD_IS_PANIC, "console");
 }
 
@@ -140,7 +141,7 @@ cmd_suspend(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF("suspend", cmd_suspend);
 
-
+static spi_t *g_spi;
 
 static void __attribute__((constructor(800)))
 platform_init_late(void)
@@ -155,6 +156,10 @@ platform_init_late(void)
   gpio_set_output(BLINK_GPIO, 1);
 
   thread_create(blinker, NULL, 256, "blinker", 0, 0);
+
+  g_spi = stm32g0_spi_create(1, GPIO_PA(5), GPIO_PA(6), GPIO_PA(7),
+                             GPIO_SPEED_LOW);
+
 
 #if 0 // Uncomment to start full duplex mbus on USART1
   stm32g0_mbus_uart_create(1, 115200,
