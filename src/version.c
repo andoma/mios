@@ -15,6 +15,12 @@ mios_get_app_name(void)
   return _appname;
 }
 
+const uint8_t *
+mios_get_app_version(void)
+{
+  return _appversion;
+}
+
 static void
 stprintversion(stream_t *s, const uint8_t *ver)
 {
