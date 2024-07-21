@@ -1,0 +1,7 @@
+#pragma once
+
+#define CORDIC_BASE 0x40020c00
+
+#define CORDIC_CSR   (CORDIC_BASE + 0x00)
+#define CORDIC_WDATA (CORDIC_BASE + 0x04)
+#define CORDIC_RDATA (CORDIC_BASE + 0x08)
