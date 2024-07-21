@@ -41,16 +41,44 @@ typedef enum {
   STM32_DMA_CIRCULAR = 1,
 } stm32_dma_circular_t;
 
-void stm32_dma_config(stm32_dma_instance_t instance,
-                      stm32_dma_burst_t mburst,
-                      stm32_dma_burst_t pburst,
-                      stm32_dma_prio_t prio,
-                      stm32_dma_data_size_t msize,
-                      stm32_dma_data_size_t psize,
-                      stm32_dma_incr_mode_t minc,
-                      stm32_dma_incr_mode_t pinc,
-                      stm32_dma_circular_t circular,
-                      stm32_dma_direction_t direction);
+
+uint32_t stm32_dma_config_make_reg(stm32_dma_burst_t mburst,
+                                   stm32_dma_burst_t pburst,
+                                   stm32_dma_prio_t prio,
+                                   stm32_dma_data_size_t msize,
+                                   stm32_dma_data_size_t psize,
+                                   stm32_dma_incr_mode_t minc,
+                                   stm32_dma_incr_mode_t pinc,
+                                   stm32_dma_circular_t circular,
+                                   stm32_dma_direction_t direction);
+
+void stm32_dma_config_set_reg(stm32_dma_instance_t instance, uint32_t raw);
+
+static inline void
+stm32_dma_config(stm32_dma_instance_t instance,
+                 stm32_dma_burst_t mburst,
+                 stm32_dma_burst_t pburst,
+                 stm32_dma_prio_t prio,
+                 stm32_dma_data_size_t msize,
+                 stm32_dma_data_size_t psize,
+                 stm32_dma_incr_mode_t minc,
+                 stm32_dma_incr_mode_t pinc,
+                 stm32_dma_circular_t circular,
+                 stm32_dma_direction_t direction)
+{
+  uint32_t reg =
+    stm32_dma_config_make_reg(mburst,
+                              pburst,
+                              prio,
+                              msize,
+                              psize,
+                              minc,
+                              pinc,
+                              circular,
+                              direction);
+  stm32_dma_config_set_reg(instance, reg);
+}
+
 
 void stm32_dma_set_paddr(stm32_dma_instance_t instance, uint32_t paddr);
 

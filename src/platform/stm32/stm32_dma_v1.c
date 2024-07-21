@@ -111,8 +111,8 @@ stm32_dma_set_mem1(stm32_dma_instance_t instance, void *maddr)
   reg_wr(DMA_SM1AR(instance), (uint32_t)maddr);
 }
 
-static void
-stm32_dma_config_u32(stm32_dma_instance_t instance, uint32_t val)
+void
+stm32_dma_config_set_reg(stm32_dma_instance_t instance, uint32_t val)
 {
   uint32_t reg = reg_rd(DMA_SCR(instance));
   reg &= 0xfe00001f;
@@ -120,17 +120,16 @@ stm32_dma_config_u32(stm32_dma_instance_t instance, uint32_t val)
   reg_wr(DMA_SCR(instance), reg);
 }
 
-void
-stm32_dma_config(stm32_dma_instance_t instance,
-                 stm32_dma_burst_t mburst,
-                 stm32_dma_burst_t pburst,
-                 stm32_dma_prio_t prio,
-                 stm32_dma_data_size_t msize,
-                 stm32_dma_data_size_t psize,
-                 stm32_dma_incr_mode_t minc,
-                 stm32_dma_incr_mode_t pinc,
-                 stm32_dma_circular_t circular,
-                 stm32_dma_direction_t direction)
+uint32_t
+stm32_dma_config_make_reg(stm32_dma_burst_t mburst,
+                          stm32_dma_burst_t pburst,
+                          stm32_dma_prio_t prio,
+                          stm32_dma_data_size_t msize,
+                          stm32_dma_data_size_t psize,
+                          stm32_dma_incr_mode_t minc,
+                          stm32_dma_incr_mode_t pinc,
+                          stm32_dma_circular_t circular,
+                          stm32_dma_direction_t direction)
 {
   uint32_t reg = 0;
 
@@ -143,9 +142,8 @@ stm32_dma_config(stm32_dma_instance_t instance,
   reg |= pinc   << 9;
   reg |= circular << 8;
   reg |= direction << 6;
-  stm32_dma_config_u32(instance, reg);
+  return reg;
 }
-
 
 
 void
