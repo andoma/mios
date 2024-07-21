@@ -1,6 +1,11 @@
 #include <mios/block.h>
+#include <mios/mios.h>
+#include <mios/error.h>
 
 #include <stdlib.h>
+#include <malloc.h>
+#include <string.h>
+#include <stdio.h>
 
 typedef struct {
   block_iface_t iface;
@@ -118,4 +123,142 @@ block_create_partition(block_iface_t *parent,
   p->parent = parent;
   p->offset = block_offset;
   return &p->iface;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+typedef struct {
+  block_iface_t iface;
+  block_iface_t *parent;
+  int flags;
+} verifier_t;
+
+static error_t
+verifier_erase(struct block_iface *bi, size_t block)
+{
+  verifier_t *v = (verifier_t *)bi;
+  return v->parent->erase(v->parent, block);
+}
+
+static error_t
+verifier_write(struct block_iface *bi, size_t block,
+               size_t offset, const void *data, size_t length)
+{
+  verifier_t *v = (verifier_t *)bi;
+
+  if(v->flags & BLOCK_VERIFIER_DUMP)
+    sthexdump(stdio, "WRITE", data, length, block * 4096 + offset);
+
+  error_t err = v->parent->write(v->parent, block, offset, data, length);
+  if(err) {
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: write failed %s", error_to_string(err));
+    return err;
+  }
+
+  void *copy = xalloc(length, 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  if(copy == NULL) {
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: no mem");
+    return ERR_NO_MEMORY;
+  }
+
+  err = v->parent->read(v->parent, block, offset, copy, length);
+  if(err) {
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: write readback failed %s", error_to_string(err));
+    free(copy);
+    return err;
+  }
+
+  if(memcmp(copy, data, length)) {
+    sthexdump(stdio, "WRITE", data, length, block * 4096 + offset);
+    sthexdump(stdio, "READB", copy, length, block * 4096 + offset);
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: write readback mismatch");
+    free(copy);
+    return err;
+  }
+
+  free(copy);
+  return 0;
+}
+
+static error_t
+verifier_read(struct block_iface *bi, size_t block,
+               size_t offset, void *data, size_t length)
+{
+  verifier_t *v = (verifier_t *)bi;
+
+  error_t err = v->parent->read(v->parent, block, offset, data, length);
+  if(err) {
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: read failed %s", error_to_string(err));
+    return err;
+  }
+  if(v->flags & BLOCK_VERIFIER_DUMP)
+    sthexdump(stdio, "READ ", data, length, block * 4096 + offset);
+
+  void *copy = xalloc(length, 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  if(copy == NULL) {
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: no mem");
+    return ERR_NO_MEMORY;
+  }
+
+  err = v->parent->read(v->parent, block, offset, copy, length);
+  if(err) {
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: read2 failed %s", error_to_string(err));
+    return err;
+  }
+
+
+  if(memcmp(copy, data, length)) {
+    sthexdump(stdio, "READ1", data, length, block * 4096 + offset);
+    sthexdump(stdio, "READ2", copy, length, block * 4096 + offset);
+    if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
+      panic("blockverifier: read mismatch");
+    free(copy);
+    return err;
+  }
+  free(copy);
+  return 0;
+}
+
+static error_t
+verifier_ctrl(struct block_iface *bi, block_ctrl_op_t op)
+{
+  verifier_t *v = (verifier_t *)bi;
+  return v->parent->ctrl(v->parent, op);
+}
+
+
+block_iface_t *
+block_create_verifier(block_iface_t *parent, int flags)
+{
+  verifier_t *v = malloc(sizeof(verifier_t));
+  v->flags = flags;
+
+  v->iface.num_blocks = parent->num_blocks;
+  v->iface.block_size = parent->block_size;
+
+  v->iface.erase = verifier_erase;
+  v->iface.write = verifier_write;
+  v->iface.read = verifier_read;
+  v->iface.ctrl = verifier_ctrl;
+  v->parent = parent;
+  return &v->iface;
 }

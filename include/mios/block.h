@@ -36,3 +36,8 @@ block_iface_t *block_create_partition(block_iface_t *parent,
                                       size_t block_offset,
                                       size_t num_blocks,
                                       int partition_flags);
+
+#define BLOCK_VERIFIER_PANIC_ON_ERR 0x1
+#define BLOCK_VERIFIER_DUMP         0x2
+
+block_iface_t *block_create_verifier(block_iface_t *parent, int flags);
