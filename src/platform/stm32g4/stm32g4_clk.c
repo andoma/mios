@@ -42,6 +42,13 @@ stm32g4_reinit_pll(void)
   int pll_m = 4; // Internal 16MHz / 4
   uint32_t pllcfgr = 2;
 
+#if CPU_SYSCLK_MHZ > 150
+  reg_clr_bit(PWR_CR5, 8);
+#endif
+
+  // D-CACHE I-CACHE PREFETCH, 4 wait states
+  reg_wr(FLASH_ACR, (1 << 18) | 0x704);
+
   // D-CACHE I-CACHE PREFETCH, 5 wait states
   reg_wr(FLASH_ACR, (1 << 18) | 0x705);
 
