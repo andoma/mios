@@ -19,11 +19,20 @@ typedef struct stm32_spi {
   stm32_dma_instance_t rx_dma;
   stm32_dma_instance_t tx_dma;
   uint16_t clkid;
+
+
+  uint32_t tx_dma_buf_cfg;
+  uint32_t tx_dma_nul_cfg;
+
+  uint32_t rx_dma_buf_cfg;
+  uint32_t rx_dma_nul_cfg;
+
 } stm32_spi_t;
 
 #define CR2_VALUE (1 << 12) // Should be set for 8 bit wide transfers
 
 static uint32_t tx_zero;
+static uint32_t rx_void;
 
 static error_t
 spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
@@ -31,67 +40,43 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
 {
   if(tx == NULL) {
     tx = (void *)&tx_zero;
-    stm32_dma_config(spi->tx_dma,
-                     STM32_DMA_BURST_NONE,
-                     STM32_DMA_BURST_NONE,
-                     STM32_DMA_PRIO_LOW,
-                     STM32_DMA_8BIT,
-                     STM32_DMA_8BIT,
-                     STM32_DMA_FIXED,
-                     STM32_DMA_FIXED,
-                     STM32_DMA_SINGLE,
-                     STM32_DMA_M_TO_P);
+    stm32_dma_config_set_reg(spi->tx_dma, spi->tx_dma_nul_cfg);
   } else {
-    stm32_dma_config(spi->tx_dma,
-                     STM32_DMA_BURST_NONE,
-                     STM32_DMA_BURST_NONE,
-                     STM32_DMA_PRIO_LOW,
-                     STM32_DMA_8BIT,
-                     STM32_DMA_8BIT,
-                     STM32_DMA_INCREMENT,
-                     STM32_DMA_FIXED,
-                     STM32_DMA_SINGLE,
-                     STM32_DMA_M_TO_P);
+    stm32_dma_config_set_reg(spi->tx_dma, spi->tx_dma_buf_cfg);
+  }
+
+  if(rx == NULL) {
+    rx = (void *)&rx_void;
+    stm32_dma_config_set_reg(spi->rx_dma, spi->rx_dma_nul_cfg);
+  } else {
+    stm32_dma_config_set_reg(spi->rx_dma, spi->rx_dma_buf_cfg);
   }
 
   stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
   stm32_dma_set_nitems(spi->tx_dma, len);
 
-  if(rx != NULL) {
-    stm32_dma_set_mem0(spi->rx_dma, rx);
-    stm32_dma_set_nitems(spi->rx_dma, len);
-    reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE | 1);
-  }
+  stm32_dma_set_mem0(spi->rx_dma, rx);
+  stm32_dma_set_nitems(spi->rx_dma, len);
 
   int q = irq_forbid(IRQ_LEVEL_SCHED);
 
   stm32_dma_start(spi->tx_dma);
-  if(rx != NULL) {
-    stm32_dma_start(spi->rx_dma);
-  }
+  stm32_dma_start(spi->rx_dma);
 
-  reg_wr(spi->base_addr + SPI_CR2,
-         CR2_VALUE |
-         (1 << 1) |
-         (rx ? 1 : 0));
+  reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE | 3);
+
+  reg_wr(spi->base_addr + SPI_CR1, config);
 
   error_t err;
-  err = rx != NULL ? stm32_dma_wait(spi->rx_dma) : 0;
+  err = stm32_dma_wait(spi->rx_dma);
   if(!err) {
     err = stm32_dma_wait(spi->tx_dma);
   }
 
-  stm32_dma_stop(spi->tx_dma);
-  if(rx != NULL) {
-    stm32_dma_stop(spi->rx_dma);
-  }
   irq_permit(q);
 
-  if(rx == NULL) {
-    while(reg_rd(spi->base_addr + SPI_SR) != 2) {
-      (void)reg_rd(spi->base_addr + SPI_DR);
-    }
-  }
+  stm32_dma_stop(spi->tx_dma);
+  stm32_dma_stop(spi->rx_dma);
 
   reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE);
 
@@ -109,7 +94,6 @@ spi_rw_locked(spi_t *dev, const uint8_t *tx, uint8_t *rx, size_t len,
 
   reg_wr(spi->base_addr + SPI_CR1, config & ~(1 << 6));
   gpio_set_output(nss, 0);
-  reg_wr(spi->base_addr + SPI_CR1, config);
 
   error_t err = spi_dma(spi, tx, rx, len, config);
   gpio_set_output(nss, 1);
@@ -141,7 +125,6 @@ spi_rwv(struct spi *bus, const struct iovec *txiov,
 
   reg_wr(spi->base_addr + SPI_CR1, config & ~(1 << 6));
   gpio_set_output(nss, 0);
-  reg_wr(spi->base_addr + SPI_CR1, config);
 
   for(size_t i = 0; i < count; i++) {
     err = spi_dma(spi, txiov[i].iov_base,
@@ -221,20 +204,52 @@ stm32_spi_create(int reg_base, int clkid,
   spi->tx_dma = stm32_dma_alloc(tx_dma_resource_id, "spitx");
   stm32_dma_make_waitable(spi->tx_dma, "spitx");
 
-  stm32_dma_config(spi->rx_dma,
-                   STM32_DMA_BURST_NONE,
-                   STM32_DMA_BURST_NONE,
-                   STM32_DMA_PRIO_LOW,
-                   STM32_DMA_8BIT,
-                   STM32_DMA_8BIT,
-                   STM32_DMA_INCREMENT,
-                   STM32_DMA_FIXED,
-                   STM32_DMA_SINGLE,
-                   STM32_DMA_P_TO_M);
+  spi->rx_dma_nul_cfg =
+    stm32_dma_config_make_reg(STM32_DMA_BURST_NONE,
+                              STM32_DMA_BURST_NONE,
+                              STM32_DMA_PRIO_LOW,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_FIXED,
+                              STM32_DMA_FIXED,
+                              STM32_DMA_SINGLE,
+                              STM32_DMA_P_TO_M);
+
+  spi->rx_dma_buf_cfg =
+    stm32_dma_config_make_reg(STM32_DMA_BURST_NONE,
+                              STM32_DMA_BURST_NONE,
+                              STM32_DMA_PRIO_LOW,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_INCREMENT,
+                              STM32_DMA_FIXED,
+                              STM32_DMA_SINGLE,
+                              STM32_DMA_P_TO_M);
+
+  spi->tx_dma_nul_cfg =
+    stm32_dma_config_make_reg(STM32_DMA_BURST_NONE,
+                              STM32_DMA_BURST_NONE,
+                              STM32_DMA_PRIO_LOW,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_FIXED,
+                              STM32_DMA_FIXED,
+                              STM32_DMA_SINGLE,
+                              STM32_DMA_M_TO_P);
+
+  spi->tx_dma_buf_cfg =
+    stm32_dma_config_make_reg(STM32_DMA_BURST_NONE,
+                              STM32_DMA_BURST_NONE,
+                              STM32_DMA_PRIO_LOW,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_8BIT,
+                              STM32_DMA_INCREMENT,
+                              STM32_DMA_FIXED,
+                              STM32_DMA_SINGLE,
+                              STM32_DMA_M_TO_P);
 
   stm32_dma_set_paddr(spi->rx_dma, spi->base_addr + SPI_DR);
   stm32_dma_set_paddr(spi->tx_dma, spi->base_addr + SPI_DR);
-
 
   spi->spi.rw = spi_rw;
   spi->spi.rwv = spi_rwv;
