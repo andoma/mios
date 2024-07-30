@@ -11,3 +11,5 @@ ssd1306_t *ssd1306_create(struct i2c *bus);
 error_t ssd1306_init(ssd1306_t *dev);
 
 error_t ssd1306_print(ssd1306_t *dev, int row, const char *str);
+
+error_t ssd1306_enable_output(ssd1306_t *dev, int on);

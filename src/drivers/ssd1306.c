@@ -206,3 +206,13 @@ ssd1306_print(ssd1306_t *dev, int row, const char *str)
   mutex_unlock(&dev->mutex);
   return err;
 }
+
+
+error_t
+ssd1306_enable_output(ssd1306_t *dev, int on)
+{
+  mutex_lock(&dev->mutex);
+  error_t err = send_command(dev, on ? 0xaf : 0xae);
+  mutex_unlock(&dev->mutex);
+  return err;
+}
