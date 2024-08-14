@@ -3,6 +3,7 @@
 #include <mios/stream.h>
 #include <stdlib.h>
 #include <alloca.h>
+#include <malloc.h>
 
 #include "hdlc.h"
 
@@ -53,7 +54,8 @@ hdlc_read(stream_t *s,
           void *opaque, size_t max_frame_size)
 {
   uint8_t *buf;
-  buf = max_frame_size <= 16 ? alloca(max_frame_size) : malloc(max_frame_size);
+  buf = max_frame_size <= 16 ? alloca(max_frame_size) : xalloc(max_frame_size,
+                                                               0, MEM_TYPE_DMA);
 
   while(1) {
     cb(opaque, buf,
