@@ -54,8 +54,10 @@ __attribute__((section("bltext"),noinline))
 static void
 console_print(char c)
 {
+#ifdef USART_CONSOLE
   while(!(reg_rd(USART_CONSOLE + USART_SR) & (1 << 7))) {}
   reg_wr(USART_CONSOLE + USART_TDR, c);
+#endif
 }
 
 __attribute__((section("bltext"),noinline,unused))
@@ -125,6 +127,8 @@ console_print_string(const char *str)
 //======================================================================
 
 #define SPI1_BASE  0x40013000
+#define SPI2_BASE  0x40003800
+#define SPI3_BASE  0x40003c00
 
 #define SPI_CR1    0x00
 #define SPI_CR2    0x04
@@ -141,17 +145,19 @@ static const uint32_t reginit[] = {
   // Clocks
   RCC_AHB1ENR,     (1 << 12) | (1 << 8),  // CRC and FLASH
   RCC_APB2ENR,     (1 << 14) | (1 << 12), // CLK_USART1 | CLK_SPI1
-  RCC_APB1ENR1,    (1 << 17) | (1 << 18), // CLK_USART2 | CLK_USART3
+  RCC_APB1ENR1,    (1 << 17) | (1 << 18) |// CLK_USART2 | CLK_USART3
+                   (1 << 14) | (1 << 15), // CLK_SPI2 | CLK_SPI3
   RCC_AHB2ENR,     0xf,                   // CLK_GPIO{A,B,C,D}
 
   // -----------------------------------------------------
   // Console
   // -----------------------------------------------------
 
+#ifdef USART_CONSOLE
   USART_CONSOLE + USART_BRR, 139, // 115200 BAUD
 
   USART_CONSOLE + USART_CR1, (USART_CR1_UE | USART_CR1_TE), // Enable UART TX
-
+#endif
   // -----------------------------------------------------
   // GPIO PORT A
   // -----------------------------------------------------
@@ -192,6 +198,9 @@ static const uint32_t reginit[] = {
 #ifdef SPI1_PB3_PB4_PB5
   GPIO_BITQUAD(3, 5) | GPIO_BITQUAD(4, 5) | GPIO_BITQUAD(5, 5) |
 #endif
+#ifdef SPI3_PC10_PC11_PB5
+  GPIO_BITQUAD(5, 6) |
+#endif
   0,
 
   GPIO_AFRH(PB),
@@ -203,6 +212,9 @@ static const uint32_t reginit[] = {
   GPIO_MODER(PB),
 #ifdef SPI1_PB3_PB4_PB5
   GPIO_BITPAIR(3, 2) | GPIO_BITPAIR(4, 2) | GPIO_BITPAIR(5, 2) |
+#endif
+#ifdef SPI3_PC10_PC11_PB5
+  GPIO_BITPAIR(5, 2) |
 #endif
 #ifdef USART1_PB6_PB7
   GPIO_BITPAIR(6, 2) | GPIO_BITPAIR(7, 2) |
@@ -220,11 +232,17 @@ static const uint32_t reginit[] = {
 #ifdef USART3_PC10_PC11
   GPIO_BITPAIR(10, 2) | GPIO_BITPAIR(11, 2) |
 #endif
+#ifdef SPI3_PC10_PC11_PB5
+  GPIO_BITPAIR(10, 2) | GPIO_BITPAIR(11, 2) |
+#endif
   GPIO_MODER_PC,
 
   GPIO_AFRH(PC),
 #ifdef USART3_PC10_PC11
   GPIO_BITQUAD(2, 7) | GPIO_BITQUAD(3, 7) |
+#endif
+#ifdef SPI3_PC10_PC11_PB5
+  GPIO_BITQUAD(2, 6) | GPIO_BITQUAD(3, 6) |
 #endif
   0,
 
@@ -508,6 +526,7 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
   }
 
   spiflash_disable();
+  delay();
 
   console_print_string(welcomestr);
 
