@@ -5,8 +5,6 @@
 #include "stm32g4_clk.h"
 #include "stm32g4_wdog.h"
 
-#include "version_git.h"
-
 #define BLOCKSIZE 32
 
 #ifndef GPIO_MODER_PA
