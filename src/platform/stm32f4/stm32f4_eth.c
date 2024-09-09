@@ -428,25 +428,21 @@ stm32f4_periodic(void *opaque, uint64_t now)
 
 
 void
-stm32f4_eth_init(gpio_t phyrst)
+stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count)
 {
   clk_enable(CLK_SYSCFG);
   reg_set_bit(SYSCFG_PMC, 23); // Enable RMII mode
 
-  static const uint8_t gpios[] =
-    { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7),
-      GPIO_PB(11), GPIO_PB(12), GPIO_PB(13),
-      GPIO_PC(1), GPIO_PC(4), GPIO_PC(5)
-    };
-
-  for(size_t i = 0; i < sizeof(gpios); i++) {
+  for(size_t i = 0; i < gpio_count; i++) {
     gpio_conf_af(gpios[i], 11, GPIO_PUSH_PULL,
                  GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
   }
 
-  gpio_conf_output(phyrst, GPIO_PUSH_PULL,
-                   GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_set_output(phyrst, 1);
+  if(phyrst != GPIO_UNUSED) {
+    gpio_conf_output(phyrst, GPIO_PUSH_PULL,
+                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_set_output(phyrst, 1);
+  }
 
   clk_enable(CLK_ETH);
   clk_enable(CLK_ETHTX);
