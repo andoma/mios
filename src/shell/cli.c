@@ -5,6 +5,7 @@
 #include <mios/mios.h>
 #include <mios/error.h>
 #include <mios/version.h>
+#include <mios/hostname.h>
 
 
 static const char errmsg[] = {
@@ -129,6 +130,11 @@ dispatch_command(cli_t *c, char *line)
 static void
 cli_prompt(cli_t *cl, char promptchar)
 {
+  mutex_lock(&hostname_mutex);
+  if(hostname[0]) {
+    cli_printf(cl, "%s", hostname);
+  }
+  mutex_unlock(&hostname_mutex);
   cli_printf(cl, "%c ", promptchar);
   cli_printf(cl, NULL);
 }

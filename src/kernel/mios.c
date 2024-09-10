@@ -4,6 +4,7 @@
 #include <mios/sys.h>
 #include <mios/eventlog.h>
 #include <mios/version.h>
+#include <mios/hostname.h>
 #include <stdio.h>
 #include <string.h>
 #include "irq.h"
@@ -12,6 +13,22 @@ extern unsigned long _init_array_begin;
 extern unsigned long _init_array_end;
 extern unsigned long _fini_array_begin;
 extern unsigned long _fini_array_end;
+
+#ifdef APPNAME
+char hostname[HOSTNAME_BUFFER_SIZE] = APPNAME;
+#else
+char hostname[HOSTNAME_BUFFER_SIZE];
+#endif
+mutex_t hostname_mutex;
+
+void
+hostname_set(const char *name)
+{
+  mutex_lock(&hostname_mutex);
+  strlcpy(hostname, name, sizeof(hostname));
+  mutex_unlock(&hostname_mutex);
+}
+
 
 
 int  __attribute__((weak))
