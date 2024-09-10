@@ -5,6 +5,7 @@
 #include <mios/mios.h>
 #include <mios/task.h>
 #include <mios/cli.h>
+#include <mios/ghook.h>
 
 #include "irq.h"
 
@@ -40,11 +41,17 @@ blinker(void *arg)
   }
 }
 
+
 static void
-ble_status(int flags)
+ble_status_update(ghook_type_t type, int on)
 {
-  gpio_set_output(LED_RED, !!(flags & NRF52_BLE_STATUS_CONNECTED));
+  if(type != GHOOK_BLE_STATUS)
+    return;
+
+  gpio_set_output(LED_RED, on);
 }
+
+GHOOK(ble_status_update);
 
 static void __attribute__((constructor(800)))
 platform_init_late(void)
@@ -56,5 +63,5 @@ platform_init_late(void)
 
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
 
-  nrf52_radio_ble_init("bluefruit", ble_status);
+  nrf52_radio_ble_init("bluefruit");
 }
