@@ -404,6 +404,68 @@ pbuf_pullup(pbuf_t *pb, size_t bytes)
   return 0;
 }
 
+int
+pbuf_read_at(pbuf_t *pb, void *out, size_t offset, size_t len)
+{
+  while(1) {
+    if(pb == NULL)
+      return -1;
+    if(offset >= pb->pb_buflen) {
+      offset -= pb->pb_buflen;
+      pb = pb->pb_next;
+    } else {
+      break;
+    }
+  }
+
+  while(len) {
+    if(pb == NULL)
+      return -1;
+    size_t to_copy = MIN(len, pb->pb_buflen);
+    memcpy(out, pb->pb_data + pb->pb_offset + offset, to_copy);
+
+    out += to_copy;
+    len -= to_copy;
+
+    offset = 0;
+    pb = pb->pb_next;
+  }
+  return 0;
+}
+
+
+int
+pbuf_memcmp_at(pbuf_t *pb, const void *data, size_t offset, size_t len)
+{
+  if(len == 0)
+    return 0;
+
+  while(1) {
+    if(pb == NULL)
+      return -1;
+    if(offset >= pb->pb_buflen) {
+      offset -= pb->pb_buflen;
+      pb = pb->pb_next;
+    } else {
+      break;
+    }
+  }
+
+  while(len) {
+    if(pb == NULL)
+      return -1;
+    size_t to_cmp = MIN(len, pb->pb_buflen);
+    int n = memcmp(data, pb->pb_data + pb->pb_offset + offset, to_cmp);
+    if(n)
+      return n;
+    data += to_cmp;
+    len -= to_cmp;
+    offset = 0;
+    pb = pb->pb_next;
+  }
+  return 0;
+}
+
 
 void
 pbuf_reset(pbuf_t *pb, size_t header_size, size_t len)
