@@ -188,6 +188,25 @@ ether_periodic(void *opaque, uint64_t expire)
   ether_nexthop_periodic(eni);
 }
 
+static void
+ether_ipv4_output_mcast(ether_netif_t *eni, pbuf_t *pb, uint32_t ipv4_addr)
+{
+  pb = pbuf_prepend(pb, 14, 1, 0);
+
+  uint8_t *eh = pbuf_data(pb, 0);
+  eh[0] = 0x01;
+  eh[1] = 0x00;
+  eh[2] = 0x5e;
+  eh[3] = (ipv4_addr >> 16) & 0x7f;
+  eh[4] = (ipv4_addr >> 8);
+  eh[5] = ipv4_addr;
+
+  memcpy(eh + 6, eni->eni_addr, 6);
+
+  eh[12] = 8;
+  eh[13] = 0;
+  eni->eni_output(eni, pb, 0);
+}
 
 static pbuf_t *
 ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
@@ -195,6 +214,14 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
   ether_netif_t *eni = (ether_netif_t *)ni;
 
   if(nh == NULL) {
+
+    const ipv4_header_t *ip = pbuf_cdata(pb, 0);
+    if(ntohl(ip->dst_addr) >= 0xe0000000 &&
+       ntohl(ip->dst_addr) <  0xf0000000) {
+      ether_ipv4_output_mcast(eni, pb, ntohl(ip->dst_addr));
+      return NULL;
+    }
+
     ether_output(eni, pb, 0x0800, ether_bcast);
     return NULL;
   }
