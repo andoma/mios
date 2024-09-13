@@ -7,6 +7,7 @@
 #include <mios/version.h>
 #include <mios/hostname.h>
 
+#include "history.h"
 
 static const char errmsg[] = {
   "OK\0"
@@ -139,9 +140,21 @@ cli_prompt(cli_t *cl, char promptchar)
   cli_printf(cl, NULL);
 }
 
+#define ESCAPE 27
+#define OPENING_BRACKET 91
+#define UP 65
+#define DOWN 66
+#define RIGHT 67
+#define LEFT 68
+const char code_cursor_left[] = {ESCAPE, OPENING_BRACKET, LEFT, 0};
+const char code_cursor_right[] = {ESCAPE, OPENING_BRACKET, RIGHT, 0};
 void
 cli_input_char(cli_t *cl, char c, char promptchar)
 {
+  static enum {
+    RAW,
+    ESCAPED,
+    BRACKET } state = RAW;
   switch((uint8_t)c) {
   case 127:
   case 8:
@@ -152,24 +165,66 @@ cli_input_char(cli_t *cl, char c, char promptchar)
       cli_printf(cl, "\033[D\033[K");
     }
     break;
-
-  case 32 ... 126:
-    if(cl->cl_pos < CLI_LINE_BUF_SIZE - 1) {
-      cl->cl_buf[cl->cl_pos++] = c;
-      cl->cl_buf[cl->cl_pos] = 0;
-      cli_printf(cl, "%c", c);
-    }
+  case ESCAPE:
+    state = ESCAPED;
     break;
+  case OPENING_BRACKET:
+    if (state == ESCAPED) {
+      state = BRACKET;
+      break;
+    }
+  case UP:
+    if (state == BRACKET) {
+      char *str = history_get_current_line();
+      history_up();
+      if (str)
+        strlcpy(cl->cl_buf, str, sizeof cl->cl_buf - 1);
+      cli_printf(cl, "\r%s", cl->cl_buf);
+      cl->cl_pos = strlen(cl->cl_buf) - 1;
+      break;
+    }
+  case DOWN:
+    if (state == BRACKET) {
+      char *str = history_get_current_line();
+      history_down();
+      if (str)
+        strlcpy(cl->cl_buf, str, sizeof cl->cl_buf - 1);
+      cli_printf(cl, "\r%s", cl->cl_buf);
+      cl->cl_pos = strlen(cl->cl_buf) - 1;
+      break;
+    }
+  case RIGHT:
+    if (state == BRACKET) {
+      cli_printf(cl, code_cursor_right);
+      if (cl->cl_pos < sizeof cl->cl_buf)
+        cl->cl_pos++;
+      break;
+    }
+  case LEFT:
+    if (state == BRACKET) {
+      cli_printf(cl, code_cursor_left);
+      cl->cl_pos--;
+      if (cl->cl_pos < 0)
+        cl->cl_pos = 0;
+    break;
+    }
   case 10:
   case 13:
     cli_printf(cl, "\r\n");
     dispatch_command(cl, cl->cl_buf);
+    history_add(cl->cl_buf);
     cl->cl_pos = 0;
     cl->cl_buf[cl->cl_pos] = 0;
     cli_prompt(cl, promptchar);
+    state = RAW;
     break;
   default:
     //    printf("\n\nGot code %d\n", c);
+    if(cl->cl_pos < CLI_LINE_BUF_SIZE - 1) {
+      cl->cl_buf[cl->cl_pos++] = c;
+      cli_printf(cl, "%c", c);
+    }
+    state = RAW;
     break;
   }
   cli_printf(cl, NULL);
@@ -219,6 +274,7 @@ cli_console(char promptchar)
 {
   if(stdio == NULL)
     return;
+  history_init();
   while(1) {
     if(cli_on_stream(stdio, promptchar) < 0)
       return;
