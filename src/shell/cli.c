@@ -126,28 +126,34 @@ dispatch_command(cli_t *c, char *line)
   cli_printf(c, "No such command\n");
 }
 
-
-
-static void
-cli_prompt(cli_t *cl, char promptchar)
-{
-  mutex_lock(&hostname_mutex);
-  if(hostname[0]) {
-    cli_printf(cl, "%s", hostname);
-  }
-  mutex_unlock(&hostname_mutex);
-  cli_printf(cl, "%c ", promptchar);
-  cli_printf(cl, NULL);
-}
-
 #define ESCAPE 27
 #define OPENING_BRACKET 91
 #define UP 65
 #define DOWN 66
 #define RIGHT 67
 #define LEFT 68
+
+/* VT100 escape code */
 const char code_cursor_left[] = {ESCAPE, OPENING_BRACKET, LEFT, 0};
 const char code_cursor_right[] = {ESCAPE, OPENING_BRACKET, RIGHT, 0};
+const char code_clear_line[] = {ESCAPE, OPENING_BRACKET, '2', 'K', 0};
+
+static size_t
+cli_prompt(cli_t *cl, char promptchar)
+{
+  size_t len = 0;
+  cli_printf(cl, code_clear_line);
+  cli_printf(cl, "\r");
+  mutex_lock(&hostname_mutex);
+  if(hostname[0]) {
+    len = cli_printf(cl, "%s", hostname);
+  }
+  mutex_unlock(&hostname_mutex);
+  len += cli_printf(cl, "%c ", promptchar);
+  cli_printf(cl, NULL);
+  return len;
+}
+
 void
 cli_input_char(cli_t *cl, char c, char promptchar)
 {
@@ -161,10 +167,19 @@ cli_input_char(cli_t *cl, char c, char promptchar)
     // Backspace
     if(cl->cl_pos) {
       cl->cl_pos--;
-      cl->cl_buf[cl->cl_pos] = 0;
-      cli_printf(cl, "\033[D\033[K");
+      int i = cl->cl_pos + 1;
+      while (cl->cl_buf[i]) {
+        cl->cl_buf[i - 1] = cl->cl_buf[i];
+        i++;
+      }
+      cl->cl_buf[i-1] = '\0';
+      size_t len = cli_prompt(cl, promptchar);
+      cli_printf(cl, "%s", cl->cl_buf);
+      // Set cursor position
+      cli_printf(cl, "\033[%d`", cl->cl_pos + len + 1);
     }
     break;
+
   case ESCAPE:
     state = ESCAPED;
     break;
@@ -173,26 +188,33 @@ cli_input_char(cli_t *cl, char c, char promptchar)
       state = BRACKET;
       break;
     }
+    // Fallthrough
   case UP:
     if (state == BRACKET) {
       char *str = history_get_current_line();
       history_up();
+      memset(cl->cl_buf, 0, sizeof cl->cl_buf);
       if (str)
         strlcpy(cl->cl_buf, str, sizeof cl->cl_buf - 1);
-      cli_printf(cl, "\r%s", cl->cl_buf);
-      cl->cl_pos = strlen(cl->cl_buf) - 1;
+      cli_prompt(cl, promptchar);
+      cli_printf(cl, "%s", cl->cl_buf);
+      cl->cl_pos = strlen(cl->cl_buf);
       break;
     }
+    // Fallthrough
   case DOWN:
     if (state == BRACKET) {
       char *str = history_get_current_line();
       history_down();
+      memset(cl->cl_buf, 0, sizeof cl->cl_buf);
       if (str)
         strlcpy(cl->cl_buf, str, sizeof cl->cl_buf - 1);
-      cli_printf(cl, "\r%s", cl->cl_buf);
-      cl->cl_pos = strlen(cl->cl_buf) - 1;
+      cli_prompt(cl, promptchar);
+      cli_printf(cl, "%s", cl->cl_buf);
+      cl->cl_pos = strlen(cl->cl_buf);
       break;
     }
+    // Fallthrough
   case RIGHT:
     if (state == BRACKET) {
       cli_printf(cl, code_cursor_right);
@@ -200,6 +222,7 @@ cli_input_char(cli_t *cl, char c, char promptchar)
         cl->cl_pos++;
       break;
     }
+    // Fallthrough
   case LEFT:
     if (state == BRACKET) {
       cli_printf(cl, code_cursor_left);
@@ -214,7 +237,7 @@ cli_input_char(cli_t *cl, char c, char promptchar)
     dispatch_command(cl, cl->cl_buf);
     history_add(cl->cl_buf);
     cl->cl_pos = 0;
-    cl->cl_buf[cl->cl_pos] = 0;
+    memset(cl->cl_buf, 0, sizeof cl->cl_buf);
     cli_prompt(cl, promptchar);
     state = RAW;
     break;
