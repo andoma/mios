@@ -155,6 +155,16 @@ cli_prompt(cli_t *cl, char promptchar)
 }
 
 void
+cli_set_cursor_pos(cli_t *cl, int cursor_pos, char promptchar)
+{
+  size_t len = cli_prompt(cl, promptchar);
+  cl->cl_pos = cursor_pos;
+  cli_printf(cl, "%s", cl->cl_buf);
+  // Set cursor position
+  cli_printf(cl, "\033[%d`", cl->cl_pos + len + 1);
+}
+
+void
 cli_input_char(cli_t *cl, char c, char promptchar)
 {
   static enum {
@@ -163,8 +173,7 @@ cli_input_char(cli_t *cl, char c, char promptchar)
     BRACKET } state = RAW;
   switch((uint8_t)c) {
   case 127:
-  case 8:
-    // Backspace
+    // Delete code (backspace function)
     if(cl->cl_pos) {
       cl->cl_pos--;
       int i = cl->cl_pos + 1;
@@ -173,13 +182,27 @@ cli_input_char(cli_t *cl, char c, char promptchar)
         i++;
       }
       cl->cl_buf[i-1] = '\0';
-      size_t len = cli_prompt(cl, promptchar);
-      cli_printf(cl, "%s", cl->cl_buf);
-      // Set cursor position
-      cli_printf(cl, "\033[%d`", cl->cl_pos + len + 1);
+      cli_set_cursor_pos(cl, cl->cl_pos, promptchar);
     }
     break;
-
+  case 4: // Backspace code (delete function)
+  case 8: // Ctrl-d
+    if(cl->cl_pos >= 0) {
+      int i = cl->cl_pos + 1;
+      while (cl->cl_buf[i]) {
+        cl->cl_buf[i - 1] = cl->cl_buf[i];
+        i++;
+      }
+      cl->cl_buf[i-1] = '\0';
+      cli_set_cursor_pos(cl, cl->cl_pos, promptchar);
+    }
+    break;
+  case 1: // Ctrl-a (QEMU eats this, do it twice to send it)
+    cli_set_cursor_pos(cl, 0, promptchar);
+    break;
+  case 5: // Ctrl-e
+    cli_set_cursor_pos(cl, strlen(cl->cl_buf), promptchar);
+    break;
   case ESCAPE:
     state = ESCAPED;
     break;
@@ -244,8 +267,20 @@ cli_input_char(cli_t *cl, char c, char promptchar)
   default:
     //    printf("\n\nGot code %d\n", c);
     if(cl->cl_pos < CLI_LINE_BUF_SIZE - 1) {
-      cl->cl_buf[cl->cl_pos++] = c;
-      cli_printf(cl, "%c", c);
+      if (cl->cl_buf[cl->cl_pos]) {
+        // Insert mode
+        int i = strlen(cl->cl_buf);
+        cl->cl_buf[i+1] = '\0';
+        while (i > cl->cl_pos) {
+          i--;
+          cl->cl_buf[i+1] = cl->cl_buf[i];
+        }
+        cl->cl_buf[cl->cl_pos++] = c;
+        cli_set_cursor_pos(cl, cl->cl_pos, promptchar);
+      } else {
+        cl->cl_buf[cl->cl_pos++] = c;
+        cli_printf(cl, "%c", c);
+      }
     }
     state = RAW;
     break;
