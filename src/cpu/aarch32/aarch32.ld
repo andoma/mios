@@ -92,6 +92,16 @@ SECTIONS {
                 _edata = .;
         } >RAM
 
+        .stack (NOLOAD): {
+                . = ALIGN(8);
+                _svcstack_start = .;
+                . = . + 4096;
+                _svcstack_end = .;
+                _irqstack_start = .;
+                . = . + 4096;
+                _irqstack_end = .;
+        } >RAM
+
         .bss (NOLOAD): {
                 . = ALIGN(4);
                 _sbss = .;
@@ -102,14 +112,5 @@ SECTIONS {
                 _ebss = .;
         } >RAM
 
-        .stack (NOLOAD): {
-                . = ALIGN(8);
-                _svcstack_start = .;
-                . = . + 4096;
-                _svcstack_end = .;
-                _irqstack_start = .;
-                . = . + 4096;
-                _irqstack_end = .;
-        } >RAM
 
 }
