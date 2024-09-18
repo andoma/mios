@@ -4,8 +4,10 @@
 
 #include <mios/timer.h>
 #include <mios/mios.h>
+#include <mios/prng.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define PTLOAD   0x600
 #define PTCNTR   0x604
@@ -98,4 +100,18 @@ systick_init(void)
   reg_wr(pbase + PTLOAD, TICKS_PER_HZ);
   reg_wr(pbase + PTCTRL, 0b111);
   irq_enable_fn(29, IRQ_LEVEL_CLOCK, tick_irq);
+}
+
+
+
+// XXX: This is a bad PRNG as it only uses the systick timer as source
+
+int  __attribute__((weak))
+rand(void)
+{
+  static prng_t state;
+
+  uint32_t pbase = cpu_get_periphbase();
+  uint32_t src = reg_rd(pbase + PTCNTR);
+  return prng_get(&state, src) & RAND_MAX;
 }
