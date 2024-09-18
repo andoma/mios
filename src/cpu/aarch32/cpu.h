@@ -34,21 +34,11 @@ cpu_get_periphbase(void)
   return result;
 }
 
-#if 0
-static inline uint32_t
-get_cpsr(void)
-{
-  uint32_t cpsr;
-  asm volatile("mrs %0, CPSR" : "=r"(cpsr));
-  return cpsr;
-}
-
 
 static inline uint32_t
-get_spsr(void)
+cpu_get_sctlr(void)
 {
-  uint32_t spsr;
-  asm volatile("mrs %0, SPSR" : "=r"(spsr));
-  return spsr;
+  uint32_t result;
+  asm("mrc p15, 0, %0, c1, c0, 0" : "=r" (result));
+  return result;
 }
-#endif
