@@ -15,7 +15,8 @@ static struct history {
   char **current;
 } history;
 
-static char *zstrdup(const char *line)
+static char *
+zstrdup(const char *line)
 {
   size_t len = strlen(line);
   char *new = xalloc(len + 1, 1, MEM_MAY_FAIL);
@@ -25,7 +26,8 @@ static char *zstrdup(const char *line)
   return new;
 }
 
-void history_add(const char *line)
+void
+history_add(const char *line)
 {
   mutex_lock(&history_mutex);
   if (history.latest == NULL) {
@@ -43,7 +45,8 @@ void history_add(const char *line)
   mutex_unlock(&history_mutex);
 }
 
-void history_up()
+void
+history_up(void)
 {
   mutex_lock(&history_mutex);
   if (history.current == NULL) {
@@ -59,7 +62,8 @@ void history_up()
   mutex_unlock(&history_mutex);
 }
 
-void history_down()
+void
+history_down(void)
 {
   mutex_lock(&history_mutex);
   if (history.current == NULL) {
@@ -76,7 +80,8 @@ void history_down()
   mutex_unlock(&history_mutex);
 }
 
-char *history_get_current_line(void)
+char *
+history_get_current_line(void)
 {
   char *ret;
   mutex_lock(&history_mutex);

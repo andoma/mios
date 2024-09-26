@@ -135,9 +135,9 @@ dispatch_command(cli_t *c, char *line)
 #define LEFT 68
 
 /* VT100 escape code */
-const char code_cursor_left[] = {ESCAPE, OPENING_BRACKET, LEFT, 0};
-const char code_cursor_right[] = {ESCAPE, OPENING_BRACKET, RIGHT, 0};
-const char code_clear_line[] = {ESCAPE, OPENING_BRACKET, '2', 'K', 0};
+static const char code_cursor_left[] = {ESCAPE, OPENING_BRACKET, LEFT, 0};
+static const char code_cursor_right[] = {ESCAPE, OPENING_BRACKET, RIGHT, 0};
+static const char code_clear_line[] = {ESCAPE, OPENING_BRACKET, '2', 'K', 0};
 
 static size_t
 cli_prompt(cli_t *cl, char promptchar)
@@ -155,7 +155,7 @@ cli_prompt(cli_t *cl, char promptchar)
   return len;
 }
 
-void
+static void
 cli_set_cursor_pos(cli_t *cl, int cursor_pos, char promptchar)
 {
   size_t len = cli_prompt(cl, promptchar);
@@ -165,7 +165,7 @@ cli_set_cursor_pos(cli_t *cl, int cursor_pos, char promptchar)
   cli_printf(cl, "\033[%d`", cl->cl_pos + len + 1);
 }
 
-void
+static void
 cli_input_char(cli_t *cl, char c, char promptchar)
 {
   static enum {
