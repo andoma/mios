@@ -103,6 +103,8 @@ cpu_task_switch:
         bl task_switch
         mov lr, r4
 
+        clrex
+
         cps #MODE_SYS
         mov sp, r0
         pop {r4-r11}
