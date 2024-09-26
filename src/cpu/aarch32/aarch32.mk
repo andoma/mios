@@ -15,8 +15,7 @@ GDB ?= ${TOOLCHAIN}gdb
 ENTRYPOINT ?= start
 LDFLAGS += -e ${ENTRYPOINT}
 
-#CFLAGS += -mthumb -mcpu=cortex-a9
-CFLAGS += -mcpu=cortex-a9
+CFLAGS += -mcpu=cortex-a9 -mno-unaligned-access
 
 NOFPU := -mgeneral-regs-only
 
