@@ -1,5 +1,6 @@
 
 ENABLE_TASK_DEBUG := yes
+ENABLE_NET_IPV4 := yes
 
 PLATFORM := vexpress-a9
 
@@ -19,6 +20,7 @@ CPPFLAGS += -I${PE}
 
 SRCS += ${P}/vexpress-a9.c \
 	${P}/pl011.c \
+	${P}/lan9118.c \
 
 SRCS += ${PE}/entry.s \
 	${PE}/irq.c \
