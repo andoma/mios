@@ -100,6 +100,9 @@ SECTIONS {
                 _irqstack_start = .;
                 . = . + 4096;
                 _irqstack_end = .;
+                _abtstack_start = .;
+                . = . + 4096;
+                _abtstack_end = .;
         } >RAM
 
         .bss (NOLOAD): {

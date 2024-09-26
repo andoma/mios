@@ -21,5 +21,6 @@ CFLAGS += -mcpu=cortex-a9
 NOFPU := -mgeneral-regs-only
 
 SRCS += ${C}/cpu.c \
+	${C}/exc.c \
 
 ${MOS}/cpu/aarch32/%.o : CFLAGS += ${NOFPU}

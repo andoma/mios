@@ -11,7 +11,7 @@ vector_table:
         b undef_instruction
         b swi
         b prefetch_abort
-        b data_abort
+        b data_abort0
         nop
         b irq
         b fiq
@@ -25,6 +25,9 @@ start:
         cps #MODE_IRQ // Enter IRQ mode
         ldr sp, =_irqstack_end
 
+        cps #MODE_ABT
+        ldr sp, =_abtstack_end
+
         cps #MODE_SVC
         ldr sp, =_svcstack_end
 
@@ -35,14 +38,27 @@ start:
 1:      wfi
         b 1b
 
+
 undef_instruction:
         b .
+
+
 swi:
         b .
+
+
 prefetch_abort:
         b .
-data_abort:
-        b .
+
+
+data_abort0:
+        push {r0-r12}
+        sub r0,lr,#8
+        mrs r1, spsr
+        mov r2, sp
+        b data_abort
+
+
 irq:
         sub lr, lr, #4
         srsdb #MODE_SYS!
