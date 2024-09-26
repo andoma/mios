@@ -866,7 +866,11 @@ task_init_accounting(void)
 static error_t
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  cli_printf(cli, " Name           Stack      Sp         Pri Sta CtxSwch Load\n");
+  cli_printf(cli, " Name           Stack      Sp         Pri Sta "
+#ifdef ENABLE_TASK_ACCOUNTING
+             "CtxSwch Load "
+#endif
+             "WaitOn\n");
 
   thread_t *t = NULL;
   while((t = thread_get_next(t)) != NULL) {
