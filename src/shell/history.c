@@ -1,8 +1,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <malloc.h>
+
+#include <mios/task.h>
 
 #define MAX_LINES 8
+
+static mutex_t history_mutex = MUTEX_INITIALIZER("history");
 
 static struct history {
   char *lines[MAX_LINES];
@@ -10,23 +15,19 @@ static struct history {
   char **current;
 } history;
 
-void history_init(void)
-{
-  memset(history.lines, 0, sizeof(char *) * MAX_LINES);
-  history.current = NULL;
-  history.latest = NULL;
-}
-
 static char *zstrdup(const char *line)
 {
   size_t len = strlen(line);
-  char *new = calloc(len + 1, 1);
+  char *new = xalloc(len + 1, 1, MEM_MAY_FAIL);
+  if (new == NULL)
+    return NULL;
   strlcpy(new, line, len + 1);
   return new;
 }
 
 void history_add(const char *line)
 {
+  mutex_lock(&history_mutex);
   if (history.latest == NULL) {
     history.lines[0] = zstrdup(line);
     history.latest = history.lines;
@@ -39,24 +40,32 @@ void history_add(const char *line)
     *history.latest = zstrdup(line);
   }
   history.current = history.latest;
+  mutex_unlock(&history_mutex);
 }
 
 void history_up()
 {
-  if (history.current == NULL)
+  mutex_lock(&history_mutex);
+  if (history.current == NULL) {
+    mutex_unlock(&history_mutex);
     return;
+  }
   history.current--;
   if (history.current < history.lines) {
     history.current = &history.lines[MAX_LINES - 1];
     while (*history.current == NULL)
       history.current--;
   }
+  mutex_unlock(&history_mutex);
 }
 
 void history_down()
 {
-  if (history.current == NULL)
+  mutex_lock(&history_mutex);
+  if (history.current == NULL) {
+    mutex_unlock(&history_mutex);
     return;
+  }
   history.current++;
   if (history.current >= &history.lines[MAX_LINES]) {
     history.current = history.lines;
@@ -64,11 +73,18 @@ void history_down()
       history.current++;
     history.current = history.lines;
   }
+  mutex_unlock(&history_mutex);
 }
 
 char *history_get_current_line(void)
 {
-  if (history.current == NULL)
-    return NULL;
-  return *history.current;
+  char *ret;
+  mutex_lock(&history_mutex);
+  if (history.current == NULL) {
+      mutex_unlock(&history_mutex);
+      return NULL;
+  }
+  ret = zstrdup(*history.current);
+  mutex_unlock(&history_mutex);
+  return ret;
 }
