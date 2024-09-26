@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <mios/cli.h>
 #include <mios/mios.h>
@@ -222,6 +223,7 @@ cli_input_char(cli_t *cl, char c, char promptchar)
       cli_prompt(cl, promptchar);
       cli_printf(cl, "%s", cl->cl_buf);
       cl->cl_pos = strlen(cl->cl_buf);
+      free(str);
       break;
     }
     // Fallthrough
@@ -235,6 +237,7 @@ cli_input_char(cli_t *cl, char c, char promptchar)
       cli_prompt(cl, promptchar);
       cli_printf(cl, "%s", cl->cl_buf);
       cl->cl_pos = strlen(cl->cl_buf);
+      free(str);
       break;
     }
     // Fallthrough
@@ -332,7 +335,6 @@ cli_console(char promptchar)
 {
   if(stdio == NULL)
     return;
-  history_init();
   while(1) {
     if(cli_on_stream(stdio, promptchar) < 0)
       return;
