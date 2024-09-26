@@ -42,3 +42,11 @@ cpu_get_sctlr(void)
   asm("mrc p15, 0, %0, c1, c0, 0" : "=r" (result));
   return result;
 }
+
+static inline uint32_t
+cpu_get_cpsr(void)
+{
+  uint32_t result;
+  asm("mrs %0, cpsr" : "=r" (result));
+  return result;
+}

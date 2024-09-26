@@ -104,5 +104,5 @@ static inline int
 can_sleep(void)
 {
   uint32_t pbase = cpu_get_periphbase();
-  return reg_rd(pbase + ICCRPR) >= 0xf8;
+  return reg_rd(pbase + ICCRPR) >= 0xf8 && ((cpu_get_cpsr() & 0x1f) == 0x1f);
 }
