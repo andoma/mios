@@ -4,9 +4,17 @@
 #include <mios/mios.h>
 
 #include "stm32f4_clk.h"
+#include "stm32f4_reg.h"
 #include "cpu.h"
 
 #include <net/pbuf.h>
+
+
+#define IWDG_KR  0x40003000
+#define IWDG_PR  0x40003004
+#define IWDG_RLR 0x40003008
+#define IWDG_SR  0x4000300c
+
 
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1fff7a22;
 static volatile uint32_t *const ACTLR        = (volatile uint32_t *)0xe000e008;
@@ -76,14 +84,26 @@ stm32f4_init(void)
   *DWT_CONTROL = 1;
 }
 
+void
+wdog_init(void)
+{
+  reg_wr(IWDG_KR, 0x5555);
+  reg_wr(IWDG_RLR, 256); // 2 seconds
+  reg_wr(IWDG_PR, 6);
+  reg_wr(IWDG_KR, 0xAAAA);
+  reg_wr(IWDG_KR, 0xCCCC);
+}
+
 
 void  __attribute__((noreturn))
 cpu_idle(void)
 {
+  wdog_init();
   while(1) {
     for(int i = 0; i < 100; i++) {
       asm volatile ("wfi;nop;nop;nop");
     }
     *DBGMCU_CR |= 1;
+    reg_wr(IWDG_KR, 0xAAAA);
   }
 }
