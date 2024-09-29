@@ -151,6 +151,8 @@ ether_input(netif_t *ni, pbuf_t *pb)
 static void
 nexthop_destroy(nexthop_t *nh)
 {
+  if(nh->nh_pending)
+    pbuf_free(nh->nh_pending);
   LIST_REMOVE(nh, nh_global_link);
   LIST_REMOVE(nh, nh_netif_link);
   free(nh);
