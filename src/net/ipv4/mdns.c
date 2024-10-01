@@ -109,7 +109,7 @@ dns_is_name(pbuf_t *pb, size_t offset, int *yes,
 }
 
 static void
-mdns_send_response(struct netif *ni, uint32_t from, uint16_t transaction_id,
+mdns_send_response(struct netif *ni, uint32_t from, uint16_t srcport, uint16_t transaction_id,
                    const char *dnsname, int send_unicast, int type)
 {
   pbuf_t *pb = pbuf_make(16 + 20 + 8, 0);
@@ -150,7 +150,7 @@ mdns_send_response(struct netif *ni, uint32_t from, uint16_t transaction_id,
   }
 
   if(send_unicast) {
-    udp_send(NULL, pb, from, NULL, 5353, 5353);
+    udp_send(NULL, pb, from, NULL, 5353, srcport);
   } else {
     udp_send(ni, pb, INADDR_MDNS, NULL, 5353, 5353);
   }
@@ -161,7 +161,8 @@ mdns_input_locked(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 {
   const ipv4_header_t *ip = pbuf_data(pb, 0);
   const uint32_t from = ip->src_addr;
-
+  const udp_hdr_t *udp = (void*)(ip + 1);
+  const uint16_t srcport = ntohs(udp->src_port);
   pb = pbuf_drop(pb, udp_offset + 8);
 
   if(pbuf_pullup(pb, sizeof(dns_header_t)))
@@ -199,7 +200,7 @@ mdns_input_locked(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 
     int send_unicast = class & 0x8000;
 
-    mdns_send_response(ni, from, dh->transaction_id,
+    mdns_send_response(ni, from, srcport, dh->transaction_id,
                        hostname, send_unicast, type);
   }
   return pb;
