@@ -32,6 +32,7 @@ typedef struct dns_request {
   LIST_ENTRY(dns_request) dr_link;
   uint32_t dr_addr;
   const char *dr_name;
+  pbuf_t *dr_pb;
   cond_t dr_cv;
 
 } dns_request_t;
@@ -293,6 +294,22 @@ mdns_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 
 UDP_INPUT(mdns_input, 5353);
 
+static void
+mdns_cb(struct net_task *nt, uint32_t signals)
+{
+  netif_t *ni = SLIST_FIRST(&netifs);
+  mutex_lock(&mdns_mtx);
+  dns_request_t *dr;
+  LIST_FOREACH(dr, &dns_requests, dr_link) {
+    if (dr->dr_pb)
+      udp_send(ni, dr->dr_pb, INADDR_MDNS, NULL, 5353, 5353);
+    dr->dr_pb = NULL;
+  }
+  mutex_unlock(&mdns_mtx) ;
+}
+
+net_task_t mdns_task = { mdns_cb };
+
 error_t
 mdns_request(const char *dnsname, uint32_t *inaddr) {
   pbuf_t *pb = pbuf_make(16 + 20 + 8, 0);
@@ -322,16 +339,17 @@ mdns_request(const char *dnsname, uint32_t *inaddr) {
   wr16_be(rr + 0, 1);      // Type: A
   wr16_be(rr + 2, 0x0001); // Class: IN + CacheFlush
 
-  udp_send(ni, pb, INADDR_MDNS, NULL, 5353, 5353);
 
   dns_request_t dr = {
     .dr_cv = COND_INITIALIZER("mdns"),
     .dr_name = dnsname,
+    .dr_pb = pb,
     .dr_addr = 0xffffffff,
   };
 
   mutex_lock(&mdns_mtx);
   LIST_INSERT_HEAD(&dns_requests, &dr, dr_link);
+  net_task_raise(&mdns_task, 1);
   // 1 second is an eternity
   uint64_t deadline = clock_get() + 1000000;
   int timeout;
