@@ -5,6 +5,8 @@ MEMORY {
          RAM   (xrw): ORIGIN = 0x20000200, LENGTH = 8K
 }
 
+NOCROSSREFS(.boot .text)
+
 SECTIONS {
         .boot : {
                 . = ALIGN(4);
