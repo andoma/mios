@@ -260,9 +260,9 @@ cli_input_char(cli_t *cl, char c, char promptchar)
   case 10:
   case 13:
     cli_printf(cl, "\r\n");
-    dispatch_command(cl, cl->cl_buf);
     if(cl->cl_buf[0])
       history_add(cl->cl_buf);
+    dispatch_command(cl, cl->cl_buf);
     cl->cl_pos = 0;
     memset(cl->cl_buf, 0, sizeof cl->cl_buf);
     cli_prompt(cl, promptchar);
