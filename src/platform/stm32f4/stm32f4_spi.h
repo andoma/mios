@@ -3,6 +3,7 @@
 #include <mios/io.h>
 
 #define SPI1_BASE 0x40013000
+#define SPI2_BASE 0x40003800
 #define SPI3_BASE 0x40003c00
 
 #define SPI_CR1    0x00
