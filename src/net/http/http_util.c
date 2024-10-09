@@ -81,9 +81,11 @@ http_match_header_value(http_header_matcher_t *hhm,
                         size_t num_callbacks, void *opaque)
 {
   hhm->hhm_len = 0;
-
+  if (hhm->hhm_mask == 0) {
+    return 0;
+  }
   unsigned int which = __builtin_clz(hhm->hhm_mask);
-  if(which == 32)
+  if(which == 32) 
     return 0;
   which = 31 - which;
   assert(which < num_callbacks);
