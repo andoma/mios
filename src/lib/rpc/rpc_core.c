@@ -35,6 +35,15 @@ rpc_appname(rpc_result_t *rr)
 
 RPC_DEF("appname()", rpc_appname);
 
+static error_t
+rpc_app_version(rpc_result_t *rr)
+{
+  rr->type = RPC_TYPE_CONST_BINARY;
+  rr->data = (void *)mios_get_app_version();
+  return 0;
+}
+
+RPC_DEF("app_version()", rpc_app_version);
 
 static error_t
 rpc_serialnum(rpc_result_t *rr)
