@@ -37,6 +37,9 @@ SRCS-${ENABLE_NET_IPV4} += ${SRCS_net} \
 	${SRC}/net/ipv4/cmd_ipv4.c \
 	${SRC}/net/ipv4/mdns.c \
 
+SRCS-${ENABLE_NET_IPV4} += \
+	${SRC}/net/ethphy/ethphy_dp83826.c \
+
 SRCS-${ENABLE_NET_HTTP} += \
        ${SRC}/net/http/http.c \
        ${SRC}/net/http/http_parser.c \

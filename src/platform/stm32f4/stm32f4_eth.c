@@ -105,6 +105,8 @@ typedef struct stm32f4_eth {
   uint8_t se_tx_rdptr; // Where DMA currently is
   uint8_t se_tx_wrptr; // Where we will write next TX desc
 
+  uint8_t se_phyaddr;
+
   timer_t se_periodic;
 
 } stm32f4_eth_t;
@@ -184,8 +186,11 @@ rx_desc_give(desc_t *rx, void *buf)
 
 
 static uint16_t
-mii_read(int phyaddr, int reg)
+mii_read(void *arg, uint16_t reg)
 {
+  stm32f4_eth_t *se = arg;
+  int phyaddr = se->se_phyaddr;
+
   reg_wr(ETH_MACMIIAR,
          (phyaddr << 11) |
          (reg << 6) |
@@ -193,11 +198,32 @@ mii_read(int phyaddr, int reg)
          (1 << 0));
 
   while(reg_rd(ETH_MACMIIAR) & 1) {
-    usleep(10);
+    if(can_sleep()) {
+      usleep(10);
+    }
   }
   return reg_rd(ETH_MACMIIDR) & 0xffff;
 }
 
+
+static void
+mii_write(void *arg, uint16_t reg, uint16_t value)
+{
+  stm32f4_eth_t *se = arg;
+  int phyaddr = se->se_phyaddr;
+
+  reg_wr(ETH_MACMIIDR, value);
+  reg_wr(ETH_MACMIIAR,
+         (phyaddr << 11) |
+         (reg << 6) |
+         (1 << 1) |  // Write
+         (1 << 0));
+  while(reg_rd(ETH_MACMIIAR) & 1) {
+    if(can_sleep()) {
+      usleep(10);
+    }
+  }
+}
 
 static void *__attribute__((noreturn))
 stm32f4_phy_thread(void *arg)
@@ -206,8 +232,8 @@ stm32f4_phy_thread(void *arg)
   int current_up = 0;
 
   while(1) {
-    mii_read(0, 1);
-    int n = mii_read(0, 1);
+    mii_read(se, 1);
+    int n = mii_read(se, 1);
     int up = !!(n & 4);
 
     if(!current_up && up) {
@@ -215,7 +241,7 @@ stm32f4_phy_thread(void *arg)
       // FIXME: Configure correct speed and duplex in MAC
 
       current_up = 1;
-      evlog(LOG_INFO, "eth: Link status: %s", "UP");
+      evlog(LOG_INFO, "eth: Link status: %s (0x%x)", "UP", n);
       net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
     } else if(current_up && !up) {
       current_up = 0;
@@ -426,12 +452,25 @@ stm32f4_periodic(void *opaque, uint64_t now)
   net_timer_arm(&se->se_periodic, now + 100000);
 }
 
+static const ethphy_reg_io_t stm32f4_eth_mdio = {
+  .read = mii_read,
+  .write = mii_write
+};
 
 void
-stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count)
+stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
+                 const ethphy_driver_t *ethphy, int phy_addr,
+                 ethphy_mode_t mode)
 {
+  stm32f4_eth_t *se = &eth;
+
   clk_enable(CLK_SYSCFG);
-  reg_set_bit(SYSCFG_PMC, 23); // Enable RMII mode
+
+  if(mode == ETHPHY_MODE_RMII) {
+    reg_set_bit(SYSCFG_PMC, 23); // Enable RMII mode
+  } else {
+    reg_clr_bit(SYSCFG_PMC, 23); // Enable MII mode
+  }
 
   for(size_t i = 0; i < gpio_count; i++) {
     gpio_conf_af(gpios[i], 11, GPIO_PUSH_PULL,
@@ -441,7 +480,10 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count)
   if(phyrst != GPIO_UNUSED) {
     gpio_conf_output(phyrst, GPIO_PUSH_PULL,
                      GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_set_output(phyrst, 0);
+    udelay(10);
     gpio_set_output(phyrst, 1);
+    udelay(10);
   }
 
   clk_enable(CLK_ETH);
@@ -450,10 +492,24 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count)
 
   reset_peripheral(RST_ETH);
 
+  se->se_phyaddr = phy_addr;
+
+  if(ethphy) {
+    ethphy->init(mode, &stm32f4_eth_mdio, se);
+  }
+
   reg_set_bit(ETH_DMABMR, 0);
+
+  int i = 0;
   while(reg_rd(ETH_DMABMR) & 1) {
+    i++;
+    if(i == 1000000) {
+      evlog(LOG_ERR, "Ethernet MAC failed to initialize, no clock?");
+      return;
+    }
   }
   udelay(10);
+
   reg_set_bit(ETH_MACCR, 13); // Receive-Own-Disable
   reg_set_bit(ETH_MACCR, 25); // Strip CRC
 
@@ -467,7 +523,6 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count)
   reg_wr(ETH_DMABMR,
          (1 << 25));
 
-  stm32f4_eth_t *se = &eth;
 
   se->se_eni.eni_addr[0] = 0x06;
   se->se_eni.eni_addr[1] = 0x00;

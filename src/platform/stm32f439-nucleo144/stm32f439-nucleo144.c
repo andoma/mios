@@ -43,6 +43,7 @@ board_init_late(void)
 {
   stm32f4_eth_init(GPIO_UNUSED,
                    stm32f439_nucleo144_ethernet_gpios,
-                   sizeof(stm32f439_nucleo144_ethernet_gpios));
+                   sizeof(stm32f439_nucleo144_ethernet_gpios),
+                   NULL, 0, ETHPHY_MODE_RMII);
 }
 
