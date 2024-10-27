@@ -40,5 +40,8 @@ size_t strcspn(const char *s, const char *reject);
 __attribute__((access(read_only, 1)))
 char *strchr(const char *s, int c);
 
+__attribute__((access(read_only, 1)))
+char *strdup(const char *src);
+
 __attribute__((access(write_only, 1), access(read_only, 2)))
 void bin2hex(char *s, const void *data, size_t len);

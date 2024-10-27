@@ -15,23 +15,12 @@ static struct history {
   char **current;
 } history;
 
-static char *
-zstrdup(const char *line)
-{
-  size_t len = strlen(line);
-  char *new = xalloc(len + 1, 1, MEM_MAY_FAIL);
-  if (new == NULL)
-    return NULL;
-  strlcpy(new, line, len + 1);
-  return new;
-}
-
 void
 history_add(const char *line)
 {
   mutex_lock(&history_mutex);
   if (history.latest == NULL) {
-    history.lines[0] = zstrdup(line);
+    history.lines[0] = strdup(line);
     history.latest = history.lines;
   } else {
     history.latest++;
@@ -39,7 +28,7 @@ history_add(const char *line)
       history.latest = history.lines;
     if (*history.latest)
       free(*history.latest);
-    *history.latest = zstrdup(line);
+    *history.latest = strdup(line);
   }
   history.current = history.latest;
   mutex_unlock(&history_mutex);
@@ -89,7 +78,7 @@ history_get_current_line(void)
       mutex_unlock(&history_mutex);
       return NULL;
   }
-  ret = zstrdup(*history.current);
+  ret = strdup(*history.current);
   mutex_unlock(&history_mutex);
   return ret;
 }
