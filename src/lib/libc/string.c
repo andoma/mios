@@ -1,5 +1,6 @@
 #include <string.h>
 #include <inttypes.h>
+#include <malloc.h>
 
 static void
 bcopy(const void *src, void *dest, size_t len)
@@ -207,4 +208,15 @@ strcspn(const char *s, const char *reject)
     i++;
   }
   return i;
+}
+
+char *
+strdup(const char *line)
+{
+  size_t len = strlen(line);
+  char *new = xalloc(len + 1, 1, MEM_MAY_FAIL);
+  if (new == NULL)
+    return NULL;
+  strlcpy(new, line, len + 1);
+  return new;
 }
