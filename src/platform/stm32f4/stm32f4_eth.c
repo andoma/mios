@@ -495,7 +495,11 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   se->se_phyaddr = phy_addr;
 
   if(ethphy) {
-    ethphy->init(mode, &stm32f4_eth_mdio, se);
+    error_t err = ethphy->init(mode, &stm32f4_eth_mdio, se);
+    if(err) {
+      evlog(LOG_ERR, "stm32f4: PHY init failed");
+      return;
+    }
   }
 
   reg_set_bit(ETH_DMABMR, 0);
