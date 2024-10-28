@@ -637,7 +637,7 @@ void
 eventlog_to_fs(size_t max_file_size)
 {
   g_logfile_max_size = max_file_size;
-  int flags = TASK_DETACHED;
+  int flags = TASK_DETACHED | TASK_NO_FPU | TASK_NO_DMA_STACK;
   thread_create(eventlog_to_fs_thread, NULL, 2048, "fslog", flags, 4);
 }
 
