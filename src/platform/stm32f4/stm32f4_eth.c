@@ -591,7 +591,8 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
 
   irq_enable(61, IRQ_LEVEL_NET);
 
-  thread_create(stm32f4_phy_thread, se, 512, "phy", 0, 4);
+  thread_create(stm32f4_phy_thread, se, 512, "phy",
+                TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
 
   reg_set_bit(ETH_MACCR, 3);   // TE
   reg_set_bit(ETH_MACCR, 2);   // RE

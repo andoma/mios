@@ -163,11 +163,7 @@ dhcpv4_update(netif_t *ni, pbuf_t **vsi)
   device_retain(&ni->ni_dev);
 
   thread_t *t = thread_create(dhcpv4_update_thread, dua,
-                              512, "dhcpupdate", TASK_DETACHED
-#ifdef HAVE_FPU
-                              | TASK_FPU
-#endif
-                              , 1);
+                              512, "dhcpupdate", TASK_DETACHED, 1);
   if(t == NULL) {
     pbuf_free(dua->vsi);
     device_release(&ni->ni_dev);

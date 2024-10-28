@@ -215,10 +215,17 @@ net_init(void)
   // we allocate some now
   pbuf_data_add(NULL, NULL);
 
-  int flags = 0;
 #ifdef ENABLE_NET_FPU_USAGE
-  flags |= TASK_FPU;
+  // This should really not be used.
+  // The reason it's here is so various RPC handlers will work
+  // But it would be much better to create on-demand threads
+  // when dispatching RPC methods and not execute them
+  // directly on the net thread itself
+  int flags = 0;
+#else
+  int flags = TASK_NO_FPU;
 #endif
+  flags |= TASK_NO_DMA_STACK;
   thread_create(net_thread, NULL, 768, "net", flags, 10);
 }
 

@@ -325,14 +325,14 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   size_t fpu_ctx_size = 0;
 #ifdef HAVE_FPU
-  if(flags & TASK_FPU) {
+  if(!(flags & TASK_NO_FPU)) {
     fpu_ctx_size += FPU_CTX_SIZE;
   }
 #endif
 
   void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(thread_t),
                            CPU_STACK_ALIGNMENT, MEM_MAY_FAIL |
-                           (flags & TASK_DMA_STACK ? MEM_TYPE_DMA : 0));
+                           (flags & TASK_NO_DMA_STACK ? 0 : MEM_TYPE_DMA));
   if(sp_bottom == NULL)
     return NULL;
 
@@ -356,7 +356,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 #endif
 
 #ifdef HAVE_FPU
-  if(flags & TASK_FPU) {
+  if(!(flags & TASK_NO_FPU)) {
     t->t_fpuctx = sp_bottom + stack_size;
     cpu_fpu_ctx_init(t->t_fpuctx);
   } else {
@@ -912,9 +912,6 @@ task_create_shell(void *(*entry)(void *arg), void *arg, const char *name,
                   size_t stack_size)
 {
   int flags = TASK_DETACHED;
-#ifdef HAVE_FPU
-  flags |= TASK_FPU;
-#endif
   if(!stack_size) {
     stack_size = 768;
 #ifdef HAVE_FPU
