@@ -84,7 +84,7 @@ stm32f4_init(void)
   *DWT_CONTROL = 1;
 }
 
-void
+static void
 wdog_init(void)
 {
   reg_wr(IWDG_KR, 0x5555);
