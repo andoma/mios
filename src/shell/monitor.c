@@ -143,19 +143,3 @@ cmd_sysinfo(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("sysinfo", cmd_sysinfo);
-
-
-
-int __attribute__((weak))
-dfu(void)
-{
-  return ERR_NOT_IMPLEMENTED;
-}
-
-static error_t
-cmd_dfu(cli_t *cli, int argc, char **argv)
-{
-  return dfu();
-}
-
-CLI_CMD_DEF("dfu", cmd_dfu);

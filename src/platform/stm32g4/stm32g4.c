@@ -74,8 +74,8 @@ stm32g4_init(void)
 }
 
 
-void
-dfu(void)
+static error_t
+cmd_dfu(cli_t *cli, int argc, char **argv)
 {
   irq_forbid(IRQ_LEVEL_ALL);
   fini();
@@ -86,3 +86,4 @@ dfu(void)
   softreset();
 }
 
+CLI_CMD_DEF("dfu", cmd_dfu);
