@@ -159,17 +159,8 @@ igmp_output(uint32_t group, uint32_t dst, uint8_t type)
   if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
   }
-  dst = ntohl(dst);
-  nexthop_t nh = {
-    .nh_state = NEXTHOP_ACTIVE,
-    .nh_hwaddr = { 0x01, 0x00, 0x5e,
-      0x7f & (dst >> 16),
-      dst >> 8,
-      dst,
-    },
-  };
-
-  ni->ni_output(ni, &nh, pb);
+  // ni_output will do the right thing with MC
+  ni->ni_output(ni, NULL, pb);
 }
 
 void
