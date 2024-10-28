@@ -2,10 +2,12 @@
 #include <malloc.h>
 
 #include <mios/mios.h>
+#include <mios/cli.h>
 
 #include "stm32f4_clk.h"
 #include "stm32f4_reg.h"
 #include "cpu.h"
+#include "irq.h"
 
 #include <net/pbuf.h>
 
@@ -107,3 +109,18 @@ cpu_idle(void)
     reg_wr(IWDG_KR, 0xAAAA);
   }
 }
+
+
+static volatile uint32_t *const SYSCFG_MEMRMP = (volatile uint32_t *)0x40013800;
+
+static error_t
+cmd_dfu(cli_t *cli, int argc, char **argv)
+{
+  irq_forbid(IRQ_LEVEL_ALL);
+  fini();
+  *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
+  systick_deinit();
+  softreset();
+}
+
+CLI_CMD_DEF("dfu", cmd_dfu);
