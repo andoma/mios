@@ -97,6 +97,14 @@ fini(void)
 }
 
 
+
+__attribute__((weak))
+stream_t *
+get_panic_stream(void)
+{
+  return stdio;
+}
+
 void
 panic(const char *fmt, ...)
 {
@@ -104,12 +112,15 @@ panic(const char *fmt, ...)
   fini();
 
   thread_t *t = thread_current();
-  printf("\n\nPANIC in %s: ", t ? t->t_name : "<nothread>");
+
+  stream_t *st = get_panic_stream();
+  stprintf(st, "\n\nPANIC in %s: ", t ? t->t_name : "<nothread>");
   va_list ap;
   va_start(ap, fmt);
-  vprintf(fmt, ap);
+  vstprintf(st, fmt, ap);
   va_end(ap);
-  printf("\n");
+  stprintf(st, "\n");
+  st->write(st, NULL, 0, 0); // Stream flush
   cli_console('#');
   halt(fmt);
 }
