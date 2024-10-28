@@ -57,7 +57,7 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
   if(curvecs == (uint32_t)&vectors) {
     // Not yet relocated
     const size_t vecsize = (16 + CORTEXM_IRQ_COUNT) * sizeof(void *);
-    void *p = xalloc(vecsize, 0x200, 0);
+    void *p = xalloc(vecsize, 0x200, MEM_TYPE_DMA);
     memcpy(p, &vectors, vecsize);
     *VTOR = (uint32_t)p;
   }
@@ -102,7 +102,7 @@ static const uint8_t irq_fpu_trampoline[] = {
 void
 irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg)
 {
-  uint32_t *p = malloc(60);
+  uint32_t *p = xalloc(60, 0, MEM_TYPE_DMA);
   memcpy(p, irq_fpu_trampoline, sizeof(irq_fpu_trampoline));
   p[13] = (uint32_t)fn;
   p[14] = (uint32_t)arg;
@@ -112,7 +112,7 @@ irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg)
 void
 irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg)
 {
-  uint32_t *p = malloc(16);
+  uint32_t *p = xalloc(16, 0, MEM_TYPE_DMA);
 
   /*
     ldr r3, [pc, #4]  // fn -> r3
