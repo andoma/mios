@@ -148,7 +148,7 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
   netif_t *ni = nh->nh_netif;
 
   if(local_addr == 0)
-    local_addr = ni->ni_local_addr;
+    local_addr = ni->ni_ipv4_local_addr;
 
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
@@ -198,7 +198,7 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
   }
 
-  nh->nh_netif->ni_output(ni, nh, pb);
+  nh->nh_netif->ni_output_ipv4(ni, nh, pb);
 
 }
 
@@ -580,7 +580,7 @@ tcp_reply(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
   th->wnd = htons(wnd);
   th->off = (sizeof(tcp_hdr_t) >> 2) << 4;
 
-  tcp_output(pb, ni->ni_local_addr, remote_addr);
+  tcp_output(pb, ni->ni_ipv4_local_addr, remote_addr);
   return NULL;
 }
 
@@ -750,7 +750,7 @@ struct pbuf *
 tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 {
   const ipv4_header_t *ip = pbuf_data(pb, 0);
-  if(ip->dst_addr != ni->ni_local_addr) {
+  if(ip->dst_addr != ni->ni_ipv4_local_addr) {
     // XXX: counter
     return pb; // Not for us
   }
@@ -823,7 +823,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         "no memory");
     }
 
-    tcb->tcb_local_addr = ni->ni_local_addr;
+    tcb->tcb_local_addr = ni->ni_ipv4_local_addr;
     tcb->tcb_remote_addr = remote_addr;
 
     tcb->tcb_local_port = local_port;

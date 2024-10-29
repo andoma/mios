@@ -68,7 +68,7 @@ arp_send_who_has(ether_netif_t *eni, uint32_t addr)
   ap->plen = 4;
   ap->oper = htons(1); // who has
   memcpy(ap->sha, eni->eni_addr, 6);
-  ap->spa = eni->eni_ni.ni_local_addr;
+  ap->spa = eni->eni_ni.ni_ipv4_local_addr;
   memset(ap->tha, 0, 6);
   ap->tpa = addr;
   ether_output(eni, pb, ETHERTYPE_ARP, ether_bcast);
@@ -83,7 +83,7 @@ arp_input(ether_netif_t *eni, pbuf_t *pb)
 
   struct arp_pkt *ap = pbuf_data(pb, 0);
 
-  if(ap->oper == htons(1) && ap->tpa == eni->eni_ni.ni_local_addr) {
+  if(ap->oper == htons(1) && ap->tpa == eni->eni_ni.ni_ipv4_local_addr) {
 
     // Request for our address
     // We reuse the packet for the reply
@@ -93,7 +93,7 @@ arp_input(ether_netif_t *eni, pbuf_t *pb)
     ap->tpa = ap->spa;
 
     memcpy(ap->sha, eni->eni_addr, 6);
-    ap->spa = eni->eni_ni.ni_local_addr;
+    ap->spa = eni->eni_ni.ni_ipv4_local_addr;
 
     ether_output(eni, pb, ETHERTYPE_ARP, ap->tha);
     return NULL;
@@ -262,7 +262,7 @@ void
 ether_netif_init(ether_netif_t *eni, const char *name,
                  const device_class_t *dc)
 {
-  eni->eni_ni.ni_output = ether_ipv4_output;
+  eni->eni_ni.ni_output_ipv4 = ether_ipv4_output;
   eni->eni_ni.ni_input = ether_input;
   eni->eni_ni.ni_status_change = ether_status_change;
 
@@ -302,8 +302,8 @@ ether_print(ether_netif_t *en, struct stream *st)
            en->eni_stats.rx_sw_qdrop,
            en->eni_stats.rx_other_err);
 
-  stprintf(st, "\tIP address: %Id/%d\n", en->eni_ni.ni_local_addr,
-           en->eni_ni.ni_local_prefixlen);
+  stprintf(st, "\tIP address: %Id/%d\n", en->eni_ni.ni_ipv4_local_addr,
+           en->eni_ni.ni_ipv4_local_prefixlen);
 
   dhcpv4_print(en, st);
 

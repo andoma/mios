@@ -186,7 +186,7 @@ dhcpv4_make(ether_netif_t *eni)
   dh->hlen = 6;
   eni->eni_dhcp_xid = rand();
   dh->xid = eni->eni_dhcp_xid;
-  dh->ciaddr = eni->eni_ni.ni_local_addr;
+  dh->ciaddr = eni->eni_ni.ni_ipv4_local_addr;
   memcpy(dh->chaddr, eni->eni_addr, 6);
   dh->cookie[0] = 0x63;
   dh->cookie[1] = 0x82;
@@ -260,7 +260,7 @@ dhcpv4_send_request(struct ether_netif *eni)
 
   append_default_options(pb, eni);
 
-  if(!eni->eni_ni.ni_local_addr) {
+  if(!eni->eni_ni.ni_ipv4_local_addr) {
     // If have no address yet we are in SELECTING state
     append_option_v4addr(pb, DHCP_SERVER_IDENTIFIER, eni->eni_dhcp_server_ip);
     append_option_v4addr(pb, DHCP_REQUESTED_IP_ADDRESS,
@@ -268,7 +268,7 @@ dhcpv4_send_request(struct ether_netif *eni)
   }
 
   append_end(pb);
-  dhcpv4_send(eni, pb, eni->eni_ni.ni_local_addr ?
+  dhcpv4_send(eni, pb, eni->eni_ni.ni_ipv4_local_addr ?
               eni->eni_dhcp_server_ip : 0xffffffff);
 }
 
@@ -285,7 +285,7 @@ dhcpv4_discover(ether_netif_t *eni)
     evlog(LOG_INFO, "dhcp: selecting (vcid:%s)", vcid);
     eni->eni_dhcp_state = DHCP_STATE_SELECTING;
   }
-  eni->eni_ni.ni_local_addr = 0;
+  eni->eni_ni.ni_ipv4_local_addr = 0;
   eni->eni_dhcp_server_ip = 0;
   eni->eni_dhcp_requested_ip = 0;
 
@@ -452,7 +452,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
          eni->eni_dhcp_state != DHCP_STATE_BOUND)
         break;
 
-      if(eni->eni_ni.ni_local_addr != yiaddr) {
+      if(eni->eni_ni.ni_ipv4_local_addr != yiaddr) {
         // Only log when something changes from our bound address
         evlog(LOG_INFO, "dhcp: ACK %Id from %Id", yiaddr, from);
       }
@@ -467,8 +467,9 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
         break;
       }
 
-      eni->eni_ni.ni_local_addr = yiaddr;
-      eni->eni_ni.ni_local_prefixlen = 33 - __builtin_ffs(ntohl(po.netmask));
+      eni->eni_ni.ni_ipv4_local_addr = yiaddr;
+      eni->eni_ni.ni_ipv4_local_prefixlen =
+        33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
       dhcpv4_update(&eni->eni_ni, &po.vsi);
       net_timer_arm(&eni->eni_dhcp_timer,

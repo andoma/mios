@@ -152,7 +152,7 @@ mdns_send_response(struct netif *ni, uint32_t from, uint16_t srcport, uint16_t t
     wr16_be(rr + 2, 0x8001); // Class: IN + CacheFlush
     wr32_be(rr + 4, 60);     // TTL
     wr16_be(rr + 8, 4);      // IPv4 length
-    memcpy(rr + 10, &ni->ni_local_addr, 4);
+    memcpy(rr + 10, &ni->ni_ipv4_local_addr, 4);
   } else {
     uint8_t *rr = pbuf_append(pb, 2 + 2 + 4 + 2 + 2 + 3);
     wr16_be(rr + 0, 47);      // Type: NSEC

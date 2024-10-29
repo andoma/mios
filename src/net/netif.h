@@ -38,33 +38,33 @@ typedef struct netif {
 
   struct nexthop_list ni_nexthops;
 
-  // FIXME: This needs to be reworks to support multiple addresses
-  // and address families per interface
-  uint32_t ni_local_addr;  // Our address
-  uint8_t ni_local_prefixlen;
-  uint8_t ni_ifindex;
   uint16_t ni_mtu;
-
-  uint32_t ni_flags;
+  uint16_t ni_flags;
 
   uint32_t ni_pending_signals;
 
-  pbuf_t *(*ni_output)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
+#ifdef ENABLE_NET_IPV4
+  uint32_t ni_ipv4_local_addr;  // Our address on this interface
+  uint8_t ni_ipv4_local_prefixlen;
+
+  pbuf_t *(*ni_output_ipv4)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
+#endif
+
+#ifdef ENABLE_NET_DSIG
+  pbuf_t *(*ni_dsig_output)(struct netif *ni, pbuf_t *pb, uint32_t id,
+                            uint32_t flags);
+  const struct dsig_filter *ni_dsig_output_filter;
+#endif
 
   void (*ni_buffers_avail)(struct netif *ni);
 
+  // ni_input() is called from main network thread after splicing off
+  // packets from the ni_rx_queue
   struct pbuf *(*ni_input)(struct netif *ni, struct pbuf *pb);
 
   void (*ni_status_change)(struct netif *ni);
 
   SLIST_ENTRY(netif) ni_global_link;
-
-#ifdef ENABLE_NET_DSIG
-
-  pbuf_t *(*ni_dsig_output)(struct netif *ni, pbuf_t *pb, uint32_t group,
-                            uint32_t flags);
-  const struct dsig_output_filter *ni_dsig_output_filter;
-#endif
 
 } netif_t;
 

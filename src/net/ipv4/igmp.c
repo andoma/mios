@@ -152,15 +152,15 @@ igmp_output(uint32_t group, uint32_t dst, uint8_t type)
   ip->fragment_info = 0;
   ip->ttl = 1;
   ip->proto = IPPROTO_IGMP;
-  ip->src_addr = ni->ni_local_addr;
+  ip->src_addr = ni->ni_ipv4_local_addr;
   ip->dst_addr = dst;
 
   ip->cksum = 0;
   if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
   }
-  // ni_output will do the right thing with MC
-  ni->ni_output(ni, NULL, pb);
+
+  ni->ni_output_ipv4(ni, NULL, pb);
 }
 
 void

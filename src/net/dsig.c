@@ -4,6 +4,7 @@
 #include <mios/timer.h>
 #include <mios/task.h>
 #include <mios/bytestream.h>
+#include <mios/cli.h>
 #include <sys/queue.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,6 +12,7 @@
 #include "net/net_task.h"
 #include "net/pbuf.h"
 #include "net/netif.h"
+#include "net/net.h"
 
 #include <stdio.h>
 
@@ -57,26 +59,31 @@ dsig_dispatch(uint32_t signal, const void *data, size_t len)
   }
 }
 
+const struct dsig_filter *
+dsig_filter_match(const struct dsig_filter *dof, uint32_t addr)
+{
+  while(dof->prefixlen != 0xff) {
+    uint32_t prefix = dof->prefix;
+    uint32_t mask = mask_from_prefixlen(dof->prefixlen);
+    if((addr & mask) == prefix)
+      return dof;
+  }
+  dof++;
+  return NULL;
+}
+
+
 static void
 dsig_output_iface(uint32_t id, struct pbuf **pb, struct netif *ni)
 {
-  const struct dsig_output_filter *dof = ni->ni_dsig_output_filter;
+  const struct dsig_filter *dof = ni->ni_dsig_output_filter;
   uint32_t flags = 0;
 
-  if(dof) {
-    int hit = 0;
-    while(dof->start != UINT32_MAX) {
-      if(id >= dof->start && id < dof->end) {
-
-        if(dof->flags & DSIG_FILTER_INCLUDE)
-          hit = 1;
-        if(dof->flags & DSIG_FILTER_EXCLUDE)
-          hit = 0;
-      }
-      dof++;
-    }
-    if(!hit)
+  if(dof != NULL) {
+    dof = dsig_filter_match(dof, id);
+    if(dof == NULL)
       return;
+    flags = dof->flags;
   }
 
   pbuf_t *copy = pbuf_copy(*pb, 0);
@@ -246,3 +253,44 @@ dsig_sub_all(void (*cb)(void *opaque, const void *data, size_t len,
 
   return ds;
 }
+
+static error_t
+cmd_dsigtx(cli_t *cli, int argc, char **argv)
+{
+  if(argc < 2)
+    return ERR_INVALID_ARGS;
+
+  uint32_t addr = atoix(argv[1]);
+
+  pbuf_t *pb = pbuf_make(0, 0);
+  uint8_t *p = pbuf_append(pb, 4);
+  wr32_le(p, addr);
+
+  if(argc > 2) {
+    extern int conv_hex_to_nibble(char c);
+    const char *s = argv[2];
+    while(s[0] && s[1]) {
+      int h = conv_hex_to_nibble(s[0]);
+      int l = conv_hex_to_nibble(s[1]);
+      if(h < 0 || l < 0)
+        return ERR_INVALID_ARGS;
+      p = pbuf_append(pb, 1);
+      *p = (h << 4) | l;
+      s += 2;
+    }
+  }
+
+  int copies = argc > 3 ? atoi(argv[3]) : 1;
+
+  for(int i = 1; i < copies; i++) {
+    pbuf_t *copy = pbuf_copy(pb, 1);
+    dsig_send(copy);
+  }
+
+  dsig_send(pb);
+  return 0;
+}
+
+
+
+CLI_CMD_DEF("dsig-tx", cmd_dsigtx);

@@ -80,18 +80,12 @@ ipv4_cksum_pbuf(uint32_t sum, pbuf_t *pb, int offset, int length)
   return ~ipv4_cksum_fold(sum);
 }
 
-static uint32_t
-ipv4_mask_from_prefix(int prefixlen)
-{
-  return ~((1 << (32 - prefixlen)) - 1);
-}
-
 static int
 ipv4_prefix_match(uint32_t addr,
                   uint32_t prefix,
                   int prefixlen)
 {
-  const uint32_t mask = htonl(ipv4_mask_from_prefix(prefixlen));
+  const uint32_t mask = htonl(mask_from_prefixlen(prefixlen));
   return (addr & mask) == (prefix & mask);
 }
 
@@ -114,7 +108,10 @@ ipv4_nexthop_resolve(uint32_t addr)
 
   netif_t *ni;
   SLIST_FOREACH(ni, &netifs, ni_global_link) {
-    if(ipv4_prefix_match(addr, ni->ni_local_addr, ni->ni_local_prefixlen))
+    if(ni->ni_ipv4_local_addr == 0)
+      continue;
+    if(ipv4_prefix_match(addr, ni->ni_ipv4_local_addr,
+                         ni->ni_ipv4_local_prefixlen))
       break;
   }
 
@@ -150,7 +147,7 @@ icmp_input_icmp_echo(netif_t *ni, pbuf_t *pb, int icmp_offset)
   icmp_hdr_t *icmp = pbuf_data(pb, icmp_offset);
 
   ip->dst_addr = ip->src_addr;
-  ip->src_addr = ni->ni_local_addr;
+  ip->src_addr = ni->ni_ipv4_local_addr;
 
   icmp->type = 0;
 
@@ -166,7 +163,7 @@ icmp_input_icmp_echo(netif_t *ni, pbuf_t *pb, int icmp_offset)
   if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
   }
-  nh->nh_netif->ni_output(ni, nh, pb);
+  nh->nh_netif->ni_output_ipv4(ni, nh, pb);
 }
 
 
@@ -174,7 +171,7 @@ pbuf_t *
 ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
 {
   // No address configured yet, no ICMP activity
-  if(ni->ni_local_addr == 0)
+  if(ni->ni_ipv4_local_addr == 0)
     return pb;
 
   if(pb->pb_flags & PBUF_MCAST)

@@ -53,7 +53,7 @@ udp_send(netif_t *ni, pbuf_t *pb, uint32_t dst_addr, nexthop_t *nh,
 
   if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
     udp->cksum =
-      ipv4_cksum_pbuf(ipv4_cksum_pseudo(ni->ni_local_addr, dst_addr,
+      ipv4_cksum_pbuf(ipv4_cksum_pseudo(ni->ni_ipv4_local_addr, dst_addr,
                                         IPPROTO_UDP, pb->pb_pktlen),
                       pb, 0, pb->pb_pktlen);
   }
@@ -68,13 +68,12 @@ udp_send(netif_t *ni, pbuf_t *pb, uint32_t dst_addr, nexthop_t *nh,
   ip->fragment_info = 0;
   ip->ttl = 255;
   ip->proto = IPPROTO_UDP;
-  ip->src_addr = ni->ni_local_addr;
+  ip->src_addr = ni->ni_ipv4_local_addr;
   ip->dst_addr = dst_addr;
 
   ip->cksum = 0;
   if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
   }
-
-  ni->ni_output(ni, nh, pb);
+  ni->ni_output_ipv4(ni, nh, pb);
 }

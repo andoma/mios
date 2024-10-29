@@ -52,15 +52,12 @@ ENABLE_TASK_DEBUG ?= no
 ENABLE_TASK_ACCOUNTING ?= yes
 ENABLE_NET_IPV4 ?= no
 ENABLE_NET_MBUS ?= no
-ENABLE_NET_DSIG ?= no
 ENABLE_NET_MBUS_GW ?= no
 ENABLE_NET_BLE ?= no
 ENABLE_NET_CAN ?= no
 ENABLE_NET_FPU_USAGE ?= no
 ENABLE_METRIC ?= no
 ENABLE_BUILTIN_BOOTLOADER ?= no
-
-ALL_ENABLE_VARS := $(filter ENABLE_%, $(.VARIABLES))
 
 CONFIG_H := ${O}/include/config.h
 
@@ -84,6 +81,8 @@ include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
 
 include ${T}/support/version/gitver.mk
+
+ALL_ENABLE_VARS := $(filter ENABLE_%, $(.VARIABLES))
 
 SRCS += ${SRC}/version.c
 

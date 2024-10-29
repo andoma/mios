@@ -113,9 +113,9 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
 
 
 static pbuf_t *
-stm32_fdcan_output(struct netif *ni, struct nexthop *nh, pbuf_t *pb)
+stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
 {
-  fdcan_t *fc = (fdcan_t *)ni;
+  fdcan_t *fc = (fdcan_t *)cni;
   uint32_t txfqs = reg_rd(fc->reg_base + FDCAN_TXFQS);
 
   if(txfqs & (1 << 21)) {
@@ -125,12 +125,8 @@ stm32_fdcan_output(struct netif *ni, struct nexthop *nh, pbuf_t *pb)
   if(pbuf_pullup(pb, pb->pb_pktlen))
     return pb;
 
-  if(pb->pb_pktlen < 4)
-    return pb;
-
   const void *data = pbuf_cdata(pb, 0);
-  uint32_t signal = rd32_le(data) & 0x1fffffff;
-  uint32_t len = pb->pb_pktlen - 4;
+  uint32_t len = pb->pb_pktlen;
 
   if(len > 8)
     return pb;
@@ -139,7 +135,7 @@ stm32_fdcan_output(struct netif *ni, struct nexthop *nh, pbuf_t *pb)
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), signal | (1 << 30));
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 1), len << 16);
 
-  const uint32_t *u32 = data + 4;
+  const uint32_t *u32 = data;
   for(size_t i = 0, w = 0; i < len; i += 4, w++) {
     reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 2 + w), u32[w]);
   }
@@ -190,7 +186,7 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
       break;
   }
 
-  fc->cni.cni_ni.ni_output = stm32_fdcan_output;
+  fc->cni.cni_output = stm32_fdcan_output;
   can_netif_attach(&fc->cni, "can", &stm32_fdcan_device_class,
                    output_filter);
 }
