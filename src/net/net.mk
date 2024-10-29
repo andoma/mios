@@ -36,6 +36,7 @@ SRCS-${ENABLE_NET_IPV4} += \
 
 SRCS-${ENABLE_NET_ETHER} += \
 	${SRC}/net/ether.c \
+	${SRC}/net/lldp.c \
 	${SRC}/net/ethphy/ethphy_dp83826.c \
 
 SRCS-${ENABLE_NET_HTTP} += \

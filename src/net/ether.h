@@ -43,6 +43,8 @@ typedef struct ether_netif {
 
   ether_stats_t eni_stats;
 
+  timer_t eni_lldp_timer;
+
 } ether_netif_t;
 
 

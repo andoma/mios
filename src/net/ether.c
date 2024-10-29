@@ -7,6 +7,7 @@
 
 #include "irq.h"
 #include "ether.h"
+#include "lldp.h"
 #include "net.h"
 #include "ipv4/ipv4.h"
 #include "ipv4/dhcpv4.h"
@@ -256,6 +257,7 @@ ether_status_change(struct netif *ni)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
   dhcpv4_status_change(eni);
+  lldp_status_change(eni);
 }
 
 void
