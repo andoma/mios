@@ -310,6 +310,24 @@ thread_join(thread_t *t)
 }
 
 
+static size_t
+get_default_stacksize(int flags)
+{
+#ifdef MAIN_STACK_SIZE
+  return MAIN_STACK_SIZE;
+#elif defined(ENABLE_LITTLEFS)
+  return 1536;
+#else
+
+#ifdef HAVE_FPU
+  if(!(flags & TASK_NO_FPU))
+    return 1024;
+#endif
+  return 768;
+#endif
+
+}
+
 thread_t *
 thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
               const char *name, int flags, unsigned int prio)
@@ -319,6 +337,9 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   prio &= TASK_PRIO_MASK;
   if(prio == 0)
     prio = 1;
+
+  if(stack_size == 0)
+    stack_size = get_default_stacksize(flags);
 
   if(stack_size < MIN_STACK_SIZE)
     stack_size = MIN_STACK_SIZE;
@@ -353,6 +374,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   t->t_load = 0;
   t->t_ctx_switches = 0;
   t->t_ctx_switches_acc = 0;
+  t->t_stacksize = stack_size;
 #endif
 
 #ifdef HAVE_FPU
@@ -866,7 +888,11 @@ task_init_accounting(void)
 static error_t
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  cli_printf(cli, " Name           Stack      Sp         Pri Sta "
+  cli_printf(cli, " Name           Stack      "
+#ifdef ENABLE_TASK_ACCOUNTING
+             " Size "
+#endif
+             "Sp         Pri Sta "
 #ifdef ENABLE_TASK_ACCOUNTING
              "CtxSwch Load "
 #endif
@@ -874,7 +900,11 @@ cmd_ps(cli_t *cli, int argc, char **argv)
 
   thread_t *t = NULL;
   while((t = thread_get_next(t)) != NULL) {
-    cli_printf(cli, " %-14s %p %p %3d %c%c%c "
+    cli_printf(cli, " %-14s %p "
+#ifdef ENABLE_TASK_ACCOUNTING
+               "%5d "
+#endif
+               "%p %3d %c%c%c "
 #ifdef ENABLE_TASK_ACCOUNTING
                "%-6d %3d.%-2d "
 #endif
@@ -882,7 +912,11 @@ cmd_ps(cli_t *cli, int argc, char **argv)
                "%s"
 #endif
                "\n",
-               t->t_name, t->t_sp_bottom, t->t_sp,
+               t->t_name, t->t_sp_bottom,
+#ifdef ENABLE_TASK_ACCOUNTING
+               t->t_stacksize,
+#endif
+               t->t_sp,
                t->t_task.t_prio,
                "_RrSZ"[t->t_task.t_state],
 #ifdef HAVE_FPU
@@ -908,20 +942,9 @@ CLI_CMD_DEF("ps", cmd_ps);
 
 
 error_t
-task_create_shell(void *(*entry)(void *arg), void *arg, const char *name,
-                  size_t stack_size)
+thread_create_shell(void *(*entry)(void *arg), void *arg, const char *name)
 {
-  int flags = TASK_DETACHED;
-  if(!stack_size) {
-    stack_size = 768;
-#ifdef HAVE_FPU
-    stack_size = 1024;
-#endif
-#ifdef MAIN_STACK_SIZE
-    stack_size = MAIN_STACK_SIZE;
-#endif
-  }
-  if(!thread_create(entry, arg, stack_size, name,  flags, 2))
+  if(!thread_create(entry, arg, 0, name, TASK_DETACHED, 2))
     return ERR_NO_MEMORY;
   return 0;
 }

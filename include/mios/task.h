@@ -69,9 +69,10 @@ typedef struct thread {
 #ifdef ENABLE_TASK_ACCOUNTING
   uint32_t t_cycle_enter;
   uint32_t t_cycle_acc;
-  uint32_t t_load;
   uint32_t t_ctx_switches_acc;
   uint32_t t_ctx_switches;
+  uint16_t t_load;
+  uint16_t t_stacksize;
 #endif
 
   SLIST_ENTRY(thread) t_global_link;
@@ -250,10 +251,9 @@ void cond_wait(cond_t *c, mutex_t *m);
 int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
   __attribute__((warn_unused_result));
 
-// Helper for constructing a task used for cli/shell activities
-
-error_t task_create_shell(void *(*entry)(void *arg), void *arg,
-                          const char *name, size_t stack_size);
+// Helper for constructing a thread used for cli/shell activities
+error_t thread_create_shell(void *(*entry)(void *arg), void *arg,
+                            const char *name);
 
 /*
  * SoftIRQs can be raised from any context (even > IRQ_LEVEL_SCHED)

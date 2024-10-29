@@ -377,7 +377,7 @@ shell_open_raw(socket_t *s, int is_telnet)
 
   socket_stream_init(&ss->s);
   wakelock_acquire();
-  error_t r = task_create_shell(shell_thread, ss, "remotecli", 0);
+  error_t r = thread_create_shell(shell_thread, ss, "remotecli");
   if(r) {
     free(ss);
     wakelock_release();
