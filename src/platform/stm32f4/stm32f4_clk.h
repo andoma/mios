@@ -66,6 +66,9 @@
 #define CLK_I2C3  CLK_ID(CLK_APB1, 23)
 #define CLK_I2C(x) CLK_ID(CLK_APB1, 21 + (x))
 
+#define CLK_CAN(x) CLK_ID(CLK_APB1, 24 + (x))
+
+
 #define RST_I2C(x) CLK_ID(RST_APB1, 21 + (x))
 
 #define CLK_ETHRX CLK_ID(CLK_AHB1, 27)

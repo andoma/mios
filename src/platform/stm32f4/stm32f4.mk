@@ -20,6 +20,7 @@ SRCS += ${C}/systick.c \
 	${P}/stm32f4_clk.c \
 	${P}/stm32f4_uart_stream.c \
 	${P}/stm32f4_adc.c \
+	${P}/stm32f4_can.c \
 	${P}/stm32f4_otgfs.c \
 	${P}/stm32f4_systim.c \
 
