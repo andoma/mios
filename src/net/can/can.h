@@ -9,7 +9,7 @@ typedef struct can_netif {
 
 } can_netif_t;
 
-struct dsig_output_filter;
+struct dsig_filter;
 
 void can_netif_attach(can_netif_t *mni, const char *name,
                       const device_class_t *dc,

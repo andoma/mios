@@ -132,7 +132,7 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
     return pb;
 
   int bufidx = (txfqs >> 16) & 3;
-  reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), signal | (1 << 30));
+  reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), id | (1 << 30));
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 1), len << 16);
 
   const uint32_t *u32 = data;
@@ -152,7 +152,7 @@ static const device_class_t stm32_fdcan_device_class = {
 
 void
 stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
-                   const struct dsig_output_filter *output_filter)
+                   const struct dsig_filter *output_filter)
 {
   fdcan_t *fc = calloc(1, sizeof(fdcan_t));
   fc->reg_base = FDCAN_BASE(instance);

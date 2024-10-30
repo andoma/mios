@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <malloc.h>
 
+#include <mios/cli.h>
+
 #include <net/pbuf.h>
 
 #include "cpu.h"
