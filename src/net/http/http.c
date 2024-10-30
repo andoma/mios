@@ -998,7 +998,7 @@ http_init(void)
 {
   STAILQ_INIT(&http_task_queue);
   STAILQ_INIT(&notifying_websocket_connections);
-  thread_create(http_thread, NULL, 4096, "http", TASK_FPU | TASK_DETACHED, 8);
+  thread_create(http_thread, NULL, 4096, "http", TASK_DETACHED, 8);
 }
 
 
