@@ -107,7 +107,7 @@ ${O}/build.bin: ${O}/build.elf
 	@echo "\tBIN\t$@"
 	${TOOLCHAIN}objcopy -O binary $< $@
 
-${O}/%.o: %.c ${GLOBALDEPS} ${CONFIG_H}
+${O}/%.o: %.c ${GLOBALDEPS} ${CONFIG_H} ${CDEPS}
 	@mkdir -p $(dir $@)
 	@echo "\tCC\t$<"
 	${TOOLCHAIN}gcc -MD -MP ${CPPFLAGS} ${CFLAGS} -c $< -o $@
