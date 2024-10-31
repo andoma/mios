@@ -8,6 +8,6 @@
 
 #define LFS_NO_DEBUG
 
-#define LFS_WARN(fmt...) evlog0(LOG_WARNING, NULL, fmt)
+#define LFS_WARN(fmt...) evlog(LOG_WARNING, fmt)
 
-#define LFS_ERROR(fmt...) evlog0(LOG_ERR, NULL, fmt)
+#define LFS_ERROR(fmt...) evlog(LOG_ERR, fmt)

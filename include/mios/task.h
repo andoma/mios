@@ -31,7 +31,6 @@ typedef struct task {
   uint8_t t_flags;
   uint8_t t_prio;
   uint16_t t_state;
-
 } task_t;
 
 
@@ -79,6 +78,7 @@ typedef struct thread {
 
   char t_name[11];
   uint8_t t_refcount;
+  struct stream *t_stream;
 } thread_t;
 
 typedef struct sched_cpu {
@@ -253,7 +253,7 @@ int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
 
 // Helper for constructing a thread used for cli/shell activities
 error_t thread_create_shell(void *(*entry)(void *arg), void *arg,
-                            const char *name);
+                            const char *name, struct stream *log_st);
 
 /*
  * SoftIRQs can be raised from any context (even > IRQ_LEVEL_SCHED)

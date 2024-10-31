@@ -79,7 +79,7 @@ init(void)
 
   call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
 
-  thread_create_shell(main_trampoline, NULL, "main");
+  thread_create_shell(main_trampoline, NULL, "main", stdio);
 }
 
 

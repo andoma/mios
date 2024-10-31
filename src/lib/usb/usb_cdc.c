@@ -388,5 +388,5 @@ void
 usb_cdc_create_shell(struct usb_interface_queue *q)
 {
   struct stream *s = usb_cdc_create_stream(q, 0);
-  thread_create_shell(cdc_shell_thread, s, "cdc-cli");
+  thread_create_shell(cdc_shell_thread, s, "cdc-cli", s);
 }
