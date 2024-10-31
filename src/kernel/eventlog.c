@@ -130,13 +130,17 @@ evl_fmt_cb(void *aux, const char *s, size_t len)
 
 
 void
-evlog0(event_level_t level, stream_t *st, const char *fmt, ...)
+evlog(event_level_t level, const char *fmt, ...)
 {
   evlogfifo_t *ef = &ef0;
   int64_t now = clock_get();
   va_list ap;
   va_start(ap, fmt);
 
+  thread_t *t = thread_current();
+  stream_t *st = NULL;
+  if (t && t->t_stream)
+    st = t->t_stream;
 
   if(st != NULL) {
     va_list ap2;

@@ -23,12 +23,9 @@ typedef enum {
 
 struct stream;
 
-void evlog0(event_level_t level, struct stream *st, const char *fmt, ...)
-  __attribute__ ((format(printf, 3, 4)));
+void evlog(event_level_t level, const char *fmt, ...)
+  __attribute__ ((format(printf, 2, 3)));
 
-#define evlog(level, fmt...) evlog0(level, NULL, fmt)
-
-#define evlogst(level, st, fmt...) evlog0(level, st, fmt)
 
 void eventlog_to_fs(size_t logfile_max_size);
 

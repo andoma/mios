@@ -388,6 +388,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
 
   t->t_sp = cpu_stack_init(sp, entry, arg, thread_exit);
   t->t_sp_bottom = sp_bottom;
+  t->t_stream = NULL;
 
   task_t *task = &t->t_task;
   task->t_state = TASK_STATE_READY;
@@ -942,9 +943,15 @@ CLI_CMD_DEF("ps", cmd_ps);
 
 
 error_t
-thread_create_shell(void *(*entry)(void *arg), void *arg, const char *name)
+thread_create_shell(void *(*entry)(void *arg), void *arg, const char *name, stream_t *st)
 {
-  if(!thread_create(entry, arg, 0, name, TASK_DETACHED, 2))
+  thread_t *t;
+  int s = irq_forbid(IRQ_LEVEL_SWITCH);
+  if(!(t = thread_create(entry, arg, 0, name, TASK_DETACHED, 2))) {
+    irq_permit(s);
     return ERR_NO_MEMORY;
+  }
+  t->t_stream = st;
+  irq_permit(s);
   return 0;
 }
