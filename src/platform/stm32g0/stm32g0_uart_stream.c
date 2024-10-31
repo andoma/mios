@@ -70,12 +70,8 @@ stm32g0_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
   const int tx_af = stm32g0_uart_tx(instance, tx);
   const int rx_af = stm32g0_uart_rx(instance, rx);
 
-  if(flags & UART_HALF_DUPLEX) {
-    gpio_conf_af(tx, tx_af, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  } else {
-    gpio_conf_af(tx, tx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
-    gpio_conf_af(rx, rx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
-  }
+  gpio_conf_af(tx, tx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
+  gpio_conf_af(rx, rx_af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
 
   u = stm32_uart_stream_init(u,
                              (cfg->base << 8) + 0x40000000,
@@ -83,11 +79,8 @@ stm32g0_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
                              cfg->clkid,
                              cfg->irq,
                              flags,
-                             0,
+                             GPIO_UNUSED,
                              name);
-
-  if(flags & UART_HALF_DUPLEX)
-    reg_wr(u->reg_base + USART_CR3, 0x8); // HDSEL
 
   uarts[instance - 1] = u;
 
