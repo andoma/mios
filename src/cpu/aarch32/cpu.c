@@ -23,7 +23,7 @@ cpu_init(void)
   thread_t *t = sp;
   strlcpy(t->t_name, "idle", sizeof(t->t_name));
   t->t_sp_bottom = sp_bottom;
-
+  t->t_stream = NULL;
   t->t_task.t_state = TASK_STATE_ZOMBIE;
   t->t_task.t_prio = 0;
   sched_cpu_init(&curcpu()->sched, t);

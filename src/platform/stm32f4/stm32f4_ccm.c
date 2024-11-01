@@ -20,7 +20,7 @@ struct panic_buf {
 
 static struct panic_buf *const panic_buf = (void *)0x1000ff00;
 
-static void  __attribute__((constructor(121)))
+static void  __attribute__((constructor(200)))
 stm32f4_ccm_init(void)
 {
   // CCM
