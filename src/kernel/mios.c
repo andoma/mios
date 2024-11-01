@@ -43,7 +43,6 @@ __attribute__((noreturn))
 static void *
 main_trampoline(void *opaque)
 {
-  log_sysinfo();
   main();
   thread_exit(0);
 }
@@ -78,6 +77,8 @@ init(void)
   memset(&_sbss, 0, (void *)&_ebss - (void *)&_sbss);
 
   call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
+
+  log_sysinfo();
 
   thread_create_shell(main_trampoline, NULL, "main", stdio);
 }
