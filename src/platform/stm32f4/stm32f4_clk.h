@@ -68,6 +68,7 @@
 
 #define CLK_CAN(x) CLK_ID(CLK_APB1, 24 + (x))
 
+#define CLK_DAC    CLK_ID(CLK_APB1, 29)
 
 #define RST_I2C(x) CLK_ID(RST_APB1, 21 + (x))
 
