@@ -78,7 +78,7 @@ exc_usage_fault(void)
   asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
   uint16_t ufsr = *UFSR;
 #ifdef __ARM_FP
-  if(ufsr & 0x8) {
+  if(ufsr == 0x8) {
     // NOCP (ie, tried to use FPU)
 
     thread_t *const t = thread_current();
