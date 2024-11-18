@@ -636,7 +636,7 @@ getchar(void)
   if(stdio == NULL || stdio->read == NULL)
     return -1;
   char c;
-  stdio->read(stdio, &c, 1, STREAM_READ_WAIT_ONE);
+  stdio->read(stdio, &c, 1, 1);
   return c;
 }
 

@@ -281,7 +281,7 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
       st->write(st, NULL, 0, 0);
       if(cond_wait_timeout(&sf.c, &ef->mutex, clock_get() + 100000)) {}
       uint8_t dummy;
-      int r = st->read(st, &dummy, 1, STREAM_READ_WAIT_NONE);
+      int r = st->read(st, &dummy, 1, 0);
       if(r)
         break;
       continue;

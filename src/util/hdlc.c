@@ -21,7 +21,7 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
   while(1) {
 
     char c;
-    if(s->read(s, &c, 1, len < 1 ? wait : STREAM_READ_WAIT_ALL) == 0)
+    if(s->read(s, &c, 1, len < 1 ? wait : 1) == 0)
       return 0;
 
     switch(c) {
@@ -31,7 +31,7 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
       len = 0;
       break;
     case 0x7d:
-      s->read(s, &c, 1, STREAM_READ_WAIT_ALL);
+      s->read(s, &c, 1, 1);
       c ^= 0x20;
     default:
       if(len >= 0) {
@@ -59,7 +59,7 @@ hdlc_read(stream_t *s,
 
   while(1) {
     cb(opaque, buf,
-       hdlc_read_to_buf(s, buf, max_frame_size, STREAM_READ_WAIT_ALL));
+       hdlc_read_to_buf(s, buf, max_frame_size, 1));
   }
 }
 

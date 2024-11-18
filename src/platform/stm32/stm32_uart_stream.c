@@ -7,6 +7,7 @@
 #include <string.h>
 #include <malloc.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "irq.h"
 
@@ -26,11 +27,32 @@ stm32_uart_update_cr1(stm32_uart_stream_t *u)
   reg_wr(u->reg_base + USART_CR1, cr1);
 }
 
-static void
+static task_waitable_t *
+stm32_uart_poll(stream_t *s, poll_type_t type)
+{
+  stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
+
+  irq_forbid(IRQ_LEVEL_CONSOLE);
+
+  if(type == POLL_STREAM_WRITE) {
+
+    if(TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr))
+      return NULL;
+    return &u->wait_tx;
+
+  } else {
+
+    if(u->rx_fifo_wrptr != u->rx_fifo_rdptr)
+      return NULL;
+    return &u->wait_rx;
+  }
+}
+
+static ssize_t
 stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 {
   if(size == 0)
-    return;
+    return 0;
 
   stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
   const char *d = buf;
@@ -59,8 +81,10 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
     }
     irq_permit(q);
-    return;
+    return size;
   }
+
+  ssize_t written = 0;
 
   for(size_t i = 0; i < size; i++) {
 
@@ -69,6 +93,8 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 
       if(avail)
         break;
+      if(flags & STREAM_WRITE_NO_WAIT)
+        goto done;
       assert(u->tx_busy);
       task_sleep(&u->wait_tx);
     }
@@ -88,13 +114,16 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
       u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = d[i];
       u->tx_fifo_wrptr++;
     }
+    written++;
   }
+ done:
   irq_permit(q);
+  return written;
 }
 
 
-static int
-stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
+static ssize_t
+stm32_uart_read(stream_t *s, void *buf, const size_t size, size_t requested)
 {
   stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
   char *d = buf;
@@ -103,7 +132,7 @@ stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
     // We are not on user thread, busy wait
     for(size_t i = 0; i < size; i++) {
       while(!(reg_rd(u->reg_base + USART_SR) & (1 << 5))) {
-        if(stream_wait_is_done(mode, i, size))
+        if(i >= requested)
           return i;
       }
       d[i] = reg_rd(u->reg_base + USART_RDR);
@@ -115,7 +144,7 @@ stm32_uart_read(stream_t *s, void *buf, const size_t size, int mode)
 
   for(size_t i = 0; i < size; i++) {
     while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
-      if(stream_wait_is_done(mode, i, size)) {
+      if(i >= requested) {
         irq_permit(q);
         return i;
       }
@@ -237,10 +266,11 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
 
   u->tx_dma = STM32_DMA_INSTANCE_NONE;
   u->stream.write = stm32_uart_write;
+  u->stream.read = stm32_uart_read;
+  u->stream.poll = stm32_uart_poll;
 
   irq_enable(irq, IRQ_LEVEL_CONSOLE);
 
-  u->stream.read = stm32_uart_read;
 
   return u;
 }

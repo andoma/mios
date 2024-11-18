@@ -18,6 +18,7 @@ LIST_HEAD(task_list, task);
 #define TASK_STATE_READY    2
 #define TASK_STATE_SLEEPING 3
 #define TASK_STATE_ZOMBIE   4
+#define TASK_STATE_MUXED_SLEEP 5
 
 typedef struct task {
   union {
@@ -30,9 +31,9 @@ typedef struct task {
 
   uint8_t t_flags;
   uint8_t t_prio;
-  uint16_t t_state;
+  uint8_t t_state;
+  uint8_t t_index;
 } task_t;
-
 
 void task_run(task_t *t);
 
@@ -96,7 +97,7 @@ typedef struct sched_cpu {
 
 void sched_cpu_init(sched_cpu_t *sc, thread_t *idle);
 
-typedef struct {
+typedef struct task_waitable {
   struct task_list list;
 #ifdef ENABLE_TASK_WCHAN
   const char *name;
@@ -114,7 +115,7 @@ typedef struct {
 #endif
 
 
-typedef struct {
+typedef struct mutex {
   union {
     task_waitable_t waiters;
     intptr_t lock;
@@ -254,6 +255,15 @@ int cond_wait_timeout(cond_t *c, mutex_t *m, uint64_t deadline)
 // Helper for constructing a thread used for cli/shell activities
 error_t thread_create_shell(void *(*entry)(void *arg), void *arg,
                             const char *name, struct stream *log_st);
+
+
+typedef struct waitmux {
+  task_waitable_t wm_waitable;
+  int wm_which;
+  task_t wm_tasks[0];
+} waitmux_t;
+
+
 
 /*
  * SoftIRQs can be raised from any context (even > IRQ_LEVEL_SCHED)

@@ -51,12 +51,12 @@ printchar(pl011_t *u, char c)
 }
 
 
-static void
+static ssize_t
 pl011_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 {
   pl011_t *u = (pl011_t *)s;
   if(size == 0)
-    return;
+    return 0;
 
   const char *d = buf;
 
@@ -81,19 +81,24 @@ pl011_uart_write(stream_t *s, const void *buf, size_t size, int flags)
       printchar(u, c);
     }
     irq_permit(q);
-    return;
+    return size;
   }
+
+  size_t written = 0;
 
   for(size_t i = 0; i < size; i++) {
     const uint8_t c = d[i];
     while(1) {
       uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_rdptr - u->tx_fifo_wrptr);
       if(avail == 0) {
+        if(flags & STREAM_WRITE_NO_WAIT)
+          break;
         assert(u->tx_busy);
         task_sleep(&u->uart_tx);
         continue;
       }
 
+      written++;
       if(!u->tx_busy) {
         reg_wr(u->base + UART_DR, c);
         reg_wr(u->base + UART_IMSC, (1 << 4) | (1 << 5));
@@ -103,10 +108,10 @@ pl011_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 
       u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = c;
       u->tx_fifo_wrptr++;
-      break;
     }
   }
   irq_permit(q);
+  return written;
 }
 
 
@@ -146,8 +151,8 @@ pl011_uart_irq(void *arg)
 }
 
 
-static int
-pl011_uart_read(struct stream *s, void *buf, size_t size, int mode)
+static ssize_t
+pl011_uart_read(struct stream *s, void *buf, size_t size, size_t minbytes)
 {
   pl011_t *u = (pl011_t *)s;
 
@@ -160,7 +165,7 @@ pl011_uart_read(struct stream *s, void *buf, size_t size, int mode)
     for(size_t i = 0; i < size; i++) {
 
       while(reg_rd(u->base + UART_FR) & (1 << 4)) {
-        if(stream_wait_is_done(mode, i, size)) {
+        if(i >= minbytes) {
           return i;
         }
       }
@@ -174,7 +179,7 @@ pl011_uart_read(struct stream *s, void *buf, size_t size, int mode)
 
   for(size_t i = 0; i < size; i++) {
     while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
-      if(stream_wait_is_done(mode, i, size)) {
+      if(i >= minbytes) {
         irq_permit(q);
         return i;
       }

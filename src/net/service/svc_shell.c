@@ -43,8 +43,8 @@ socket_stream_init(socket_stream_t *ss)
   cond_init(&ss->ss_cond, "sockstream");
 }
 
-static int
-socket_stream_read(struct stream *s, void *buf, size_t size, int wait)
+static ssize_t
+socket_stream_read(struct stream *s, void *buf, size_t size, size_t requested)
 {
   socket_stream_t *ss = (socket_stream_t *)s;
 
@@ -57,9 +57,8 @@ socket_stream_read(struct stream *s, void *buf, size_t size, int wait)
       break;
 
     if(ss->ss_rxbuf == NULL) {
-      if(stream_wait_is_done(wait, off, size)) {
+      if(off >= requested)
         break;
-      }
       ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PUSH);
       cond_wait(&ss->ss_cond, &ss->ss_mutex);
       continue;
@@ -78,12 +77,12 @@ socket_stream_read(struct stream *s, void *buf, size_t size, int wait)
 }
 
 
-static void
+ssize_t
 socket_stream_write(struct stream *s, const void *buf, size_t size,
                     int flags)
 {
   socket_stream_t *ss = (socket_stream_t *)s;
-
+  size_t written = 0;
   mutex_lock(&ss->ss_mutex);
 
   if(buf == NULL) {
@@ -106,6 +105,8 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
         if(ss->ss_txbuf_head == NULL) {
           ss->ss_flushed = 1;
           ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
+          if(flags & STREAM_WRITE_NO_WAIT)
+            break;
           ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 1);
         }
         ss->ss_txbuf_tail = ss->ss_txbuf_head;
@@ -147,9 +148,11 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
       ss->ss_txbuf_head->pb_pktlen += to_copy;
       buf += to_copy;
       size -= to_copy;
+      written += to_copy;
     }
   }
   mutex_unlock(&ss->ss_mutex);
+  return written;
 }
 
 static void
@@ -271,13 +274,13 @@ shell_thread(void *arg)
 
 
 #ifdef ENABLE_NET_IPV4
-static int
-telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
+static ssize_t
+telnet_read_filter(struct stream *s, void *buf, size_t size, size_t requested)
 {
   svc_shell_t *ss = (svc_shell_t *)s;
   int r;
   while(1) {
-    r = socket_stream_read(s, buf, size, wait);
+    r = socket_stream_read(s, buf, size, requested);
     if(r > 0) {
       uint8_t *b = buf;
       size_t wrptr = 0;
@@ -316,7 +319,7 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
         }
       }
       r -= cut;
-      if(r == 0 && wait) {
+      if(r == 0 && requested) {
         continue;
       }
     }
@@ -325,29 +328,40 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, int wait)
 }
 
 
-static void
+static ssize_t
 telnet_write_filter(struct stream *s, const void *buf, size_t size,
                     int flags)
 {
   static const uint8_t crlf[2] = {0x0d, 0x0a};
 
   if(buf == NULL) {
-    socket_stream_write(s, buf, size, flags);
+    return socket_stream_write(s, buf, size, flags);
   } else {
+
+    // NO_WAIT is not really supported here.
+    // We need to keep track if any of the writes below does a partial
+    // write and if so terminate early. In particular it get tricky
+    // if we write a partial CRLF because it doesn't translate 1:1
+    // to input bytes. So for that we need to keep some kind of state
+    assert((flags & STREAM_WRITE_NO_WAIT) == 0);
+
     const uint8_t *c = buf;
     size_t s0 = 0, i;
+    size_t written = 0;
     for(i = 0; i < size; i++) {
       if(c[i] == 0x0a) {
         size_t len = i - s0;
-        socket_stream_write(s, buf + s0, len, flags);
+        written += socket_stream_write(s, buf + s0, len, flags);
         socket_stream_write(s, crlf, 2, flags);
+        written++;
         s0 = i + 1;
       }
     }
     size_t len = i - s0;
     if(len) {
-      socket_stream_write(s, buf + s0, len, flags);
+      written += socket_stream_write(s, buf + s0, len, flags);
     }
+    return written;
   }
 }
 
