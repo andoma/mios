@@ -18,6 +18,9 @@
 #define USART_CR1_TCIE   (1 << 6)
 #define USART_CR1_TXEIE  (1 << 7)
 
+#define USART_CR2_STOP_BITS_2    (0x00002000)
+#define USART_CR2_STOP_BITS_MASK (~(0x00003000))
+
 typedef struct {
   uint16_t base;
   uint16_t clkid;

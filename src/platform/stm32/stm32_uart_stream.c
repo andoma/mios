@@ -238,6 +238,12 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
   u->tx_dma = STM32_DMA_INSTANCE_NONE;
   u->stream.write = stm32_uart_write;
 
+  if(flags & UART_2_STOP_BITS) {
+    uint32_t cr2 = reg_rd(u->reg_base + USART_CR2);
+    cr2 = ((cr2 & USART_CR2_STOP_BITS_MASK) | USART_CR2_STOP_BITS_2);
+    reg_wr(u->reg_base + USART_CR2, cr2);
+  }
+
   /* Clear TC (transmission complete) flag which is set in SR by default.
    * Although the docs state that clearing should be a SR read followed by a DR
    * write, that sequence doesn't seem to work but a simple read does. */

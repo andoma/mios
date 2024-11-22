@@ -45,3 +45,4 @@ typedef struct stm32_uart_stream {
 #define UART_WAKEUP         0x4
 
 #define UART_CTRLD_IS_PANIC 0x80
+#define UART_2_STOP_BITS    0x01
