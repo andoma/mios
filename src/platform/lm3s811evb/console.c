@@ -27,8 +27,8 @@ irq_5(void)
 }
 
 
-static int
-uart_read(struct stream *s, void *buf, size_t size, int wait)
+static ssize_t
+uart_read(struct stream *s, void *buf, size_t size, size_t reqsize)
 {
   char *d = buf;
 
@@ -39,7 +39,7 @@ uart_read(struct stream *s, void *buf, size_t size, int wait)
       uint8_t avail = rx_fifo_wrptr - rx_fifo_rdptr;
       if(avail)
         break;
-      if(!wait) {
+      if(i >= reqsize) {
         irq_permit(q);
         return i;
       }
@@ -54,13 +54,14 @@ uart_read(struct stream *s, void *buf, size_t size, int wait)
 }
 
 
-static void
+static ssize_t
 uart_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   const char *d = buf;
   for(size_t i = 0; i < size; i++) {
     *UART_DR = d[i];
   }
+  return size;
 }
 
 

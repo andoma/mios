@@ -36,7 +36,7 @@ static struct http_server_task_squeue http_task_queue;
 static mutex_t http_mutex = MUTEX_INITIALIZER("http");
 static cond_t http_task_queue_cond = COND_INITIALIZER("rq");
 
-static void http_stream_write(struct stream *s, const void *buf, size_t size, int flags);
+static ssize_t http_stream_write(struct stream *s, const void *buf, size_t size, int flags);
 
 static struct http_connection_squeue notifying_websocket_connections;
 
@@ -1103,11 +1103,12 @@ http_stream_release_packet(http_connection_t *hc, int fin)
 }
 
 
-static void
+static ssize_t
 http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   http_connection_t *hc = (http_connection_t *)s;
 
+  size_t written = 0;
   mutex_lock(&http_mutex);
 
   socket_t *sk = hc->hc_sock;
@@ -1167,9 +1168,11 @@ http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
       hc->hc_txbuf_head->pb_pktlen += to_copy;
       buf += to_copy;
       size -= to_copy;
+      written += to_copy;
     }
   }
   mutex_unlock(&http_mutex);
+  return written;
 }
 
 static void

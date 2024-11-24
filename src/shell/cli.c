@@ -301,8 +301,7 @@ cli_getc(struct cli *cli, int wait)
     return ERR_NOT_IMPLEMENTED;
 
   char c;
-  int r = s->read(s, &c, 1,
-                  wait ? STREAM_READ_WAIT_ONE : STREAM_READ_WAIT_NONE);
+  int r = s->read(s, &c, 1, !!wait);
   if(r == 0)
     return ERR_NOT_READY;
   if(r < 0)

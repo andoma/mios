@@ -47,12 +47,12 @@ printchar(char c)
   reg_wr(UART_TX_TASK, 0);
 }
 
-static void
+static ssize_t
 nrf52_uart_write(stream_t *s, const void *buf, size_t size, int flags)
 {
   nrf52_uart_t *u = (nrf52_uart_t *)s;
   if(size == 0)
-    return;
+    return 0;
 
   const char *d = buf;
 
@@ -77,19 +77,24 @@ nrf52_uart_write(stream_t *s, const void *buf, size_t size, int flags)
       printchar(c);
     }
     irq_permit(q);
-    return;
+    return size;
   }
+
+  size_t written = 0;
 
   for(size_t i = 0; i < size; i++) {
     const uint8_t c = d[i];
     while(1) {
       uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_rdptr - u->tx_fifo_wrptr);
       if(avail == 0) {
+        if(flags & STREAM_WRITE_NO_WAIT)
+          break;
         assert(u->tx_busy);
         task_sleep(&u->uart_tx);
         continue;
       }
 
+      written++;
       if(!u->tx_busy) {
         reg_wr(UART_TXD, c);
         reg_wr(UART_TX_TASK, 1);
@@ -103,6 +108,7 @@ nrf52_uart_write(stream_t *s, const void *buf, size_t size, int flags)
     }
   }
   irq_permit(q);
+  return written;
 }
 
 
@@ -142,8 +148,8 @@ nrf52_uart_irq(void *arg)
 }
 
 
-static int
-nrf52_uart_read(struct stream *s, void *buf, size_t size, int mode)
+static ssize_t
+nrf52_uart_read(struct stream *s, void *buf, size_t size, size_t requested)
 {
   nrf52_uart_t *u = (nrf52_uart_t *)s;
 
@@ -156,9 +162,8 @@ nrf52_uart_read(struct stream *s, void *buf, size_t size, int mode)
     for(size_t i = 0; i < size; i++) {
 
       while(!reg_rd(UART_RX_RDY)) {
-        if(stream_wait_is_done(mode, i, size)) {
+        if(i >= requested)
           return i;
-        }
       }
       reg_wr(UART_RX_RDY, 0);
       char c = reg_rd(UART_RXD);
@@ -171,7 +176,7 @@ nrf52_uart_read(struct stream *s, void *buf, size_t size, int mode)
 
   for(size_t i = 0; i < size; i++) {
     while(u->rx_fifo_wrptr == u->rx_fifo_rdptr) {
-      if(stream_wait_is_done(mode, i, size)) {
+      if(i >= requested) {
         irq_permit(q);
         return i;
       }

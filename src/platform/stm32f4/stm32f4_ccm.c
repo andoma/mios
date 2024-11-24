@@ -38,18 +38,18 @@ stm32f4_ccm_init(void)
   panic_buf->message[0] = 0;
 }
 
-static void
+static ssize_t
 panic_stream_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   stdio->write(stdio, buf, size, flags);
 
   if(buf == NULL) {
     panic_buf->magic = PANIC_MAGIC;
-    return;
+    return size;
   }
 
   if(panic_buf->magic != PANIC_PREP)
-    return;
+    return size;
 
   size_t len = strlen(panic_buf->message);
   size_t to_copy = sizeof(panic_buf->message) - len - 1;
@@ -64,6 +64,7 @@ panic_stream_write(struct stream *s, const void *buf, size_t size, int flags)
     *dst++ = *src;
   }
   *dst = 0;
+  return size;
 }
 
 static const stream_t panic_stream = {

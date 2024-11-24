@@ -250,8 +250,27 @@ cdc_tx_reset(device_t *d, usb_ep_t *ue)
 
 
 
-static int
-cdc_read(struct stream *s, void *buf, size_t size, int wait)
+static task_waitable_t *
+cdc_poll(struct stream *s, poll_type_t type)
+{
+  usb_cdc_t *uc = (usb_cdc_t *)s;
+
+  irq_forbid(IRQ_LEVEL_NET);
+
+  if(type == POLL_STREAM_WRITE) {
+    if(!fifo_is_full(&uc->tx_fifo))
+      return NULL;
+    return &uc->tx_waitq;
+  } else {
+    if(!fifo_is_empty(&uc->rx_fifo))
+      return NULL;
+    return &uc->rx_waitq;
+  }
+}
+
+
+static ssize_t
+cdc_read(struct stream *s, void *buf, size_t size, size_t required)
 {
   usb_cdc_t *uc = (usb_cdc_t *)s;
   usb_ep_t *ue = &uc->data_iface->ui_endpoints[1]; // OUT
@@ -268,7 +287,7 @@ cdc_read(struct stream *s, void *buf, size_t size, int wait)
         ue->ue_vtable->cnak(ue->ue_dev, ue);
       }
 
-      if(stream_wait_is_done(wait, i, size)) {
+      if(i >= required) {
         irq_permit(q);
         return i;
       }
@@ -284,12 +303,13 @@ cdc_read(struct stream *s, void *buf, size_t size, int wait)
 
 
 
-static void
+static ssize_t
 cdc_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   if(size == 0)
-    return;
+    return 0;
 
+  ssize_t written = 0;
   usb_cdc_t *uc = (usb_cdc_t *)s;
   usb_ep_t *ue = &uc->data_iface->ui_endpoints[0]; // IN
 
@@ -317,7 +337,7 @@ cdc_write(struct stream *s, const void *buf, size_t size, int flags)
     }
 
     fifo_wr(&uc->tx_fifo, b[i]);
-
+    written++;
     if(ue->ue_running && !uc->tx_on) {
       cdc_tx(ue->ue_dev, ue, uc);
       uc->tx_on = 1;
@@ -325,6 +345,7 @@ cdc_write(struct stream *s, const void *buf, size_t size, int flags)
   }
  done:
   irq_permit(q);
+  return written;
 }
 
 
@@ -356,6 +377,7 @@ usb_cdc_create_stream(struct usb_interface_queue *q, int flags)
   usb_cdc_t *cdc = calloc(1, sizeof(usb_cdc_t));
   cdc->s.read = cdc_read;
   cdc->s.write = cdc_write;
+  cdc->s.poll = cdc_poll;
   cdc->flags = flags;
   task_waitable_init(&cdc->rx_waitq, "cdcrx");
   task_waitable_init(&cdc->tx_waitq, "cdctx");
