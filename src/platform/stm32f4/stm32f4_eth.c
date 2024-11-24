@@ -267,6 +267,7 @@ eth_irq_rx(stm32f4_eth_t *se)
       if(pb != NULL)
         pbuf_free_irq_blocked(pb);
       se->se_rx_scatter_length = 0;
+      STAILQ_INIT(&se->se_rx_scatter_queue);
     }
 
     void *buf = rx->buf;
