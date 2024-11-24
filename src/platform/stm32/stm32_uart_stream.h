@@ -45,4 +45,10 @@ typedef struct stm32_uart_stream {
 #define UART_WAKEUP         0x4
 
 #define UART_CTRLD_IS_PANIC 0x80
-#define UART_2_STOP_BITS    0x01
+
+// STOP-bit config bits are written as-is to register, don't change
+// withuot adjusting corresponding setup code
+#define UART_1_STOP_BIT     0x00
+#define UART_0_5_STOP_BITS  0x01
+#define UART_2_STOP_BITS    0x02
+#define UART_1_5_STOP_BITS  0x03
