@@ -14,6 +14,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: setup
-      run: apt update && apt install  --no-install-recommends --no-install-suggests gcc-arm-none-eabi
+      run: sudo apt update && sudo apt install  --no-install-recommends --no-install-suggests gcc-arm-none-eabi
     - name: make
       run: make allplatforms
