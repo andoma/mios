@@ -16,4 +16,4 @@ jobs:
     - name: setup
       run: sudo apt update && sudo apt install  --no-install-recommends --no-install-suggests gcc-arm-none-eabi
     - name: make
-      run: make allplatforms
+      run: make -j`nproc` allplatforms
