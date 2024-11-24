@@ -59,6 +59,7 @@ static const char errmsg[] = {
   "IO\0"
   "FS\0"
   "DMAFIFO\0"
+  "INTERRUPTED\0"
   "\0"
 };
 
