@@ -9,11 +9,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <malloc.h>
+#include <alloca.h>
 
 #include <mios/task.h>
 #include <mios/mios.h>
 #include <mios/cli.h>
 #include <mios/timer.h>
+#include <mios/poll.h>
 
 #include "irq.h"
 #include "cpu.h"
@@ -413,6 +415,21 @@ task_wakeup_sched_locked(task_waitable_t *waitable, int all)
   task_t *t;
   int do_sched = 0;
   while((t = LIST_FIRST(&waitable->list)) != NULL) {
+
+    if(t->t_state == TASK_STATE_MUXED_SLEEP) {
+      LIST_REMOVE(t, t_wait_link);
+      t->t_state = TASK_STATE_NONE;
+      uint32_t which = t->t_index;
+      t -= t->t_index;
+      waitmux_t *wm = (void *)t - offsetof(waitmux_t, wm_tasks);
+
+      if(wm->wm_which == -1) {
+        wm->wm_which = which;
+        task_wakeup_sched_locked(&wm->wm_waitable, 1);
+      }
+      continue;
+    }
+
     assert(t->t_state == TASK_STATE_SLEEPING);
     LIST_REMOVE(t, t_wait_link);
     cpu_t *cpu = curcpu();
@@ -954,4 +971,84 @@ thread_create_shell(void *(*entry)(void *arg), void *arg, const char *name, stre
   t->t_stream = st;
   irq_permit(s);
   return 0;
+}
+
+
+int
+poll(const pollset_t *ps, size_t num, mutex_t *m, int64_t deadline)
+{
+  /* Each poll target will raise IRQ level as high as needed
+     and we will eventually irq_lower() while waiting.
+     Finally we irq_permit() back to the origin level.
+  */
+
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+
+  waitmux_t *wm = alloca(sizeof(waitmux_t) + num * sizeof(task_t));
+  task_waitable_init(&wm->wm_waitable, "poll");
+  wm->wm_which = -1;
+
+  for(int i = 0; i < num; i++) {
+    stream_t *st;
+    task_waitable_t *tw;
+
+    switch(ps[i].type) {
+    case POLL_NONE:
+      wm->wm_tasks[i].t_state = TASK_STATE_NONE;
+      continue;
+    case POLL_COND:
+      tw = ps[i].obj; // condvar is a waitable
+      break;
+    case POLL_STREAM_READ:
+    case POLL_STREAM_WRITE:
+      st = ps[i].obj;
+      assert(st->poll != NULL);
+      tw = st->poll(st, ps[i].type);
+      break;
+    default:
+      panic("Bad poll type %d", ps[i].type);
+    }
+
+    if(tw == NULL) {
+      // event is already asserted
+
+      for(int j = 0; j < i; j++) {
+        task_t *t = &wm->wm_tasks[j];
+        // Unwind objects we've enlisted so far
+        if(t->t_state == TASK_STATE_MUXED_SLEEP)
+          LIST_REMOVE(t, t_wait_link);
+      }
+
+      irq_permit(q);
+      return i;
+    }
+
+    task_t *t = &wm->wm_tasks[i];
+    t->t_state = TASK_STATE_MUXED_SLEEP;
+    t->t_index = i;
+    LIST_INSERT_HEAD(&tw->list, t, t_wait_link);
+  }
+
+  irq_forbid(IRQ_LEVEL_SCHED);
+
+  if(m != NULL)
+    mutex_unlock(m);
+
+  if(deadline != INT64_MAX) {
+    task_sleep_abs_sched_locked(&wm->wm_waitable, deadline);
+  } else {
+    task_sleep_sched_locked(&wm->wm_waitable);
+  }
+
+  for(int i = 0; i < num; i++) {
+    task_t *t = &wm->wm_tasks[i];
+    if(t->t_state == TASK_STATE_MUXED_SLEEP)
+      LIST_REMOVE(t, t_wait_link);
+  }
+
+  if(m != NULL)
+    mutex_lock(m);
+
+  irq_permit(q);
+  return wm->wm_which;
 }
