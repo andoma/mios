@@ -596,6 +596,12 @@ http_pull(void *opaque)
 
 
 void
+http_connection_retain(http_connection_t *hc)
+{
+  atomic_inc(&hc->hc_refcount);
+}
+
+void
 http_connection_release(http_connection_t *hc)
 {
   if(atomic_dec(&hc->hc_refcount))

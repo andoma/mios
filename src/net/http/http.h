@@ -83,6 +83,8 @@ int http_request_accept_websocket(http_request_t *hr,
 struct stream *http_websocket_output_begin(http_connection_t *hc,
                                            int opcode);
 
+void http_connection_retain(http_connection_t *hc);
+
 void http_connection_release(http_connection_t *hc);
 
 // name must be compile time constant
