@@ -41,6 +41,13 @@ typedef struct {
 
 static evlogfifo_t ef0;
 
+
+static void __attribute__((constructor(400)))
+evlog_init_globals(void)
+{
+  mutex_init(&ef0.mutex, "evlog");
+}
+
 /**
  * Message structure
  *
@@ -265,7 +272,7 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
   stream_follower_t sf;
   sf.f.ptr = ef->tail;
   sf.f.cb = stream_follower_wakeup;
-  cond_init(&sf.c, "log");
+  cond_init(&sf.c, "evlog");
 
   LIST_INSERT_HEAD(&ef->followers, &sf.f, link);
 
@@ -559,7 +566,7 @@ eventlog_to_fs_thread(void *arg)
 
   sf.f.ptr = ef->tail;
   sf.f.cb = stream_follower_wakeup;
-  cond_init(&sf.c, "log");
+  cond_init(&sf.c, "evlog");
 
   LIST_INSERT_HEAD(&ef->followers, &sf.f, link);
 
