@@ -22,11 +22,20 @@ char hostname[HOSTNAME_BUFFER_SIZE];
 mutex_t hostname_mutex;
 
 void
+hostname_setf(const char *fmt, ...)
+{
+  va_list ap;
+  va_start(ap, fmt);
+  mutex_lock(&hostname_mutex);
+  vsnprintf(hostname, sizeof(hostname), fmt, ap);
+  mutex_unlock(&hostname_mutex);
+  va_end(ap);
+}
+
+void
 hostname_set(const char *name)
 {
-  mutex_lock(&hostname_mutex);
-  strlcpy(hostname, name, sizeof(hostname));
-  mutex_unlock(&hostname_mutex);
+  hostname_setf("%s", name);
 }
 
 
