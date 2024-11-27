@@ -52,6 +52,13 @@ void irq_disable(int irq);
 #define GICD_SGIR  0x1f00
 
 __attribute__((always_inline))
+inline void
+irq_off(void)
+{
+  asm volatile ("cpsid i;isb;dsb");
+}
+
+__attribute__((always_inline))
 static inline unsigned int
 irq_forbid(unsigned int level)
 {
@@ -103,6 +110,9 @@ __attribute__((always_inline))
 static inline int
 can_sleep(void)
 {
-  uint32_t pbase = cpu_get_periphbase();
-  return reg_rd(pbase + ICCRPR) >= 0xf8 && ((cpu_get_cpsr() & 0x1f) == 0x1f);
+  const uint32_t cpsr = cpu_get_cpsr();
+
+  // We may sleep if MODE=SYS (regular thread exection) and IRQs are not
+  // disabled (bit 7 (0x80))
+  return (cpsr & 0x9f) == 0x1f;
 }

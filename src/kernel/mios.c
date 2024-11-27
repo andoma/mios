@@ -118,7 +118,7 @@ get_panic_stream(void)
 void
 panic(const char *fmt, ...)
 {
-  irq_forbid(IRQ_LEVEL_ALL);
+  irq_off();
   fini();
 
   thread_t *t = thread_current();

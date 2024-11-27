@@ -22,6 +22,12 @@
 
 #include <mios/mios.h>
 
+inline void __attribute__((always_inline))
+irq_off(void)
+{
+  asm volatile ("cpsid i;isb;dsb");
+}
+
 #ifdef HAVE_BASEPRI
 
 inline void  __attribute__((always_inline))
@@ -73,19 +79,6 @@ irq_lower(void)
   return old;
 }
 
-
-
-static inline int  __attribute__((always_inline))
-can_sleep(void)
-{
-  unsigned int basepri;
-  asm volatile ("mrs %0, basepri\n\t" : "=r" (basepri));
-
-  unsigned int control;
-  asm volatile ("mrs %0, control\n\t" : "=r" (control));
-  return !!(control & 0x2) && basepri == 0;
-}
-
 #else
 
 inline void  __attribute__((always_inline))
@@ -135,6 +128,8 @@ irq_lower(void)
   return old;
 }
 
+#endif
+
 static inline int  __attribute__((always_inline))
 can_sleep(void)
 {
@@ -145,8 +140,6 @@ can_sleep(void)
   asm volatile ("mrs %0, control\n\t" : "=r" (control));
   return !!(control & 0x2) && primask == 0;
 }
-
-#endif
 
 inline void  __attribute__((always_inline))
 schedule(void)
