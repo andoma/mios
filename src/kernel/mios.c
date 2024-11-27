@@ -130,7 +130,7 @@ panic(const char *fmt, ...)
   vstprintf(st, fmt, ap);
   va_end(ap);
   stprintf(st, "\n");
-  st->write(st, NULL, 0, 0); // Stream flush
+  stream_write(st, NULL, 0, 0); // Stream flush
   cli_console('#');
   halt(fmt);
 }

@@ -470,7 +470,7 @@ static size_t
 stream_fmt(void *arg, const char *buf, size_t len)
 {
   stream_t *s = arg;
-  s->write(s, buf, len, 0);
+  stream_write(s, buf, len, 0);
   return len;
 }
 
@@ -479,7 +479,7 @@ int
 vstprintf(stream_t *s, const char *fmt, va_list ap)
 {
   if(fmt == NULL) {
-    s->write(s, NULL, 0, 0);
+    stream_write(s, NULL, 0, 0);
     return 0;
   }
 
@@ -542,9 +542,9 @@ stprintflags(stream_t *s, const char *str, uint32_t flags, const char *sep)
       break;
     if(flags & (1 << i)) {
       if(need_sep) {
-        s->write(s, sep, seplen, 0);
+        stream_write(s, sep, seplen, 0);
       }
-      s->write(s, str, n, 0);
+      stream_write(s, str, n, 0);
       need_sep = 1;
     }
     str += n + 1;
@@ -562,7 +562,7 @@ sthexstr(stream_t *s, const void *data, size_t len)
     uint8_t v = u8[i];
     buf[0] = "0123456789abcdef"[v >> 4];
     buf[1] = "0123456789abcdef"[v & 0xf];
-    s->write(s, buf, 2, 0);
+    stream_write(s, buf, 2, 0);
   }
 }
 
@@ -633,10 +633,10 @@ stream_t *stdio;
 int
 getchar(void)
 {
-  if(stdio == NULL || stdio->read == NULL)
+  if(stdio == NULL || stdio->vtable->read == NULL)
     return -1;
   char c;
-  stdio->read(stdio, &c, 1, 1);
+  stream_read(stdio, &c, 1, 1);
   return c;
 }
 
@@ -646,7 +646,7 @@ static size_t
 stdout_cb(void *aux, const char *s, size_t len)
 {
   if(stdio != NULL)
-    stdio->write(stdio, s, len, 0);
+    stream_write(stdio, s, len, 0);
   return len;
 }
 
@@ -673,7 +673,7 @@ putchar(int c)
 {
   if(stdio) {
     char s8 = c;
-    stdio->write(stdio, &s8, 1, 0);
+    stream_write(stdio, &s8, 1, 0);
   }
   return c;
 }
@@ -684,8 +684,8 @@ puts(const char *s)
 {
   if(stdio) {
     size_t len = strlen(s);
-    stdio->write(stdio, s, len, 0);
-    stdio->write(stdio, "\n", 1, 0);
+    stream_write(stdio, s, len, 0);
+    stream_write(stdio, "\n", 1, 0);
   }
   return 0;
 }

@@ -1002,8 +1002,8 @@ poll(const pollset_t *ps, size_t num, mutex_t *m, int64_t deadline)
     case POLL_STREAM_READ:
     case POLL_STREAM_WRITE:
       st = ps[i].obj;
-      assert(st->poll != NULL);
-      tw = st->poll(st, ps[i].type);
+      assert(st->vtable->poll != NULL);
+      tw = st->vtable->poll(st, ps[i].type);
       break;
     default:
       panic("Bad poll type %d", ps[i].type);

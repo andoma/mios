@@ -42,4 +42,4 @@ int cli_on_stream(struct stream *s, char promptchar);
 
 void cli_console(char promptchar);
 
-#define cli_flush(cli) (cli)->cl_stream->write((cli)->cl_stream, NULL, 0, 0)
+#define cli_flush(cli) stream_write((cli)->cl_stream, NULL, 0, 0)

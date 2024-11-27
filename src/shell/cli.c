@@ -298,11 +298,11 @@ int
 cli_getc(struct cli *cli, int wait)
 {
   stream_t *s = cli->cl_stream;
-  if(s->read == NULL)
+  if(s->vtable->read == NULL)
     return ERR_NOT_IMPLEMENTED;
 
   char c;
-  int r = s->read(s, &c, 1, !!wait);
+  int r = stream_read(s, &c, 1, !!wait);
   if(r == 0)
     return ERR_NOT_READY;
   if(r < 0)
@@ -317,7 +317,7 @@ cli_on_stream(stream_t *s, char promptchar)
     .cl_stream = s
   };
 
-  s->write(s, "\n", 1, STREAM_WRITE_WAIT_DTR);
+  stream_write(s, "\n", 1, STREAM_WRITE_WAIT_DTR);
   mios_print_version(s);
   cli_prompt(&cli, promptchar);
   while(1) {

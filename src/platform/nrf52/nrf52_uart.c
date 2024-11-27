@@ -190,13 +190,17 @@ nrf52_uart_read(struct stream *s, void *buf, size_t size, size_t requested)
   return size;
 }
 
+static const stream_vtable_t nrf52_uart_vtable = {
+  .read = nrf52_uart_read,
+  .write = nrf52_uart_write
+};
+
 struct stream *
 nrf52_uart_init(int baudrate, gpio_t txpin, gpio_t rxpin, int flags)
 {
   nrf52_uart_t *u = calloc(1, sizeof(nrf52_uart_t));
 
-  u->stream.read = nrf52_uart_read;
-  u->stream.write = nrf52_uart_write;
+  u->stream.vtable = &nrf52_uart_vtable;
 
   u->uart_flags = flags;
   reg_wr(UART_PSELTXD, txpin);

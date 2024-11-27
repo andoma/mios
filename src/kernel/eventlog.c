@@ -154,7 +154,7 @@ evlog(event_level_t level, const char *fmt, ...)
     va_copy(ap2, ap);
     vstprintf(st, fmt, ap2);
     va_end(ap2);
-    st->write(st, "\n", 1, 0);
+    stream_write(st, "\n", 1, 0);
   }
 
   mutex_lock(&ef->mutex);
@@ -264,7 +264,7 @@ print_timestamp_to_stream(stream_t *st, int64_t ts)
 static void
 stream_log(evlogfifo_t *ef, stream_t *st, int follow)
 {
-  if(st->read == NULL)
+  if(st->vtable->read == NULL)
     follow = 0;
 
   mutex_lock(&ef->mutex);
@@ -285,10 +285,10 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
     if(ptr == ef->head) {
       if(!follow)
         break;
-      st->write(st, NULL, 0, 0);
+      stream_write(st, NULL, 0, 0);
       if(cond_wait_timeout(&sf.c, &ef->mutex, clock_get() + 100000)) {}
       uint8_t dummy;
-      int r = st->read(st, &dummy, 1, 0);
+      int r = stream_read(st, &dummy, 1, 0);
       if(r)
         break;
       continue;
@@ -309,12 +309,12 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
     stprintf(st, " %s : ", level2str[level]);
 
     if(msgend >= msgstart) {
-      st->write(st, ef->data + msgstart, msglen, 0);
+      stream_write(st, ef->data + msgstart, msglen, 0);
     } else {
-      st->write(st, ef->data + msgstart, EVENTLOG_SIZE - msgstart, 0);
-      st->write(st, ef->data, msgend, 0);
+      stream_write(st, ef->data + msgstart, EVENTLOG_SIZE - msgstart, 0);
+      stream_write(st, ef->data, msgend, 0);
     }
-    st->write(st, "\n", 1, 0);
+    stream_write(st, "\n", 1, 0);
 
     sf.f.ptr = ptr + len;
   }

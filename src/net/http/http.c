@@ -710,6 +710,168 @@ http_timer_cb(void *opaque, uint64_t now)
   mutex_unlock(&http_mutex);
 }
 
+
+static const char hexdigit[16] = "0123456789abcdef";
+
+static void
+add_chunked_encoding(http_connection_t *hc)
+{
+  pbuf_t *pb = hc->hc_txbuf_head;
+
+  size_t len = pb->pb_pktlen;
+  pb = pbuf_prepend(pb, 8, 0, 0);
+  assert(pb != NULL);
+  char *hdr = pbuf_data(pb, 0);
+  hdr[0] = '0';
+  hdr[1] = '0';
+  hdr[2] = '0';
+  hdr[3] = hexdigit[(len >> 8) & 0xf];
+  hdr[4] = hexdigit[(len >> 4) & 0xf];
+  hdr[5] = hexdigit[(len >> 0) & 0xf];
+  hdr[6] = '\r';
+  hdr[7] = '\n';
+  hc->hc_txbuf_head = pb;
+
+  pbuf_t *tail = hc->hc_txbuf_tail;
+  memcpy(tail->pb_data + tail->pb_offset + tail->pb_buflen, "\r\n", 2);
+  tail->pb_buflen += 2;
+  pb->pb_pktlen += 2;
+}
+
+
+static void
+add_websocket_framing(http_connection_t *hc, int fin)
+{
+  pbuf_t *pb = hc->hc_txbuf_head;
+  size_t len = pb->pb_pktlen;
+
+  if(hc->hc_output_mask_bit) {
+
+    assert(pb->pb_offset >= 4);
+    uint8_t *m = pbuf_data(pb, 0) - 4;
+    uint32_t r = rand();
+    memcpy(m, &r, sizeof(uint32_t));
+
+    int o = 0;
+    for(pbuf_t *p = pb; p != NULL; p = p->pb_next) {
+      uint8_t *d = pbuf_data(p, 0);
+      for(size_t i = 0; i < p->pb_buflen; i++) {
+        d[i] ^= m[o & 3];
+        o++;
+      }
+    }
+
+    pb->pb_offset -= 4;
+    pb->pb_buflen += 4;
+    pb->pb_pktlen += 4;
+  }
+
+  assert(pb->pb_offset >= 4);
+  pb->pb_offset -= 4;
+
+  uint8_t *hdr;
+  if(len < 126) {
+    memmove(pbuf_data(pb, 2), pbuf_data(pb, 4), pb->pb_buflen);
+    pb->pb_buflen += 2;
+    pb->pb_pktlen += 2;
+    hdr = pbuf_data(pb, 0);
+    hdr[1] = len | hc->hc_output_mask_bit;
+  } else {
+    pb->pb_buflen += 4;
+    pb->pb_pktlen += 4;
+
+    hdr = pbuf_data(pb, 0);
+    hdr[1] = 126 | hc->hc_output_mask_bit;
+    hdr[2] = len >> 8;
+    hdr[3] = len;
+  }
+  hdr[0] = hc->hc_ws_opcode | (fin ? 0x80 : 0);
+  hc->hc_ws_opcode = 0;
+}
+
+
+static void
+http_stream_release_packet(http_connection_t *hc, int fin)
+{
+  pushpull_t *sk = hc->hc_sock;
+  if(sk == NULL)
+    return;
+
+  switch(hc->hc_output_encoding) {
+  case OUTPUT_ENCODING_CHUNKED:
+    add_chunked_encoding(hc);
+    break;
+  case OUTPUT_ENCODING_WEBSOCKET:
+    add_websocket_framing(hc, fin);
+    break;
+  }
+  hc->hc_hold = 0;
+
+  sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
+}
+
+
+static void
+http_response_close(stream_t *st)
+{
+  http_connection_t *hc = (http_connection_t *)st;
+  pbuf_t *pb;
+
+  mutex_lock(&http_mutex);
+
+  if(hc->hc_hold)
+    http_stream_release_packet(hc, 1);
+
+  while(hc->hc_txbuf_head && hc->hc_sock) {
+    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+  }
+
+  pushpull_t *sk = hc->hc_sock;
+  if(sk != NULL && hc->hc_output_encoding == OUTPUT_ENCODING_CHUNKED) {
+    pb = pbuf_make(sk->preferred_offset, 1);
+    memcpy(pbuf_data(pb, 0), "0\r\n\r\n", 5);
+
+    pb->pb_pktlen += 5;
+    pb->pb_buflen += 5;
+
+    hc->hc_txbuf_head = pb;
+    hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_PULL);
+  }
+
+  hc->hc_output_encoding = 0;
+  mutex_unlock(&http_mutex);
+}
+
+
+static const stream_vtable_t http_response_chunked = {
+  .write = http_stream_write,
+  .close = http_response_close,
+};
+
+static void
+http_websocket_output_end(stream_t *st)
+{
+  http_connection_t *hc = (http_connection_t *)st;
+  mutex_lock(&http_mutex);
+
+  if(hc->hc_hold)
+    http_stream_release_packet(hc, 1);
+
+  while(hc->hc_txbuf_head && hc->hc_sock) {
+    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+  }
+  hc->hc_output_encoding = 0;
+  mutex_unlock(&http_mutex);
+}
+
+
+static const stream_vtable_t http_response_websocket = {
+  .write = http_stream_write,
+  .close = http_websocket_output_end,
+};
+
+
+
 static http_connection_t *
 http_connection_create(enum http_parser_type type,
                        const http_parser_settings *parser_settings)
@@ -726,7 +888,6 @@ http_connection_create(enum http_parser_type type,
   http_parser_init(&hc->hc_hp, type);
 
   hc->hc_hp.data = hc;
-  hc->s.write = http_stream_write;
   cond_init(&hc->hc_txbuf_cond, "httpout");
 
   hc->hc_timer.t_cb = http_timer_cb;
@@ -1008,106 +1169,6 @@ http_init(void)
 }
 
 
-static const char hexdigit[16] = "0123456789abcdef";
-
-static void
-add_chunked_encoding(http_connection_t *hc)
-{
-  pbuf_t *pb = hc->hc_txbuf_head;
-
-  size_t len = pb->pb_pktlen;
-  pb = pbuf_prepend(pb, 8, 0, 0);
-  assert(pb != NULL);
-  char *hdr = pbuf_data(pb, 0);
-  hdr[0] = '0';
-  hdr[1] = '0';
-  hdr[2] = '0';
-  hdr[3] = hexdigit[(len >> 8) & 0xf];
-  hdr[4] = hexdigit[(len >> 4) & 0xf];
-  hdr[5] = hexdigit[(len >> 0) & 0xf];
-  hdr[6] = '\r';
-  hdr[7] = '\n';
-  hc->hc_txbuf_head = pb;
-
-  pbuf_t *tail = hc->hc_txbuf_tail;
-  memcpy(tail->pb_data + tail->pb_offset + tail->pb_buflen, "\r\n", 2);
-  tail->pb_buflen += 2;
-  pb->pb_pktlen += 2;
-}
-
-
-static void
-add_websocket_framing(http_connection_t *hc, int fin)
-{
-  pbuf_t *pb = hc->hc_txbuf_head;
-  size_t len = pb->pb_pktlen;
-
-  if(hc->hc_output_mask_bit) {
-
-    assert(pb->pb_offset >= 4);
-    uint8_t *m = pbuf_data(pb, 0) - 4;
-    uint32_t r = rand();
-    memcpy(m, &r, sizeof(uint32_t));
-
-    int o = 0;
-    for(pbuf_t *p = pb; p != NULL; p = p->pb_next) {
-      uint8_t *d = pbuf_data(p, 0);
-      for(size_t i = 0; i < p->pb_buflen; i++) {
-        d[i] ^= m[o & 3];
-        o++;
-      }
-    }
-
-    pb->pb_offset -= 4;
-    pb->pb_buflen += 4;
-    pb->pb_pktlen += 4;
-  }
-
-  assert(pb->pb_offset >= 4);
-  pb->pb_offset -= 4;
-
-  uint8_t *hdr;
-  if(len < 126) {
-    memmove(pbuf_data(pb, 2), pbuf_data(pb, 4), pb->pb_buflen);
-    pb->pb_buflen += 2;
-    pb->pb_pktlen += 2;
-    hdr = pbuf_data(pb, 0);
-    hdr[1] = len | hc->hc_output_mask_bit;
-  } else {
-    pb->pb_buflen += 4;
-    pb->pb_pktlen += 4;
-
-    hdr = pbuf_data(pb, 0);
-    hdr[1] = 126 | hc->hc_output_mask_bit;
-    hdr[2] = len >> 8;
-    hdr[3] = len;
-  }
-  hdr[0] = hc->hc_ws_opcode | (fin ? 0x80 : 0);
-  hc->hc_ws_opcode = 0;
-}
-
-
-
-static void
-http_stream_release_packet(http_connection_t *hc, int fin)
-{
-  pushpull_t *sk = hc->hc_sock;
-  if(sk == NULL)
-    return;
-
-  switch(hc->hc_output_encoding) {
-  case OUTPUT_ENCODING_CHUNKED:
-    add_chunked_encoding(hc);
-    break;
-  case OUTPUT_ENCODING_WEBSOCKET:
-    add_websocket_framing(hc, fin);
-    break;
-  }
-  hc->hc_hold = 0;
-
-  sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-}
-
 
 static ssize_t
 http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
@@ -1215,37 +1276,6 @@ http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
   return written;
 }
 
-static void
-http_response_close(stream_t *st)
-{
-  http_connection_t *hc = (http_connection_t *)st;
-  pbuf_t *pb;
-
-  mutex_lock(&http_mutex);
-
-  if(hc->hc_hold)
-    http_stream_release_packet(hc, 1);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-
-  pushpull_t *sk = hc->hc_sock;
-  if(sk != NULL && hc->hc_output_encoding == OUTPUT_ENCODING_CHUNKED) {
-    pb = pbuf_make(sk->preferred_offset, 1);
-    memcpy(pbuf_data(pb, 0), "0\r\n\r\n", 5);
-
-    pb->pb_pktlen += 5;
-    pb->pb_buflen += 5;
-
-    hc->hc_txbuf_head = pb;
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_PULL);
-  }
-
-  hc->hc_output_encoding = 0;
-  mutex_unlock(&http_mutex);
-}
-
 struct stream *
 http_response_begin(struct http_request *hr, int status_code,
                     const char *content_type)
@@ -1285,26 +1315,11 @@ http_response_begin(struct http_request *hr, int status_code,
   }
 
   mutex_unlock(&http_mutex);
-  hc->s.close = http_response_close;
+  hc->s.vtable = &http_response_chunked;
   return &hc->s;
 }
 
 
-static void
-http_websocket_output_end(stream_t *st)
-{
-  http_connection_t *hc = (http_connection_t *)st;
-  mutex_lock(&http_mutex);
-
-  if(hc->hc_hold)
-    http_stream_release_packet(hc, 1);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-  hc->hc_output_encoding = 0;
-  mutex_unlock(&http_mutex);
-}
 
 struct stream *
 http_websocket_output_begin(http_connection_t *hc, int opcode)
@@ -1323,7 +1338,7 @@ http_websocket_output_begin(http_connection_t *hc, int opcode)
   hc->hc_output_encoding = OUTPUT_ENCODING_WEBSOCKET;
   hc->hc_ws_opcode = opcode;
   mutex_unlock(&http_mutex);
-  hc->s.close = http_websocket_output_end;
+  hc->s.vtable = &http_response_websocket;
   return &hc->s;
 }
 

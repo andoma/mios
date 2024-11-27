@@ -42,7 +42,7 @@ static error_t
 pipe_handle(pipe_stream_t *in, pipe_stream_t *out, pipe_t *p)
 {
   if(in->used == 0) {
-    in->used += in->s->read(in->s, in->buf + in->used,
+    in->used += stream_read(in->s, in->buf + in->used,
                             PIPE_BUF_SIZE - in->used, 0);
   }
 
@@ -53,7 +53,7 @@ pipe_handle(pipe_stream_t *in, pipe_stream_t *out, pipe_t *p)
     }
   }
 
-  ssize_t r = out->s->write(out->s, in->buf, in->used, STREAM_WRITE_NO_WAIT);
+  ssize_t r = stream_write(out->s, in->buf, in->used, STREAM_WRITE_NO_WAIT);
   if(r < 0)
     return r;
 

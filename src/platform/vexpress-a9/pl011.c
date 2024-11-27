@@ -194,6 +194,11 @@ pl011_uart_read(struct stream *s, void *buf, size_t size, size_t minbytes)
 }
 
 
+static const stream_vtable_t pl011_uart_vtable = {
+  .read = pl011_uart_read,
+  .write = pl011_uart_write
+};
+
 struct stream *
 pl011_uart_init(uint32_t base, int baudrate, int irq)
 {
@@ -201,8 +206,7 @@ pl011_uart_init(uint32_t base, int baudrate, int irq)
 
   u->base = base;
 
-  u->stream.read = pl011_uart_read;
-  u->stream.write = pl011_uart_write;
+  u->stream.vtable = &pl011_uart_vtable;
 
   reg_wr(base + UART_IMSC, (1 << 4)); // RX interrupt
 

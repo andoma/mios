@@ -371,13 +371,19 @@ usb_cdc_iface_cfg(void *opaque, int req, int value)
   }
 }
 
+
+const stream_vtable_t cdc_stream_vtable = {
+  .read = cdc_read,
+  .write = cdc_write,
+  .poll = cdc_poll,
+};
+
+
 struct stream *
 usb_cdc_create_stream(struct usb_interface_queue *q, int flags)
 {
   usb_cdc_t *cdc = calloc(1, sizeof(usb_cdc_t));
-  cdc->s.read = cdc_read;
-  cdc->s.write = cdc_write;
-  cdc->s.poll = cdc_poll;
+  cdc->s.vtable = &cdc_stream_vtable;
   cdc->flags = flags;
   task_waitable_init(&cdc->rx_waitq, "cdcrx");
   task_waitable_init(&cdc->tx_waitq, "cdctx");

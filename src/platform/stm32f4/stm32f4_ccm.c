@@ -41,7 +41,7 @@ stm32f4_ccm_init(void)
 static ssize_t
 panic_stream_write(struct stream *s, const void *buf, size_t size, int flags)
 {
-  stdio->write(stdio, buf, size, flags);
+  stream_write(stdio, buf, size, flags);
 
   if(buf == NULL) {
     panic_buf->magic = PANIC_MAGIC;
@@ -67,8 +67,12 @@ panic_stream_write(struct stream *s, const void *buf, size_t size, int flags)
   return size;
 }
 
-static const stream_t panic_stream = {
+static const stream_vtable_t panic_stream_vtable = {
   .write = panic_stream_write,
+};
+
+static const stream_t panic_stream = {
+  .vtable = &panic_stream_vtable
 };
 
 stream_t *

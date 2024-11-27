@@ -405,7 +405,7 @@ display_file(stream_t *st, const char *path, int hex)
       sthexdump(st, NULL, buf, r, offset);
       offset += r;
     } else {
-      st->write(st, buf, r, 0);
+      stream_write(st, buf, r, 0);
     }
   }
   fs_close(fp);

@@ -21,7 +21,7 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
   while(1) {
 
     char c;
-    if(s->read(s, &c, 1, len < 1 ? wait : 1) == 0)
+    if(stream_read(s, &c, 1, len < 1 ? wait : 1) == 0)
       return 0;
 
     switch(c) {
@@ -31,7 +31,7 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
       len = 0;
       break;
     case 0x7d:
-      s->read(s, &c, 1, 1);
+      stream_read(s, &c, 1, 1);
       c ^= 0x20;
     default:
       if(len >= 0) {
@@ -71,7 +71,7 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
   const uint8_t byte_7e = 0x7e;
   uint8_t esc[2] = {0x7d, 0};
 
-  s->write(s, &byte_7e, 1, 0);
+  stream_write(s, &byte_7e, 1, 0);
 
   for(size_t v = 0; v < count; v++) {
 
@@ -82,19 +82,19 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
       if(buf[i] == 0x7e || buf[i] == 0x7d) {
 
         if(i - b)
-          s->write(s, buf + b, i - b, 0);
+          stream_write(s, buf + b, i - b, 0);
 
         esc[1] = buf[i] ^ 0x20;
-        s->write(s, esc, 2, 0);
+        stream_write(s, esc, 2, 0);
 
         b = i + 1;
       }
     }
     if(i - b)
-      s->write(s, buf + b, i - b, 0);
+      stream_write(s, buf + b, i - b, 0);
   }
-  s->write(s, &byte_7e, 1, 0);
-  s->write(s, NULL, 0, 0);
+  stream_write(s, &byte_7e, 1, 0);
+  stream_write(s, NULL, 0, 0);
 }
 
 

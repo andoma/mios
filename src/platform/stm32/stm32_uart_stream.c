@@ -253,6 +253,12 @@ static const device_class_t stm32_uart_class = {
   .dc_print_info = stm32_uart_print_info,
 };
 
+static const stream_vtable_t stm32_uart_vtable = {
+  .write = stm32_uart_write,
+  .read = stm32_uart_read,
+  .poll = stm32_uart_poll
+};
+
 stm32_uart_stream_t *
 stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
                        int clkid, int irq, uint8_t flags, const char *name)
@@ -279,9 +285,7 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
   task_waitable_init(&u->wait_tx, "uarttx");
 
   u->tx_dma = STM32_DMA_INSTANCE_NONE;
-  u->stream.write = stm32_uart_write;
-  u->stream.read = stm32_uart_read;
-  u->stream.poll = stm32_uart_poll;
+  u->stream.vtable = &stm32_uart_vtable;
 
   if(flags & UART_HALF_DUPLEX)
     reg_set_bit(reg_base + USART_CR3, 3); // HDSEL

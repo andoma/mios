@@ -132,7 +132,7 @@ http_client_body(http_parser *p, const char *at, size_t length)
   http_client_t *hc = p->data;
   if(hc->hc_error < 0)
     return 0;
-  ssize_t r = hc->hc_stream->write(hc->hc_stream, at, length, 0);
+  ssize_t r = stream_write(hc->hc_stream, at, length, 0);
   if(r < 0)
     hc->hc_error = r;
   return 0;
@@ -143,7 +143,7 @@ static int
 http_client_message_complete(http_parser *p)
 {
   http_client_t *hc = p->data;
-  ssize_t r = hc->hc_stream->write(hc->hc_stream, NULL, 0, 0);
+  ssize_t r = stream_write(hc->hc_stream, NULL, 0, 0);
   if(r < 0)
     hc->hc_error = r;
   if(hc->hc_error > 0)

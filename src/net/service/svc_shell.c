@@ -255,7 +255,7 @@ shell_thread(void *arg)
 
 #ifdef ENABLE_NET_IPV4
   if(ss->ss_telnet_mode) {
-    ss->s.ss_stream.write(&ss->s.ss_stream, telnet_init, sizeof(telnet_init), 0);
+    stream_write(&ss->s.ss_stream, telnet_init, sizeof(telnet_init), 0);
   }
 #endif
 
@@ -367,6 +367,21 @@ telnet_write_filter(struct stream *s, const void *buf, size_t size,
 
 #endif
 
+
+#ifdef ENABLE_NET_IPV4
+
+static const stream_vtable_t stream_telnet_filter = {
+  .read = telnet_read_filter,
+  .write = telnet_write_filter
+};
+
+#endif
+
+static const stream_vtable_t stream_pushpull = {
+  .read = pushpull_stream_read,
+  .write = pushpull_stream_write
+};
+
 static error_t
 shell_open_raw(pushpull_t *s, int is_telnet)
 {
@@ -379,12 +394,10 @@ shell_open_raw(pushpull_t *s, int is_telnet)
   ss->s.ss_sock->app = &pushpull_stream_fn;
   ss->s.ss_sock->app_opaque = ss;
 
-  ss->s.ss_stream.read = pushpull_stream_read;
-  ss->s.ss_stream.write = pushpull_stream_write;
+  ss->s.ss_stream.vtable = &stream_pushpull;
 #ifdef ENABLE_NET_IPV4
   if(is_telnet) {
-    ss->s.ss_stream.read = telnet_read_filter;
-    ss->s.ss_stream.write = telnet_write_filter;
+    ss->s.ss_stream.vtable = &stream_telnet_filter;
   }
   ss->ss_telnet_mode = is_telnet;
 #endif

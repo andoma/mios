@@ -65,7 +65,12 @@ uart_write(struct stream *s, const void *buf, size_t size, int flags)
 }
 
 
-static stream_t uart_stdio = { uart_read, uart_write };
+static const stream_vtable_t uart_stdio_vtable = {
+  .read = uart_read,
+  .write = uart_write
+};
+
+static stream_t uart_stdio = { &uart_stdio_vtable };
 
 static void __attribute__((constructor(110)))
 board_init_console(void)
