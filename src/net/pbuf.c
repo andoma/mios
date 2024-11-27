@@ -21,10 +21,23 @@ typedef struct pbuf_pool {
   struct pbuf_list pp_items;
   task_waitable_t pp_wait;
   int pp_avail;
+  int pp_total;
 } pbuf_pool_t;
 
 static struct pbuf_pool pbuf_datas = { . pp_wait = WAITABLE_INITIALIZER("pbufdata")};
 static struct pbuf_pool pbufs  = { . pp_wait = WAITABLE_INITIALIZER("pbuf")};
+
+int
+pbuf_buffer_avail(void)
+{
+  return pbuf_datas.pp_avail;
+}
+
+int
+pbuf_buffer_total(void)
+{
+  return pbuf_datas.pp_total;
+}
 
 void __attribute__((weak))
 net_buffers_available(void)
@@ -84,6 +97,7 @@ pbuf_pool_add(pbuf_pool_t *pp, void *start, void *end, size_t item_size)
     start += item_size;
     count++;
   }
+  pp->pp_total += count;
   return count;
 }
 

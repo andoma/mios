@@ -84,6 +84,10 @@ int pbuf_read_at(pbuf_t *pb, void *out, size_t offset, size_t len);
 __attribute__((warn_unused_result))
 int pbuf_memcmp_at(pbuf_t *pb, const void *data, size_t offset, size_t len);
 
+int pbuf_buffer_avail(void);
+
+int pbuf_buffer_total(void);
+
 
 // =========================================================
 // Debug helpers
