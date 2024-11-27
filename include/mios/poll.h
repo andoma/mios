@@ -4,7 +4,8 @@
 
 typedef enum {
   POLL_NONE,
-  POLL_COND,
+  POLL_WAITABLE,
+  POLL_COND = POLL_WAITABLE,  // condvar is really just a waitable
   POLL_STREAM_READ,
   POLL_STREAM_WRITE,
 } poll_type_t;

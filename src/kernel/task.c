@@ -996,7 +996,7 @@ poll(const pollset_t *ps, size_t num, mutex_t *m, int64_t deadline)
     case POLL_NONE:
       wm->wm_tasks[i].t_state = TASK_STATE_NONE;
       continue;
-    case POLL_COND:
+    case POLL_WAITABLE:
       tw = ps[i].obj; // condvar is a waitable
       break;
     case POLL_STREAM_READ:
