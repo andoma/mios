@@ -42,9 +42,8 @@ typedef struct stm32_uart_stream {
 } stm32_uart_stream_t;
 
 
-#define UART_WAKEUP         0x4
 
-#define UART_CTRLD_IS_PANIC 0x80
+// -- Flags passed to uart_init functions
 
 // STOP-bit config bits are written as-is to register, don't change
 // withuot adjusting corresponding setup code
@@ -52,3 +51,13 @@ typedef struct stm32_uart_stream {
 #define UART_0_5_STOP_BITS  0x01
 #define UART_2_STOP_BITS    0x02
 #define UART_1_5_STOP_BITS  0x03
+
+#define UART_WAKEUP         0x4   // Enables wakeup from sleep
+
+#define UART_HALF_DUPLEX    0x8   // Run UART in halfduplex mode
+
+#define UART_DEBUG          0x40
+
+#define UART_CTRLD_IS_PANIC 0x80 /* panic system if CTRL-D is receviced
+                                  * useful on system console
+                                  */

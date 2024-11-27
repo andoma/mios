@@ -269,6 +269,9 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
   u->stream.read = stm32_uart_read;
   u->stream.poll = stm32_uart_poll;
 
+  if(flags & UART_HALF_DUPLEX)
+    reg_set_bit(reg_base + USART_CR3, 3); // HDSEL
+
   _Static_assert(UART_1_5_STOP_BITS == 3);
   reg_set_bits(u->reg_base + USART_CR2, 12, 2, flags & UART_1_5_STOP_BITS);
 
