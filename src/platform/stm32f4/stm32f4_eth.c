@@ -337,7 +337,7 @@ static void
 eth_irq_tx(stm32f4_eth_t *se)
 {
   while(se->se_tx_rdptr != se->se_tx_wrptr) {
-    desc_t *tx = se->se_txring + (se->se_tx_rdptr & ETH_RX_RING_MASK);
+    desc_t *tx = se->se_txring + (se->se_tx_rdptr & ETH_TX_RING_MASK);
 
     const uint32_t w0 = tx->w0;
     if(w0 & ETH_TDES0_OWN)
