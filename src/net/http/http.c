@@ -1136,7 +1136,34 @@ http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
         break;
 
       if(hc->hc_txbuf_head == NULL) {
-        hc->hc_txbuf_head = pbuf_make(sk->preferred_offset + 8, 1);
+
+        int offset = sk->preferred_offset + 8;
+
+        // Unlock because we will wait for buffer
+        // Without unlocking we might deadlock with the network thread
+        mutex_unlock(&http_mutex);
+        pbuf_t *pb = pbuf_make(offset, 1);
+        mutex_lock(&http_mutex);
+
+        // It's possible that the keep-alive generator will have
+        // generated a new packet while we unlocked.
+        // If that's the case we need to wait for txbuf_head to
+        // clear.
+        while(hc->hc_txbuf_head && hc->hc_sock) {
+          cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+        }
+
+        // Ok, now the socket might also have closed while we were
+        // away, if so, free buffer and give up
+
+        sk = hc->hc_sock;
+        if(sk == NULL) {
+          pbuf_free(pb);
+          break;
+        }
+
+        assert(pb->pb_next == NULL);
+        hc->hc_txbuf_head = pb;
         hc->hc_txbuf_tail = hc->hc_txbuf_head;
         hc->hc_hold = 1;
       }
@@ -1148,7 +1175,12 @@ http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
          hc->hc_txbuf_tail->pb_buflen +
          hc->hc_txbuf_tail->pb_offset == PBUF_DATA_SIZE) {
 
-        pbuf_t *pb = pbuf_make(0, 0);
+        pbuf_t *pb = NULL;
+
+        if(pbuf_buffer_avail() > pbuf_buffer_total() / 2) {
+          pb = pbuf_make(0, 0);
+        }
+
         if(pb == NULL) {
           // Can't alloc, flush what we have
           remain = 0;
@@ -1162,7 +1194,9 @@ http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
 
       if(remain == 0) {
         http_stream_release_packet(hc, 0);
-        cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+        while(hc->hc_txbuf_head && hc->hc_sock) {
+          cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+        }
         continue;
       }
       pbuf_t *pb = hc->hc_txbuf_tail;
@@ -1280,6 +1314,12 @@ http_websocket_output_begin(http_connection_t *hc, int opcode)
   while(hc->hc_txbuf_head && hc->hc_sock) {
     cond_wait(&hc->hc_txbuf_cond, &http_mutex);
   }
+
+  if(hc->hc_sock == NULL) {
+    mutex_unlock(&http_mutex);
+    return NULL;
+  }
+
   hc->hc_output_encoding = OUTPUT_ENCODING_WEBSOCKET;
   hc->hc_ws_opcode = opcode;
   mutex_unlock(&http_mutex);
