@@ -546,6 +546,8 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
     if(buf == NULL)
       break;
     desc_t *rx = se->se_rxring + i;
+    memset(rx, 0, sizeof(desc_t));
+
     rx->w1 = ETH_RDES1_RCH | (PBUF_DATA_SIZE - DMA_BUFFER_PAD);
     rx->next = se->se_rxring + ((i + 1) & (ETH_RX_RING_SIZE - 1));
     rx_desc_give(rx, buf);
@@ -553,9 +555,7 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
 
   for(int i = 0; i < ETH_TX_RING_SIZE; i++) {
     desc_t *tx = se->se_txring + i;
-    tx->w0 = 0;
-    tx->w1 = 0;
-    tx->w2 = 0;
+    memset(tx, 0, sizeof(desc_t));
     tx->next = se->se_txring + ((i + 1) & (ETH_TX_RING_SIZE - 1));
   }
 
