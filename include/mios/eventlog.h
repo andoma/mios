@@ -33,6 +33,4 @@ void eventlog_to_fs(size_t logfile_max_size);
 
 #define evlog(level, fmt...)
 
-#define evlogst(level, st, fmt...)
-
 #endif
