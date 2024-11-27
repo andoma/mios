@@ -24,7 +24,11 @@ typedef struct stm32_uart_stream {
   uint8_t flags;
 
   gpio_t tx_enable;
+  uint8_t tx_pol_invert;
   uint8_t tx_enabled;
+
+  gpio_t rx_enable;
+  uint8_t rx_pol_invert;
 
   uint8_t rx_fifo_rdptr;
   uint8_t rx_fifo_wrptr;
