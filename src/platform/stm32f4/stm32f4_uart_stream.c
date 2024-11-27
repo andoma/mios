@@ -33,8 +33,12 @@ stm32f4_uart_stream_init(stm32_uart_stream_t *u, int instance, int baudrate,
   const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
 
   const int af = cfg->af;
-  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
+
+  if(tx != GPIO_UNUSED)
+    gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
+  if(rx != GPIO_UNUSED)
+    gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_UP);
 
   u = stm32_uart_stream_init(u,
                              (cfg->base << 8) + 0x40000000,
