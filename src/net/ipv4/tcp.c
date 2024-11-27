@@ -54,6 +54,8 @@ LIST_HEAD(tcb_list, tcb);
 static struct tcb_list tcbs;
 static mutex_t tcbs_mutex = MUTEX_INITIALIZER("tcp");
 
+static size_t tcp_unaq_buffers;
+
 typedef struct tcb {
 
   net_task_t tcb_task;
@@ -111,6 +113,8 @@ typedef struct tcb {
   uint32_t tcb_timo;
 
   const char *tcb_name;
+
+  uint32_t tcb_rtx_drop;
 
 } tcb_t;
 
@@ -243,25 +247,29 @@ tcp_send(tcb_t *tcb, pbuf_t *pb, int seg_len, uint8_t flag)
     }
 
     pbuf_t *tx = pbuf_copy_pkt(pb, 0);
+    int lensum = 0;
+
     while(pb) {
       pbuf_t *n = pb->pb_next;
+      lensum += pb->pb_buflen;
       STAILQ_INSERT_TAIL(&tcb->tcb_unaq, pb, pb_link);
       tcb->tcb_unaq_buffers++;
+      tcp_unaq_buffers++;
       pb = n;
     }
-    if(tx == NULL)
-      return;
     pb = tx;
   }
 
-  pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
-  if(pb == NULL)
-    return;
-  tcp_hdr_t *th = pbuf_data(pb, 0);
 
-  th->flg = flag;
-  th->seq = htonl(tcb->tcb_snd.nxt);
-  tcp_output_tcb(tcb, pb);
+  if(pb != NULL) {
+    pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
+    if(pb != NULL) {
+      tcp_hdr_t *th = pbuf_data(pb, 0);
+      th->flg = flag;
+      th->seq = htonl(tcb->tcb_snd.nxt);
+      tcp_output_tcb(tcb, pb);
+    }
+  }
   tcb->tcb_snd.nxt += seg_len;
 }
 
@@ -329,6 +337,8 @@ tcp_rtx_cb(void *opaque, uint64_t now)
         }
         th->seq = htonl(tcb->tcb_snd.una);
       }
+    } else {
+      tcb->tcb_rtx_drop++;
     }
   }
 
@@ -362,6 +372,7 @@ tcp_ack(tcb_t *tcb, uint32_t count)
     if(pb->pb_buflen == 0) {
       STAILQ_REMOVE_HEAD(&tcb->tcb_unaq, pb_link);
       tcb->tcb_unaq_buffers--;
+      tcp_unaq_buffers--;
 
       if(pb->pb_next != NULL) {
         if((pb->pb_flags & (PBUF_SOP | PBUF_EOP)) == PBUF_SOP) {
@@ -391,8 +402,11 @@ tcp_send_data(tcb_t *tcb)
   if(tcb->tcb_snd.wnd < PBUF_DATA_SIZE)
     return 0;
 
-  // Replace with some kind of global pbuf pressure
-  if(tcb->tcb_unaq_buffers >= 10)
+  // We want to always queue at least one packet.
+  // But also limit global TCP buffer usage to half the number of total
+  // buffers
+  if(tcb->tcb_unaq_buffers &&
+     tcp_unaq_buffers >= pbuf_buffer_avail() / 2)
     return 0;
 
   pbuf_t *pb = tcb->tcb_sock.app->pull(tcb->tcb_sock.app_opaque);
@@ -623,6 +637,8 @@ tcp_close(tcb_t *tcb, const char *reason)
   tcp_disarm_all_timers(tcb);
 
   int q = irq_forbid(IRQ_LEVEL_NET);
+  tcp_unaq_buffers -= tcb->tcb_unaq_buffers;
+  tcb->tcb_unaq_buffers = 0;
   pbuf_free_queue_irq_blocked(&tcb->tcb_unaq);
   irq_permit(q);
 
@@ -1026,7 +1042,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
         tcb->tcb_snd.wl2 = ack;
       }
 
-    } else if(ack < 0) {
+    } else if(una_ack < 0) {
       // Old
     } else if(ack_nxt < 0) {
       // Too new
@@ -1242,17 +1258,25 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                ntohs(tcb->tcb_local_port),
                tcb->tcb_remote_addr,
                ntohs(tcb->tcb_remote_port));
-    cli_printf(cli, "\t%s  TX:%lld RX:%lld  ReTX:%lld\n",
+    cli_printf(cli, "\t%s  TX:%lld RX:%lld  ReTX:%lld  Failed ReTX:%d\n",
                tcp_state_to_str(tcb->tcb_state),
                tcb->tcb_tx_bytes,
                tcb->tcb_rx_bytes,
-               tcb->tcb_rtx_bytes);
+               tcb->tcb_rtx_bytes,
+               tcb->tcb_rtx_drop);
+    cli_printf(cli, "\tUNA:%u SEQ:%u ACK:%u\n",
+               tcb->tcb_snd.una,
+               tcb->tcb_snd.nxt,
+               tcb->tcb_rcv.nxt);
     cli_printf(cli, "\tRTO: %d ms\n", tcb->tcb_rto);
-    cli_printf(cli, "\tUnacked: %d\n",
-               tcb->tcb_snd.nxt  - tcb->tcb_snd.una);
+    cli_printf(cli, "\tUnacked bytes:%d  buffers:%d\n",
+               tcb->tcb_snd.nxt  - tcb->tcb_snd.una,
+               tcb->tcb_unaq_buffers);
   }
-
   mutex_unlock(&tcbs_mutex);
+
+  cli_printf(cli, "Total buffers allocated by TCP: %d\n",
+             tcp_unaq_buffers);
   return 0;
 }
 
