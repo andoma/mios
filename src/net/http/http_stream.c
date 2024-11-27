@@ -3,9 +3,8 @@
 #include <mios/stream.h>
 #include <mios/task.h>
 #include <mios/mios.h>
-#include <mios/fifo.h>
+#include <mios/pushpull.h>
 
-#include <socket.h>
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
@@ -88,7 +87,7 @@ http_client_may_push(void *opaque)
   return 1;
 }
 
-static const socket_app_fn_t http_client_sock_fn = {
+static const pushpull_app_fn_t http_client_sock_fn = {
   .push = http_client_push,
   .may_push = http_client_may_push,
   .pull = http_client_pull,
@@ -202,7 +201,7 @@ http_get(const char *url, stream_t *output, uint16_t flags,
   mutex_init(&hc->hc_mutex, "httpclient");
   cond_init(&hc->hc_rxcond, "httpclient");
 
-  socket_t *sk = tcp_create_socket("httpclient");
+  pushpull_t *sk = tcp_create_socket("httpclient");
   if(sk == NULL) {
     free(hc);
     return ERR_NO_MEMORY;
@@ -247,7 +246,7 @@ http_get(const char *url, stream_t *output, uint16_t flags,
     hc->hc_rxbuf = NULL;
     mutex_unlock(&hc->hc_mutex);
 
-    sk->net->event(sk->net_opaque, SOCKET_EVENT_PUSH);
+    sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PUSH);
 
     for(pbuf_t *pb = pb0 ; pb != NULL; pb = pb->pb_next) {
       size_t offset = 0;
@@ -268,7 +267,7 @@ http_get(const char *url, stream_t *output, uint16_t flags,
     mutex_lock(&hc->hc_mutex);
   }
 
-  sk->net->event(sk->net_opaque, SOCKET_EVENT_CLOSE);
+  sk->net->event(sk->net_opaque, PUSHPULL_EVENT_CLOSE);
 
   while(!hc->hc_closed) {
     cond_wait(&hc->hc_rxcond, &hc->hc_mutex);

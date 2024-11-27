@@ -10,7 +10,7 @@
 typedef struct svc_chargen {
   void *sc_opaque;
   int sc_cnt;
-  socket_t *sc_sock;
+  pushpull_t *sc_sock;
 
 } svc_chargen_t;
 
@@ -21,7 +21,7 @@ chargen_pull(void *opaque)
   svc_chargen_t *sc = opaque;
 
   if(sc->sc_cnt == 100) {
-    sc->sc_sock->net->event(sc->sc_sock->net_opaque, SOCKET_EVENT_CLOSE);
+    sc->sc_sock->net->event(sc->sc_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
     return NULL;
   }
   sc->sc_cnt++;
@@ -43,14 +43,14 @@ chargen_close(void *opaque, const char *reason)
 
 
 
-static const socket_app_fn_t chargen_fn = {
+static const pushpull_app_fn_t chargen_fn = {
   .pull = chargen_pull,
   .close = chargen_close
 };
 
 
 static error_t
-chargen_open(socket_t *s)
+chargen_open(pushpull_t *s)
 {
   svc_chargen_t *sc = xalloc(sizeof(svc_chargen_t), 0, MEM_MAY_FAIL);
   if(sc == NULL)

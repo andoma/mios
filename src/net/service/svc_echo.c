@@ -8,7 +8,7 @@
 
 typedef struct svc_echo {
   pbuf_t *se_pb;
-  socket_t *se_sock;
+  pushpull_t *se_sock;
 } svc_echo_t;
 
 static uint32_t
@@ -32,10 +32,10 @@ static pbuf_t *
 echo_pull(void *opaque)
 {
   svc_echo_t *se = opaque;
-  socket_t *s = se->se_sock;
+  pushpull_t *s = se->se_sock;
   pbuf_t *pb = se->se_pb;
   se->se_pb = NULL;
-  s->net->event(s->net_opaque, SOCKET_EVENT_PUSH);
+  s->net->event(s->net_opaque, PUSHPULL_EVENT_PUSH);
   return pb;
 }
 
@@ -44,13 +44,13 @@ static void
 echo_close(void *opaque, const char *reason)
 {
   svc_echo_t *se = opaque;
-  socket_t *s = se->se_sock;
-  s->net->event(s->net_opaque, SOCKET_EVENT_CLOSE);
+  pushpull_t *s = se->se_sock;
+  s->net->event(s->net_opaque, PUSHPULL_EVENT_CLOSE);
   pbuf_free(se->se_pb);
   free(se);
 }
 
-static const socket_app_fn_t echo_fn = {
+static const pushpull_app_fn_t echo_fn = {
   .push = echo_push,
   .may_push = echo_may_push,
   .pull = echo_pull,
@@ -58,7 +58,7 @@ static const socket_app_fn_t echo_fn = {
 };
 
 static error_t
-echo_open(socket_t *s)
+echo_open(pushpull_t *s)
 {
   svc_echo_t *se = xalloc(sizeof(svc_echo_t), 0, MEM_MAY_FAIL);
   if(se == NULL)

@@ -32,7 +32,7 @@ typedef struct {
 
 
 typedef struct svc_ota {
-  socket_t *sa_sock;
+  pushpull_t *sa_sock;
 
   pbuf_t *sa_info;
   uint8_t sa_blocksize;
@@ -64,7 +64,7 @@ ota_get_next_pkt(svc_ota_t *sa)
   }
   sa->sa_rxbuf = NULL;
   mutex_unlock(&sa->sa_mutex);
-  sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_PUSH);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_PUSH);
   return pb;
 }
 
@@ -78,7 +78,7 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
     mutex_lock(&sa->sa_mutex);
     sa->sa_info = reply;
     mutex_unlock(&sa->sa_mutex);
-    sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_PULL);
+    sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_PULL);
   }
 }
 
@@ -211,7 +211,7 @@ ota_thread(void *arg)
   error_t err = ota_perform(sa);
   evlog(LOG_NOTICE, "OTA: Cancelled -- %s", error_to_string(err));
   ota_send_final_status(sa, -err);
-  sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_CLOSE);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
   thread_exit(NULL);
 }
 
@@ -285,7 +285,7 @@ ota_close(void *opaque, const char *reason)
   if(sa->sa_thread)
     thread_join(sa->sa_thread);
   else
-    sa->sa_sock->net->event(sa->sa_sock->net_opaque, SOCKET_EVENT_CLOSE);
+    sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
 
   pbuf_free(sa->sa_info);
   free(sa);
@@ -294,7 +294,7 @@ ota_close(void *opaque, const char *reason)
 
 
 
-static const socket_app_fn_t ota_fn = {
+static const pushpull_app_fn_t ota_fn = {
   .push = ota_push,
   .may_push = ota_may_push,
   .pull = ota_pull,
@@ -304,7 +304,7 @@ static const socket_app_fn_t ota_fn = {
 
 
 error_t
-ota_open_with_args(socket_t *s,
+ota_open_with_args(pushpull_t *s,
                    struct block_iface *partition,
                    int skip_kb,
                    void (*platform_upgrade)(uint32_t flow_header,

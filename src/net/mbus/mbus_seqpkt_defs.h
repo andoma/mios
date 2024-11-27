@@ -48,7 +48,7 @@ typedef struct mbus_seqpkt_con {
 
   mbus_flow_t msc_flow;  // Must be first
 
-  socket_t msc_sock;
+  pushpull_t msc_sock;
 
   net_task_t msc_task;
 

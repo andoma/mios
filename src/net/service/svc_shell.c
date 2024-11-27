@@ -15,12 +15,12 @@
 
 #include "net/pbuf.h"
 
-// Maybe move socket_stream to a separate file
-typedef struct socket_stream {
+// Maybe move pushpull_stream to a separate file
+typedef struct pushpull_stream {
 
   stream_t ss_stream;
 
-  socket_t *ss_sock;
+  pushpull_t *ss_sock;
 
   mutex_t ss_mutex;
   cond_t ss_cond;
@@ -33,20 +33,20 @@ typedef struct socket_stream {
   uint8_t ss_shutdown;
   uint8_t ss_flushed;
 
-} socket_stream_t;
+} pushpull_stream_t;
 
 
 static void
-socket_stream_init(socket_stream_t *ss)
+pushpull_stream_init(pushpull_stream_t *ss)
 {
   mutex_init(&ss->ss_mutex, "sockstream");
   cond_init(&ss->ss_cond, "sockstream");
 }
 
 static ssize_t
-socket_stream_read(struct stream *s, void *buf, size_t size, size_t requested)
+pushpull_stream_read(struct stream *s, void *buf, size_t size, size_t requested)
 {
-  socket_stream_t *ss = (socket_stream_t *)s;
+  pushpull_stream_t *ss = (pushpull_stream_t *)s;
 
   int off = 0;
   mutex_lock(&ss->ss_mutex);
@@ -59,7 +59,7 @@ socket_stream_read(struct stream *s, void *buf, size_t size, size_t requested)
     if(ss->ss_rxbuf == NULL) {
       if(off >= requested)
         break;
-      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PUSH);
+      ss->ss_sock->net->event(ss->ss_sock->net_opaque, PUSHPULL_EVENT_PUSH);
       cond_wait(&ss->ss_cond, &ss->ss_mutex);
       continue;
     }
@@ -78,10 +78,10 @@ socket_stream_read(struct stream *s, void *buf, size_t size, size_t requested)
 
 
 ssize_t
-socket_stream_write(struct stream *s, const void *buf, size_t size,
+pushpull_stream_write(struct stream *s, const void *buf, size_t size,
                     int flags)
 {
-  socket_stream_t *ss = (socket_stream_t *)s;
+  pushpull_stream_t *ss = (pushpull_stream_t *)s;
   size_t written = 0;
   mutex_lock(&ss->ss_mutex);
 
@@ -90,7 +90,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
 
     if(ss->ss_txbuf_head != NULL) {
       ss->ss_flushed = 1;
-      ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
+      ss->ss_sock->net->event(ss->ss_sock->net_opaque, PUSHPULL_EVENT_PULL);
     }
 
   } else {
@@ -104,7 +104,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
         ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 0);
         if(ss->ss_txbuf_head == NULL) {
           ss->ss_flushed = 1;
-          ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
+          ss->ss_sock->net->event(ss->ss_sock->net_opaque, PUSHPULL_EVENT_PULL);
           if(flags & STREAM_WRITE_NO_WAIT)
             break;
           ss->ss_txbuf_head = pbuf_make(ss->ss_sock->preferred_offset, 1);
@@ -135,7 +135,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
 
       if(remain == 0) {
         ss->ss_flushed = 1;
-        ss->ss_sock->net->event(ss->ss_sock->net_opaque, SOCKET_EVENT_PULL);
+        ss->ss_sock->net->event(ss->ss_sock->net_opaque, PUSHPULL_EVENT_PULL);
         cond_wait(&ss->ss_cond, &ss->ss_mutex);
         continue;
       }
@@ -156,7 +156,7 @@ socket_stream_write(struct stream *s, const void *buf, size_t size,
 }
 
 static void
-socket_stream_stop(socket_stream_t *ss)
+pushpull_stream_stop(pushpull_stream_t *ss)
 {
   mutex_lock(&ss->ss_mutex);
   while(!ss->ss_shutdown)
@@ -169,9 +169,9 @@ socket_stream_stop(socket_stream_t *ss)
 
 
 static struct pbuf *
-socket_stream_pull(void *opaque)
+pushpull_stream_pull(void *opaque)
 {
-  socket_stream_t *ss = opaque;
+  pushpull_stream_t *ss = opaque;
   pbuf_t *pb = NULL;
   mutex_lock(&ss->ss_mutex);
   if(ss->ss_flushed) {
@@ -189,9 +189,9 @@ socket_stream_pull(void *opaque)
 
 
 static uint32_t
-socket_stream_push(void *opaque, struct pbuf *pb)
+pushpull_stream_push(void *opaque, struct pbuf *pb)
 {
-  socket_stream_t *ss = opaque;
+  pushpull_stream_t *ss = opaque;
 
   mutex_lock(&ss->ss_mutex);
   assert(ss->ss_rxbuf == NULL);
@@ -202,17 +202,17 @@ socket_stream_push(void *opaque, struct pbuf *pb)
 }
 
 static int
-socket_stream_may_push(void *opaque)
+pushpull_stream_may_push(void *opaque)
 {
-  socket_stream_t *ss = opaque;
+  pushpull_stream_t *ss = opaque;
   return ss->ss_rxbuf == NULL;
 }
 
 
 static void
-socket_stream_close(void *opaque, const char *reason)
+pushpull_stream_close(void *opaque, const char *reason)
 {
-  socket_stream_t *ss = opaque;
+  pushpull_stream_t *ss = opaque;
   mutex_lock(&ss->ss_mutex);
   ss->ss_shutdown = 1;
   cond_signal(&ss->ss_cond);
@@ -220,16 +220,16 @@ socket_stream_close(void *opaque, const char *reason)
 }
 
 
-static const socket_app_fn_t socket_stream_fn = {
-  .push = socket_stream_push,
-  .may_push = socket_stream_may_push,
-  .pull = socket_stream_pull,
-  .close = socket_stream_close
+static const pushpull_app_fn_t pushpull_stream_fn = {
+  .push = pushpull_stream_push,
+  .may_push = pushpull_stream_may_push,
+  .pull = pushpull_stream_pull,
+  .close = pushpull_stream_close
 };
 
 
 typedef struct {
-  socket_stream_t s;
+  pushpull_stream_t s;
 
 #ifdef ENABLE_NET_IPV4
   uint8_t ss_iac_state;
@@ -261,11 +261,11 @@ shell_thread(void *arg)
 
   cli_on_stream(&ss->s.ss_stream, '>');
 
-  socket_t *sk = ss->s.ss_sock;
+  pushpull_t *sk = ss->s.ss_sock;
 
-  sk->net->event(sk->net_opaque, SOCKET_EVENT_CLOSE);
+  sk->net->event(sk->net_opaque, PUSHPULL_EVENT_CLOSE);
 
-  socket_stream_stop(&ss->s);
+  pushpull_stream_stop(&ss->s);
   free(ss);
 
   wakelock_release();
@@ -280,7 +280,7 @@ telnet_read_filter(struct stream *s, void *buf, size_t size, size_t requested)
   svc_shell_t *ss = (svc_shell_t *)s;
   int r;
   while(1) {
-    r = socket_stream_read(s, buf, size, requested);
+    r = pushpull_stream_read(s, buf, size, requested);
     if(r > 0) {
       uint8_t *b = buf;
       size_t wrptr = 0;
@@ -335,7 +335,7 @@ telnet_write_filter(struct stream *s, const void *buf, size_t size,
   static const uint8_t crlf[2] = {0x0d, 0x0a};
 
   if(buf == NULL) {
-    return socket_stream_write(s, buf, size, flags);
+    return pushpull_stream_write(s, buf, size, flags);
   } else {
 
     // NO_WAIT is not really supported here.
@@ -351,15 +351,15 @@ telnet_write_filter(struct stream *s, const void *buf, size_t size,
     for(i = 0; i < size; i++) {
       if(c[i] == 0x0a) {
         size_t len = i - s0;
-        written += socket_stream_write(s, buf + s0, len, flags);
-        socket_stream_write(s, crlf, 2, flags);
+        written += pushpull_stream_write(s, buf + s0, len, flags);
+        pushpull_stream_write(s, crlf, 2, flags);
         written++;
         s0 = i + 1;
       }
     }
     size_t len = i - s0;
     if(len) {
-      written += socket_stream_write(s, buf + s0, len, flags);
+      written += pushpull_stream_write(s, buf + s0, len, flags);
     }
     return written;
   }
@@ -368,7 +368,7 @@ telnet_write_filter(struct stream *s, const void *buf, size_t size,
 #endif
 
 static error_t
-shell_open_raw(socket_t *s, int is_telnet)
+shell_open_raw(pushpull_t *s, int is_telnet)
 {
   svc_shell_t *ss = xalloc(sizeof(svc_shell_t), 0, MEM_MAY_FAIL);
   if(ss == NULL)
@@ -376,11 +376,11 @@ shell_open_raw(socket_t *s, int is_telnet)
   memset(ss, 0, sizeof(svc_shell_t));
 
   ss->s.ss_sock = s;
-  ss->s.ss_sock->app = &socket_stream_fn;
+  ss->s.ss_sock->app = &pushpull_stream_fn;
   ss->s.ss_sock->app_opaque = ss;
 
-  ss->s.ss_stream.read = socket_stream_read;
-  ss->s.ss_stream.write = socket_stream_write;
+  ss->s.ss_stream.read = pushpull_stream_read;
+  ss->s.ss_stream.write = pushpull_stream_write;
 #ifdef ENABLE_NET_IPV4
   if(is_telnet) {
     ss->s.ss_stream.read = telnet_read_filter;
@@ -389,7 +389,7 @@ shell_open_raw(socket_t *s, int is_telnet)
   ss->ss_telnet_mode = is_telnet;
 #endif
 
-  socket_stream_init(&ss->s);
+  pushpull_stream_init(&ss->s);
   wakelock_acquire();
   error_t r = thread_create_shell(shell_thread, ss, "remotecli", &ss->s.ss_stream);
   if(r) {
@@ -402,7 +402,7 @@ shell_open_raw(socket_t *s, int is_telnet)
 
 
 static error_t
-shell_open(socket_t *s)
+shell_open(pushpull_t *s)
 {
   return shell_open_raw(s, 0);
 }
@@ -413,7 +413,7 @@ SERVICE_DEF("shell", 0, 23, SERVICE_TYPE_STREAM, shell_open);
 #ifdef ENABLE_NET_IPV4
 
 static error_t
-telnet_open(socket_t *s)
+telnet_open(pushpull_t *s)
 {
   return shell_open_raw(s, 1);
 }

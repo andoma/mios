@@ -12,9 +12,9 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <sys/param.h>
-#include <socket.h>
 
 #include <mios/service.h>
+#include <mios/pushpull.h>
 #include <mios/eventlog.h>
 
 /*
@@ -32,7 +32,7 @@ typedef struct l2cap_connection {
 
   l2cap_t *lc_l2c;
 
-  socket_t lc_socket;
+  pushpull_t lc_pushpull;
 
   int lc_remote_credits;
   int lc_local_credits;
@@ -195,8 +195,8 @@ con_output(l2cap_connection_t *lc, pbuf_t *pb)
 static void
 connection_pull(l2cap_connection_t *lc)
 {
-  while(lc->lc_remote_credits > 0 && lc->lc_socket.app_opaque) {
-    pbuf_t *pb = lc->lc_socket.app->pull(lc->lc_socket.app_opaque);
+  while(lc->lc_remote_credits > 0 && lc->lc_pushpull.app_opaque) {
+    pbuf_t *pb = lc->lc_pushpull.app->pull(lc->lc_pushpull.app_opaque);
     if(pb == NULL)
       break;
     con_output(lc, pb);
@@ -211,8 +211,8 @@ connection_close(l2cap_connection_t *lc, const char *why)
 
   lc->lc_l2c = NULL;
   LIST_REMOVE(lc, lc_link);
-  lc->lc_socket.app->close(lc->lc_socket.app_opaque, why);
-  lc->lc_socket.app_opaque = NULL;
+  lc->lc_pushpull.app->close(lc->lc_pushpull.app_opaque, why);
+  lc->lc_pushpull.app_opaque = NULL;
 }
 
 
@@ -258,7 +258,7 @@ connection_push(l2cap_connection_t *lc)
 {
   pbuf_t *pb = NULL;
   while(1) {
-    if(!lc->lc_socket.app->may_push(lc->lc_socket.app_opaque))
+    if(!lc->lc_pushpull.app->may_push(lc->lc_pushpull.app_opaque))
       return pb;
 
     pbuf_t *pb2 = l2cap_splice(&lc->lc_rxq, 2);
@@ -276,7 +276,7 @@ connection_push(l2cap_connection_t *lc)
       pb = NULL;
       while(1) {
 
-        if(!lc->lc_socket.app->may_push(lc->lc_socket.app_opaque)) {
+        if(!lc->lc_pushpull.app->may_push(lc->lc_pushpull.app_opaque)) {
           break;
         }
 
@@ -295,7 +295,7 @@ connection_push(l2cap_connection_t *lc)
         lc->lc_credit_deficit += credits;
         lc->lc_queued_credits -= credits;
         assert(lc->lc_queued_credits >= 0);
-        if(lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb)) {
+        if(lc->lc_pushpull.app->push(lc->lc_pushpull.app_opaque, pb)) {
 
         }
         pb = NULL;
@@ -304,7 +304,7 @@ connection_push(l2cap_connection_t *lc)
       int credits = count_credits(pb);
       lc->lc_credit_deficit += credits;
 
-      if(lc->lc_socket.app->push(lc->lc_socket.app_opaque, pb)) {
+      if(lc->lc_pushpull.app->push(lc->lc_pushpull.app_opaque, pb)) {
 
       }
       pb = NULL;
@@ -320,7 +320,7 @@ connection_task_cb(net_task_t *task, uint32_t signals)
 
   l2cap_t *l2c = lc->lc_l2c;
 
-  if(signals & SOCKET_EVENT_CLOSE) {
+  if(signals & PUSHPULL_EVENT_CLOSE) {
 
     if(l2c) {
       evlog(LOG_DEBUG, "l2cap: Connection closed by service end");
@@ -348,7 +348,7 @@ connection_task_cb(net_task_t *task, uint32_t signals)
     return;
   }
 
-  if(signals & SOCKET_EVENT_PULL && l2c) {
+  if(signals & PUSHPULL_EVENT_PULL && l2c) {
     connection_pull(lc);
   }
 }
@@ -417,7 +417,7 @@ handle_le_credit_based_connection_fail(l2cap_t *l2c, pbuf_t *pb,
 
 
 
-static const socket_net_fn_t l2cap_fns = {
+static const pushpull_net_fn_t l2cap_fns = {
   . event = &l2c_service_event_cb,
 };
 
@@ -456,13 +456,13 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   lc->lc_remote_mps = MIN(req->mps, PBUF_DATA_SIZE - hdrs);
   lc->lc_remote_credits = req->initial_credits;
 
-  lc->lc_socket.max_fragment_size = lc->lc_remote_mps;
-  lc->lc_socket.preferred_offset = hdrs;
+  lc->lc_pushpull.max_fragment_size = lc->lc_remote_mps;
+  lc->lc_pushpull.preferred_offset = hdrs;
 
-  lc->lc_socket.net_opaque = lc;
-  lc->lc_socket.net = &l2cap_fns;
+  lc->lc_pushpull.net_opaque = lc;
+  lc->lc_pushpull.net = &l2cap_fns;
 
-  if(s->open(&lc->lc_socket)) {
+  if(s->open_pushpull(&lc->lc_pushpull)) {
     free(lc);
     return handle_le_credit_based_connection_fail(l2c, pb, "Unable to setup",
                                                   L2CAP_CON_NO_RESOURCES);
@@ -663,7 +663,7 @@ handle_channel(l2cap_t *l2c, pbuf_t *pb, uint16_t channel_id)
     }
   }
 
-  if(lc == NULL || lc->lc_socket.app_opaque == NULL) {
+  if(lc == NULL || lc->lc_pushpull.app_opaque == NULL) {
     evlog(LOG_DEBUG, "l2cap: Input on unexpected channel 0x%x", channel_id);
     return pb;
   }

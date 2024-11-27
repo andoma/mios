@@ -87,7 +87,7 @@ mbus_seqpkt_service_prep_send(mbus_seqpkt_con_t *msc)
   if(msc->msc_sock.app_opaque == NULL)
     return 0;
 
-  const socket_app_fn_t *app = msc->msc_sock.app;
+  const pushpull_app_fn_t *app = msc->msc_sock.app;
 
   if(app->pull == NULL)
     return 0;
@@ -105,7 +105,7 @@ static uint8_t
 mbus_seqpkt_service_update_cts(mbus_seqpkt_con_t *msc)
 {
   uint8_t prev = msc->msc_local_flags;
-  const socket_app_fn_t *app = msc->msc_sock.app;
+  const pushpull_app_fn_t *app = msc->msc_sock.app;
 
   if(msc->msc_sock.app_opaque != NULL && app->may_push &&
      app->may_push(msc->msc_sock.app_opaque)) {
@@ -120,7 +120,7 @@ mbus_seqpkt_service_update_cts(mbus_seqpkt_con_t *msc)
 static pbuf_t *
 mbus_seqpkt_service_recv(pbuf_t *pb, mbus_seqpkt_con_t *msc)
 {
-  const socket_app_fn_t *app = msc->msc_sock.app;
+  const pushpull_app_fn_t *app = msc->msc_sock.app;
 
   if(msc->msc_sock.app_opaque != NULL && app->push != NULL) {
 
@@ -143,7 +143,7 @@ mbus_seqpkt_service_shut(mbus_seqpkt_con_t *msc, const char *reason)
 {
   if(msc->msc_sock.app_opaque) {
 
-    const socket_app_fn_t *app = msc->msc_sock.app;
+    const pushpull_app_fn_t *app = msc->msc_sock.app;
     app->close(msc->msc_sock.app_opaque, reason);
     msc->msc_sock.app_opaque = NULL;
   }
@@ -189,7 +189,7 @@ mbus_seqpkt_con_init(mbus_seqpkt_con_t *msc)
   net_timer_arm(&msc->msc_ka_timer, msc->msc_last_rx + SP_TIME_FAST_ACK);
 }
 
-static const socket_net_fn_t mbus_seqpkt_fn = {
+static const pushpull_net_fn_t mbus_seqpkt_fn = {
   .event = mbus_seqpkt_service_event_cb,
   .get_flow_header = mbus_seqpkt_local_flow_get_header,
 };
@@ -223,7 +223,7 @@ mbus_seqpkt_accept(pbuf_t *pb, uint8_t remote_addr, uint16_t flow)
   msc->msc_sock.net = &mbus_seqpkt_fn;
   msc->msc_sock.net_opaque = msc;
 
-  error_t err = s->open(&msc->msc_sock);
+  error_t err = s->open_pushpull(&msc->msc_sock);
   if(err) {
     free(msc);
     mbus_seqpkt_accept_err(name, error_to_string(err), remote_addr);
@@ -459,7 +459,7 @@ mbus_seqpkt_task_cb(net_task_t *nt, uint32_t signals)
   mbus_seqpkt_con_t *msc =
     ((void *)nt) - offsetof(mbus_seqpkt_con_t, msc_task);
 
-  if(signals & SOCKET_EVENT_CLOSE) {
+  if(signals & PUSHPULL_EVENT_CLOSE) {
     evlog(LOG_DEBUG, "seqpkt/%s: App side closed", msc->msc_name);
     msc->msc_app_closed = 1;
   }

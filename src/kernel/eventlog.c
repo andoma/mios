@@ -355,7 +355,7 @@ typedef struct {
   uint64_t ts;
   uint32_t seq;
 
-  socket_t *s;
+  pushpull_t *p;
 
 } evlog_svc_follower_t;
 
@@ -423,8 +423,8 @@ evlog_svc_pull(void *opaque)
     hdr |= level;
     hdr |= tslen << 3;
 
-    pb = pbuf_make(esf->s->preferred_offset, 0);
-    const int mfs = esf->s->max_fragment_size;
+    pb = pbuf_make(esf->p->preferred_offset, 0);
+    const int mfs = esf->p->max_fragment_size;
     if(pb != NULL) {
       pb = pbuf_write(pb, &hdr, 1, mfs);
 
@@ -455,7 +455,7 @@ static void
 evlog_svc_wakeup(follower_t *f)
 {
   evlog_svc_follower_t *svc = (evlog_svc_follower_t *)f;
-  svc->s->net->event(svc->s->net_opaque, SOCKET_EVENT_PULL);
+  svc->p->net->event(svc->p->net_opaque, PUSHPULL_EVENT_PULL);
 }
 
 
@@ -470,18 +470,18 @@ evlog_svc_close(void *opaque, const char *errmsg)
   LIST_REMOVE(&esf->f, link);
   mutex_unlock(&ef->mutex);
 
-  esf->s->net->event(esf->s->net_opaque, SOCKET_EVENT_CLOSE);
+  esf->p->net->event(esf->p->net_opaque, PUSHPULL_EVENT_CLOSE);
   free(esf);
 }
 
-static const socket_app_fn_t evlog_app_fn = {
+static const pushpull_app_fn_t evlog_app_fn = {
   .pull = evlog_svc_pull,
   .close = evlog_svc_close
 };
 
 
 static error_t
-evlog_svc_open(socket_t *s)
+evlog_svc_open(pushpull_t *p)
 {
   evlog_svc_follower_t *esf =
     xalloc(sizeof(evlog_svc_follower_t), 0, MEM_MAY_FAIL);
@@ -489,9 +489,9 @@ evlog_svc_open(socket_t *s)
     return ERR_NO_MEMORY;
 
   memset(esf, 0, sizeof(evlog_svc_follower_t));
-  esf->s = s;
-  esf->s->app = &evlog_app_fn;
-  esf->s->app_opaque = esf;
+  esf->p = p;
+  esf->p->app = &evlog_app_fn;
+  esf->p->app_opaque = esf;
 
   evlogfifo_t *ef = &ef0;
 

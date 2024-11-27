@@ -20,7 +20,7 @@
 #include <mios/eventlog.h>
 #include <mios/cli.h>
 
-#define TCP_EVENT_CONNECT (1 << SOCKET_EVENT_PROTO)
+#define TCP_EVENT_CONNECT (1 << PUSHPULL_EVENT_PROTO)
 /*
  * Based on these RFCs:
  *
@@ -62,7 +62,7 @@ typedef struct tcb {
 
   LIST_ENTRY(tcb) tcb_link;
 
-  socket_t tcb_sock;
+  pushpull_t tcb_sock;
 
   uint8_t tcb_state;
   uint8_t tcb_app_closed;
@@ -525,11 +525,11 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     tcp_do_connect(tcb);
   }
 
-  if(signals & SOCKET_EVENT_PULL) {
+  if(signals & PUSHPULL_EVENT_PULL) {
     switch(tcb->tcb_state) {
     case TCP_STATE_ESTABLISHED:
     case TCP_STATE_CLOSE_WAIT:
-      signals &= ~SOCKET_EVENT_PUSH;
+      signals &= ~PUSHPULL_EVENT_PUSH;
       tcp_send_data(tcb);
       break;
     default:
@@ -537,7 +537,7 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     }
   }
 
-  if(signals & SOCKET_EVENT_PUSH) {
+  if(signals & PUSHPULL_EVENT_PUSH) {
     if(tcb->tcb_app_pending) {
       tcb->tcb_rx_bytes += tcb->tcb_app_pending;
       tcb->tcb_app_pending = 0;
@@ -545,7 +545,7 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     }
   }
 
-  if(signals & SOCKET_EVENT_CLOSE) {
+  if(signals & PUSHPULL_EVENT_CLOSE) {
 
     tcb->tcb_app_pending = 0;
     tcb->tcb_app_closed = 1;
@@ -708,7 +708,7 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
   }
 }
 
-static const socket_net_fn_t tcp_net_fn = {
+static const pushpull_net_fn_t tcp_net_fn = {
   .event = tcp_service_event_cb,
 };
 
@@ -853,7 +853,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         hdr_len - sizeof(tcp_hdr_t));
     }
 
-    error_t err = svc->open(&tcb->tcb_sock);
+    error_t err = svc->open_pushpull(&tcb->tcb_sock);
     if(err) {
       free(tcb);
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
@@ -1198,7 +1198,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 }
 
 
-struct socket *
+struct pushpull *
 tcp_create_socket(const char *name)
 {
   tcb_t *tcb = tcb_create(name);
@@ -1209,7 +1209,7 @@ tcp_create_socket(const char *name)
 
 
 void
-tcp_connect(struct socket *sk, uint32_t dst_addr, uint16_t dst_port)
+tcp_connect(struct pushpull *sk, uint32_t dst_addr, uint16_t dst_port)
 {
   tcb_t *tcb = sk->net_opaque;
   tcb->tcb_remote_addr = dst_addr;

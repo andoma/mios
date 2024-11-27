@@ -2,7 +2,8 @@
 
 #include "mios.h"
 #include "error.h"
-#include "socket.h"
+
+#include <mios/pushpull.h>
 
 #include <stdint.h>
 #include <stddef.h>
@@ -23,7 +24,7 @@ typedef struct service {
   uint8_t ble_psm;
   uint8_t type;
 
-  error_t (*open)(socket_t *s);
+  error_t (*open_pushpull)(pushpull_t *p);
 
 } service_t;
 

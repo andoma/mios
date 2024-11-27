@@ -16,7 +16,7 @@ discard_push(void *opaque, struct pbuf *pb)
     memcpy(&id, pbuf_cdata(pb, 0), 4);
   //  evlog(LOG_DEBUG, "Disc-0x%x %d bytes", id, pb->pb_pktlen);
   pbuf_free(pb);
-  return SOCKET_EVENT_PUSH;
+  return PUSHPULL_EVENT_PUSH;
 }
 
 static int
@@ -36,11 +36,11 @@ discard_pull(void *opaque)
 static void
 discard_close(void *opaque, const char *reason)
 {
-  socket_t *s = opaque;
-  s->net->event(s->net_opaque, SOCKET_EVENT_CLOSE);
+  pushpull_t *s = opaque;
+  s->net->event(s->net_opaque, PUSHPULL_EVENT_CLOSE);
 }
 
-static const socket_app_fn_t discard_fn = {
+static const pushpull_app_fn_t discard_fn = {
   .push = discard_push,
   .may_push = discard_may_push,
   .pull = discard_pull,
@@ -48,7 +48,7 @@ static const socket_app_fn_t discard_fn = {
 };
 
 static error_t
-discard_open(socket_t *s)
+discard_open(pushpull_t *s)
 {
   s->app = &discard_fn;
   s->app_opaque = s;

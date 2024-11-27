@@ -21,3 +21,4 @@ typedef struct stream {
   struct task_waitable *(*poll)(struct stream *s, poll_type_t type);
 
 } stream_t;
+
