@@ -13,7 +13,6 @@
 
 #include "stm32_uart_stream.h"
 
-
 static void
 stm32_uart_update_cr1(stm32_uart_stream_t *u)
 {
@@ -104,7 +103,10 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
       u->tx_busy = 1;
 
       if(u->tx_enable != GPIO_UNUSED && !u->tx_enabled) {
-        gpio_set_output(u->tx_enable, 1);
+        gpio_set_output(u->tx_enable, !u->tx_pol_invert);
+        if(u->rx_enable != GPIO_UNUSED)
+          gpio_set_output(u->rx_enable, u->rx_pol_invert);
+
         u->tx_enabled = 1;
       }
 
@@ -199,14 +201,17 @@ uart_irq(void *arg)
     }
   }
 
-  if(sr & (1 << 6)) {
+  if(sr & (1 << 6)) { // Transmission complete
     if(u->tx_enable != GPIO_UNUSED) {
-      gpio_set_output(u->tx_enable, 0);
+      gpio_set_output(u->tx_enable, u->tx_pol_invert);
+      if(u->rx_enable != GPIO_UNUSED)
+        gpio_set_output(u->rx_enable, !u->rx_pol_invert);
+
       u->tx_enabled = 0;
     }
   }
 
-  if(sr & (1 << 7)) {
+  if(sr & (1 << 7)) { // TX reg empty
     uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
     if(avail == 0) {
       u->tx_busy = 0;
@@ -232,6 +237,16 @@ stm32_uart_print_info(struct device *dev, struct stream *st)
            u->rx_framing_error);
 }
 
+void
+stm32_uart_set_io_ctrl(stream_t *s, gpio_t tx_enable, int tx_pol_invert,
+                       gpio_t rx_enable, int rx_pol_invert)
+{
+  stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
+  u->tx_enable = tx_enable;
+  u->tx_pol_invert = !!tx_pol_invert;
+  u->rx_enable = rx_enable;
+  u->rx_pol_invert = !!rx_pol_invert;
+}
 
 static const device_class_t stm32_uart_class = {
   .dc_print_info = stm32_uart_print_info,
@@ -239,8 +254,7 @@ static const device_class_t stm32_uart_class = {
 
 stm32_uart_stream_t *
 stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
-                       int clkid, int irq, uint8_t flags, gpio_t tx_enable,
-                       const char *name)
+                       int clkid, int irq, uint8_t flags, const char *name)
 {
   if(u == NULL)
     u = calloc(1, sizeof(stm32_uart_stream_t));
@@ -253,7 +267,6 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
 
   u->reg_base = reg_base;
   u->flags = flags;
-  u->tx_enable = tx_enable;
 
   const unsigned int freq = clk_get_freq(clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;

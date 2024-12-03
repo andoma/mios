@@ -24,10 +24,16 @@ stm32f4_uart_get_config(int index)
 
 static stm32_uart_stream_t *uarts[6];
 
+void
+stm32f4_uart_set_io_ctrl(stream_t *s, gpio_t tx_enable, int tx_pol_invert,
+                         gpio_t rx_enable, int rx_pol_invert)
+{
+  stm32_uart_set_io_ctrl(s, tx_enable, tx_pol_invert, rx_enable, rx_pol_invert);
+}
+
 stream_t *
 stm32f4_uart_stream_init(stm32_uart_stream_t *u, int instance, int baudrate,
-                         gpio_t tx, gpio_t rx, gpio_t tx_enable, uint8_t flags,
-                         const char *name)
+                         gpio_t tx, gpio_t rx, uint8_t flags, const char *name)
 {
   const int index = instance - 1;
   const stm32f4_uart_config_t *cfg = stm32f4_uart_get_config(index);
@@ -46,7 +52,6 @@ stm32f4_uart_stream_init(stm32_uart_stream_t *u, int instance, int baudrate,
                              cfg->clkid,
                              cfg->irq,
                              flags,
-                             tx_enable,
                              name);
 
   uarts[index] = u;

@@ -79,7 +79,6 @@ stm32g0_uart_stream_init(stm32_uart_stream_t *u, unsigned int instance,
                              cfg->clkid,
                              cfg->irq,
                              flags,
-                             GPIO_UNUSED,
                              name);
 
   uarts[instance - 1] = u;

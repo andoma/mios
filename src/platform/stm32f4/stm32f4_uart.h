@@ -27,13 +27,16 @@ typedef struct {
   uint32_t rxdma;
 } stm32f4_uart_config_t;
 
-stream_t *stm32f4_uart_stream_init(struct stm32_uart_stream *uart,
-                                   int instance, int baudrate,
-                                   gpio_t tx, gpio_t rx, gpio_t tx_enable,
+stream_t *stm32f4_uart_stream_init(struct stm32_uart_stream *uart, int instance,
+                                   int baudrate, gpio_t tx, gpio_t rx,
                                    uint8_t flags, const char *name);
 
 void stm32f4_uart_mbus_multidrop_create(unsigned int instance,
                                         gpio_t tx, gpio_t rx, gpio_t txe,
                                         const char *name);
+
+void stm32f4_uart_set_io_ctrl(stream_t *uart, gpio_t tx_enable,
+                              int tx_pol_invert, gpio_t rx_enable,
+                              int rx_pol_invert);
 
 const stm32f4_uart_config_t *stm32f4_uart_get_config(int index);
