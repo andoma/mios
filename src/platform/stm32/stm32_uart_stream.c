@@ -12,6 +12,7 @@
 #include "irq.h"
 
 #include "stm32_uart_stream.h"
+#include "stm32_uart.h"
 
 static void
 stm32_uart_update_cr1(stm32_uart_stream_t *u)
@@ -63,7 +64,7 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
   if(busy_wait) {
     // We are not on user thread, busy wait
 
-    while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+    while(!(reg_rd(u->reg_base + USART_SR) & UART_SR_TXE)) {}
 
     while(1) {
       uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
@@ -72,12 +73,12 @@ stm32_uart_write(stream_t *s, const void *buf, size_t size, int flags)
       uint8_t c = u->tx_fifo[u->tx_fifo_rdptr & (TX_FIFO_SIZE - 1)];
       u->tx_fifo_rdptr++;
       reg_wr(u->reg_base + USART_TDR, c);
-      while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+      while(!(reg_rd(u->reg_base + USART_SR) & UART_SR_TXE)) {}
     }
 
     for(size_t i = 0; i < size; i++) {
       reg_wr(u->reg_base + USART_TDR, d[i]);
-      while(!(reg_rd(u->reg_base + USART_SR) & (1 << 7))) {}
+      while(!(reg_rd(u->reg_base + USART_SR) & UART_SR_TXE)) {}
     }
     irq_permit(q);
     return size;
@@ -170,7 +171,7 @@ uart_irq(void *arg)
 
   const uint32_t sr = reg_rd(u->reg_base + USART_SR);
 
-  if(sr & (1 << 5)) {
+  if(sr & UART_SR_RXNE) {
     const uint8_t c = reg_rd(u->reg_base + USART_RDR);
 
     if(u->flags & UART_CTRLD_IS_PANIC && c == 4) {
@@ -181,19 +182,19 @@ uart_irq(void *arg)
 
     task_wakeup(&u->wait_rx, 1);
 
-    if(sr & (1 << 1)) {
+    if(sr & UART_SR_FRAMING_ERR) {
       u->rx_framing_error++;
 #ifdef USART_ICR
       reg_wr(u->reg_base + USART_ICR, (1 << 1));
 #endif
     }
-    if(sr & (1 << 2)) {
+    if(sr & UART_SR_NOISE_ERR) {
       u->rx_noise++;
 #ifdef USART_ICR
       reg_wr(u->reg_base + USART_ICR, (1 << 2));
 #endif
     }
-    if(sr & (1 << 3)) {
+    if(sr & UART_SR_OVERRUN_ERR) {
       u->rx_overrun++;
 #ifdef USART_ICR
       reg_wr(u->reg_base + USART_ICR, (1 << 3));
@@ -201,7 +202,7 @@ uart_irq(void *arg)
     }
   }
 
-  if(sr & (1 << 6)) { // Transmission complete
+  if(sr & UART_SR_TC) {
     if(u->tx_enable != GPIO_UNUSED) {
       gpio_set_output(u->tx_enable, u->tx_pol_invert);
       if(u->rx_enable != GPIO_UNUSED)
@@ -211,7 +212,7 @@ uart_irq(void *arg)
     }
   }
 
-  if(sr & (1 << 7)) { // TX reg empty
+  if(sr & UART_SR_TXE) { // TX reg empty
     uint8_t avail = u->tx_fifo_wrptr - u->tx_fifo_rdptr;
     if(avail == 0) {
       u->tx_busy = 0;
@@ -298,4 +299,3 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
 
   return u;
 }
-
