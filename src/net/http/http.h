@@ -7,40 +7,13 @@
 
 #include "http_util.h"
 
+struct iovec;
 struct stream;
 
 typedef struct http_connection http_connection_t;
 
-typedef enum {
-  HST_HTTP_REQ,
-  HST_WEBSOCKET_PACKET,
-} http_server_task_type_t;
-
-typedef struct http_server_task {
-
-  STAILQ_ENTRY(http_server_task) hst_global_link;
-
-  TAILQ_ENTRY(http_server_task) hst_connection_link;
-
-  struct http_connection *hst_hc;
-
-  uint8_t hst_type;
-  uint8_t hst_opcode;
-
-} http_server_task_t;
-
-
-typedef struct http_server_wsp {
-  http_server_task_t hsw_hst;
-
-  balloc_t hsw_bumpalloc;
-
-} http_server_wsp_t;
-
 
 typedef struct http_request {
-
-  http_server_task_t hr_hst;
 
   // Headers
   char *hr_url;
@@ -60,6 +33,8 @@ typedef struct http_request {
   uint8_t hr_upgrade_to_websocket;
 
   http_header_matcher_t hr_header_matcher;
+
+  http_connection_t *hr_hc;
 
   balloc_t hr_bumpalloc;
 
@@ -83,6 +58,10 @@ int http_request_accept_websocket(http_request_t *hr,
 struct stream *http_websocket_output_begin(http_connection_t *hc,
                                            int opcode);
 
+ssize_t http_websocket_sendv(http_connection_t *hc, int opcode,
+                             struct iovec *iov, size_t iovcnt,
+                             int flags);
+
 void http_connection_retain(http_connection_t *hc);
 
 void http_connection_release(http_connection_t *hc);
@@ -97,9 +76,10 @@ http_connection_t *http_websocket_create(int (*cb)(void *opaque,
                                          void *opaque,
                                          const char *name);
 
-void http_websocket_start(http_connection_t *hc, uint32_t addr,
-                          uint16_t port, const char *path,
-                          const char *protocol);
+__attribute__((warn_unused_result))
+error_t http_websocket_start(http_connection_t *hc, uint32_t addr,
+                             uint16_t port, const char *path,
+                             const char *protocol);
 
 
 void http_websocket_close(http_connection_t *hc, uint16_t status_code,

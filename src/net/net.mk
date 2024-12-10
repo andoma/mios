@@ -62,6 +62,9 @@ SRCS-${ENABLE_NET} += \
 	${SRC}/net/service/svc_discard.c \
 	${SRC}/net/service/svc_ota.c \
 
+SRCS-${ENABLE_NET_IPV4} += \
+	${SRC}/net/service/svc_telnet.c \
+
 
 ${MOS}/net/%.o : CFLAGS += ${NOFPU}
 ${MOS}/net/mbus/%.o : CFLAGS += ${NOFPU}

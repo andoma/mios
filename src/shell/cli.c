@@ -306,7 +306,7 @@ cli_getc(struct cli *cli, int wait)
   if(r == 0)
     return ERR_NOT_READY;
   if(r < 0)
-    return -1;
+    return r;
   return c;
 }
 

@@ -8,13 +8,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define SERVICE_TYPE_STREAM 0
-#define SERVICE_TYPE_DGRAM  1
-
 typedef struct {
   uint16_t max_fragment_size;
   uint16_t preferred_offset;
 } svc_pbuf_policy_t;
+
+struct stream;
 
 typedef struct service {
 
@@ -22,9 +21,10 @@ typedef struct service {
 
   uint16_t ip_port;
   uint8_t ble_psm;
-  uint8_t type;
 
   error_t (*open_pushpull)(pushpull_t *p);
+
+  error_t (*open_stream)(struct stream *s);
 
 } service_t;
 
@@ -34,6 +34,10 @@ const service_t *service_find_by_ble_psm(uint8_t psm);
 
 const service_t *service_find_by_ip_port(uint16_t port);
 
-#define SERVICE_DEF(name, ip_port, ble_psm, type, open) \
-static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, type, open};
+#define SERVICE_DEF_STREAM(name, port, open)  \
+static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, .ip_port = port, .open_stream = open};
+
+
+#define SERVICE_DEF_PUSHPULL(name, ip_port, ble_psm, open)  \
+static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, .open_pushpull = open};
 
