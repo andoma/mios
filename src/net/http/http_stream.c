@@ -20,80 +20,17 @@ typedef struct {
 
   stream_t *hc_stream;
 
-  void *hc_opaque;
-
-  pbuf_t *hc_txbuf;
-
-  pbuf_t *hc_rxbuf;
-
-  mutex_t hc_mutex;
-  cond_t hc_rxcond;
-
   error_t hc_error;
   uint16_t hc_flags;
   uint8_t hc_closed;
 
+  void *hc_opaque;
   const http_header_callback_t *hc_header_callbacks;
   size_t hc_num_header_callbacks;
 
   http_header_matcher_t hc_hhm;
 
 } http_client_t;
-
-
-static struct pbuf *
-http_client_pull(void *opaque)
-{
-  http_client_t *hc = opaque;
-  pbuf_t *pb = hc->hc_txbuf;
-  hc->hc_txbuf = NULL;
-  return pb;
-}
-
-static void
-http_client_close(void *opaque, const char *reason)
-{
-  http_client_t *hc = opaque;
-  mutex_lock(&hc->hc_mutex);
-  hc->hc_closed = 1;
-  cond_signal(&hc->hc_rxcond);
-  mutex_unlock(&hc->hc_mutex);
-}
-
-
-
-static uint32_t
-http_client_push(void *opaque, struct pbuf *pb)
-{
-  http_client_t *hc = opaque;
-  mutex_lock(&hc->hc_mutex);
-  if(hc->hc_rxbuf == NULL) {
-    hc->hc_rxbuf = pb;
-    cond_signal(&hc->hc_rxcond);
-  } else {
-    pbuf_t *tail = hc->hc_rxbuf;
-    while(tail->pb_next) {
-      tail = tail->pb_next;
-    }
-    tail->pb_next = pb;
-  }
-  mutex_unlock(&hc->hc_mutex);
-  return 0;
-}
-
-static int
-http_client_may_push(void *opaque)
-{
-  return 1;
-}
-
-static const pushpull_app_fn_t http_client_sock_fn = {
-  .push = http_client_push,
-  .may_push = http_client_may_push,
-  .pull = http_client_pull,
-  .close = http_client_close
-};
-
 
 
 static int
@@ -162,17 +99,7 @@ static const http_parser_settings client_parser = {
 };
 
 
-static void
-pbuf_push_buf(pbuf_t *pb, const void *data, size_t len)
-{
-  memcpy(pbuf_append(pb, len), data, len);
-}
 
-static void
-pbuf_push_str(pbuf_t *pb, const char *str)
-{
-  pbuf_push_buf(pb, str, strlen(str));
-}
 
 error_t
 http_get(const char *url, stream_t *output, uint16_t flags,
@@ -198,10 +125,8 @@ http_get(const char *url, stream_t *output, uint16_t flags,
   hc->hc_header_callbacks = header_callbacks;
   hc->hc_num_header_callbacks = num_header_callbacks;
   hc->hc_opaque = opaque;
-  mutex_init(&hc->hc_mutex, "httpclient");
-  cond_init(&hc->hc_rxcond, "httpclient");
 
-  pushpull_t *sk = tcp_create_socket("httpclient");
+  stream_t *sk = tcp_create_socket("httpclient", 2048, 4096);
   if(sk == NULL) {
     free(hc);
     return ERR_NO_MEMORY;
@@ -209,76 +134,43 @@ http_get(const char *url, stream_t *output, uint16_t flags,
 
   int port = up.field_set & UF_PORT ? up.port : 80;
 
-  sk->app = &http_client_sock_fn;
-  sk->app_opaque = hc;
-
-  pbuf_t *pb = pbuf_make(sk->preferred_offset, 1);
-
-  pbuf_push_str(pb, "GET ");
-  pbuf_push_buf(pb, url + up.field_data[UF_PATH].off,
-                up.field_data[UF_PATH].len);
-  pbuf_push_str(pb, " HTTP/1.1\r\nConnection: close\r\n\r\n");
-
-  hc->hc_txbuf = pb;
-
   uint32_t addr = inet_addr(url + up.field_data[UF_HOST].off);
   tcp_connect(sk, addr, port);
+
+  stprintf(sk, "GET ");
+  stream_write(sk, url + up.field_data[UF_PATH].off,
+               up.field_data[UF_PATH].len, 0);
+  stprintf(sk, " HTTP/1.1\r\nConnection: close\r\n\r\n");
+  stream_flush(sk);
 
   struct http_parser hp;
   http_parser_init(&hp, HTTP_RESPONSE);
   hp.data = hc;
 
-  mutex_lock(&hc->hc_mutex);
-
   hc->hc_error = 1;
 
   while(hc->hc_error == 1) {
 
-    if(hc->hc_rxbuf == NULL) {
-      if(hc->hc_closed)
-        break;
+    void *buf;
 
-      cond_wait(&hc->hc_rxcond, &hc->hc_mutex);
-      continue;
+    ssize_t bytes = stream_peek(sk, &buf, 1);
+    if(bytes < 0) {
+      hc->hc_error = bytes;
+      break;
     }
 
-    pbuf_t *pb0 = hc->hc_rxbuf;
-    hc->hc_rxbuf = NULL;
-    mutex_unlock(&hc->hc_mutex);
-
-    sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PUSH);
-
-    for(pbuf_t *pb = pb0 ; pb != NULL; pb = pb->pb_next) {
-      size_t offset = 0;
-
-      while(offset != pb->pb_buflen) {
-        int r = http_parser_execute(&hp, &client_parser,
-                                    pbuf_cdata(pb, offset),
-                                    pb->pb_buflen - offset);
-        assert(r > 0);
-        if(r < 0) {
-          hc->hc_error = ERR_BAD_STATE;
-          break;
-        }
-        offset += r;
-      }
+    int r = http_parser_execute(&hp, &client_parser, buf, bytes);
+    if(r < 0) {
+      hc->hc_error = ERR_BAD_STATE;
+      break;
     }
-    pbuf_free(pb0);
-    mutex_lock(&hc->hc_mutex);
+
+    stream_drop(sk, r);
   }
 
-  sk->net->event(sk->net_opaque, PUSHPULL_EVENT_CLOSE);
-
-  while(!hc->hc_closed) {
-    cond_wait(&hc->hc_rxcond, &hc->hc_mutex);
-  }
-
-  mutex_unlock(&hc->hc_mutex);
+  stream_close(sk);
 
   error_t rval = hc->hc_error;
-  if(rval > 0)
-    rval = ERR_NOT_CONNECTED;
-
   free(hc);
   return rval;
 }

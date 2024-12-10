@@ -1,3 +1,4 @@
+
 #include <mios/service.h>
 #include <malloc.h>
 #include <stdlib.h>
@@ -5,6 +6,7 @@
 #include <string.h>
 #include <mios/eventlog.h>
 
+#if 0
 #include "net/pbuf.h"
 
 
@@ -55,4 +57,5 @@ discard_open(pushpull_t *s)
   return 0;
 }
 
-SERVICE_DEF("discard", 9, 9, SERVICE_TYPE_DGRAM, discard_open);
+SERVICE_DEF_PUSHPULL("discard", 9, 9, discard_open);
+#endif

@@ -506,7 +506,7 @@ evlog_svc_open(pushpull_t *p)
 
 
 
-SERVICE_DEF("log", 2, 2, SERVICE_TYPE_DGRAM, evlog_svc_open);
+SERVICE_DEF_PUSHPULL("log", 2, 2, evlog_svc_open);
 
 #include <mios/fs.h>
 

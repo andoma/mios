@@ -109,6 +109,7 @@ exc_usage_fault(void)
   }
 #endif
   if(ufsr & 0x2) {
+    // Most likely an attempt to return to non-thumb code, etc
     panic("Invalid use of EPSR, PC:0x%x ", psp[6]);
   }
   if(ufsr & 0x100) {

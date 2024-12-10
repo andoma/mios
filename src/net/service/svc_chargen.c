@@ -64,4 +64,4 @@ chargen_open(pushpull_t *s)
 }
 
 
-SERVICE_DEF("chargen", 19, 19, SERVICE_TYPE_STREAM, chargen_open);
+SERVICE_DEF_PUSHPULL("chargen", 19, 19, chargen_open);

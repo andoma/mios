@@ -36,7 +36,7 @@ typedef struct stream_vtable {
 
   struct task_waitable *(*poll)(struct stream *s, poll_type_t type);
 
-  ssize_t (*peek)(struct stream *s, void **buf);
+  ssize_t (*peek)(struct stream *s, void **buf, int wait);
 
   ssize_t (*drop)(struct stream *s, size_t bytes);
 
@@ -62,9 +62,37 @@ stream_write(struct stream *s, const void *buf, size_t size, int flags)
 }
 
 __attribute__((always_inline))
+static inline ssize_t
+stream_writev(struct stream *s, struct iovec *iov, size_t iovcnt, int flags)
+{
+  return s->vtable->writev(s, iov, iovcnt, flags);
+}
+
+__attribute__((always_inline))
 static inline void
 stream_close(struct stream *s)
 {
   s->vtable->close(s);
 }
 
+__attribute__((always_inline))
+static inline ssize_t
+stream_peek(struct stream *s, void **buf, int wait)
+{
+  return s->vtable->peek(s, buf, wait);
+}
+
+
+__attribute__((always_inline))
+static inline ssize_t
+stream_drop(struct stream *s, size_t bytes)
+{
+  return s->vtable->drop(s, bytes);
+}
+
+__attribute__((always_inline))
+static inline ssize_t
+stream_flush(struct stream *s)
+{
+  return s->vtable->write(s, NULL, 0, 0);
+}

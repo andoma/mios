@@ -31,25 +31,24 @@ STAILQ_HEAD(http_connection_squeue, http_connection);
 STAILQ_HEAD(http_server_task_squeue, http_server_task);
 TAILQ_HEAD(http_server_task_queue, http_server_task);
 
-static struct http_server_task_squeue http_task_queue;
 
-static mutex_t http_mutex = MUTEX_INITIALIZER("http");
-static cond_t http_task_queue_cond = COND_INITIALIZER("rq");
+typedef struct http_payload {
 
-static ssize_t http_stream_write(struct stream *s, const void *buf, size_t size, int flags);
+  balloc_t hp_bumpalloc;
 
-static struct http_connection_squeue notifying_websocket_connections;
+} http_payload_t;
+
+#define HTTP_OUTPUT_BUFFER_SIZE 256
 
 struct http_connection {
 
-  stream_t s;
+  stream_t hc_response_stream;
 
   union {
     struct http_parser hc_hp;
     struct websocket_parser hc_wp;
   };
 
-  STAILQ_ENTRY(http_connection) hc_ws_notify_link;
   int (*hc_ws_cb)(void *opaque,
                   int opcode,
                   void *data,
@@ -60,15 +59,10 @@ struct http_connection {
 
   atomic_t hc_refcount;
 
-  pushpull_t *hc_sock;
+  stream_t *hc_socket;
 
-  pbuf_t *hc_txbuf_head;
-  pbuf_t *hc_txbuf_tail;
-  cond_t hc_txbuf_cond;
-
-  http_server_task_t *hc_task;
-  http_server_task_t *hc_ctrl_task;
-  struct http_server_task_queue hc_tasks;
+  void *hc_payload;
+  void *hc_ctrl;
 
   uint8_t hc_output_encoding;
   uint8_t hc_websocket_mode;
@@ -76,15 +70,36 @@ struct http_connection {
 
   uint8_t hc_hold : 1;
   uint8_t hc_notify : 1;
-  uint8_t hc_ws_opcode;
+  uint8_t hc_ws_rx_opcode;
+  uint8_t hc_ws_tx_opcode;
   uint8_t hc_output_mask_bit; // Set to 0x80 if we should do masking
-  uint8_t hc_sock_preferred_offset;
+  uint8_t hc_index;
 
   timer_t hc_timer;
+
+  uint8_t hc_output_buffer[HTTP_OUTPUT_BUFFER_SIZE];
+  size_t hc_output_buffer_used;
 
   const http_parser_settings *hc_parser_settings;
   const char *hc_close_reason;
 };
+
+
+#define MAX_HTTP_SERVER_CONNECTIONS 16
+
+typedef struct {
+
+  pollset_t hs_pollset[MAX_HTTP_SERVER_CONNECTIONS + 1];
+  http_connection_t *hs_connections[MAX_HTTP_SERVER_CONNECTIONS];
+  struct timer_list hs_timers;
+  mutex_t hs_mutex;
+  cond_t hs_cond;
+  uint8_t hs_update_pollset;
+
+} http_server_t;
+
+static http_server_t g_http_server;
+
 
 #define OUTPUT_ENCODING_NONE      0
 #define OUTPUT_ENCODING_CHUNKED   1
@@ -104,10 +119,301 @@ struct http_connection {
 
 
 
-static void
-http_timer_arm(http_connection_t *hc, int seconds)
+void
+http_connection_retain(http_connection_t *hc)
 {
-  net_timer_arm(&hc->hc_timer, clock_get() + seconds * 1000000);
+  atomic_inc(&hc->hc_refcount);
+}
+
+void
+http_connection_release(http_connection_t *hc)
+{
+  if(atomic_dec(&hc->hc_refcount))
+    return;
+
+  free(hc);
+}
+
+
+static ssize_t
+http_response_chunk_send(http_connection_t *hc, const void *data, size_t len)
+{
+  stprintf(hc->hc_socket, "%x\r\n", len);
+  stream_write(hc->hc_socket, data, len, 0);
+  stprintf(hc->hc_socket, "\r\n");
+  return len;
+}
+
+
+static ssize_t
+http_response_write(stream_t *s, const void *buf, size_t size, int flags)
+{
+  http_connection_t *hc = (http_connection_t *)s;
+  size_t total = size;
+
+  while(size) {
+
+    if(hc->hc_output_buffer_used == 0 && size > HTTP_OUTPUT_BUFFER_SIZE) {
+      http_response_chunk_send(hc, buf, size);
+      return total;
+    }
+
+    size_t to_copy = MIN(HTTP_OUTPUT_BUFFER_SIZE - hc->hc_output_buffer_used,
+                         size);
+    memcpy(hc->hc_output_buffer + hc->hc_output_buffer_used, buf, to_copy);
+
+    buf += to_copy;
+    size -= to_copy;
+    hc->hc_output_buffer_used += to_copy;
+
+    if(hc->hc_output_buffer_used == HTTP_OUTPUT_BUFFER_SIZE) {
+      http_response_chunk_send(hc, hc->hc_output_buffer,
+                               HTTP_OUTPUT_BUFFER_SIZE);
+      hc->hc_output_buffer_used = 0;
+    }
+  }
+  return total;
+}
+
+
+static void
+http_response_close(stream_t *s)
+{
+  http_connection_t *hc = (http_connection_t *)s;
+
+  if(hc->hc_output_buffer_used) {
+    http_response_chunk_send(hc, hc->hc_output_buffer,
+                             hc->hc_output_buffer_used);
+    hc->hc_output_buffer_used = 0;
+  }
+  stprintf(hc->hc_socket, "0\r\n\r\n");
+  stream_flush(hc->hc_socket);
+}
+
+
+static const stream_vtable_t http_response_vtable = {
+  .write = http_response_write,
+  .close = http_response_close,
+};
+
+
+struct stream *
+http_response_begin(struct http_request *hr, int status_code,
+                    const char *content_type)
+{
+  http_connection_t *hc = hr->hr_hc;
+
+  stprintf(hc->hc_socket,
+           "HTTP/1.1 %d %s\r\n"
+           "Transfer-Encoding: chunked\r\n"
+           "Content-Type: %s\r\n"
+           "%s"
+           "\r\n",
+           status_code, http_status_str(status_code),
+           content_type,
+           !hr->hr_should_keep_alive ?
+           "Connection: close\r\n": "");
+
+  hc->hc_response_stream.vtable = &http_response_vtable;
+  return &hc->hc_response_stream;
+}
+
+
+static void *
+payload_acquire(void **p, size_t capacity)
+{
+  if(*p)
+    return *p;
+
+  balloc_t *ba = xalloc(sizeof(balloc_t) + capacity, 0, MEM_MAY_FAIL);
+  if(ba == NULL)
+    return NULL;
+
+  *p = ba;
+  memset(ba, 0, sizeof(balloc_t));
+  ba->capacity = capacity;
+  return ba;
+}
+
+
+static ssize_t
+websocket_send_fragment(http_connection_t *hc, void *buf, size_t size, int fin,
+                        int opcode, int flags)
+{
+  uint8_t hdr[8];
+  int hlen = 2;
+  if(size < 126) {
+    hdr[1] = size | hc->hc_output_mask_bit;
+  } else {
+    hdr[1] = 126 | hc->hc_output_mask_bit;
+    hdr[2] = size >> 8;
+    hdr[3] = size;
+    hlen = 4;
+  }
+
+  if(hc->hc_output_mask_bit) {
+    memset(hdr + hlen, 0, 4);
+    hlen += 4;
+  }
+
+  hdr[0] = opcode | (fin ? 0x80 : 0);
+  //  hc->hc_ws_tx_opcode = 0;
+
+  struct iovec iov[2];
+  iov[0].iov_base = hdr;
+  iov[0].iov_len = hlen;
+  iov[1].iov_base = buf;
+  iov[1].iov_len = size;
+  return stream_writev(hc->hc_socket, iov, 2, flags);
+}
+
+
+static ssize_t
+websocket_parser_execute(http_connection_t *hc,
+                         const uint8_t *pkt, size_t total_len)
+{
+  websocket_parser_t *wp = &hc->hc_wp;
+
+  size_t pkt_len = total_len;
+  size_t consumed = 0;
+
+  while(1) {
+    int req_hdr_len = 2;
+    if(wp->wp_header_len >= 2) {
+      int frag_len = wp->wp_header[1] & 0x7f;
+      if(frag_len == 126)
+        req_hdr_len = 4;
+      else if(frag_len == 127)
+        req_hdr_len = 10;
+
+      if(wp->wp_header[1] & 0x80)
+        req_hdr_len += 4; // mask
+    }
+
+    if(wp->wp_header_len == req_hdr_len)
+      break;
+
+    const size_t to_copy = MIN(req_hdr_len - wp->wp_header_len, pkt_len);
+    if(to_copy == 0)
+      return consumed;
+    memcpy(wp->wp_header + wp->wp_header_len, pkt, to_copy);
+    pkt += to_copy;
+    pkt_len -= to_copy;
+    consumed += to_copy;
+    wp->wp_header_len += to_copy;
+  }
+
+  int64_t frag_len = wp->wp_header[1] & 0x7f;
+  int mask_off = 2;
+
+  if(frag_len == 126) {
+    frag_len = wp->wp_header[2] << 8 | wp->wp_header[3];
+    mask_off = 4;
+  } else if(frag_len == 127) {
+    frag_len = rd64_be(wp->wp_header + 2);
+    mask_off = 10;
+  }
+
+  if(frag_len > 1024 * 1024)
+    return ERR_INVALID_LENGTH;
+
+  const int opcode = wp->wp_header[0] & 0xf;
+
+  balloc_t *ba;
+
+  if(opcode & 0x8) {
+
+    if(!(wp->wp_header[0] & 0x80) || frag_len > 125)
+      return ERR_MALFORMED;
+
+    // We special case PONG replies (just discard data) and reset
+    // our ping counter to reset timeout countdown of doom
+    if(opcode == WS_OPCODE_PONG) {
+      hc->hc_ping_counter = 0;
+      size_t to_discard = MIN(frag_len - wp->wp_fragment_used, pkt_len);
+      wp->wp_fragment_used += to_discard;
+      consumed += to_discard;
+
+      if(wp->wp_fragment_used == frag_len) {
+        wp->wp_header_len = 0;
+        wp->wp_fragment_used = 0;
+      }
+      return consumed;
+    }
+
+    // Control frame
+    // These can appear within fragmented non-control-frames
+    // Also control frames themselves may not be fragmented
+    ba = payload_acquire(&hc->hc_ctrl, frag_len);
+  } else {
+    if(opcode)
+      hc->hc_ws_rx_opcode = opcode;
+    ba = payload_acquire(&hc->hc_payload, 4096);
+  }
+
+  if(ba == NULL) {
+    return ERR_NO_BUFFER;
+  }
+
+  const size_t to_copy = MIN(frag_len - wp->wp_fragment_used, pkt_len);
+  if(ba->used + to_copy > ba->capacity) {
+    return ERR_NO_BUFFER;
+  }
+
+  uint8_t *dst = ba->data + ba->used;
+  memcpy(dst, pkt, to_copy);
+  if(wp->wp_header[1] & 0x80) {
+    const uint8_t *mask = wp->wp_header + mask_off;
+    for(size_t i = 0; i < to_copy; i++) {
+      dst[i] ^= mask[i&3];
+    }
+  }
+
+  consumed += to_copy;
+  wp->wp_fragment_used += to_copy;
+  ba->used += to_copy;
+
+  if(wp->wp_fragment_used == frag_len) {
+
+    wp->wp_header_len = 0;
+    wp->wp_fragment_used = 0;
+
+    if(wp->wp_header[0] & 0x80) { // FIN bit
+
+      if(opcode == WS_OPCODE_PING) {
+        websocket_send_fragment(hc, ba->data, ba->used, 1, WS_OPCODE_PONG, 0);
+      } else if(hc->hc_ws_cb != NULL) {
+        int result = hc->hc_ws_cb(hc->hc_ws_opaque, hc->hc_ws_rx_opcode,
+                                  ba->data, ba->used, hc, ba);
+
+        if(result) {
+          // Returned error code, Close connection
+          uint8_t payload[2] = {result >> 8, result};
+          websocket_send_fragment(hc, payload, sizeof(payload), 1,
+                                  WS_OPCODE_CLOSE, 0);
+          return ERR_NOT_CONNECTED;
+        }
+      }
+
+      if(opcode & 0x8) {
+        free(hc->hc_ctrl);
+        hc->hc_ctrl = NULL;
+      } else {
+        free(hc->hc_payload);
+        hc->hc_payload = NULL;
+      }
+    }
+  }
+
+  return opcode == WS_OPCODE_CLOSE ? ERR_NOT_CONNECTED : consumed;
+}
+
+
+static void
+http_timer_arm(http_connection_t *hc, http_server_t *hs, int seconds)
+{
+  timer_arm_on_queue(&hc->hc_timer, clock_get() + seconds * 1000000,
+                     &hs->hs_timers);
 }
 
 
@@ -125,7 +431,8 @@ http_server_message_begin(http_parser *p)
   hr->hr_bumpalloc.capacity = alloc_size - sizeof(http_request_t);
 
   http_connection_t *hc = p->data;
-  hc->hc_task = &hr->hr_hst;
+  hr->hr_hc = hc;
+  hc->hc_payload = hr;
   return 0;
 }
 
@@ -134,7 +441,7 @@ static int
 http_server_url(http_parser *p, const char *at, size_t length)
 {
   http_connection_t *hc = p->data;
-  http_request_t *hr = (http_request_t *)hc->hc_task;
+  http_request_t *hr = (http_request_t *)hc->hc_payload;
   if(hr == NULL || hr->hr_header_err)
     return 0;
 
@@ -203,7 +510,7 @@ static int
 http_server_header_field(http_parser *p, const char *at, size_t length)
 {
   http_connection_t *hc = p->data;
-  http_request_t *hr = (http_request_t *)hc->hc_task;
+  http_request_t *hr = (http_request_t *)hc->hc_payload;
   if(hr == NULL || hr->hr_header_err)
     return 0;
 
@@ -215,7 +522,7 @@ static int
 http_server_header_value(http_parser *p, const char *at, size_t length)
 {
   http_connection_t *hc = p->data;
-  http_request_t *hr = (http_request_t *)hc->hc_task;
+  http_request_t *hr = (http_request_t *)hc->hc_payload;
   if(hr == NULL || hr->hr_header_err)
     return 0;
 
@@ -229,7 +536,7 @@ static int
 http_server_headers_complete(http_parser *p)
 {
   http_connection_t *hc = p->data;
-  http_request_t *hr = (http_request_t *)hc->hc_task;
+  http_request_t *hr = (http_request_t *)hc->hc_payload;
   if(hr == NULL)
     return 0;
 
@@ -238,11 +545,11 @@ http_server_headers_complete(http_parser *p)
     hc->hc_ws_cb = NULL;
     hc->hc_websocket_mode = 1;
     hr->hr_upgrade_to_websocket = 1;
-    http_timer_arm(hc, 5);
+    http_timer_arm(hc, &g_http_server, 5);
     return 2;
   }
 
-  http_timer_arm(hc, 20);
+  http_timer_arm(hc, &g_http_server, 20);
   return 0;
 }
 
@@ -251,7 +558,7 @@ static int
 http_server_body(http_parser *p, const char *at, size_t length)
 {
   http_connection_t *hc = p->data;
-  http_request_t *hr = (http_request_t *)hc->hc_task;
+  http_request_t *hr = (http_request_t *)hc->hc_payload;
   if(hr == NULL || hr->hr_header_err)
     return 0;
 
@@ -262,662 +569,6 @@ http_server_body(http_parser *p, const char *at, size_t length)
 
   return 0;
 }
-
-static pbuf_t *
-make_output(http_connection_t *hc, int wait, const char *fmt, ...)
-{
-  pbuf_t *pb = pbuf_make(hc->hc_sock_preferred_offset, wait);
-  if(pb == NULL)
-    return NULL;
-
-  va_list ap;
-  va_start(ap, fmt);
-  size_t len = vsnprintf(pbuf_data(pb, 0), PBUF_DATA_SIZE - pb->pb_offset,
-                         fmt, ap);
-  va_end(ap);
-  pb->pb_pktlen += len;
-  pb->pb_buflen += len;
-  return pb;
-}
-
-static pbuf_t *
-make_simple_output(http_connection_t *hc, int wait,
-                   int http_status_code, int do_close)
-{
-  return make_output(hc, wait, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\n%s\r\n",
-                     http_status_code, http_status_str(http_status_code),
-                     do_close ? "Connection: close\r\n": "");
-}
-
-static void
-http_task_enqueue(http_server_task_t *hst, http_connection_t *hc,
-                  http_server_task_type_t type)
-{
-  hst->hst_type = type;
-  STAILQ_INSERT_TAIL(&http_task_queue, hst, hst_global_link);
-  hst->hst_hc = hc;
-  TAILQ_INSERT_TAIL(&hc->hc_tasks, hst, hst_connection_link);
-  atomic_inc(&hc->hc_refcount);
-  cond_signal(&http_task_queue_cond);
-}
-
-static int
-http_server_message_complete(http_parser *p)
-{
-  http_connection_t *hc = p->data;
-  http_request_t *hr = (http_request_t *)hc->hc_task;
-
-  mutex_lock(&http_mutex);
-
-  if(hr == NULL) {
-    // We didn't manage to allocate a request struct,
-
-    http_server_task_t *last =
-      TAILQ_LAST(&hc->hc_tasks, http_server_task_queue);
-
-    // We do some trickery here to correct deal with HTTP/1 pipelining
-    // It's almost never used, but it's not really much extra work for us
-    if(last == NULL) {
-      // No other requests are queued, we can respond directly
-
-      // This executes on net-thread, so don't wait
-      pbuf_t *pb = make_simple_output(hc, 0, 503, 1);
-      if(pb == NULL) {
-        // Failed to allocate, bail out
-        mutex_unlock(&http_mutex);
-        return 1;
-      }
-
-      hc->hc_txbuf_head = pb;
-      pushpull_t *sk = hc->hc_sock;
-      sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-
-    } else {
-      // Ask the request last in queue to also send a 503 when it completed
-      http_request_t *hr = (http_request_t *)last;
-      hr->hr_piggyback_503++;
-    }
-  } else {
-
-    hr->hr_should_keep_alive = http_should_keep_alive(p);
-    http_task_enqueue(&hr->hr_hst, hc, HST_HTTP_REQ);
-    hc->hc_task = NULL;
-  }
-
-  mutex_unlock(&http_mutex);
-  http_timer_arm(hc, 5);
-  return 0;
-}
-
-static const http_parser_settings server_parser = {
-  .on_message_begin    = http_server_message_begin,
-  .on_url              = http_server_url,
-  .on_header_field     = http_server_header_field,
-  .on_header_value     = http_server_header_value,
-  .on_headers_complete = http_server_headers_complete,
-  .on_body             = http_server_body,
-  .on_message_complete = http_server_message_complete,
-};
-
-
-
-static http_server_wsp_t *
-hsw_acquire(http_server_task_t **p, size_t capacity, uint8_t opcode)
-{
-  if(*p)
-    return (http_server_wsp_t *)*p;
-
-  http_server_wsp_t *hsw = xalloc(sizeof(http_server_wsp_t) + capacity,
-                                  0, MEM_MAY_FAIL);
-  if(hsw == NULL)
-    return NULL;
-
-  *p = &hsw->hsw_hst;
-  memset(hsw, 0, sizeof(http_server_wsp_t));
-  hsw->hsw_hst.hst_opcode = opcode;
-  hsw->hsw_bumpalloc.capacity = capacity;
-  return hsw;
-}
-
-
-static int
-websocket_parser_execute(http_connection_t *hc,
-                         const uint8_t *pkt, size_t total_len)
-{
-  websocket_parser_t *wp = &hc->hc_wp;
-
-  size_t pkt_len = total_len;
-  size_t consumed = 0;
-  uint8_t rewind_to = wp->wp_header_len;
-
-  while(1) {
-    int req_hdr_len = 2;
-    if(wp->wp_header_len >= 2) {
-      int frag_len = wp->wp_header[1] & 0x7f;
-      if(frag_len == 126)
-        req_hdr_len = 4;
-      else if(frag_len == 127)
-        req_hdr_len = 10;
-
-      if(wp->wp_header[1] & 0x80)
-        req_hdr_len += 4; // mask
-    }
-
-    if(wp->wp_header_len == req_hdr_len)
-      break;
-
-    const size_t to_copy = MIN(req_hdr_len - wp->wp_header_len, pkt_len);
-    if(to_copy == 0)
-      return consumed;
-    memcpy(wp->wp_header + wp->wp_header_len, pkt, to_copy);
-    pkt += to_copy;
-    pkt_len -= to_copy;
-    consumed += to_copy;
-    wp->wp_header_len += to_copy;
-  }
-
-  int64_t frag_len = wp->wp_header[1] & 0x7f;
-  int mask_off = 2;
-
-  if(frag_len == 126) {
-    frag_len = wp->wp_header[2] << 8 | wp->wp_header[3];
-    mask_off = 4;
-  } else if(frag_len == 127) {
-    frag_len = rd64_be(wp->wp_header + 2);
-    mask_off = 10;
-  }
-
-  if(frag_len > 1024 * 1024)
-    return -1;
-
-  const int opcode = wp->wp_header[0] & 0xf;
-
-  http_server_wsp_t *hsw;
-
-  if(opcode & 0x8) {
-
-    if(!(wp->wp_header[0] & 0x80) || frag_len > 125)
-      return -1;
-
-    // We special case PONG replies (just discard data) and reset
-    // our ping counter to reset timeout countdown of doom
-    if(opcode == WS_OPCODE_PONG) {
-      hc->hc_ping_counter = 0;
-      size_t to_discard = MIN(frag_len - wp->wp_fragment_used, pkt_len);
-      wp->wp_fragment_used += to_discard;
-      consumed += to_discard;
-
-      if(wp->wp_fragment_used == frag_len) {
-        wp->wp_header_len = 0;
-        wp->wp_fragment_used = 0;
-      }
-      return consumed;
-    }
-
-    // Control frame
-    // These can appear within fragmented non-control-frames
-    // Also control frames themselves may not be fragmented
-    hsw = hsw_acquire(&hc->hc_ctrl_task, frag_len, opcode);
-  } else {
-    hsw = hsw_acquire(&hc->hc_task, 4096, opcode);
-  }
-
-  if(hsw == NULL) {
-    wp->wp_header_len = rewind_to;
-    return 0;
-  }
-  const size_t to_copy = MIN(frag_len - wp->wp_fragment_used, pkt_len);
-  if(hsw->hsw_bumpalloc.used + to_copy > hsw->hsw_bumpalloc.capacity) {
-    return -1;
-  }
-
-  uint8_t *dst = hsw->hsw_bumpalloc.data + hsw->hsw_bumpalloc.used;
-  memcpy(dst, pkt, to_copy);
-  if(wp->wp_header[1] & 0x80) {
-    const uint8_t *mask = wp->wp_header + mask_off;
-    for(size_t i = 0; i < to_copy; i++) {
-      dst[i] ^= mask[i&3];
-    }
-  }
-
-  consumed += to_copy;
-  wp->wp_fragment_used += to_copy;
-  hsw->hsw_bumpalloc.used += to_copy;
-
-  if(wp->wp_fragment_used == frag_len) {
-
-    if(wp->wp_header[0] & 0x80) {
-      mutex_lock(&http_mutex);
-      http_task_enqueue(&hsw->hsw_hst, hc, HST_WEBSOCKET_PACKET);
-      mutex_unlock(&http_mutex);
-
-      if(opcode & 0x8)
-        hc->hc_ctrl_task = NULL;
-      else
-        hc->hc_task = NULL;
-    }
-    wp->wp_header_len = 0;
-    wp->wp_fragment_used = 0;
-  }
-
-  // Return -1 to close
-  return opcode == WS_OPCODE_CLOSE ? -1 : consumed;
-}
-
-
-static void
-http_close_locked(http_connection_t *hc, const char *reason)
-{
-  if(hc->hc_sock != NULL) {
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
-    hc->hc_sock = NULL;
-    if(hc->hc_close_reason == NULL)
-      hc->hc_close_reason = reason;
-    cond_signal(&hc->hc_txbuf_cond);
-  }
-}
-
-
-static size_t
-http_push_error(http_connection_t *hc, struct pbuf *pb0,
-                const char *reason)
-{
-  mutex_lock(&http_mutex);
-  http_close_locked(hc, reason);
-  mutex_unlock(&http_mutex);
-  return pb0->pb_pktlen;
-}
-
-static size_t
-http_push_partial(void *opaque, struct pbuf * const pb0)
-{
-  http_connection_t *hc = opaque;
-  size_t consumed = 0;
-
-  for(pbuf_t *pb = pb0 ; pb != NULL; pb = pb->pb_next) {
-    size_t offset = 0;
-
-    while(offset != pb->pb_buflen) {
-
-      int r;
-      if(hc->hc_websocket_mode) {
-        websocket_parser_t *wp = &hc->hc_wp;
-
-        if(hc->hc_websocket_mode == 1) {
-          memset(wp, 0, sizeof(websocket_parser_t));
-          hc->hc_websocket_mode++;
-        }
-
-        size_t offered = pb->pb_buflen - offset;
-        r = websocket_parser_execute(hc, pbuf_cdata(pb, offset), offered);
-        if(r < 0) {
-          return http_push_error(hc, pb0, "parser error");
-        }
-
-        if(r != offered)
-          return consumed + r;
-
-      } else {
-
-        r = http_parser_execute(&hc->hc_hp, hc->hc_parser_settings,
-                                pbuf_cdata(pb, offset),
-                                pb->pb_buflen - offset);
-        if(hc->hc_hp.http_errno) {
-          return http_push_error(hc, pb0, "parser error");
-        }
-      }
-      offset += r;
-      consumed += r;
-    }
-  }
-  return consumed;
-}
-
-
-
-static struct pbuf *
-http_pull(void *opaque)
-{
-  http_connection_t *hc = opaque;
-  mutex_lock(&http_mutex);
-  if(hc->hc_hold) {
-    mutex_unlock(&http_mutex);
-    return NULL;
-  }
-
-  pbuf_t *pb = hc->hc_txbuf_head;
-  hc->hc_txbuf_head = NULL;
-  hc->hc_txbuf_tail = NULL;
-  cond_signal(&hc->hc_txbuf_cond);
-  mutex_unlock(&http_mutex);
-
-  return pb;
-}
-
-
-void
-http_connection_retain(http_connection_t *hc)
-{
-  atomic_inc(&hc->hc_refcount);
-}
-
-void
-http_connection_release(http_connection_t *hc)
-{
-  if(atomic_dec(&hc->hc_refcount))
-    return;
-
-  if(hc->hc_txbuf_head)
-    pbuf_free(hc->hc_txbuf_head);
-
-  free(hc);
-}
-
-static void
-http_websocket_enqueue_notify(http_connection_t *hc)
-{
-  if (hc->hc_notify)
-    return;
-  atomic_inc(&hc->hc_refcount);
-  STAILQ_INSERT_TAIL(&notifying_websocket_connections, hc, hc_ws_notify_link);
-  hc->hc_notify = 1;
-  cond_signal(&http_task_queue_cond);
-}
-
-
-static void
-http_close(void *opaque, const char *reason)
-{
-  http_connection_t *hc = opaque;
-
-  if(hc->hc_task != NULL) {
-    free(hc->hc_task);
-    hc->hc_task = NULL;
-  }
-
-  if(hc->hc_ctrl_task != NULL) {
-    free(hc->hc_ctrl_task);
-    hc->hc_ctrl_task = NULL;
-  }
-
-  timer_disarm(&hc->hc_timer);
-
-  mutex_lock(&http_mutex);
-  http_close_locked(hc, reason);
-
-  if(hc->hc_ws_cb) {
-    http_websocket_enqueue_notify(hc);
-  }
-  mutex_unlock(&http_mutex);
-  http_connection_release(hc);
-}
-
-
-static const pushpull_app_fn_t http_sock_fn = {
-  .push_partial = http_push_partial,
-  .pull = http_pull,
-  .close = http_close
-};
-
-static void
-http_timer_locked(http_connection_t *hc)
-{
-  if(hc->hc_websocket_mode) {
-
-    pushpull_t *sk = hc->hc_sock;
-    if(sk == NULL)
-      return;
-
-    if(hc->hc_ping_counter < 3) {
-
-      http_timer_arm(hc, 5);
-
-      // If we can't ping for the following reasons, we just don't
-      // increase the ping_counter and just retry a ping in 5
-      // seconds again.
-
-      // If there's already a frame queued for output, don't ping
-      if(hc->hc_txbuf_head != NULL)
-        return;
-
-      // If we can't allocated a frame, don't ping
-      pbuf_t *pb = pbuf_make(sk->preferred_offset, 0);
-      if(pb == NULL)
-        return;
-      size_t payload_size = 2 + (hc->hc_output_mask_bit >> 5);
-      uint8_t *pkt = pbuf_append(pb, 2 + payload_size);
-      pkt[0] = 0x80 | WS_OPCODE_PING;
-      pkt[1] = 2 | hc->hc_output_mask_bit;
-      for(int i = 0 ; i < payload_size; i++) {
-        pkt[i + 2] = rand();
-      }
-      hc->hc_txbuf_head = pb;
-
-      sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-      hc->hc_ping_counter++;
-      return;
-    }
-  }
-  http_close_locked(hc, "keep alive timeout");
-}
-
-static void
-http_timer_cb(void *opaque, uint64_t now)
-{
-  http_connection_t *hc = opaque;
-  mutex_lock(&http_mutex);
-  http_timer_locked(hc);
-  mutex_unlock(&http_mutex);
-}
-
-
-static const char hexdigit[16] = "0123456789abcdef";
-
-static void
-add_chunked_encoding(http_connection_t *hc)
-{
-  pbuf_t *pb = hc->hc_txbuf_head;
-
-  size_t len = pb->pb_pktlen;
-  pb = pbuf_prepend(pb, 8, 0, 0);
-  assert(pb != NULL);
-  char *hdr = pbuf_data(pb, 0);
-  hdr[0] = '0';
-  hdr[1] = '0';
-  hdr[2] = '0';
-  hdr[3] = hexdigit[(len >> 8) & 0xf];
-  hdr[4] = hexdigit[(len >> 4) & 0xf];
-  hdr[5] = hexdigit[(len >> 0) & 0xf];
-  hdr[6] = '\r';
-  hdr[7] = '\n';
-  hc->hc_txbuf_head = pb;
-
-  pbuf_t *tail = hc->hc_txbuf_tail;
-  memcpy(tail->pb_data + tail->pb_offset + tail->pb_buflen, "\r\n", 2);
-  tail->pb_buflen += 2;
-  pb->pb_pktlen += 2;
-}
-
-
-static void
-add_websocket_framing(http_connection_t *hc, int fin)
-{
-  pbuf_t *pb = hc->hc_txbuf_head;
-  size_t len = pb->pb_pktlen;
-
-  if(hc->hc_output_mask_bit) {
-
-    assert(pb->pb_offset >= 4);
-    uint8_t *m = pbuf_data(pb, 0) - 4;
-    uint32_t r = rand();
-    memcpy(m, &r, sizeof(uint32_t));
-
-    int o = 0;
-    for(pbuf_t *p = pb; p != NULL; p = p->pb_next) {
-      uint8_t *d = pbuf_data(p, 0);
-      for(size_t i = 0; i < p->pb_buflen; i++) {
-        d[i] ^= m[o & 3];
-        o++;
-      }
-    }
-
-    pb->pb_offset -= 4;
-    pb->pb_buflen += 4;
-    pb->pb_pktlen += 4;
-  }
-
-  assert(pb->pb_offset >= 4);
-  pb->pb_offset -= 4;
-
-  uint8_t *hdr;
-  if(len < 126) {
-    memmove(pbuf_data(pb, 2), pbuf_data(pb, 4), pb->pb_buflen);
-    pb->pb_buflen += 2;
-    pb->pb_pktlen += 2;
-    hdr = pbuf_data(pb, 0);
-    hdr[1] = len | hc->hc_output_mask_bit;
-  } else {
-    pb->pb_buflen += 4;
-    pb->pb_pktlen += 4;
-
-    hdr = pbuf_data(pb, 0);
-    hdr[1] = 126 | hc->hc_output_mask_bit;
-    hdr[2] = len >> 8;
-    hdr[3] = len;
-  }
-  hdr[0] = hc->hc_ws_opcode | (fin ? 0x80 : 0);
-  hc->hc_ws_opcode = 0;
-}
-
-
-static void
-http_stream_release_packet(http_connection_t *hc, int fin)
-{
-  pushpull_t *sk = hc->hc_sock;
-  if(sk == NULL)
-    return;
-
-  switch(hc->hc_output_encoding) {
-  case OUTPUT_ENCODING_CHUNKED:
-    add_chunked_encoding(hc);
-    break;
-  case OUTPUT_ENCODING_WEBSOCKET:
-    add_websocket_framing(hc, fin);
-    break;
-  }
-  hc->hc_hold = 0;
-
-  sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-}
-
-
-static void
-http_response_close(stream_t *st)
-{
-  http_connection_t *hc = (http_connection_t *)st;
-  pbuf_t *pb;
-
-  mutex_lock(&http_mutex);
-
-  if(hc->hc_hold)
-    http_stream_release_packet(hc, 1);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-
-  pushpull_t *sk = hc->hc_sock;
-  if(sk != NULL && hc->hc_output_encoding == OUTPUT_ENCODING_CHUNKED) {
-    pb = pbuf_make(sk->preferred_offset, 1);
-    memcpy(pbuf_data(pb, 0), "0\r\n\r\n", 5);
-
-    pb->pb_pktlen += 5;
-    pb->pb_buflen += 5;
-
-    hc->hc_txbuf_head = pb;
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_PULL);
-  }
-
-  hc->hc_output_encoding = 0;
-  mutex_unlock(&http_mutex);
-}
-
-
-static const stream_vtable_t http_response_chunked = {
-  .write = http_stream_write,
-  .close = http_response_close,
-};
-
-static void
-http_websocket_output_end(stream_t *st)
-{
-  http_connection_t *hc = (http_connection_t *)st;
-  mutex_lock(&http_mutex);
-
-  if(hc->hc_hold)
-    http_stream_release_packet(hc, 1);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-  hc->hc_output_encoding = 0;
-  mutex_unlock(&http_mutex);
-}
-
-
-static const stream_vtable_t http_response_websocket = {
-  .write = http_stream_write,
-  .close = http_websocket_output_end,
-};
-
-
-
-static http_connection_t *
-http_connection_create(enum http_parser_type type,
-                       const http_parser_settings *parser_settings)
-{
-  http_connection_t *hc = xalloc(sizeof(http_connection_t), 0, MEM_MAY_FAIL);
-  if(hc == NULL)
-    return NULL;
-
-  memset(hc, 0, sizeof(http_connection_t));
-  hc->hc_parser_settings = parser_settings;
-  atomic_set(&hc->hc_refcount, 1);
-  TAILQ_INIT(&hc->hc_tasks);
-
-  http_parser_init(&hc->hc_hp, type);
-
-  hc->hc_hp.data = hc;
-  cond_init(&hc->hc_txbuf_cond, "httpout");
-
-  hc->hc_timer.t_cb = http_timer_cb;
-  hc->hc_timer.t_opaque = hc;
-  hc->hc_timer.t_name = "http";
-
-  return hc;
-}
-
-
-static error_t
-http_accept(pushpull_t *s)
-{
-  http_connection_t *hc = http_connection_create(HTTP_REQUEST,
-                                                 &server_parser);
-  if(hc == NULL)
-    return ERR_NO_MEMORY;
-
-  hc->hc_sock = s;
-  hc->hc_sock_preferred_offset = s->preferred_offset;
-  s->app = &http_sock_fn;
-  s->app_opaque = hc;
-
-  http_timer_arm(hc, 5);
-  return 0;
-}
-
-
-SERVICE_DEF("http", 80, 0, SERVICE_TYPE_STREAM, http_accept);
-
 
 
 static int
@@ -983,363 +634,376 @@ find_route(http_request_t *hr, char *path)
 }
 
 
-static void
-http_websocket_send_locked(http_connection_t *hc, uint8_t opcode,
-                           const void *data, size_t len)
-{
-  while(len) {
-    while(hc->hc_txbuf_head && hc->hc_sock) {
-      cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-    }
-
-    pushpull_t *sk = hc->hc_sock;
-    if(sk == NULL)
-      break;
-
-    pbuf_t *pb = pbuf_make(sk->preferred_offset, 1);
-    uint8_t *hdr;
-    int hdrlen;
-    if(len < 126) {
-      hdr = pbuf_append(pb, 2);
-      hdrlen = 2;
-      hdr[1] = len;
-    } else {
-      hdr = pbuf_append(pb, 4);
-      hdrlen = 4;
-      hdr[1] = 126;
-      hdr[2] = len >> 8;
-      hdr[3] = len;
-    }
-    hdr[0] = opcode;
-    opcode = 0;
-
-    size_t to_copy = MIN(len, PBUF_DATA_SIZE - pb->pb_offset);
-    memcpy(pbuf_data(pb, hdrlen), data, to_copy);
-    pb->pb_pktlen += to_copy;
-    pb->pb_buflen += to_copy;
-
-    data += to_copy;
-    len -= to_copy;
-
-    if(len == 0)
-      hdr[0] |= 0x80;
-
-    hc->hc_txbuf_head = pb;
-    sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-  }
-}
-
 
 static void
-websocket_close_locked(http_connection_t *hc, uint16_t code)
+send_simple_output(http_connection_t *hc, int http_status_code,
+                   int do_close)
 {
-  if(hc->hc_close_reason == NULL)
-    hc->hc_close_reason = "Sending websocket close";
+  stprintf(hc->hc_socket,
+           "HTTP/1.1 %d %s\r\nContent-Length: 0\r\n%s\r\n",
+           http_status_code, http_status_str(http_status_code),
+           do_close ? "Connection: close\r\n": "");
+  stream_flush(hc->hc_socket);
 
-  uint8_t payload[2] = {code >> 8, code};
-  http_websocket_send_locked(hc, WS_OPCODE_CLOSE, payload, sizeof(payload));
 }
 
 static void
-http_process_websocket_packet(http_server_wsp_t *hsw)
+http_process_request(http_request_t *hr, http_connection_t *hc)
 {
-  http_connection_t *hc = hsw->hsw_hst.hst_hc;
-  if(hsw->hsw_hst.hst_opcode == WS_OPCODE_PING) {
-    http_websocket_send_locked(hc, WS_OPCODE_PONG,
-                               hsw->hsw_bumpalloc.data,
-                               hsw->hsw_bumpalloc.used);
-    return;
-  }
-
-  mutex_unlock(&http_mutex);
-  int err = hc->hc_ws_cb(hc->hc_ws_opaque, hsw->hsw_hst.hst_opcode,
-                         hsw->hsw_bumpalloc.data, hsw->hsw_bumpalloc.used, hc,
-                         &hsw->hsw_bumpalloc);
-  mutex_lock(&http_mutex);
-
-  if(err) {
-    websocket_close_locked(hc, err);
-  }
-}
-
-static void
-http_process_request(http_request_t *hr)
-{
-  mutex_unlock(&http_mutex);
   int http_status_code = find_route(hr, hr->hr_url);
 
-  http_connection_t *hc = hr->hr_hst.hst_hc;
-  pbuf_t *pb = NULL;
   if(http_status_code) {
-    pb = make_simple_output(hc, 1, http_status_code, !hr->hr_should_keep_alive);
-  }
-
-  mutex_lock(&http_mutex);
-
-  if(pb) {
-    // Send the simple response
-
-    while(hc->hc_txbuf_head && hc->hc_sock) {
-      cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-    }
-
-    pushpull_t *sk = hc->hc_sock;
-    if(sk == NULL) {
-      pbuf_free(pb);
-      return;
-    }
-    hc->hc_txbuf_head = pb;
-    sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-  }
-
-
-  while(hr->hr_piggyback_503) {
-
-    mutex_unlock(&http_mutex);
-    pb = make_simple_output(hc, 1, 503, 1);
-    mutex_lock(&http_mutex);
-
-    while(hc->hc_txbuf_head && hc->hc_sock) {
-      cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-    }
-
-    pushpull_t *sk = hc->hc_sock;
-    if(sk == NULL) {
-      pbuf_free(pb);
-      break;
-    }
-    hc->hc_txbuf_head = pb;
-    sk->net->event(sk->net_opaque, PUSHPULL_EVENT_PULL);
-
-    hr->hr_piggyback_503--;
+    send_simple_output(hc, http_status_code, !hr->hr_should_keep_alive);
+    return;
   }
 }
 
+
+static int
+http_server_message_complete(http_parser *p)
+{
+  http_connection_t *hc = p->data;
+  http_request_t *hr = (http_request_t *)hc->hc_payload;
+
+  hr->hr_should_keep_alive = http_should_keep_alive(p);
+
+  http_process_request(hr, hc);
+  hc->hc_payload = NULL;
+  free(hr);
+  http_timer_arm(hc, &g_http_server, 5);
+  return 0;
+}
+
+
+static const http_parser_settings server_parser = {
+  .on_message_begin    = http_server_message_begin,
+  .on_url              = http_server_url,
+  .on_header_field     = http_server_header_field,
+  .on_header_value     = http_server_header_value,
+  .on_headers_complete = http_server_headers_complete,
+  .on_body             = http_server_body,
+  .on_message_complete = http_server_message_complete,
+};
+
+
+static void
+http_connection_shutdown(http_connection_t *hc, http_server_t *hs,
+                         const char *reason)
+{
+  if(hc->hc_ws_cb) {
+    hc->hc_ws_cb(hc->hc_ws_opaque, WS_OPCODE_DISCONNECT,
+                 (char *)reason, 0, hc, NULL);
+    hc->hc_ws_cb = NULL;
+  }
+
+  stream_close(hc->hc_socket);
+  hs->hs_pollset[hc->hc_index].type = POLL_NONE;
+
+  timer_disarm(&hc->hc_timer);
+
+  hs->hs_connections[hc->hc_index] = NULL;
+  http_connection_release(hc);
+
+  free(hc->hc_ctrl);
+  hc->hc_ctrl = NULL;
+
+  free(hc->hc_payload);
+  hc->hc_payload = NULL;
+}
+
+static void
+http_timer_cb(void *opaque, uint64_t now)
+{
+  http_connection_t *hc = opaque;
+
+  if(hc->hc_websocket_mode && hc->hc_ping_counter < 3) {
+
+    http_timer_arm(hc, &g_http_server, 5);
+    uint8_t payload[2] = {0x13, 0x37};
+    ssize_t r =
+      websocket_send_fragment(hc, payload, sizeof(payload), 1, WS_OPCODE_PING,
+                              STREAM_WRITE_NO_WAIT | STREAM_WRITE_ALL);
+    if(r > 0)
+      hc->hc_ping_counter++;
+
+    return;
+  }
+  http_connection_shutdown(hc, &g_http_server, "Timeout");
+}
+
+
+
+
+static http_connection_t *
+http_connection_create(enum http_parser_type type,
+                       const http_parser_settings *parser_settings)
+{
+  http_connection_t *hc = xalloc(sizeof(http_connection_t), 0, MEM_MAY_FAIL);
+  if(hc == NULL)
+    return NULL;
+
+  memset(hc, 0, sizeof(http_connection_t));
+  hc->hc_parser_settings = parser_settings;
+  atomic_set(&hc->hc_refcount, 1);
+
+  http_parser_init(&hc->hc_hp, type);
+
+  hc->hc_hp.data = hc;
+
+  hc->hc_timer.t_cb = http_timer_cb;
+  hc->hc_timer.t_opaque = hc;
+  hc->hc_timer.t_name = "http";
+
+  return hc;
+}
+
+
+static error_t
+http_connection_serve(http_connection_t *hc, http_server_t *hs)
+{
+  while(1) {
+
+    void *buf;
+    ssize_t bytes = stream_peek(hc->hc_socket, &buf, 0);
+    if(bytes < 1)
+      return bytes;
+
+    ssize_t consumed;
+
+    if(hc->hc_websocket_mode) {
+      websocket_parser_t *wp = &hc->hc_wp;
+
+      if(hc->hc_websocket_mode == 1) {
+        memset(wp, 0, sizeof(websocket_parser_t));
+        hc->hc_websocket_mode++;
+      }
+
+      consumed = websocket_parser_execute(hc, buf, bytes);
+
+      } else {
+
+      consumed = http_parser_execute(&hc->hc_hp, hc->hc_parser_settings,
+                                     buf, bytes);
+      if(hc->hc_hp.http_errno) {
+        return ERR_NOT_CONNECTED;
+      }
+    }
+
+    if(consumed < 1)
+      return consumed;
+
+    stream_drop(hc->hc_socket, consumed);
+  }
+}
+
+
+static void
+http_update_pollset(http_server_t *hs)
+{
+  for(size_t i = 0; i < MAX_HTTP_SERVER_CONNECTIONS; i++) {
+    http_connection_t *hc = hs->hs_connections[i];
+    if(hc != NULL) {
+      hs->hs_pollset[i].obj = hc->hc_socket;
+
+      if(hs->hs_pollset[i].type == POLL_NONE) {
+        http_timer_arm(hc, hs, 5);
+      }
+
+      hs->hs_pollset[i].type = POLL_STREAM_READ;
+    } else {
+      hs->hs_pollset[i].type = POLL_NONE;
+    }
+  }
+}
 
 __attribute__((noreturn))
 static void *
 http_thread(void *arg)
 {
-  mutex_lock(&http_mutex);
+  http_server_t *hs = arg;
+
+  hs->hs_pollset[MAX_HTTP_SERVER_CONNECTIONS].obj = &hs->hs_cond;
+  hs->hs_pollset[MAX_HTTP_SERVER_CONNECTIONS].type = POLL_COND;
+
+  mutex_lock(&hs->hs_mutex);
+
   while(1) {
-    http_server_task_t *hst = STAILQ_FIRST(&http_task_queue);
-    if(hst == NULL) {
-      http_connection_t *hc = STAILQ_FIRST(&notifying_websocket_connections);
-      if(hc != NULL) {
-        STAILQ_REMOVE_HEAD(&notifying_websocket_connections, hc_ws_notify_link);
-        hc->hc_notify = 0;
-        const char *reason = hc->hc_close_reason;
-        int opcode =  hc->hc_sock ? WS_OPCODE_OPEN : WS_OPCODE_DISCONNECT;
-        mutex_unlock(&http_mutex);
-        if(hc->hc_ws_cb) {
-          hc->hc_ws_cb(hc->hc_ws_opaque, opcode, (char *)reason, 0, hc, NULL);
-        }
-        mutex_lock(&http_mutex);
-        http_connection_release(hc);
-        continue;
-      }
-      cond_wait(&http_task_queue_cond, &http_mutex);
-      continue;
+    timer_t *t = LIST_FIRST(&hs->hs_timers);
+
+    if(hs->hs_update_pollset) {
+      hs->hs_update_pollset = 0;
+      http_update_pollset(hs);
     }
 
-    switch(hst->hst_type) {
-    case HST_HTTP_REQ:
-      http_process_request((http_request_t *)hst);
-      break;
-    case HST_WEBSOCKET_PACKET:
-      http_process_websocket_packet((http_server_wsp_t *)hst);
-      break;
+    int idx = poll(hs->hs_pollset, MAX_HTTP_SERVER_CONNECTIONS + 1,
+                   &hs->hs_mutex, t != NULL ? t->t_expire : INT64_MAX);
+
+    mutex_unlock(&hs->hs_mutex);
+    if(idx >= 0 && idx < MAX_HTTP_SERVER_CONNECTIONS) {
+      http_connection_t *hc = hs->hs_connections[idx];
+      error_t err = http_connection_serve(hc, hs);
+      if(err)
+        http_connection_shutdown(hc, hs, error_to_string(err));
     }
 
-    http_connection_t *hc = hst->hst_hc;
-    TAILQ_REMOVE(&hc->hc_tasks, hst, hst_connection_link);
-    STAILQ_REMOVE_HEAD(&http_task_queue, hst_global_link);
-    free(hst);
-    http_connection_release(hc);
+    timer_dispatch(&hs->hs_timers, clock_get());
+    mutex_lock(&hs->hs_mutex);
+
   }
 }
-
 
 static void __attribute__((constructor(300)))
 http_init(void)
 {
-  STAILQ_INIT(&http_task_queue);
-  STAILQ_INIT(&notifying_websocket_connections);
-  thread_create(http_thread, NULL, 4096, "http", TASK_DETACHED, 8);
+  http_server_t *hs = &g_http_server;
+  thread_create(http_thread, hs, 4096, "http", TASK_DETACHED, 9);
 }
 
+
+static error_t
+http_connection_link(http_connection_t *hc)
+{
+  http_server_t *hs = &g_http_server;
+
+  mutex_lock(&hs->hs_mutex);
+  for(int i = 0; i < MAX_HTTP_SERVER_CONNECTIONS; i++) {
+    if(hs->hs_connections[i] == NULL) {
+      hc->hc_index = i;
+      hs->hs_connections[i] = hc;
+      hs->hs_update_pollset = 1;
+      cond_signal(&hs->hs_cond);
+      mutex_unlock(&hs->hs_mutex);
+      return 0;
+    }
+  }
+  mutex_unlock(&hs->hs_mutex);
+  return ERR_NOSPC;
+}
+
+
+
+
+
+
+
+
+static error_t
+http_accept(stream_t *s)
+{
+  http_connection_t *hc = http_connection_create(HTTP_REQUEST,
+                                                 &server_parser);
+  if(hc == NULL)
+    return ERR_NO_MEMORY;
+
+  hc->hc_socket = s;
+
+  error_t err = http_connection_link(hc);
+  if(err)
+    free(hc);
+
+  return err;
+}
+
+SERVICE_DEF_STREAM("http", 80, http_accept);
 
 
 static ssize_t
-http_stream_write(struct stream *s, const void *buf, size_t size, int flags)
+websocket_output_write(stream_t *s, const void *buf, size_t size, int flags)
 {
   http_connection_t *hc = (http_connection_t *)s;
 
-  size_t written = 0;
-  mutex_lock(&http_mutex);
+  if(buf == NULL)
+    return 0;
 
-  pushpull_t *sk = hc->hc_sock;
+  while(size) {
 
-  if(buf == NULL) {
-    // Flush
-
-    if(sk != NULL && hc->hc_txbuf_head != NULL) {
-      http_stream_release_packet(hc, 1);
+    if(hc->hc_output_buffer_used == HTTP_OUTPUT_BUFFER_SIZE) {
+      websocket_send_fragment(hc, hc->hc_output_buffer,
+                              HTTP_OUTPUT_BUFFER_SIZE, 0,
+                              hc->hc_ws_tx_opcode, 0);
+      hc->hc_ws_tx_opcode = 0;
+      hc->hc_output_buffer_used = 0;
     }
 
-  } else {
+    size_t to_copy = MIN(HTTP_OUTPUT_BUFFER_SIZE - hc->hc_output_buffer_used,
+                         size);
+    memcpy(hc->hc_output_buffer + hc->hc_output_buffer_used, buf, to_copy);
 
-    while(size) {
-
-      sk = hc->hc_sock;
-
-      if(sk == NULL)
-        break;
-
-      if(hc->hc_txbuf_head == NULL) {
-
-        int offset = sk->preferred_offset + 8;
-
-        // Unlock because we will wait for buffer
-        // Without unlocking we might deadlock with the network thread
-        mutex_unlock(&http_mutex);
-        pbuf_t *pb = pbuf_make(offset, 1);
-        mutex_lock(&http_mutex);
-
-        // It's possible that the keep-alive generator will have
-        // generated a new packet while we unlocked.
-        // If that's the case we need to wait for txbuf_head to
-        // clear.
-        while(hc->hc_txbuf_head && hc->hc_sock) {
-          cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-        }
-
-        // Ok, now the socket might also have closed while we were
-        // away, if so, free buffer and give up
-
-        sk = hc->hc_sock;
-        if(sk == NULL) {
-          pbuf_free(pb);
-          break;
-        }
-
-        assert(pb->pb_next == NULL);
-        hc->hc_txbuf_head = pb;
-        hc->hc_txbuf_tail = hc->hc_txbuf_head;
-        hc->hc_hold = 1;
-      }
-
-      size_t remain =
-        sk->max_fragment_size - hc->hc_txbuf_head->pb_pktlen - 10;
-      // Check if we need to allocate a new buffer for filling
-      if(remain &&
-         hc->hc_txbuf_tail->pb_buflen +
-         hc->hc_txbuf_tail->pb_offset == PBUF_DATA_SIZE) {
-
-        pbuf_t *pb = NULL;
-
-        if(pbuf_buffer_avail() > pbuf_buffer_total() / 2) {
-          pb = pbuf_make(0, 0);
-        }
-
-        if(pb == NULL) {
-          // Can't alloc, flush what we have
-          remain = 0;
-        } else {
-          pb->pb_flags &= ~PBUF_SOP;
-          hc->hc_txbuf_tail->pb_flags &= ~PBUF_EOP;
-          hc->hc_txbuf_tail->pb_next = pb;
-          hc->hc_txbuf_tail = pb;
-        }
-      }
-
-      if(remain == 0) {
-        http_stream_release_packet(hc, 0);
-        while(hc->hc_txbuf_head && hc->hc_sock) {
-          cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-        }
-        continue;
-      }
-      pbuf_t *pb = hc->hc_txbuf_tail;
-      size_t to_copy = MIN(MIN(size, remain),
-                           PBUF_DATA_SIZE - (pb->pb_offset + pb->pb_buflen));
-
-      memcpy(pb->pb_data + pb->pb_offset + pb->pb_buflen, buf, to_copy);
-      pb->pb_buflen += to_copy;
-      hc->hc_txbuf_head->pb_pktlen += to_copy;
-      buf += to_copy;
-      size -= to_copy;
-      written += to_copy;
-    }
+    buf += to_copy;
+    size -= to_copy;
+    hc->hc_output_buffer_used += to_copy;
   }
-  mutex_unlock(&http_mutex);
-  return written;
+
+  return size;
 }
 
-struct stream *
-http_response_begin(struct http_request *hr, int status_code,
-                    const char *content_type)
+
+static void
+websocket_output_close(stream_t *s)
 {
-  http_connection_t *hc = hr->hr_hst.hst_hc;
+  http_connection_t *hc = (http_connection_t *)s;
 
-  pbuf_t *pb =
-    make_output(hc, 1, "HTTP/1.1 %d %s\r\n"
-                "Transfer-Encoding: chunked\r\n"
-                "Content-Type: %s\r\n"
-                "%s"
-                "\r\n",
-                status_code, http_status_str(status_code),
-                content_type,
-                !hr->hr_should_keep_alive ?
-                "Connection: close\r\n": "");
-
-  mutex_lock(&http_mutex);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-
-  pushpull_t *sk = hc->hc_sock;
-  if(sk != NULL) {
-
-    hc->hc_txbuf_head = pb;
-
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_PULL);
-
-    while(hc->hc_txbuf_head && hc->hc_sock) {
-      cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-    }
-    hc->hc_output_encoding = OUTPUT_ENCODING_CHUNKED;
-  } else {
-    pbuf_free(pb);
-  }
-
-  mutex_unlock(&http_mutex);
-  hc->s.vtable = &http_response_chunked;
-  return &hc->s;
+  websocket_send_fragment(hc, hc->hc_output_buffer,
+                          hc->hc_output_buffer_used, 1,
+                          hc->hc_ws_tx_opcode, STREAM_WRITE_ALL);
+  hc->hc_output_buffer_used = 0;
+  hc->hc_ws_tx_opcode = 0;
 }
 
+
+static const stream_vtable_t websocket_output_vtable = {
+  .write = websocket_output_write,
+  .close = websocket_output_close,
+};
 
 
 struct stream *
 http_websocket_output_begin(http_connection_t *hc, int opcode)
 {
-  mutex_lock(&http_mutex);
+  hc->hc_ws_tx_opcode = opcode;
+  hc->hc_response_stream.vtable = &websocket_output_vtable;
+  return &hc->hc_response_stream;
+}
 
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
+
+ssize_t
+http_websocket_sendv(http_connection_t *hc, int opcode,
+                     struct iovec *iov0, size_t iovcnt,
+                     int flags)
+{
+  struct iovec iov[iovcnt + 1];
+
+  size_t size = 0;
+  for(size_t i = 0; i < iovcnt; i++) {
+    size += iov0[i].iov_len;
   }
 
-  if(hc->hc_sock == NULL) {
-    mutex_unlock(&http_mutex);
-    return NULL;
+  uint8_t hdr[8];
+  int hlen = 2;
+  if(size < 126) {
+    hdr[1] = size | hc->hc_output_mask_bit;
+  } else {
+    hdr[1] = 126 | hc->hc_output_mask_bit;
+    hdr[2] = size >> 8;
+    hdr[3] = size;
+    hlen = 4;
   }
 
-  hc->hc_output_encoding = OUTPUT_ENCODING_WEBSOCKET;
-  hc->hc_ws_opcode = opcode;
-  mutex_unlock(&http_mutex);
-  hc->s.vtable = &http_response_websocket;
-  return &hc->s;
+  if(hc->hc_output_mask_bit) {
+    memset(hdr + hlen, 0, 4);
+    hlen += 4;
+  }
+
+  hdr[0] = opcode | 0x80;
+
+  iov[0].iov_base = hdr;
+  iov[0].iov_len = hlen;
+
+  for(size_t i = 0; i < iovcnt; i++) {
+    iov[1 + i].iov_base = iov0[i].iov_base;
+    iov[1 + i].iov_len = iov0[i].iov_len;
+  }
+  return stream_writev(hc->hc_socket, iov, iovcnt + 1, flags);
 }
 
 
@@ -1374,38 +1038,25 @@ http_request_accept_websocket(http_request_t *hr,
   SHA1Final(digest, &shactx);
   base64_encode(sig, 64, digest, 20);
 
-  http_connection_t *hc = hr->hr_hst.hst_hc;
-
-  pbuf_t *pb = make_output(hc, 1, "HTTP/1.1 %d %s\r\n"
-                           "Connection: Upgrade\r\n"
-                           "Upgrade: websocket\r\n"
-                           "Sec-WebSocket-Accept: %s\r\n"
-                           "\r\n",
-                           101, http_status_str(101),
-                           sig);
-
-  mutex_lock(&http_mutex);
-
-  while(hc->hc_txbuf_head && hc->hc_sock) {
-    cond_wait(&hc->hc_txbuf_cond, &http_mutex);
-  }
-
-  pushpull_t *sk = hc->hc_sock;
-  if(sk != NULL) {
-    hc->hc_txbuf_head = pb;
-    hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_PULL);
-  } else {
-    pbuf_free(pb);
-  }
+  http_connection_t *hc = hr->hr_hc;
 
   hc->hc_ws_cb = cb;
   hc->hc_ws_opaque = opaque;
 
-  mutex_unlock(&http_mutex);
   if(hcp) {
     atomic_inc(&hc->hc_refcount);
     *hcp = hc;
   }
+
+  stprintf(hc->hc_socket,
+           "HTTP/1.1 %d %s\r\n"
+           "Connection: Upgrade\r\n"
+           "Upgrade: websocket\r\n"
+           "Sec-WebSocket-Accept: %s\r\n"
+           "\r\n",
+           101, http_status_str(101),
+           sig);
+
   return 0;
 }
 
@@ -1417,14 +1068,12 @@ websocket_response_headers_complete(http_parser *p)
   http_connection_t *hc = p->data;
 
   if(p->status_code == HTTP_STATUS_SWITCHING_PROTOCOLS) {
-    http_websocket_enqueue_notify(hc);
+    hc->hc_ws_cb(hc->hc_ws_opaque, WS_OPCODE_OPEN,
+                 NULL, 0, hc, NULL);
     hc->hc_websocket_mode = 1;
-    http_timer_arm(hc, 5);
+    http_timer_arm(hc, &g_http_server, 5);
   } else {
-    mutex_lock(&http_mutex);
-    http_close_locked(hc, http_status_str(p->status_code));
-    http_websocket_enqueue_notify(hc);
-    mutex_unlock(&http_mutex);
+    http_connection_shutdown(hc, &g_http_server, "No websocket endpoint");
     return 1;
   }
   return 0;
@@ -1434,7 +1083,6 @@ websocket_response_headers_complete(http_parser *p)
 static const http_parser_settings websocket_response_parser = {
   .on_headers_complete = websocket_response_headers_complete,
 };
-
 
 http_connection_t *
 http_websocket_create(int (*cb)(void *opaque,
@@ -1451,7 +1099,7 @@ http_websocket_create(int (*cb)(void *opaque,
   if(hc == NULL)
     return NULL;
 
-  pushpull_t *sk = tcp_create_socket(name);
+  stream_t *sk = tcp_create_socket(name, 2048, 2048);
   if(sk == NULL) {
     free(hc);
     return NULL;
@@ -1460,41 +1108,35 @@ http_websocket_create(int (*cb)(void *opaque,
   atomic_inc(&hc->hc_refcount); // refcount for returned pointer
 
   hc->hc_output_mask_bit = 0x80;
-  hc->hc_sock = sk;
-  hc->hc_sock_preferred_offset = sk->preferred_offset;
+  hc->hc_socket = sk;
   hc->hc_ws_cb = cb;
   hc->hc_ws_opaque = opaque;
-
-  sk->app = &http_sock_fn;
-  sk->app_opaque = hc;
 
   return hc;
 }
 
-void
+
+error_t
 http_websocket_start(http_connection_t *hc, uint32_t addr,
                      uint16_t port, const char *path,
                      const char *protocol)
 {
-  tcp_connect(hc->hc_sock, addr, port);
+  tcp_connect(hc->hc_socket, addr, port);
 
-  pbuf_t *pb = make_output(hc, 1,
-                "GET %s HTTP/1.1\r\n"
-                "Connection: Upgrade\r\n"
-                "Upgrade: websocket\r\n"
-                "Sec-WebSocket-Version: 13\r\n"
-                "Sec-WebSocket-Key: Aoetmg2mBDsoQUGZN05WLQ==\r\n"
-                "%s%s%s"
-                "\r\n",
-                path,
-                protocol ? "Sec-WebSocket-Protocol: " : "",
-                protocol ?: "",
-                protocol ? "\r\n" : "");
+  stprintf(hc->hc_socket,
+           "GET %s HTTP/1.1\r\n"
+           "Connection: Upgrade\r\n"
+           "Upgrade: websocket\r\n"
+           "Sec-WebSocket-Version: 13\r\n"
+           "Sec-WebSocket-Key: Aoetmg2mBDsoQUGZN05WLQ==\r\n"
+           "%s%s%s"
+           "\r\n",
+           path,
+           protocol ? "Sec-WebSocket-Protocol: " : "",
+           protocol ?: "",
+           protocol ? "\r\n" : "");
 
-  mutex_lock(&http_mutex);
-  hc->hc_txbuf_head = pb;
-  hc->hc_sock->net->event(hc->hc_sock->net_opaque, PUSHPULL_EVENT_PULL);
-  mutex_unlock(&http_mutex);
+  return http_connection_link(hc);
 }
 
 
@@ -1502,7 +1144,8 @@ void
 http_websocket_close(http_connection_t *hc, uint16_t status_code,
                      const char *message)
 {
-  mutex_lock(&http_mutex);
-  websocket_close_locked(hc, status_code);
-  mutex_unlock(&http_mutex);
+  uint8_t payload[2] = {status_code >> 8, status_code};
+
+  websocket_send_fragment(hc, payload, sizeof(payload), 1, WS_OPCODE_CLOSE, 0);
+  stream_close(hc->hc_socket);
 }
