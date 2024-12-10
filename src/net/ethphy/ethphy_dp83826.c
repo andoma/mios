@@ -62,6 +62,7 @@ dp83826_init(ethphy_mode_t mode,
   for(int i = 0; i < 11; i++) {
     strapbits[i] = (sor >> i) & 1 ? '1' : '0';
   }
+  strapbits[11] = 0;
 
   evlog(LOG_DEBUG, "dp83826: Revision %d in %s mode (Strap:%s)",
         id2 & 0xf, model == 0x13 ? "Enhanced" : "Basic", strapbits);
