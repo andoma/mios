@@ -42,8 +42,8 @@ conv_hex_to_nibble(char c)
 
 
 
-static unsigned int
-atoi_hex(const char *s)
+unsigned int
+xtoi(const char *s)
 {
   unsigned int r = 0;
 
@@ -64,7 +64,7 @@ atoix(const char *s)
     s++;
 
   if(s[0] == '0' && s[1] == 'x') {
-    return atoi_hex(s + 2);
+    return xtoi(s + 2);
   }
   return atoi(s);
 }
