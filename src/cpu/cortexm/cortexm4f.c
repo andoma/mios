@@ -20,7 +20,7 @@ cortexm4f_init(void)
     void *idle_stack = ((thread_t *)(curcpu()->sched.idle))->t_sp_bottom;
     *MPU_RBAR = (intptr_t)idle_stack | 0x17; // Set MPU to region 7
     *MPU_RASR = (4 << 1) | 1; // 2^(4 + 1) = 32 byte + enable
-    *MPU_CTRL = 5; // Enable MPU
   }
 
+  *MPU_CTRL = 5; // Enable MPU
 }

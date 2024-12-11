@@ -84,6 +84,8 @@ stm32f4_init(void)
   *SCB_DEMCR |= 0x01000000;
   *DWT_LAR = 0xC5ACCE55; // unlock
   *DWT_CONTROL = 1;
+
+  cpu_unmap_null(27); // Map first 128MB unreachable
 }
 
 static void
@@ -112,10 +114,13 @@ cpu_idle(void)
 
 
 static volatile uint32_t *const SYSCFG_MEMRMP = (volatile uint32_t *)0x40013800;
+static volatile uint32_t * const MPU_CTRL = (uint32_t *)0xe000ed94;
 
 static error_t
 cmd_dfu(cli_t *cli, int argc, char **argv)
 {
+  *MPU_CTRL = 0; // Disable MPU
+
   irq_forbid(IRQ_LEVEL_ALL);
   fini();
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
