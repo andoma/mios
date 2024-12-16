@@ -594,8 +594,13 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
         // Nothing currently outstanding, arm rtx timer
         net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + tcb->tcb_rto * 1000);
       }
-      tcp_emit(tcb, NULL, tcb->tcb_snd.nxt, 0, "event");
+
+      while(tcb->tcb_snd.wrptr != tcb->tcb_snd.nxt) {
+        if(tcp_emit(tcb, NULL, tcb->tcb_snd.nxt, 0, "event"))
+          break;
+      }
       break;
+
     default:
       break;
     }
