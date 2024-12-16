@@ -227,13 +227,13 @@ tcp_set_state(tcb_t *tcb, int state, const char *reason)
   tcb->tcb_state = state;
 }
 
-static void
+static error_t
 tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
 {
   nexthop_t *nh = ipv4_nexthop_resolve(remote_addr);
   if(nh == NULL) {
     pbuf_free(pb);
-    return;
+    return ERR_NO_ROUTE;
   }
   netif_t *ni = nh->nh_netif;
 
@@ -267,7 +267,7 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
 
   pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 0, 0);
   if(pb == NULL)
-    return;
+    return ERR_NO_BUFFER;
 
   ipv4_header_t *ip = pbuf_data(pb, 0);
 
@@ -287,11 +287,11 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
     ip->cksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(ipv4_header_t));
   }
 
-  nh->nh_netif->ni_output_ipv4(ni, nh, pb);
-
+  return nh->nh_netif->ni_output_ipv4(ni, nh, pb);
 }
 
-static void
+
+static error_t
 tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
 {
   tcp_hdr_t *th = pbuf_data(pb, 0);
@@ -314,17 +314,17 @@ tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
     th->off = (sizeof(tcp_hdr_t) >> 2) << 4;
   }
 
-  tcp_output(pb, tcb->tcb_local_addr, tcb->tcb_remote_addr);
+  return tcp_output(pb, tcb->tcb_local_addr, tcb->tcb_remote_addr);
 }
 
 
-static void
+static error_t
 tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
 {
   if(pb == NULL) {
     pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
     if(pb == NULL) {
-      return;
+      return ERR_NO_BUFFER;
     }
   } else {
     // Recycle packet
@@ -332,8 +332,9 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
   }
 
   pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
-  if(pb == NULL)
-    return;
+  if(pb == NULL) {
+    return ERR_NO_BUFFER;
+  }
 
   timer_disarm(&tcb->tcb_delayed_ack_timer);
 
@@ -345,19 +346,18 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
     // If we have a pending SYN it's the only thing we may send
     th->flg = tcb->tcb_pending_syn;
     th->seq = htonl(tcb->tcb_iss);
-    tcp_output_tcb(tcb, pb, "pending-syn");
-    return;
+    return tcp_output_tcb(tcb, pb, "pending-syn");
 
   } else if(!bytes_in_fifo) {
     // Nothing in FIFO to send, but send an ACK if asked to
     if(gen_ack) {
       th->flg = TCP_F_ACK;
       th->seq = htonl(seq);
-      tcp_output_tcb(tcb, pb, "empty_ack");
+      return tcp_output_tcb(tcb, pb, "empty_ack");
     } else {
       pbuf_free(pb);
     }
-    return;
+    return 0;
 
   } else if(tcb->tcb_pending_fin) {
 
@@ -369,8 +369,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
       if(tcb->tcb_snd.nxt != tcb->tcb_snd.wrptr)
         tcb->tcb_snd.nxt = tcb->tcb_snd.wrptr;
 
-      tcp_output_tcb(tcb, pb, "fin");
-      return;
+      return tcp_output_tcb(tcb, pb, "fin");
     } else {
       bytes_in_fifo--;
     }
@@ -385,9 +384,9 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
   th->seq = htonl(seq);
   int total = 0;
 
-  int mss = 1460; // something better plz
+  size_t max_pkt_size = 1460 + sizeof(tcp_hdr_t);
 
-  while(bytes_in_fifo && pb->pb_pktlen < mss) {
+  while(bytes_in_fifo && pb->pb_pktlen < max_pkt_size) {
     if(p->pb_offset + p->pb_buflen == PBUF_DATA_SIZE) {
       pbuf_t *n = pbuf_make(0, 0);
 
@@ -401,7 +400,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
     }
     size_t avail_in_pbuf = PBUF_DATA_SIZE - p->pb_offset - p->pb_buflen;
     size_t to_copy = MIN(bytes_in_fifo, avail_in_pbuf);
-    to_copy = MIN(mss - pb->pb_pktlen, to_copy);
+    to_copy = MIN(max_pkt_size - pb->pb_pktlen, to_copy);
 
     wtol_memcpy(p->pb_data + p->pb_offset + p->pb_buflen,
                 tcb_txfifo(tcb), to_copy, seq, tcb->tcb_txfifo_size);
@@ -413,8 +412,9 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
     total += to_copy;
   }
 
-  tcp_output_tcb(tcb, pb, "data");
-  // FIXME: Check if we actually managed to send anything
+  error_t err = tcp_output_tcb(tcb, pb, "data");
+  if(err)
+    return err;
 
   // We sent from our head of queue, increase
   if(tcb->tcb_snd.nxt == seq0) {
@@ -423,6 +423,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
   } else {
     tcb->tcb_rtx_bytes += total;
   }
+  return 0;
 }
 
 

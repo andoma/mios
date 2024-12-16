@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <malloc.h>
 
 #include "net/netif.h"
 #include "net/net.h"
@@ -115,11 +116,13 @@ ipv4_nexthop_resolve(uint32_t addr)
       break;
   }
 
-  if(ni == NULL) {
+  if(ni == NULL)
     return NULL;
-  }
 
-  nh = malloc(sizeof(nexthop_t));
+  nh = xalloc(sizeof(nexthop_t), 0, MEM_MAY_FAIL);
+  if(nh == NULL)
+    return NULL;
+
   nh->nh_addr = addr;
   LIST_INSERT_HEAD(&ipv4_nexthops, nh, nh_global_link);
 

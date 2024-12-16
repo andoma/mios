@@ -60,6 +60,8 @@ static const char errmsg[] = {
   "FS\0"
   "DMAFIFO\0"
   "INTERRUPTED\0"
+  "QUEUE_FULL\0"
+  "NO_ROUTE\0"
   "\0"
 };
 

@@ -38,7 +38,7 @@ struct arp_pkt {
 
 
 
-static void
+static error_t
 ether_output(ether_netif_t *eni, pbuf_t *pb,
              uint16_t ether_type, const uint8_t *dstmac)
 {
@@ -50,7 +50,7 @@ ether_output(ether_netif_t *eni, pbuf_t *pb,
 
   eh[12] = ether_type >> 8;
   eh[13] = ether_type;
-  eni->eni_output(eni, pb, 0);
+  return eni->eni_output(eni, pb, 0);
 }
 
 
@@ -191,7 +191,7 @@ ether_periodic(void *opaque, uint64_t expire)
   ether_nexthop_periodic(eni);
 }
 
-static void
+static error_t
 ether_ipv4_output_mcast(ether_netif_t *eni, pbuf_t *pb, uint32_t ipv4_addr)
 {
   pb = pbuf_prepend(pb, 14, 1, 0);
@@ -208,10 +208,10 @@ ether_ipv4_output_mcast(ether_netif_t *eni, pbuf_t *pb, uint32_t ipv4_addr)
 
   eh[12] = 8;
   eh[13] = 0;
-  eni->eni_output(eni, pb, 0);
+  return eni->eni_output(eni, pb, 0);
 }
 
-static pbuf_t *
+static error_t
 ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
@@ -221,12 +221,10 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
     const ipv4_header_t *ip = pbuf_cdata(pb, 0);
     if(ntohl(ip->dst_addr) >= 0xe0000000 &&
        ntohl(ip->dst_addr) <  0xf0000000) {
-      ether_ipv4_output_mcast(eni, pb, ntohl(ip->dst_addr));
-      return NULL;
+      return ether_ipv4_output_mcast(eni, pb, ntohl(ip->dst_addr));
     }
 
-    ether_output(eni, pb, 0x0800, ether_bcast);
-    return NULL;
+    return ether_output(eni, pb, 0x0800, ether_bcast);
   }
 
   nh->nh_in_use = 5;
@@ -243,11 +241,10 @@ ether_ipv4_output(netif_t *ni, struct nexthop *nh, pbuf_t *pb)
     if(nh->nh_pending != NULL)
       pbuf_free(nh->nh_pending);
     nh->nh_pending = pb;
-    return NULL;
+    return 0;
   }
 
-  ether_output(eni, pb, 0x0800, nh->nh_hwaddr);
-  return NULL;
+  return ether_output(eni, pb, 0x0800, nh->nh_hwaddr);
 }
 
 

@@ -47,7 +47,7 @@ typedef struct netif {
   uint32_t ni_ipv4_local_addr;  // Our address on this interface
   uint8_t ni_ipv4_local_prefixlen;
 
-  pbuf_t *(*ni_output_ipv4)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
+  error_t (*ni_output_ipv4)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 #endif
 
 #ifdef ENABLE_NET_DSIG

@@ -393,7 +393,7 @@ handle_irq_tx(stm32h7_eth_t *se)
 
 
 
-static void
+static error_t
 stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
 {
   stm32h7_eth_t *se = (stm32h7_eth_t *)eni;
@@ -434,6 +434,7 @@ stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
   }
 
   irq_permit(q);
+  return 0;
 }
 
 

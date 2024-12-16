@@ -28,7 +28,7 @@ typedef struct ether_netif {
 
   SLIST_ENTRY(ether_netif) eni_global_link;
 
-  void (*eni_output)(struct ether_netif *eni, pbuf_t *pb, int flags);
+  error_t (*eni_output)(struct ether_netif *eni, pbuf_t *pb, int flags);
 
   uint8_t eni_addr[6];    // Our address
 

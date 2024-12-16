@@ -60,7 +60,7 @@ static const device_class_t lan9118_eth_device_class = {
   .dc_print_info = lan9118_eth_print_info,
 };
 
-static void
+static error_t
 lan9118_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
 {
   lan9118_eth_t *le = (lan9118_eth_t *)eni;
@@ -94,6 +94,7 @@ lan9118_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
     }
   }
   pbuf_free(pkt);
+  return 0;
 }
 
 

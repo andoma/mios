@@ -369,7 +369,7 @@ irq_61(void)
 
 
 
-static void
+static error_t
 stm32f4_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
 {
   stm32f4_eth_t *se = (stm32f4_eth_t *)eni;
@@ -388,7 +388,7 @@ stm32f4_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
     pbuf_free_irq_blocked(pkt);
     eni->eni_stats.tx_qdrop++;
     irq_permit(q);
-    return;
+    return ERR_QUEUE_FULL;
   }
 
   for(pb = pkt; pb != NULL; pb = pb->pb_next) {
@@ -424,6 +424,7 @@ stm32f4_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
   }
 
   irq_permit(q);
+  return 0;
 }
 
 

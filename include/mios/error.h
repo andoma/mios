@@ -50,6 +50,8 @@ typedef enum {
   ERR_FS                    = -46,
   ERR_DMA_FIFO              = -47,
   ERR_INTERRUPTED           = -48,
+  ERR_QUEUE_FULL            = -49,
+  ERR_NO_ROUTE              = -50,
 } error_t;
 
 const char *error_to_string(error_t e);
