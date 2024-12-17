@@ -386,6 +386,15 @@ websocket_parser_execute(http_connection_t *hc,
         int result = hc->hc_ws_cb(hc->hc_ws_opaque, hc->hc_ws_rx_opcode,
                                   ba->data, ba->used, hc, ba);
 
+        if(hc->hc_ws_rx_opcode == WS_OPCODE_CLOSE && result == 0) {
+          if(ba->used > 2) {
+            const uint8_t *u8 = ba->data;
+            result = (u8[0] << 8) | u8[1];
+          } else {
+            result = WS_STATUS_NORMAL_CLOSE;
+          }
+        }
+
         if(result) {
           // Returned error code, Close connection
           uint8_t payload[2] = {result >> 8, result};
