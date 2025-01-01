@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <inttypes.h>
 
 wallclock_t wallclock;
 
@@ -102,7 +102,7 @@ datetime_set_utc_offset(int64_t offset, const char *source)
   wallclock.source = source;
   wallclock.utc_offset = offset;
   if(significant_change)
-    evlog(LOG_INFO, "Clock updated via %s (uptime:%lld µs)",
+    evlog(LOG_INFO, "Clock updated via %s (uptime:%"PRId64" µs)",
           source, clock_get());
   return significant_change;
 }

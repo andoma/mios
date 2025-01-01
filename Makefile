@@ -107,12 +107,12 @@ ${O}/build.bin: ${O}/build.elf
 	@echo "\tBIN\t$@"
 	${TOOLCHAIN}objcopy -O binary $< $@
 
-${O}/%.o: %.c ${GLOBALDEPS} ${CONFIG_H} ${CDEPS}
+${O}/%.o: %.c ${GLOBALDEPS} ${CONFIG_H} ${CDEPS} toolchain
 	@mkdir -p $(dir $@)
 	@echo "\tCC\t$<"
 	${TOOLCHAIN}gcc -MD -MP ${CPPFLAGS} ${CFLAGS} -c $< -o $@
 
-${O}/%.o: %.S ${GLOBALDEPS} ${CONFIG_H}
+${O}/%.o: %.S ${GLOBALDEPS} ${CONFIG_H} toolchain
 	@mkdir -p $(dir $@)
 	@echo "\tASM\t$<"
 	${TOOLCHAIN}gcc -MD -MP -DASM ${CPPFLAGS} ${CFLAGS} -c $< -o $@
@@ -131,6 +131,9 @@ ${CONFIG_H}: ${GLOBALDEPS}
 clean::
 	rm -rf "${O}"
 
+toolchain:
+	@which ${TOOLCHAIN}gcc || (echo "\nERROR: Toolchain misconfigured, \
+	${TOOLCHAIN}gcc is not in path\n"  && exit 1)
 
 bin: ${O}/build.bin
 

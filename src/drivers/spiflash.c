@@ -309,7 +309,7 @@ spiflash_create(spi_t *spi, gpio_t cs)
   sf->iface.num_blocks = size / 4096;
   sf->iface.block_size = 4096;
 
-  printf("%d kB (%d sectors)  ", size >> 10, sf->iface.num_blocks);
+  printf("%d kB (%zd sectors)  ", size >> 10, sf->iface.num_blocks);
   mutex_init(&sf->mutex, "spiflash");
   sf->iface.erase = spiflash_erase;
   sf->iface.write = spiflash_write;

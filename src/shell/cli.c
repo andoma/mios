@@ -165,7 +165,7 @@ cli_set_cursor_pos(cli_t *cl, int cursor_pos, char promptchar)
   cl->cl_pos = cursor_pos;
   cli_printf(cl, "%s", cl->cl_buf);
   // Set cursor position
-  cli_printf(cl, "\033[%d`", cl->cl_pos + len + 1);
+  cli_printf(cl, "\033[%zd`", cl->cl_pos + len + 1);
 }
 
 static void
