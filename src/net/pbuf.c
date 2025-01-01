@@ -6,6 +6,7 @@
 #include <mios/mios.h>
 #include <sys/queue.h>
 #include <sys/param.h>
+#include <mios/mios.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -50,7 +51,7 @@ static void
 pbuf_pool_put(pbuf_pool_t *pp, void *item)
 {
   pbuf_item_t *pi = item;
-  assert(((uint32_t)item & 0x3) == 0);
+  assert(((unsigned long)item & 0x3) == 0);
   SLIST_INSERT_HEAD(&pp->pp_items, pi, pi_link);
 
   if(pp->pp_avail == 0) {
@@ -117,7 +118,7 @@ pbuf_data_add(void *start, void *end)
     end = start + size;
   }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
-  printf("pbuf: size:%d arena:%d count:%d\n",
+  printf("pbuf: size:%d arena:%zd count:%zd\n",
          PBUF_DATA_SIZE, end - start, count);
   pbuf_alloc(count);
 }
@@ -291,7 +292,7 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
     if(bytes > pb->pb_buflen) {
       // Fix this case
       pbuf_dump("pbuf_drop", pb, 1);
-      panic("pbuf_drop r:%d bl:%d pl:%d pb:%p",
+      panic("pbuf_drop r:%zd bl:%d pl:%d pb:%p",
             bytes, pb->pb_buflen, pb->pb_pktlen, pb);
     }
 

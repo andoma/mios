@@ -403,9 +403,39 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
     if(fp.ipv4)
       fmt++;
 #endif
-    const int ll = fmt[0] == 'l' && fmt[1] == 'l';
-    if(ll)
-      fmt += 2;
+
+    int scalar_is_64bit = 0;
+
+#if __LONG_WIDTH__ == 32
+    // 32bit system
+
+    if(fmt[0] == 'l') {
+      fmt++;
+      if(fmt[1] == 'l') {
+        scalar_is_64bit = 1;
+        fmt++;
+      }
+    }
+
+    if(fmt[0] == 'z') {
+      fmt++;
+    }
+
+#else
+    // 64bit system
+    if(fmt[0] == 'l') {
+      fmt++;
+      scalar_is_64bit = 1;
+      if(fmt[1] == 'l') {
+        fmt++;
+      }
+    }
+
+    if(fmt[0] == 'z') {
+      scalar_is_64bit = 1;
+      fmt++;
+    }
+#endif
 
     c = *fmt++;
     switch(c) {
@@ -424,7 +454,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       break;
     case 'd':
 #ifndef DISABLE_FMT_64BIT
-      if(ll)
+      if(scalar_is_64bit)
         total += emit_s64(cb, aux, &fp, va_arg(ap, uint64_t));
       else
 #endif
@@ -432,7 +462,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       break;
     case 'u':
 #ifndef DISABLE_FMT_64BIT
-      if(ll)
+      if(scalar_is_64bit)
         total += emit_u64(cb, aux, &fp, 0, va_arg(ap, uint64_t));
       else
 #endif

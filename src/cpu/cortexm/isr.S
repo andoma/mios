@@ -85,7 +85,6 @@ cpu_softreset:
         .global     vectors
         .type   vectors, %object
 
-
         .altmacro
         .macro insert_irq number
         .long irq_\number

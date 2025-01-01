@@ -1,0 +1,6 @@
+MEMORY {
+         TEXT (RX): ORIGIN = 0x40000000, LENGTH = 8M
+         DATA (RW): ORIGIN = 0x40800000, LENGTH = 8M
+}
+
+INCLUDE cpu/aarch64/aarch64.ld
