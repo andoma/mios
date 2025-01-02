@@ -406,7 +406,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     int scalar_is_64bit = 0;
 
-#if UINTPTR_MAX == 0xffffffff
+#if __LONG_WIDTH__ == 32
     // 32bit system
 
     if(fmt[0] == 'l') {

@@ -7,7 +7,7 @@
 #define PRIu16 "u"
 #define PRId16 "d"
 
-#if UINTPTR_MAX == 0xffffffff
+#if __LONG_WIDTH__ == 32
 
 #define PRIx64 "llx"
 #define PRIu64 "llu"

@@ -21,13 +21,13 @@ SLIST_HEAD(heap_header_slist, heap_header);
 
 typedef struct heap_block {
   struct heap_block *next;
-  //#if UINTPTR_MAX == 0xffffffff
+#if __LONG_WIDTH__ == 32
   unsigned long prev : 31;
   unsigned long free : 1;
-  //#else
-  //  unsigned long prev : 63;
-  //  unsigned long free : 1;
-  //#endif
+#else
+  unsigned long prev : 63;
+  unsigned long free : 1;
+#endif
 } heap_block_t;
 
 
