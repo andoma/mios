@@ -14,6 +14,10 @@
 #define IRQ_LEVEL_CLOCK    6
 #define IRQ_LEVEL_SWITCH   7
 
+#define IRQ_PRI_LEVEL_SHIFT 5
+
+#define IRQ_LEVEL_TO_PRI(x) ((x) << IRQ_PRI_LEVEL_SHIFT)
+
 static inline unsigned int
 irq_forbid(unsigned int level)
 {
@@ -48,3 +52,4 @@ inline void  __attribute__((always_inline))
 schedule(void)
 {
 }
+

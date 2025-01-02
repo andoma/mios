@@ -37,11 +37,11 @@ board_init_console(void)
   asm volatile("":::"memory");
 
   //#define GIC_BASE 0x08000000
-#define GIC_BASE 0xf0000000
+  //#define GIC_BASE 0xf0000000
 
-  printf("GICD_CTRL:%x\n", reg_rd(GIC_BASE + 0x0));
-  printf("GICD_TYPER:%x\n", reg_rd(GIC_BASE + 0x4));
-  printf("GICD_IIDR:%x\n", reg_rd(GIC_BASE + 0x8));
+  //  printf("GICD_CTRL:%x\n", reg_rd(GIC_BASE + 0x0));
+  //  printf("GICD_TYPER:%x\n", reg_rd(GIC_BASE + 0x4));
+  //  printf("GICD_IIDR:%x\n", reg_rd(GIC_BASE + 0x8));
 
   unsigned long sp_el0 = 0x41234560;
   asm volatile ("msr sp_el0, %0\n\t" : : "r" (sp_el0));
