@@ -365,7 +365,7 @@ websocket_parser_execute(http_connection_t *hc,
   if(wp->wp_header[1] & 0x80) {
     const uint8_t *mask = wp->wp_header + mask_off;
     for(size_t i = 0; i < to_copy; i++) {
-      dst[i] ^= mask[i&3];
+      dst[i] ^= mask[(i + ba->used)&3];
     }
   }
 
