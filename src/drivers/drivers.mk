@@ -19,9 +19,12 @@ SRCS-${ENABLE_BT81X} += \
 SRCS-${ENABLE_MCP23008} += \
 	${SRC}/drivers/mcp23008.c
 
-SRCS += ${SRC}/drivers/spiflash.c
-
 SRCS-${ENABLE_SSD1306} += \
 	${SRC}/drivers/ssd1306.c
 
+SRCS-${ENABLE_PL011} += \
+	${SRC}/drivers/pl011.c
+${MOS}/drivers/pl011.o : CFLAGS += ${NOFPU}
+
+SRCS += ${SRC}/drivers/spiflash.c
 ${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}

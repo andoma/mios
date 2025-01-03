@@ -19,7 +19,7 @@ typedef struct pl011 {
 
   stream_t stream;
 
-  uint32_t base;
+  long base;
 
   uint8_t rx_fifo_rdptr;
   uint8_t rx_fifo_wrptr;
@@ -90,26 +90,25 @@ pl011_uart_write(stream_t *s, const void *buf, size_t size, int flags)
     const uint8_t c = d[i];
     while(1) {
       uint8_t avail = TX_FIFO_SIZE - (u->tx_fifo_rdptr - u->tx_fifo_wrptr);
-      if(avail == 0) {
-        if(flags & STREAM_WRITE_NO_WAIT)
-          break;
-        assert(u->tx_busy);
-        task_sleep(&u->uart_tx);
-        continue;
-      }
-
-      written++;
-      if(!u->tx_busy) {
-        reg_wr(u->base + UART_DR, c);
-        reg_wr(u->base + UART_IMSC, (1 << 4) | (1 << 5));
-        u->tx_busy = 1;
+      if(avail)
         break;
-      }
+      if(flags & STREAM_WRITE_NO_WAIT)
+        goto done;
+      assert(u->tx_busy);
+      task_sleep(&u->uart_tx);
+    }
 
+    written++;
+    if(!u->tx_busy) {
+      reg_wr(u->base + UART_DR, c);
+      reg_wr(u->base + UART_IMSC, (1 << 4) | (1 << 5));
+      u->tx_busy = 1;
+    } else {
       u->tx_fifo[u->tx_fifo_wrptr & (TX_FIFO_SIZE - 1)] = c;
       u->tx_fifo_wrptr++;
     }
   }
+ done:
   irq_permit(q);
   return written;
 }
@@ -200,7 +199,7 @@ static const stream_vtable_t pl011_uart_vtable = {
 };
 
 struct stream *
-pl011_uart_init(uint32_t base, int baudrate, int irq)
+pl011_uart_init(long base, int baudrate, int irq)
 {
   pl011_t *u = calloc(1, sizeof(pl011_t));
 

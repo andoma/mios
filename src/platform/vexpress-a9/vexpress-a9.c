@@ -4,7 +4,7 @@
 
 #include "cpu.h"
 
-#include "pl011.h"
+#include "drivers/pl011.h"
 
 static void  __attribute__((constructor(110)))
 vexpress_a9_init_heap(void)
