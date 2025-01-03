@@ -377,31 +377,49 @@ websocket_parser_execute(http_connection_t *hc,
 
     wp->wp_header_len = 0;
     wp->wp_fragment_used = 0;
-
     if(wp->wp_header[0] & 0x80) { // FIN bit
+      int result = 0;
 
-      if(opcode == WS_OPCODE_PING) {
-        websocket_send_fragment(hc, ba->data, ba->used, 1, WS_OPCODE_PONG, 0);
-      } else if(hc->hc_ws_cb != NULL) {
-        int result = hc->hc_ws_cb(hc->hc_ws_opaque, hc->hc_ws_rx_opcode,
+      if(opcode & 0x8) {
+        // Handle control messages in a special path
+        switch(opcode) {
+
+        case WS_OPCODE_PING:   // Echo back payload
+          websocket_send_fragment(hc, ba->data, ba->used, 1,
+                                  WS_OPCODE_PONG, 0);
+          break;
+        case WS_OPCODE_CLOSE:
+          if(hc->hc_ws_cb != NULL) {
+            // Propagate close message to user callback
+            result = hc->hc_ws_cb(hc->hc_ws_opaque, WS_OPCODE_CLOSE,
                                   ba->data, ba->used, hc, ba);
+          }
 
-        if(hc->hc_ws_rx_opcode == WS_OPCODE_CLOSE && result == 0) {
-          if(ba->used > 2) {
+          // Echo back close message (send back received status-code if any)
+          if(result == 0 && ba->used > 2) {
             const uint8_t *u8 = ba->data;
             result = (u8[0] << 8) | u8[1];
-          } else {
-            result = WS_STATUS_NORMAL_CLOSE;
           }
+
+          if(result == 0) // Nothing, send normal close
+            result = WS_STATUS_NORMAL_CLOSE;
+          break;
+
+        default:
+          // Control opcode we don't understand, bail
+          result = WS_STATUS_PROTOCOL_ERROR;
         }
 
-        if(result) {
-          // Returned error code, Close connection
-          uint8_t payload[2] = {result >> 8, result};
-          websocket_send_fragment(hc, payload, sizeof(payload), 1,
-                                  WS_OPCODE_CLOSE, 0);
-          return ERR_NOT_CONNECTED;
-        }
+      } else if(hc->hc_ws_cb != NULL) {
+        result = hc->hc_ws_cb(hc->hc_ws_opaque, hc->hc_ws_rx_opcode,
+                              ba->data, ba->used, hc, ba);
+      }
+
+      if(result) {
+        uint8_t payload[2] = {result >> 8, result};
+        websocket_send_fragment(hc, payload, sizeof(payload), 1,
+                                WS_OPCODE_CLOSE, 0);
+        return ERR_NOT_CONNECTED;
       }
 
       if(opcode & 0x8) {
