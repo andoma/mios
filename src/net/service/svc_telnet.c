@@ -15,6 +15,8 @@ typedef struct telnet_server {
 
   uint8_t iac_state;
 
+  uint8_t stream_closed;
+
 } telnet_server_t;
 
 
@@ -36,7 +38,8 @@ telnetd_thread(void *arg)
   stream_write(ts->net, telnet_init, sizeof(telnet_init), 0);
 
   cli_on_stream(s, '>');
-  stream_close(s);
+  if (!ts->stream_closed)
+    stream_close(s);
   wakelock_release();
   free(ts);
   thread_exit(NULL);
@@ -143,6 +146,7 @@ telnet_stream_close(stream_t *s)
 {
   telnet_server_t *ts = (telnet_server_t *)s;
   stream_close(ts->net);
+  ts->stream_closed = 1;
 }
 
 
@@ -162,6 +166,7 @@ telnet_open(stream_t *s)
   ts->iac_state = 0;
   ts->net = s;
   ts->s.vtable = &telnet_protocol_vtable;
+  ts->stream_closed = 0;
   wakelock_acquire();
   error_t r = thread_create_shell(telnetd_thread, ts, "telnetd", &ts->s);
   if(r) {
