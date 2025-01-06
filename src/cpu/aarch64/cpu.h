@@ -1,8 +1,8 @@
 #pragma once
 
-#define CPU_STACK_ALIGNMENT 8
+#define CPU_STACK_ALIGNMENT 16
 
-#define MIN_STACK_SIZE 256
+#define MIN_STACK_SIZE 1024
 
 void *cpu_stack_init(uint64_t *stack, void *(*entry)(void *arg), void *arg,
                      void (*thread_exit)(void *));

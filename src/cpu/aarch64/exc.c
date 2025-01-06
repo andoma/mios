@@ -17,11 +17,14 @@ curr_el_sp0_sync(void)
 {
   void *elr;
   asm volatile ("mrs %0, elr_el1\n\t" : "=r" (elr));
+  uint32_t spsr_el1;
+  asm volatile ("mrs %0, spsr_el1\n\t" : "=r" (spsr_el1));
   uint32_t esr;
   asm volatile ("mrs %0, esr_el1\n\t" : "=r" (esr));
   void *far;
   asm volatile ("mrs %0, far_el1\n\t" : "=r" (far));
-  panic("Synchronous Exception @ SP0. ELR:%p ESR:0x%08x FAR:%p", elr, esr, far);
+  panic("Synchronous Exception @ SP0. ELR:%p ESR:0x%08x FAR:%p SPSR:%x",
+        elr, esr, far, spsr_el1);
 }
 
 void
@@ -39,7 +42,16 @@ curr_el_sp0_serror(void)
 void
 curr_el_spx_sync(void)
 {
-  trap(__FUNCTION__);
+  void *elr;
+  asm volatile ("mrs %0, elr_el1\n\t" : "=r" (elr));
+  uint32_t spsr_el1;
+  asm volatile ("mrs %0, spsr_el1\n\t" : "=r" (spsr_el1));
+  uint32_t esr;
+  asm volatile ("mrs %0, esr_el1\n\t" : "=r" (esr));
+  void *far;
+  asm volatile ("mrs %0, far_el1\n\t" : "=r" (far));
+  panic("Synchronous Exception @ SPX. ELR:%p ESR:0x%08x FAR:%p SPSR:%x",
+        elr, esr, far, spsr_el1);
 }
 
 void

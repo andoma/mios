@@ -12,8 +12,6 @@ include ${SRC}/cpu/aarch64/aarch64.mk
 
 SRCS += \
 	${P}/aarch64-virt.c \
-	${P}/gicv3.c \
-
 
 ENABLE_TASK_ACCOUNTING := no
 
@@ -24,4 +22,4 @@ qemu: ${O}/build.elf
 	qemu-system-aarch64 -M virt,gic-version=3 -cpu cortex-a57 -nographic -kernel $< -s -S
 
 gdb: ${O}/build.elf
-	${GDB} -ex "target extended-remote ${GDB_HOST}:${GDB_PORT}" -x ${T}/gdb/macros $<
+	${GDB} -ex "target extended-remote ${GDB_HOST}:${GDB_PORT}" -ex "layout asm" -ex "layout regs" -x ${T}/gdb/macros $<

@@ -3,9 +3,11 @@
 
 #include <malloc.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "cpu.h"
 
+#include "reg.h"
 
 struct cpu cpu0;
 
@@ -22,7 +24,6 @@ reboot(void)
 
    ELR
    SPSR
-
    x1
    x0
    ...
@@ -54,9 +55,8 @@ cpu_init(void)
                            CPU_STACK_ALIGNMENT, 0);
   memset(sp_bottom, 0x55, stack_size + sizeof(thread_t));
   void *sp = sp_bottom + stack_size;
-
+  printf("Idle stack at %p\n", sp);
   asm volatile ("msr sp_el0, %0\n\t" : : "r" (sp));
-
   thread_t *t = sp;
   strlcpy(t->t_name, "idle", sizeof(t->t_name));
   t->t_sp_bottom = sp_bottom;

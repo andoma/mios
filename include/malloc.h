@@ -13,6 +13,6 @@ int free_try(void *ptr);
 
 #define MEM_MAY_FAIL   0x80000000
 
-#define HEAP_START_EBSS 0xffffffff
+#define HEAP_START_EBSS __SIZE_MAX__
 
 void heap_add_mem(long start, long end, int type);

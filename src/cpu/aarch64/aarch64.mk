@@ -11,16 +11,16 @@ CPPFLAGS += -iquote${C}
 
 CPPFLAGS += -include ${C}/aarch64.h
 
-CFLAGS += -mgeneral-regs-only
+CFLAGS += -mgeneral-regs-only  -mstrict-align
 
 GDB ?= ${TOOLCHAIN}gdb
 
 SRCS += \
 	${C}/entry.s \
+	${C}/gicv3.c \
 	${C}/clock.c \
 	${C}/cpu.c \
 	${C}/exc.c \
-	${C}/aarch64.c \
 
 
 ENTRYPOINT ?= start

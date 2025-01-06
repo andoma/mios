@@ -117,6 +117,41 @@ emit_u64(fmtcb_t *cb, void *aux,
 
   return emit_intstr(cb, aux, fp, neg, buf + sizeof(buf), digits);
 }
+
+static size_t  __attribute__((noinline))
+emit_s64(fmtcb_t *cb, void *aux,
+         const fmtparam_t *fp, int64_t x)
+{
+  if(x < 0)
+    return emit_u64(cb, aux, fp, 1, -x);
+  else
+    return emit_u64(cb, aux, fp, 0, x);
+}
+
+static size_t  __attribute__((noinline))
+emit_x64(fmtcb_t *cb, void *aux, uint64_t x,
+         const fmtparam_t *fp)
+{
+  char buf[16];
+  int digits = 1;
+  for(int i = 0; i < 16; i++, x >>= 4) {
+    const unsigned int d = x & 0xf;
+    buf[15 - i] = "0123456789abcdef"[d];
+    if(d)
+      digits = i + 1;
+  }
+
+  size_t total = 0;
+
+  if(fp->width > digits) {
+    const int pad = fp->width - digits;
+    for(int i = 0; i < pad; i++) {
+      total += cb(aux, fp->lz ? "0" : " ", 1);
+    }
+  }
+  return cb(aux, buf + 16 - digits, digits) + total;
+}
+
 #endif
 
 static size_t  __attribute__((noinline))
@@ -152,18 +187,6 @@ emit_fix16(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
   char buf[13];
   fix16_to_str(x, buf, fp->decimals != -1 ? fp->decimals : 5);
   return emit_str(cb, aux, buf, fp);
-}
-#endif
-
-#ifndef DISABLE_FMT_64BIT
-static size_t  __attribute__((noinline))
-emit_s64(fmtcb_t *cb, void *aux,
-         const fmtparam_t *fp, int64_t x)
-{
-  if(x < 0)
-    return emit_u64(cb, aux, fp, 1, -x);
-  else
-    return emit_u64(cb, aux, fp, 0, x);
 }
 #endif
 
@@ -476,7 +499,11 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 #endif
     case 'p':
       total += cb(aux, "0x", 2);
+#if __LONG_WIDTH__ == 64
+      total += emit_x64(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
+#else
       total += emit_x32(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
+#endif
       break;
 #ifdef ENABLE_FIXMATH
     case 'o':
