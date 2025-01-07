@@ -11,8 +11,8 @@
 
 #define IRQ_LEVEL_NET      5
 
-#define IRQ_LEVEL_CLOCK    14
-#define IRQ_LEVEL_SWITCH   15
+#define IRQ_LEVEL_CLOCK    13
+#define IRQ_LEVEL_SWITCH   14
 
 #define IRQ_PRI_LEVEL_SHIFT 4
 

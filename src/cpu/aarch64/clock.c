@@ -62,6 +62,8 @@ clock_init(void)
   uint32_t freq;
   asm volatile ("mrs %0, cntfrq_el0\n\r" : "=r"(freq));
   printf("Timer frequency: %d\n", freq);
+  nxt_timer = clock_get_irq_blocked();
+  printf("System clock is %ld\n", nxt_timer);
   hz = freq / 10;
 
   irq_enable_fn_arg(27, IRQ_LEVEL_CLOCK, timer_virt, NULL);

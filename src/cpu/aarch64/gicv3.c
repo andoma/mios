@@ -6,11 +6,6 @@
 #include <stdio.h>
 #include <mios/mios.h>
 
-
-#define GIC_BASE 0x8000000
-
-#define GIC_GICD_BASE GIC_BASE
-
 #define GICD_CTLR          (GIC_GICD_BASE + 0x000)
 #define GICD_TYPER         (GIC_GICD_BASE + 0x004)
 #define GICD_IIDR          (GIC_GICD_BASE + 0x008)
@@ -26,12 +21,10 @@
 
 
 
-#define GIC_GICR_BASE (GIC_BASE + 0xa0000)
-
-
 #define GICR_SGI_OFFSET  0x10000
 #define GICR_VLPI_OFFSET 0x20000
 
+#define GICR_IIDR          (GIC_GICR_BASE + 0x004)
 #define GICR_WAKER         (GIC_GICR_BASE + 0x014)
 
 #define GICR_IGROUPR(x)    (GIC_GICR_BASE + GICR_SGI_OFFSET + 0x080 + (x) * 4)
@@ -114,11 +107,6 @@ static void  __attribute__((constructor(102)))
 irq_init(void)
 {
   reg_wr(GICD_CTLR, 7);
-#if 0
-  printf("GICD_CTRL:%x\n", reg_rd(GIC_BASE + 0x0));
-  printf("GICD_IIDR:%x\n", reg_rd(GIC_BASE + 0x8));
-  printf("GICD_CTRL:%x\n", reg_rd(GIC_BASE + 0x0));
-#endif
 
   reg_wr(GICR_WAKER, 0);
 
@@ -127,4 +115,5 @@ irq_init(void)
   asm volatile ("msr icc_igrpen1_el1, %0\n\t" : : "r" (1));
 
   sgi_enable(0, IRQ_LEVEL_SWITCH);
+  printf("GICv3 initialized\n");
 }

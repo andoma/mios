@@ -19,115 +19,12 @@ start:
 
         eret
         .pool
-pchar:
-        ldr x1, =0x0c168000
-        ldr x2, =0x81000000
-        orr x2, x2, x0
-        str w2, [x1]
-1:      ldr w2, [x1]
-        cmp w2, #0
-        bne 1b
-        ret
-        .pool
-
-pnibble:
-        and x0, x0, #0xf
-        cmp x0, #10
-        b.lt 1f
-        add x0, x0, #0x57
-        b pchar
-1:
-        add x0, x0, #0x30
-        b pchar
-
-preg:
-        mov x26, lr
-        mov x3, x0
-        lsr x0, x3, #60
-        bl pnibble
-        lsr x0, x3, #56
-        bl pnibble
-        lsr x0, x3, #52
-        bl pnibble
-        lsr x0, x3, #48
-        bl pnibble
-        lsr x0, x3, #44
-        bl pnibble
-        lsr x0, x3, #40
-        bl pnibble
-        lsr x0, x3, #36
-        bl pnibble
-        lsr x0, x3, #32
-        bl pnibble
-        lsr x0, x3, #28
-        bl pnibble
-        lsr x0, x3, #24
-        bl pnibble
-        lsr x0, x3, #20
-        bl pnibble
-        lsr x0, x3, #16
-        bl pnibble
-        lsr x0, x3, #12
-        bl pnibble
-        lsr x0, x3, #8
-        bl pnibble
-        lsr x0, x3, #4
-        bl pnibble
-        mov x0, x3
-        bl pnibble
-        mov x0, #10
-        mov lr, x26
-        b pchar
-        .pool
 
 el1:
-        adr x0, vectors_early
-        msr vbar_el1, x0
-
         bl mmusetup
         ldr x0, =vstart
         br x0
         .pool
-
-
-        .macro exc char
-        .balign 0x80
-        mov x0, #'!'
-        bl pchar
-        mov x0, #\char
-        bl pchar
-        mov x0, #':'
-        bl pchar
-        mrs x0, esr_el1
-        bl preg
-        mrs x0, far_el1
-        bl preg
-        mrs x0, elr_el1
-        bl preg
-        mrs x0, spsr_el1
-        bl preg
-1:      wfi
-        b 1b
-        .endm
-
-        .balign 0x800
-vectors_early:
-        exc 'A'
-        exc 'B'
-        exc 'C'
-        exc 'D'
-        exc 'E'
-        exc 'F'
-        exc 'G'
-        exc 'H'
-        exc 'I'
-        exc 'J'
-        exc 'K'
-        exc 'L'
-        exc 'M'
-        exc 'N'
-        exc 'O'
-        exc 'P'
 
         .text
         .global vstart
@@ -381,7 +278,7 @@ mmusetup:
 mmuinit:
         // MAIR 0 - Device-nGnRnE memory
         // MAIR 1 - Normal Memory
-        ldr x1, =0x0000
+        ldr x1, =0xff00
         msr mair_el1, x1
 
         // 4kb page size, etc
@@ -429,8 +326,9 @@ tut:
         tlbi vmalle1
 
         mrs x0, sctlr_el1
-        orr x0, x0, 0x1
-        orr x0, x0, (0x1 << 12)
+        orr x0, x0, (1 << 0)    // MMU
+        orr x0, x0, (1 << 2)    // D-Cache
+        orr x0, x0, (1 << 12)   // I-Cache
         msr sctlr_el1, x0
 
         isb
