@@ -776,7 +776,7 @@ tcp_stream_read(stream_t *s, void *buf, size_t size, size_t require)
 
   while(size) {
 
-    size_t used = tcb_rxfifo_user_bytes(tcb);
+    ssize_t used = tcb_rxfifo_user_bytes(tcb);
     if(used < 0) {
       irq_permit(q);
       return used;
@@ -950,7 +950,7 @@ ssize_t
 tcp_stream_drop(struct stream *s, size_t bytes)
 {
   tcb_t *tcb = (tcb_t *)s;
-  size_t used = tcb_rxfifo_user_bytes(tcb);
+  ssize_t used = tcb_rxfifo_user_bytes(tcb);
   if(used < 1)
     return used;
 
