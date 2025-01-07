@@ -266,6 +266,9 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
   if(u == NULL)
     u = calloc(1, sizeof(stm32_uart_stream_t));
 
+  u->tx_enable = GPIO_UNUSED;
+  u->rx_enable = GPIO_UNUSED;
+
   clk_enable(clkid);
 
   u->device.d_name = name;
