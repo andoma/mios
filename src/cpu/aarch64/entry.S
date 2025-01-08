@@ -273,7 +273,6 @@ mmusetup:
         cmp x1, x0
         bne 1b
 
-        .global tut
         .global mmuinit
 mmuinit:
         // MAIR 0 - Device-nGnRnE memory
@@ -298,7 +297,7 @@ mmuinit:
         add x0, x0, x1
         cmp x2, x8
         bne 1b
-tut:
+
         add x10, x9, 4096    // x10 pagetable_v0
         msr ttbr1_el1, x10
 

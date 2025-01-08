@@ -16,6 +16,12 @@ unsigned int xtoi(const char *s);
 
 unsigned int atoix(const char *s); // Uses xtoi() if string starts with 0x
 
+long atol(const char *s);
+
+unsigned long xtol(const char *s);
+
+unsigned long atolx(const char *s); // Uses xtol() if string starts with 0x
+
 #define RAND_MAX 0x7fffffff
 
 int rand(void);

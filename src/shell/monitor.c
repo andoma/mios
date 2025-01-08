@@ -26,8 +26,8 @@ cmd_md(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  const long start = atoix(argv[1]);
-  const long len   = atoix(argv[2]);
+  const long start = atolx(argv[1]);
+  const long len   = atolx(argv[2]);
   sthexdump(cli->cl_stream, NULL, (void *)start, len, start);
   return 0;
 }
