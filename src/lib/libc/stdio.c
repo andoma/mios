@@ -473,6 +473,11 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += emit_str(cb, aux, va_arg(ap, const char *), &fp);
       break;
     case 'x':
+#ifndef DISABLE_FMT_64BIT
+      if(scalar_is_64bit)
+        total += emit_x64(cb, aux, va_arg(ap, uint64_t), &fp);
+      else
+#endif
       total += emit_x32(cb, aux, va_arg(ap, unsigned int), &fp);
       break;
     case 'd':

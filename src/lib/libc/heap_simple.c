@@ -43,14 +43,14 @@ typedef struct heap_header {
 static inline heap_block_t *
 hb_get_prev(const heap_block_t *hb)
 {
-  return (heap_block_t *)(intptr_t)(hb->prev << 1);
+  return (heap_block_t *)(((uintptr_t)hb->prev) << 1);
 }
 
 
 static inline void
 hb_set_prev(heap_block_t *hb, heap_block_t *prev)
 {
-  hb->prev = (intptr_t)prev >> 1;
+  hb->prev = (uintptr_t)prev >> 1;
 }
 
 static inline size_t

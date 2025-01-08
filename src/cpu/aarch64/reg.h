@@ -3,6 +3,13 @@
 #include <stdint.h>
 
 static inline void
+reg_wr64(uint64_t addr, uint64_t value)
+{
+  volatile uint64_t *ptr = (uint64_t *)addr;
+  *ptr = value;
+}
+
+static inline void
 reg_wr(uint64_t addr, uint32_t value)
 {
   volatile uint32_t *ptr = (uint32_t *)addr;
@@ -21,6 +28,13 @@ reg_wr16(uint64_t addr, uint16_t value)
 {
   volatile uint16_t *ptr = (uint16_t *)addr;
   *ptr = value;
+}
+
+static inline uint64_t
+reg_rd64(uint64_t addr)
+{
+  volatile uint64_t *ptr = (uint64_t *)addr;
+  return *ptr;
 }
 
 static inline uint32_t
