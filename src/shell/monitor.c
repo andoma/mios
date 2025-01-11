@@ -26,8 +26,8 @@ cmd_md(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  const int start = atoix(argv[1]);
-  const int len   = atoix(argv[2]);
+  const long start = atolx(argv[1]);
+  const long len   = atolx(argv[2]);
   sthexdump(cli->cl_stream, NULL, (void *)start, len, start);
   return 0;
 }
@@ -45,7 +45,7 @@ cmd_wr32(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  const int addr = atoix(argv[1]);
+  const long addr = atoix(argv[1]);
   const int value = atoix(argv[2]);
 
   uint32_t *ptr = (uint32_t *)addr;
@@ -67,7 +67,7 @@ cmd_rd32(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  const int start = atoix(argv[1]);
+  const long start = atoix(argv[1]);
   const int count = argc > 2 ? atoix(argv[2]) : 1;
 
   uint32_t *ptr = (uint32_t *)start;
