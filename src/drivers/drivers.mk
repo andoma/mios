@@ -31,5 +31,9 @@ SRCS-${ENABLE_PL011} += \
 	${SRC}/drivers/pl011.c
 ${MOS}/drivers/pl011.o : CFLAGS += ${NOFPU}
 
+SRCS-${ENABLE_UART_16550} += \
+	${SRC}/drivers/uart_16550.c
+${MOS}/drivers/uart_16550.o : CFLAGS += ${NOFPU}
+
 SRCS += ${SRC}/drivers/spiflash.c
 ${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}
