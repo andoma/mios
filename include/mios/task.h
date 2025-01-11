@@ -66,6 +66,12 @@ typedef struct thread {
   const char *t_wchan; // Valid when state == SLEEPING
 #endif
 
+  SLIST_ENTRY(thread) t_global_link;
+  struct stream *t_stream;
+
+  char t_name[11];
+  uint8_t t_refcount;
+
 #ifdef ENABLE_TASK_ACCOUNTING
   uint32_t t_cycle_enter;
   uint32_t t_cycle_acc;
@@ -75,11 +81,6 @@ typedef struct thread {
   uint16_t t_stacksize;
 #endif
 
-  SLIST_ENTRY(thread) t_global_link;
-
-  char t_name[11];
-  uint8_t t_refcount;
-  struct stream *t_stream;
 } thread_t;
 
 typedef struct sched_cpu {
