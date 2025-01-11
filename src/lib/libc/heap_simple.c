@@ -21,8 +21,13 @@ LIST_HEAD(heap_header_list, heap_header);
 
 typedef struct heap_block {
   struct heap_block *next;
-  uint32_t prev : 31;
-  uint32_t free : 1;
+#if __LONG_WIDTH__ == 32
+  unsigned long prev : 31;
+  unsigned long free : 1;
+#else
+  unsigned long prev : 63;
+  unsigned long free : 1;
+#endif
 } heap_block_t;
 
 
@@ -39,14 +44,14 @@ typedef struct heap_header {
 static inline heap_block_t *
 hb_get_prev(const heap_block_t *hb)
 {
-  return (heap_block_t *)(hb->prev << 1);
+  return (heap_block_t *)(((uintptr_t)hb->prev) << 1);
 }
 
 
 static inline void
 hb_set_prev(heap_block_t *hb, heap_block_t *prev)
 {
-  hb->prev = (intptr_t)prev >> 1;
+  hb->prev = (uintptr_t)prev >> 1;
 }
 
 static inline size_t
@@ -168,7 +173,7 @@ cmd_mem(cli_t *cli, int argc, char **argv)
     size_t use = 0;
     size_t avail = 0;
     while(hb->next) {
-      cli_printf(cli, "\t%s @ %p size:0x%08x %d\n",
+      cli_printf(cli, "\t%s @ %p size:0x%08zx %zd\n",
                  hb->free ? "free" : "used",
                  hb, hb_size(hb), hb_size(hb));
       if(hb->free)
@@ -177,7 +182,7 @@ cmd_mem(cli_t *cli, int argc, char **argv)
         use += hb_size(hb);
       hb = hb->next;
     }
-    cli_printf(cli, "\t%d bytes used, %d bytes free\n\n",
+    cli_printf(cli, "\t%zd bytes used, %zd bytes free\n\n",
                use, avail);
   }
   mutex_unlock(&heap_mutex);
@@ -203,14 +208,14 @@ heap_alloc(heap_block_t *hb, size_t size, size_t align)
     if(!hb->free)
       continue;
 
-    const uint32_t addr = (intptr_t)(hb + 1);
-    const uint32_t aligned_addr = ALIGN(addr, align);
-    const uint32_t end = aligned_addr + size;
+    const unsigned long addr = (intptr_t)(hb + 1);
+    const unsigned long aligned_addr = ALIGN(addr, align);
+    const unsigned long end = aligned_addr + size;
 
     if((intptr_t)end > (intptr_t)hb->next)
       continue; // Doesn't fit
 
-    const uint32_t align_gap = aligned_addr - addr;
+    const unsigned long align_gap = aligned_addr - addr;
     if(align_gap) {
       // Need to pad before memory block
       assert(align_gap >= sizeof(heap_block_t));
@@ -235,7 +240,7 @@ heap_alloc(heap_block_t *hb, size_t size, size_t align)
 
     hb->free = 0;
 
-    const uint32_t tail_gap = (intptr_t)hb->next - end;
+    const unsigned long tail_gap = (intptr_t)hb->next - end;
 
     if(tail_gap > sizeof(heap_block_t)) {
       heap_block_t *n = hb->next;
@@ -312,7 +317,7 @@ malloc0(size_t size, size_t align, int type)
 
   mutex_unlock(&heap_mutex);
   if(!(type & MEM_MAY_FAIL))
-    panic("Out of memory (s=%d a=%d t=%d)", size, align, type & 0xf);
+    panic("Out of memory (s=%zd a=%zd t=%d)", size, align, type & 0xf);
   return NULL;
 }
 

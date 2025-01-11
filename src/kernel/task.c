@@ -315,6 +315,10 @@ thread_join(thread_t *t)
 static size_t
 get_default_stacksize(int flags)
 {
+#if __LONG_WIDTH__ == 64
+  return 8192;
+#endif
+
 #ifdef MAIN_STACK_SIZE
   return MAIN_STACK_SIZE;
 #elif defined(ENABLE_LITTLEFS)
