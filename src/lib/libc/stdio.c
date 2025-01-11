@@ -117,6 +117,41 @@ emit_u64(fmtcb_t *cb, void *aux,
 
   return emit_intstr(cb, aux, fp, neg, buf + sizeof(buf), digits);
 }
+
+static size_t  __attribute__((noinline))
+emit_s64(fmtcb_t *cb, void *aux,
+         const fmtparam_t *fp, int64_t x)
+{
+  if(x < 0)
+    return emit_u64(cb, aux, fp, 1, -x);
+  else
+    return emit_u64(cb, aux, fp, 0, x);
+}
+
+static size_t  __attribute__((noinline))
+emit_x64(fmtcb_t *cb, void *aux, uint64_t x,
+         const fmtparam_t *fp)
+{
+  char buf[16];
+  int digits = 1;
+  for(int i = 0; i < 16; i++, x >>= 4) {
+    const unsigned int d = x & 0xf;
+    buf[15 - i] = "0123456789abcdef"[d];
+    if(d)
+      digits = i + 1;
+  }
+
+  size_t total = 0;
+
+  if(fp->width > digits) {
+    const int pad = fp->width - digits;
+    for(int i = 0; i < pad; i++) {
+      total += cb(aux, fp->lz ? "0" : " ", 1);
+    }
+  }
+  return cb(aux, buf + 16 - digits, digits) + total;
+}
+
 #endif
 
 static size_t  __attribute__((noinline))
@@ -152,18 +187,6 @@ emit_fix16(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
   char buf[13];
   fix16_to_str(x, buf, fp->decimals != -1 ? fp->decimals : 5);
   return emit_str(cb, aux, buf, fp);
-}
-#endif
-
-#ifndef DISABLE_FMT_64BIT
-static size_t  __attribute__((noinline))
-emit_s64(fmtcb_t *cb, void *aux,
-         const fmtparam_t *fp, int64_t x)
-{
-  if(x < 0)
-    return emit_u64(cb, aux, fp, 1, -x);
-  else
-    return emit_u64(cb, aux, fp, 0, x);
 }
 #endif
 
@@ -403,9 +426,39 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
     if(fp.ipv4)
       fmt++;
 #endif
-    const int ll = fmt[0] == 'l' && fmt[1] == 'l';
-    if(ll)
-      fmt += 2;
+
+    int scalar_is_64bit = 0;
+
+#if __LONG_WIDTH__ == 32
+    // 32bit system
+
+    if(fmt[0] == 'l') {
+      fmt++;
+      if(fmt[1] == 'l') {
+        scalar_is_64bit = 1;
+        fmt++;
+      }
+    }
+
+    if(fmt[0] == 'z') {
+      fmt++;
+    }
+
+#else
+    // 64bit system
+    if(fmt[0] == 'l') {
+      fmt++;
+      scalar_is_64bit = 1;
+      if(fmt[1] == 'l') {
+        fmt++;
+      }
+    }
+
+    if(fmt[0] == 'z') {
+      scalar_is_64bit = 1;
+      fmt++;
+    }
+#endif
 
     c = *fmt++;
     switch(c) {
@@ -420,11 +473,16 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += emit_str(cb, aux, va_arg(ap, const char *), &fp);
       break;
     case 'x':
+#ifndef DISABLE_FMT_64BIT
+      if(scalar_is_64bit)
+        total += emit_x64(cb, aux, va_arg(ap, uint64_t), &fp);
+      else
+#endif
       total += emit_x32(cb, aux, va_arg(ap, unsigned int), &fp);
       break;
     case 'd':
 #ifndef DISABLE_FMT_64BIT
-      if(ll)
+      if(scalar_is_64bit)
         total += emit_s64(cb, aux, &fp, va_arg(ap, uint64_t));
       else
 #endif
@@ -432,7 +490,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       break;
     case 'u':
 #ifndef DISABLE_FMT_64BIT
-      if(ll)
+      if(scalar_is_64bit)
         total += emit_u64(cb, aux, &fp, 0, va_arg(ap, uint64_t));
       else
 #endif
@@ -446,7 +504,11 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 #endif
     case 'p':
       total += cb(aux, "0x", 2);
+#if __LONG_WIDTH__ == 64
+      total += emit_x64(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
+#else
       total += emit_x32(cb, aux, (intptr_t)va_arg(ap, void *), &fp);
+#endif
       break;
 #ifdef ENABLE_FIXMATH
     case 'o':
