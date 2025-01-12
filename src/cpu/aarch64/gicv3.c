@@ -77,11 +77,13 @@ irq_enable(int irq, int level)
   reg_wr8(GICD_IPRIORITYR(irq), IRQ_LEVEL_TO_PRI(level));
 }
 
-static irq_handler_t irqs[128];
+static irq_handler_t irqs[1024];
 
 void
 trap_irq(uint32_t irq)
 {
+  if(irqs[irq].fn == NULL)
+    panic("Spurious IRQ %d", irq);
   irqs[irq].fn(irqs[irq].arg);
 }
 
@@ -93,6 +95,8 @@ irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg)
   irqs[irq].arg = arg;
   irq_enable(irq, level);
 }
+
+
 void
 irq_enable_fn(int irq, int level, void (*fn)(void))
 {
