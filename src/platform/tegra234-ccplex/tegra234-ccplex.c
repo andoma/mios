@@ -3,6 +3,8 @@
 
 #include "reg.h"
 
+#include "tegra234_hsp.h"
+
 /*
 I> Binary cpubl loaded successfully at 0x272000000 + 4M
                                        0x272400000
@@ -14,62 +16,6 @@ I> Binary cpubl loaded successfully at 0x272000000 + 4M
 
 
 #define DEFAULT_BLINFO_LOCATION_ADDRESS  0x0C390154
-
-#define TEGRA_SYSTEM_MEMORY_BASE  0X80000000
-
-
-#define NV_ADDRESS_MAP_BPMP_HSP_BASE 0x0d150000
-#define NV_ADDRESS_MAP_AON_HSP_BASE  0x0c150000
-#define NV_ADDRESS_MAP_TOP0_HSP_BASE 0x03c00000
-
-static uint8_t
-getc(void)
-{
-  while((reg_rd(NV_ADDRESS_MAP_TOP0_HSP_BASE + 0x10000) & (1 << 31)) == 0) {}
-  uint8_t r = reg_rd(NV_ADDRESS_MAP_TOP0_HSP_BASE + 0x10000) & 0xff;
-  reg_wr(NV_ADDRESS_MAP_TOP0_HSP_BASE + 0x10000, 0);
-  return r;
-}
-
-
-static void
-outc(uint8_t c)
-{
-  while(reg_rd(NV_ADDRESS_MAP_AON_HSP_BASE + 0x10000 + 0x8000)) {}
-  reg_wr(NV_ADDRESS_MAP_AON_HSP_BASE + 0x10000 + 0x8000,
-         (1 << 31) | (1 << 24) | c);
-}
-
-static ssize_t
-tcu_console_write(stream_t *s, const void *buf, size_t size, int flags)
-{
-  const uint8_t *n = buf;
-  for(size_t i = 0; i < size; i++) {
-    outc(n[i]);
-  }
-  return size;
-}
-
-static ssize_t
-tcu_console_read(struct stream *s, void *buf, size_t size, size_t minbytes)
-{
-  uint8_t *u8 = buf;
-  for(size_t i = 0; i < size; i++) {
-    u8[i] = getc();
-  }
-  return size;
-}
-
-
-static stream_vtable_t tcu_console_vtable = {
-  .read = tcu_console_read,
-  .write = tcu_console_write,
-};
-
-static stream_t tcu_console = {
-  .vtable = &tcu_console_vtable,
-};
-
 
 
 typedef union {
@@ -220,13 +166,49 @@ typedef struct cpubl_params_v2 {
 } cpubl_params_v2_t;
 
 
+
+
+static void
+outc(uint8_t c)
+{
+  uint32_t reg = NV_ADDRESS_MAP_AON_HSP_BASE + 0x10000 + 0x8000 * 1;
+  while(reg_rd(reg)) {}
+  reg_wr(reg, (1 << 31) | (1 << 24) | c);
+}
+
+static ssize_t
+tcu_early_console_write(stream_t *s, const void *buf, size_t size, int flags)
+{
+  const uint8_t *n = buf;
+  for(size_t i = 0; i < size; i++) {
+    outc(n[i]);
+  }
+  return size;
+}
+
+
+static stream_vtable_t tcu_early_console_vtable = {
+  .write = tcu_early_console_write,
+};
+
+static stream_t tcu_early_console = {
+  .vtable = &tcu_early_console_vtable,
+};
+
+
+
+
 static void __attribute__((constructor(101)))
 board_init_early(void)
 {
-  stdio = &tcu_console;
+  stdio = &tcu_early_console;
+
+  heap_add_mem(HEAP_START_EBSS, 0xffff000000200000ull + 2 * 1024 * 1024,
+               MEM_TYPE_DMA);
 
   printf("\nMIOS on Tegra234 CCPLEX\n");
 
+#if 0
   const cpubl_params_v2_t *cbp =
     (const void *)reg_rd64(DEFAULT_BLINFO_LOCATION_ADDRESS);
 
@@ -262,7 +244,14 @@ board_init_early(void)
            cbp->carveout_info[i].size,
            cbp->carveout_info[i].flags);
   }
+#endif
+}
 
-  heap_add_mem(HEAP_START_EBSS, 0xffff000000200000ull + 2 * 1024 * 1024,
-               MEM_TYPE_DMA);
+#include "irq.h"
+
+static void __attribute__((constructor(110)))
+board_init_console(void)
+{
+  stdio = hsp_mbox_stream(NV_ADDRESS_MAP_TOP0_HSP_BASE, 0,
+                          NV_ADDRESS_MAP_AON_HSP_BASE, 1);
 }
