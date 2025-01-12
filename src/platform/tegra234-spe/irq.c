@@ -150,10 +150,16 @@ dispatch_lic_irq(uint32_t regbase)
     uint32_t active = reg_rd(regbase + s * 0x40);
 
     while(active) {
-      int which = 31 - __builtin_clz(active);
-      lic_irq_t *li = &lic_irq_vector[s * 32 + which];
-      li->fn(li->arg);
-      active &= ~(1 << which);
+      int which = 31 - __builtin_clz(active) + s * 32;
+      if(which < ARRAYSIZE(lic_irq_vector)) {
+        lic_irq_t *li = &lic_irq_vector[which];
+        if(li->fn != NULL) {
+          li->fn(li->arg);
+          active &= ~(1 << which);
+          continue;
+        }
+      }
+      panic("Unexpected LIC IRQ %d", which);
     }
   }
 }
