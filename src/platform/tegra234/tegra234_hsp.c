@@ -200,6 +200,10 @@ static const stream_vtable_t hsp_stream_vtable = {
   .poll = hsp_stream_poll,
 };
 
+static const stream_vtable_t hsp_stream_vtable_txonly = {
+  .write = hsp_stream_write,
+};
+
 
 static uint8_t
 hsp_connect_mbox(uint32_t addr, void (*fn)(void *arg), void *arg,
@@ -244,9 +248,12 @@ hsp_mbox_stream(uint32_t rx_hsp_base, uint32_t rx_mbox,
   hs->tx_irq_route =
     hsp_connect_mbox(tx_hsp_base, hsp_stream_tx_irq, hs, tx_mbox);
 
-  hs->st.vtable = &hsp_stream_vtable;
-
-  reg_set_bit(hs->rx_hsp_base + 0x100 + hs->rx_irq_route * 4, 8 + rx_mbox);
+  if(rx_hsp_base) {
+    reg_set_bit(rx_hsp_base + 0x100 + hs->rx_irq_route * 4, 8 + rx_mbox);
+    hs->st.vtable = &hsp_stream_vtable;
+  } else {
+    hs->st.vtable = &hsp_stream_vtable_txonly;
+  }
 
   irq_permit(q);
   return &hs->st;
@@ -256,10 +263,18 @@ hsp_mbox_stream(uint32_t rx_hsp_base, uint32_t rx_mbox,
 static void
 hsp_dispatch_irq(hsp_t *hsp, uint32_t base_addr, uint32_t enabled)
 {
-  uint32_t pending = reg_rd(base_addr + 0x304) & 0xffff & enabled;
+  uint32_t active = reg_rd(base_addr + 0x304);
+  uint32_t pending = active & 0xffff & enabled;
   if(pending) {
-    const handler_t *irq = &hsp->irqs[31 - __builtin_clz(pending)];
-    irq->fn(irq->arg);
+    int id = 31 - __builtin_clz(pending);
+    if(id < ARRAYSIZE(hsp->irqs)) {
+      const handler_t *irq = &hsp->irqs[id];
+      if(irq->fn) {
+        irq->fn(irq->arg);
+        return;
+      }
+    }
+    panic("HSP 0x%x stray IRQ %d enabled:0x%x", base_addr, id, enabled);
   }
 }
 
