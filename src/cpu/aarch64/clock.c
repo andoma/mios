@@ -76,3 +76,12 @@ clock_init(void)
   // Enable timer
   asm volatile("msr cntv_ctl_el0, %0\n\t" : : "r" (1));
 }
+
+void
+udelay(unsigned int usec)
+{
+  int s = irq_forbid(IRQ_LEVEL_CLOCK);
+  uint64_t deadline = clock_get_irq_blocked() + usec;
+  while(clock_get_irq_blocked() < deadline) {}
+  irq_permit(s);
+}
