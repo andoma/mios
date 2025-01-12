@@ -75,6 +75,29 @@ hsp_stream_read(struct stream *s, void *buf, size_t size, size_t required)
   hsp_stream_t *hs = (hsp_stream_t *)s;
   uint8_t *u8 = buf;
   size_t written = 0;
+
+  if(!can_sleep()) {
+    const uint32_t reg = hs->rx_hsp_base + 0x10000 + hs->rx_mbox * 0x8000;
+
+    while(written < size) {
+
+      uint32_t val = reg_rd(reg);
+
+      if(!(val & (1 << 31))) {
+        if(written >= required)
+          break;
+        continue;
+      }
+
+      //      int bytes = (val >> 24) & 3;
+      // XXX: Handle # bytes > 1
+      *u8++ = val;
+      reg_wr(reg, 0);
+      written++;
+    }
+    return written;
+  }
+
   int q = irq_forbid(IRQ_LEVEL_IO);
 
   while(written < size) {
@@ -130,6 +153,10 @@ hsp_stream_write(struct stream *s, const void *buf, size_t size, int flags)
   while(count < size) {
 
     if(reg_rd(reg) & (1 << 31)) {
+
+      if(!can_sleep())
+        continue;
+
       reg_set_bit(hs->tx_hsp_base + 0x100 + hs->tx_irq_route * 4,
                   hs->tx_mbox);
       if(task_sleep_deadline(&hs->tx_waitq, deadline)) {
