@@ -9,7 +9,7 @@ P := ${SRC}/platform/${PLATFORM}
 
 GLOBALDEPS += ${P}/${PLATFORM}.mk
 
-CPPFLAGS += -I${P} -include ${PLATFORM}.h
+CPPFLAGS += -I${P} -I${SRC}/platform/tegra234 -include ${PLATFORM}.h
 
 LDSCRIPT = ${P}/${PLATFORM}.ld
 
@@ -17,7 +17,7 @@ include ${SRC}/cpu/aarch32/aarch32.mk
 
 SRCS += ${P}/entry.s \
 	${P}/tegra234-spe.c \
-	${P}/tegra234-hsp.c \
+	${P}/tegra234_spe_hsp.c \
 	${P}/tcu.c \
 	${P}/systick.c \
 	${P}/irq.c \
