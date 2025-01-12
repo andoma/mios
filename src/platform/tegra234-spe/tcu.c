@@ -8,7 +8,7 @@
 #include "irq.h"
 
 #include "drivers/uart_16550.h"
-#include "tegra234-hsp.h"
+#include "tegra234_hsp.h"
 
 // Tegra Combined UART
 
@@ -196,12 +196,25 @@ tcu_init(void)
   tcu->spe.vtable = &spe_console_vtable;
   stdio = &tcu->spe;
 
-  tcu->mbox_streams[0] = hsp_mbox_stream(1,        // CCPLEX
+  // CCPLEX
+  tcu->mbox_streams[0] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 1,
                                          NV_ADDRESS_MAP_TOP0_HSP_BASE, 0);
-  tcu->mbox_streams[1] = hsp_mbox_stream(3, 0, 0); // DCE
-  tcu->mbox_streams[2] = hsp_mbox_stream(5, 0, 0); // RCE
-  tcu->mbox_streams[3] = hsp_mbox_stream(6, 0, 0); // BPMP
-  tcu->mbox_streams[4] = hsp_mbox_stream(7, 0, 0); // TZ
+
+  // DCE
+  tcu->mbox_streams[1] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 3,
+                                         0, 0);
+
+  // RCE
+  tcu->mbox_streams[2] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 5,
+                                         0, 0);
+
+  // BPMP
+  tcu->mbox_streams[3] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 6,
+                                         0, 0);
+
+  // TZ
+  tcu->mbox_streams[4] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 7,
+                                         0, 0);
 
   thread_create(tcu_rx_thread, tcu, 512, "tcu_rx", TASK_DETACHED, 4);
   thread_create(tcu_tx_thread, tcu, 512, "tcu_tx", TASK_DETACHED, 4);

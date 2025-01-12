@@ -10,6 +10,7 @@
 
 struct stream;
 
-struct stream *hsp_mbox_stream(uint32_t rx_mbox, uint32_t tx_hsp_address,
-                               uint32_t tx_mbox);
+struct stream *
+hsp_mbox_stream(uint32_t rx_hsp_base, uint32_t rx_mbox,
+                uint32_t tx_hsp_base, uint32_t tx_mbox);
 
