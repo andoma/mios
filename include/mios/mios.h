@@ -13,3 +13,8 @@ void reboot(void);
 
 #define MIOS_GLUE(a, b) a ## b
 #define MIOS_JOIN(a, b) MIOS_GLUE(a, b)
+
+typedef struct handler {
+  void (*fn)(void *arg);
+  void *arg;
+} handler_t;
