@@ -24,7 +24,7 @@
 
 #define USART_SR_BUSY    (1 << 16)
 
-#include "platform/stm32/stm32_uart.c"
+#include "platform/stm32/stm32_uart_stream.c"
 
 
 static const struct {
@@ -41,11 +41,11 @@ static const struct {
 };
 
 
-static stm32_uart_t *uarts[6];
+static stm32_uart_stream_t *uarts[6];
 
 stream_t *
-stm32h7_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
-                  gpio_t tx, gpio_t rx, uint8_t flags)
+stm32h7_uart_init(stm32_uart_stream_t *u, unsigned int instance, int baudrate,
+                  gpio_t tx, gpio_t rx, uint8_t flags, const char *name)
 {
   instance--;
   if(instance >= ARRAYSIZE(uart_config))
@@ -56,13 +56,13 @@ stm32h7_uart_init(stm32_uart_t *u, unsigned int instance, int baudrate,
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 
 
-  u = stm32_uart_init(u,
-                      (uart_config[instance].base << 8) + 0x40000000,
-                      baudrate,
-                      uart_config[instance].clkid,
-                      uart_config[instance].irq,
-                      flags,
-                      0);
+  u = stm32_uart_stream_init(u,
+                             (uart_config[instance].base << 8) + 0x40000000,
+                             baudrate,
+                             uart_config[instance].clkid,
+                             uart_config[instance].irq,
+                             flags,
+                             name);
   uarts[instance] = u;
   return &u->stream;
 }
