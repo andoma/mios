@@ -9,7 +9,9 @@
 #define STM32H7_CLK_AHB1  0xd8
 #define STM32H7_CLK_AHB4  0xe0
 #define STM32H7_CLK_APB1L 0xe8
+#define STM32H7_CLK_APB1R 0xec
 #define STM32H7_CLK_APB2  0xf0
+
 #define STM32H7_CLK_APB4  0xf4
 
 #define CLK_ID(reg, bit) (((reg) << 8) | (bit))
@@ -54,6 +56,9 @@
 
 #define CLK_DMA1 CLK_ID(STM32H7_CLK_AHB1, 0)
 #define CLK_DMA2 CLK_ID(STM32H7_CLK_AHB1, 1)
+
+#define CLK_FDCAN CLK_ID(STM32H7_CLK_APB1R, 8)
+
 
 
 static inline void

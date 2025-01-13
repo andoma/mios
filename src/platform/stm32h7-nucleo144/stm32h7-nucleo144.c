@@ -4,6 +4,7 @@
 #include <mios/task.h>
 
 #include "stm32h7_clk.h"
+#include "stm32h7_can.h"
 #include "stm32h7_uart.h"
 
 #define BLINK_GPIO  GPIO_PB(0) // Green led (User LD1)
@@ -48,4 +49,6 @@ static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
+
+  stm32h7_fdcan_init(1, GPIO_PB(8), GPIO_PB(9), NULL);
 }
