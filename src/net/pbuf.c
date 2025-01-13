@@ -113,7 +113,7 @@ pbuf_data_add(void *start, void *end)
     if(pbuf_datas.pp_avail)
       return;
     const size_t size = PBUF_DATA_SIZE * PBUF_DEFAULT_COUNT;
-    start = xalloc(size, 0, 0);
+    start = xalloc(size, 0, MEM_TYPE_DMA);
     end = start + size;
   }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
