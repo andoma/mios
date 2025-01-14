@@ -84,6 +84,7 @@ typedef struct spi {
 } spi_t;
 
 // GPIO implementations provided by platform (or stubbed out)
+// Typically, memory mapped, fast and available from all IRQ levels
 
 void gpio_conf_input(gpio_t gpio, gpio_pull_t pull);
 
@@ -108,3 +109,26 @@ void gpio_dir_output(gpio_t gpio);
 void gpio_conf_irq_edge(gpio_t gpio, gpio_edge_t edge);
 
 void gpio_disconnect(gpio_t gpio);
+
+// Indirect GPIO
+
+struct indirect_gpio;
+
+typedef struct gpio_vtable {
+
+  error_t (*conf_input)(struct indirect_gpio *ig, unsigned int line,
+                        gpio_pull_t pull);
+
+  error_t (*conf_output)(struct indirect_gpio *ig, unsigned int line,
+                         gpio_output_type_t type, gpio_output_speed_t speed,
+                         gpio_pull_t pull);
+
+  error_t (*set_output)(struct indirect_gpio *ig, unsigned int line, int on);
+
+  error_t (*get_input)(struct indirect_gpio *ig, unsigned int gpio,
+                       int *status);
+} gpio_vtable_t;
+
+typedef struct indirect_gpio {
+  const gpio_vtable_t *vtable;
+} indirect_gpio_t;

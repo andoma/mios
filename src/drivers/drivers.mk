@@ -19,6 +19,9 @@ SRCS-${ENABLE_BT81X} += \
 SRCS-${ENABLE_MCP23008} += \
 	${SRC}/drivers/mcp23008.c
 
+SRCS-${ENABLE_TCAL9539} += \
+	${SRC}/drivers/tcal9539.c
+
 SRCS += ${SRC}/drivers/spiflash.c
 
 SRCS-${ENABLE_SSD1306} += \
