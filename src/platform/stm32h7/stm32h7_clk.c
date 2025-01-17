@@ -1,30 +1,10 @@
 #include <mios/mios.h>
 
 #include "stm32h7_clk.h"
+#include "stm32h7_pwr.h"
 
 
 #define FLASH_ACR 0x52002000
-
-
-#define PWR_BASE              0x58024800
-
-#define PWR_CSR1       (PWR_BASE + 0x04)
-#define PWR_CR3        (PWR_BASE + 0x0c)
-#define PWR_D3CR       (PWR_BASE + 0x18)
-
-
-
-#define RCC_BASE              0x58024400
-
-#define RCC_CR         (RCC_BASE + 0x00)
-#define RCC_CFGR       (RCC_BASE + 0x10)
-
-#define RCC_D1CFGR     (RCC_BASE + 0x18)
-#define RCC_D2CFGR     (RCC_BASE + 0x1c)
-#define RCC_D3CFGR     (RCC_BASE + 0x20)
-#define RCC_PLLCKSELR  (RCC_BASE + 0x28)
-#define RCC_PLLCFGR    (RCC_BASE + 0x2c)
-#define RCC_PLL1DIVR   (RCC_BASE + 0x30)
 
 
 #define VOS_LEVEL_0 0 // 480 MHz
@@ -92,11 +72,25 @@ voltage_scaling(int level)
 
 */
 
+
+
+
+static void
+wait_voltages_ready(void)
+{
+  while(reg_get_bit(PWR_CSR1, 13) == 0) {}
+}
+
+
+
 void
 stm32h7_init_pll(void)
 {
-  // Lock LDO setup
+  //reg_wr(PWR_CR3, (reg_rd(PWR_CR3) | (1 << 1)) & ~((1 << 0) | (1 << 2)));
+
+           // Lock LDO setup
   reg_clr_bit(PWR_CR3, 2);
+  wait_voltages_ready();
 
   int sysclk_freq = 400;
   int axi_freq = sysclk_freq / 2;
@@ -104,12 +98,12 @@ stm32h7_init_pll(void)
   const uint32_t pll1m = 1; // Input prescaler (1 == divide  by 1)
   const uint32_t pll2m = 1; // Input prescaler (1 == divide  by 1)
   const uint32_t pll3m = 1; // Input prescaler (1 == divide  by 1)
-  const uint32_t plln = 49;
-  const uint32_t pllp = 0;
+  const uint32_t plln = 99;
+  const uint32_t pllp = 1;
   const uint32_t pllq = 20;
 
   const uint32_t d1cpre  = 0;
-  const uint32_t hpre    = 0x8; // Divide by 2
+  const uint32_t hpre    = 0xa; // Divide by 4
   const uint32_t d1ppre  = 0x4; // Divide by 2
 
   const uint32_t d2ppre1 = 0x4; // Divide by 2
@@ -189,7 +183,7 @@ stm32h7_init_pll(void)
   while(((reg_rd(RCC_CFGR) >> 3) & 0x7) != 3) {}
 
   // Set MCO2 divider to divide by 10
-  reg_set_bits(RCC_CFGR, 25, 4, 10);
+  //  reg_set_bits(RCC_CFGR, 25, 4, 10);
 }
 
 
@@ -197,9 +191,10 @@ unsigned int
 clk_get_freq(uint16_t id)
 {
   // TODO: Fix this incorrect hack
-  return 100000000;
+  return 25000000;
 }
 
+#include <stdio.h>
 void
 reset_peripheral(uint16_t id)
 {

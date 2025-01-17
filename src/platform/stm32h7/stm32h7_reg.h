@@ -64,3 +64,9 @@ reg_get_bit(uint32_t addr, int bit)
 {
   return (reg_rd(addr) >> bit) & 1;
 }
+
+static inline void
+reg_or(uint32_t addr, uint32_t bits)
+{
+  reg_wr(addr, reg_rd(addr) | bits);
+}

@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <malloc.h>
 
+#include <mios/sys.h>
+
 #include <net/pbuf.h>
 
 #include "stm32h7_clk.h"
@@ -67,4 +69,16 @@ stm32h7_init(void)
 
   // Packet buffers from SRAM2
   //  pbuf_data_add((void *)0x30020000, (void *)0x30020000 + 32 * 1024);
+}
+
+
+
+
+const struct serial_number
+sys_get_serial_number(void)
+{
+  struct serial_number sn;
+  sn.data = (const void *)0x1ff1e800;
+  sn.len = 12;
+  return sn;
 }

@@ -101,8 +101,8 @@
 #define CLK_CCMDATARAMEN CLK_ID(CLK_AHB1, 20)
 #define CLK_RNG          CLK_ID(CLK_AHB2, 6)
 
-#define CLK_OTGFS        CLK_ID(CLK_AHB2, 7)
-#define RST_OTGFS        CLK_ID(RST_AHB2, 7)
+#define CLK_OTG        CLK_ID(CLK_AHB2, 7)
+#define RST_OTG        CLK_ID(RST_AHB2, 7)
 
 
 void reset_peripheral(uint16_t id);
