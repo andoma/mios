@@ -4,7 +4,10 @@
 #include <mios/task.h>
 
 #include "stm32h7_clk.h"
+#include "stm32h7_usb.h"
 #include "stm32h7_uart.h"
+
+#include <usb/usb.h>
 
 #define BLINK_GPIO  GPIO_PB(0) // Green led (User LD1)
 
@@ -48,4 +51,13 @@ static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
+
+  struct usb_interface_queue q;
+  STAILQ_INIT(&q);
+
+  // Expose a serial-port that is a normal console to this OS
+  usb_cdc_create_shell(&q);
+
+  stm32h7_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32h7-nucleo144", &q);
+
 }
