@@ -72,8 +72,18 @@ cmd_rd32(cli_t *cli, int argc, char **argv)
 
   uint32_t *ptr = (uint32_t *)start;
   for(int i = 0; i < count; i++) {
-    cli_printf(cli, "0x%04x: 0x%08x\n",
-           4 * i, *ptr);
+    uint32_t val = *ptr;
+    cli_printf(cli, "0x%04x: 0x%08x ",
+           4 * i, val);
+
+    for(int i = 28; i >= 0; i -= 4) {
+      cli_printf(cli, "%c%c%c%c%s",
+                 ((val >> (i + 3)) & 1) + '0',
+                 ((val >> (i + 2)) & 1) + '0',
+                 ((val >> (i + 1)) & 1) + '0',
+                 ((val >> (i + 0)) & 1) + '0',
+                 i ? "_" : "\n");
+    }
     ptr++;
   }
   return 0;
