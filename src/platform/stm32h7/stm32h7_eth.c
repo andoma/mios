@@ -210,101 +210,6 @@ stm32h7_phy_thread(void *arg)
 }
 
 
-
-
-
-
-static void
-stm32h7_eth_init(stm32h7_eth_t *se)
-{
-  se->se_eni.eni_addr[0] = 0x06;
-  se->se_eni.eni_addr[1] = 0x00;
-
-  uint32_t uuidcrc = crc32(0, (void *)0x1ff1e800, 12);
-  memcpy(&se->se_eni.eni_addr[2], &uuidcrc, 4);
-
-  se->se_tx_wrptr = 0;
-  se->se_next_rx = 0;
-  STAILQ_INIT(&se->se_rx_scatter_queue);
-  se->se_txring = xalloc(sizeof(desc_t) * ETH_TX_RING_SIZE, 0, MEM_TYPE_DMA);
-  se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0, MEM_TYPE_DMA);
-
-  clk_enable(CLK_SYSCFG);
-
-  static const uint8_t gpios[] =
-    { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7),
-      GPIO_PB(13),
-      GPIO_PC(1), GPIO_PC(4), GPIO_PC(5),
-      GPIO_PG(11), GPIO_PG(13)
-    };
-
-  for(size_t i = 0; i < sizeof(gpios); i++) {
-    gpio_conf_af(gpios[i], 11, GPIO_PUSH_PULL,
-                 GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
-  }
-
-  reg_set_bits(SYSCFG_BASE + 0x4, 21, 3, 4);
-
-  clk_enable(CLK_ETH1MACEN);
-  clk_enable(CLK_ETH1TXEN);
-  clk_enable(CLK_ETH1RXEN);
-
-  reg_set_bits(0x58024480, 15, 1, 1);
-  reg_set_bits(0x58024480, 15, 1, 0);
-
-  // Soft reset
-  reg_set_bit(ETH_DMAMR, 0);
-  while(reg_rd(ETH_DMAMR) & 1) {}
-
-  reg_wr(ETH_MACPFR, 1 << 31);  // Receive ALL
-
-  reg_set_bit(ETH_MTLTXQOMR, 1);
-
-  reg_set_bits(ETH_DMACTXCR, 16, 5, 1);
-
-  reg_set_bits(ETH_DMACRXCR, 16, 5, 1);
-
-  reg_set_bits(ETH_DMACRXCR, 1, 14, PBUF_DATA_SIZE - DMA_BUFFER_PAD);
-
-  memset(se->se_txring, 0, sizeof(desc_t) * ETH_TX_RING_SIZE);
-  memset(se->se_rxring, 0, sizeof(desc_t) * ETH_RX_RING_SIZE);
-
-  reg_wr(ETH_DMACTXDLAR, (uint32_t)se->se_txring);
-  reg_wr(ETH_DMACTXRLR,  ETH_TX_RING_SIZE - 1);
-  reg_wr(ETH_DMACTXDTPR, (uint32_t)se->se_txring);
-
-  reg_wr(ETH_DMACRXDLAR, (uint32_t)se->se_rxring);
-  reg_wr(ETH_DMACRXRLR,  ETH_RX_RING_SIZE - 1);
-
-  for(int i = 0; i < ETH_RX_RING_SIZE; i++) {
-    void *buf = pbuf_data_get(0);
-    if(buf == NULL)
-      break;
-    desc_t *rx = se->se_rxring + i;
-    rx_desc_give(rx, buf);
-  }
-
-  reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
-
-  reg_set_bit(ETH_MACCR, 21); // CST: Strip CRC for type packets in RX path
-  //  reg_set_bit(ETH_MACCR, 20); // ACS: Strip CRC in RX path
-
-  reg_set_bit(ETH_MACCR, 0); // Enable RX
-  reg_set_bit(ETH_MACCR, 1); // Enable TX
-
-  reg_set_bit(ETH_MACCR, 14); // 100Mbit
-  reg_set_bit(ETH_MACCR, 13); // FullDuplex
-
-  // Start DMA
-  reg_set_bit(ETH_DMACRXCR, 0);
-  reg_set_bit(ETH_DMACTXCR, 0);
-
-  ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
-  irq_enable(61, IRQ_LEVEL_NET);
-  thread_create(stm32h7_phy_thread, se, 512, "phy", 0, 4);
-}
-
-
 static void
 handle_irq_rx(stm32h7_eth_t *se)
 {
@@ -442,8 +347,10 @@ stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
 
 
 static void
-stm32h7_eth_irq(stm32h7_eth_t *se)
+stm32h7_eth_irq(void *arg)
 {
+  stm32h7_eth_t *se = arg;
+
   const uint32_t dmacsr = reg_rd(ETH_DMACSR);
   const uint32_t mtlisr = reg_rd(ETH_MTLISR);
   const uint32_t macisr = reg_rd(ETH_MACISR);
@@ -463,24 +370,97 @@ stm32h7_eth_irq(stm32h7_eth_t *se)
   reg_wr(ETH_DMACSR, dmacsr);
 }
 
+
 void
-irq_61(void)
+stm32h7_eth_init(void)
 {
-  stm32h7_eth_irq(&stm32h7_eth);
-}
+  stm32h7_eth_t *se = &stm32h7_eth;
 
-static void  __attribute__((constructor(200)))
-eth_init(void)
-{
-  stm32h7_eth_init(&stm32h7_eth);
-  stm32h7_eth.se_eni.eni_output = stm32h7_eth_output;
+  se->se_eni.eni_addr[0] = 0x02;
+  se->se_eni.eni_addr[1] = 0x00;
 
-  printf("eth initialized ok at %p %02x:%02x:%02x:%02x:%02x:%02x\n",
-         &stm32h7_eth,
-         stm32h7_eth.se_eni.eni_addr[0],
-         stm32h7_eth.se_eni.eni_addr[1],
-         stm32h7_eth.se_eni.eni_addr[2],
-         stm32h7_eth.se_eni.eni_addr[3],
-         stm32h7_eth.se_eni.eni_addr[4],
-         stm32h7_eth.se_eni.eni_addr[5]);
+  uint32_t uuidcrc = crc32(0, (void *)0x1ff1e800, 12);
+  memcpy(&se->se_eni.eni_addr[2], &uuidcrc, 4);
+
+  se->se_tx_wrptr = 0;
+  se->se_next_rx = 0;
+  STAILQ_INIT(&se->se_rx_scatter_queue);
+  se->se_txring = xalloc(sizeof(desc_t) * ETH_TX_RING_SIZE, 0, MEM_TYPE_DMA);
+  se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0, MEM_TYPE_DMA);
+
+  clk_enable(CLK_SYSCFG);
+
+  static const uint8_t gpios[] =
+    { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7),
+      GPIO_PB(13),
+      GPIO_PC(1), GPIO_PC(4), GPIO_PC(5),
+      GPIO_PG(11), GPIO_PG(13)
+    };
+
+  for(size_t i = 0; i < sizeof(gpios); i++) {
+    gpio_conf_af(gpios[i], 11, GPIO_PUSH_PULL,
+                 GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
+  }
+
+  reg_set_bits(SYSCFG_BASE + 0x4, 21, 3, 4);
+
+  clk_enable(CLK_ETH1MACEN);
+  clk_enable(CLK_ETH1TXEN);
+  clk_enable(CLK_ETH1RXEN);
+
+  reg_set_bits(0x58024480, 15, 1, 1);
+  reg_set_bits(0x58024480, 15, 1, 0);
+
+  // Soft reset
+  reg_set_bit(ETH_DMAMR, 0);
+  while(reg_rd(ETH_DMAMR) & 1) {}
+
+  reg_wr(ETH_MACPFR, 1 << 31);  // Receive ALL
+
+  reg_set_bit(ETH_MTLTXQOMR, 1);
+
+  reg_set_bits(ETH_DMACTXCR, 16, 5, 1);
+
+  reg_set_bits(ETH_DMACRXCR, 16, 5, 1);
+
+  reg_set_bits(ETH_DMACRXCR, 1, 14, PBUF_DATA_SIZE - DMA_BUFFER_PAD);
+
+  memset(se->se_txring, 0, sizeof(desc_t) * ETH_TX_RING_SIZE);
+  memset(se->se_rxring, 0, sizeof(desc_t) * ETH_RX_RING_SIZE);
+
+  reg_wr(ETH_DMACTXDLAR, (uint32_t)se->se_txring);
+  reg_wr(ETH_DMACTXRLR,  ETH_TX_RING_SIZE - 1);
+  reg_wr(ETH_DMACTXDTPR, (uint32_t)se->se_txring);
+
+  reg_wr(ETH_DMACRXDLAR, (uint32_t)se->se_rxring);
+  reg_wr(ETH_DMACRXRLR,  ETH_RX_RING_SIZE - 1);
+
+  for(int i = 0; i < ETH_RX_RING_SIZE; i++) {
+    void *buf = pbuf_data_get(0);
+    if(buf == NULL)
+      break;
+    desc_t *rx = se->se_rxring + i;
+    rx_desc_give(rx, buf);
+  }
+
+  reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
+
+  reg_set_bit(ETH_MACCR, 21); // CST: Strip CRC for type packets in RX path
+  //  reg_set_bit(ETH_MACCR, 20); // ACS: Strip CRC in RX path
+
+  reg_set_bit(ETH_MACCR, 0); // Enable RX
+  reg_set_bit(ETH_MACCR, 1); // Enable TX
+
+  reg_set_bit(ETH_MACCR, 14); // 100Mbit
+  reg_set_bit(ETH_MACCR, 13); // FullDuplex
+
+  // Start DMA
+  reg_set_bit(ETH_DMACRXCR, 0);
+  reg_set_bit(ETH_DMACTXCR, 0);
+
+  se->se_eni.eni_output = stm32h7_eth_output;
+  ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
+
+  irq_enable_fn_arg(61, IRQ_LEVEL_NET, stm32h7_eth_irq, se);
+  thread_create(stm32h7_phy_thread, se, 512, "phy", 0, 4);
 }

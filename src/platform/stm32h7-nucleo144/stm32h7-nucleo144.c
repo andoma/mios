@@ -5,6 +5,7 @@
 
 #include "stm32h7_clk.h"
 #include "stm32h7_usb.h"
+#include "stm32h7_eth.h"
 #include "stm32h7_uart.h"
 
 #include <usb/usb.h>
@@ -60,4 +61,5 @@ platform_init_late(void)
 
   stm32h7_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32h7-nucleo144", &q);
 
+  stm32h7_eth_init();
 }
