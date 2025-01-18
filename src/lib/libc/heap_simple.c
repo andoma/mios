@@ -17,7 +17,7 @@ static const unsigned long ebss_start = (long)&_ebss;
 
 static mutex_t heap_mutex = MUTEX_INITIALIZER("heap");
 
-SLIST_HEAD(heap_header_slist, heap_header);
+LIST_HEAD(heap_header_list, heap_header);
 
 typedef struct heap_block {
   struct heap_block *next;
@@ -26,12 +26,13 @@ typedef struct heap_block {
 } heap_block_t;
 
 
-static struct heap_header_slist heaps;
+static struct heap_header_list heaps;
 
 typedef struct heap_header {
   heap_block_t *blocks;
-  SLIST_ENTRY(heap_header) link;
-  int type;
+  LIST_ENTRY(heap_header) link;
+  uint16_t type;
+  uint16_t prio;
 } heap_header_t;
 
 
@@ -55,9 +56,15 @@ hb_size(const heap_block_t *hb)
 }
 
 
+static long
+heap_cmp(const heap_header_t *a, const heap_header_t *b)
+{
+  return a->prio > b->prio;
+}
+
 
 void
-heap_add_mem(long start, long end, int type)
+heap_add_mem(long start, long end, uint8_t type, uint8_t prio)
 {
   if(start == HEAP_START_EBSS) {
     start = ebss_start;
@@ -80,8 +87,9 @@ heap_add_mem(long start, long end, int type)
 
   hh->blocks = hb;
   hh->type = type;
+  hh->prio = prio;
   mutex_lock(&heap_mutex);
-  SLIST_INSERT_HEAD(&heaps, hh, link);
+  LIST_INSERT_SORTED(&heaps, hh, link, heap_cmp);
   mutex_unlock(&heap_mutex);
 }
 
@@ -139,7 +147,11 @@ heap_dump0(heap_block_t *hb)
 #endif
 
 
-
+const char *memtypeflags =
+  "LOCAL\0"
+  "DMA\0"
+  "NO-CACHE\0"
+  "VECTORS\0\0";
 
 static error_t
 cmd_mem(cli_t *cli, int argc, char **argv)
@@ -147,8 +159,11 @@ cmd_mem(cli_t *cli, int argc, char **argv)
   mutex_lock(&heap_mutex);
 
   heap_header_t *hh;
-  SLIST_FOREACH(hh, &heaps, link) {
-    cli_printf(cli, "Heap at %p type 0x%x\n", hh, hh->type);
+  LIST_FOREACH(hh, &heaps, link) {
+    cli_printf(cli, "Heap at %p  [", hh);
+    stprintflags(cli->cl_stream, memtypeflags, hh->type, ", ");
+    cli_printf(cli, "]\n");
+
     heap_block_t *hb = hh->blocks;
     size_t use = 0;
     size_t avail = 0;
@@ -277,16 +292,22 @@ malloc0(size_t size, size_t align, int type)
   int heap_type = type & 0xf;
 
   heap_header_t *hh;
-  SLIST_FOREACH(hh, &heaps, link) {
+
+  LIST_FOREACH(hh, &heaps, link) {
     heap_block_t *hb = hh->blocks;
-    if(hb != NULL && (heap_type == 0 || heap_type == hh->type)) {
-      void *x = heap_alloc(hb, size, align);
-      if(x) {
-        mutex_unlock(&heap_mutex);
-        return x;
-      }
+    if(hb == NULL)
+      continue;
+
+    if(heap_type && ((type & hh->type) != heap_type))
+      continue;
+
+    void *x = heap_alloc(hb, size, align);
+    if(x) {
+      mutex_unlock(&heap_mutex);
+      return x;
     }
   }
+
   mutex_unlock(&heap_mutex);
   if(!(type & MEM_MAY_FAIL))
     panic("Out of memory (s=%d a=%d t=%d)", size, align, type & 0xf);

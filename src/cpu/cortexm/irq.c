@@ -57,7 +57,7 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
   if(curvecs == (uint32_t)&vectors) {
     // Not yet relocated
     const size_t vecsize = (16 + CORTEXM_IRQ_COUNT) * sizeof(void *);
-    void *p = xalloc(vecsize, 0x200, MEM_TYPE_DMA);
+    void *p = xalloc(vecsize, 0x200, MEM_TYPE_VECTOR_TABLE);
     memcpy(p, &vectors, vecsize);
     *VTOR = (uint32_t)p;
   }

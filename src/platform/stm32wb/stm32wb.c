@@ -9,7 +9,8 @@ stm32wb_init(void)
 {
   void *SRAM2_end   = (void *)0x20000000 + 64 * 1024;
 
-  heap_add_mem(HEAP_START_EBSS, (long)SRAM2_end, MEM_TYPE_DMA);
+  heap_add_mem(HEAP_START_EBSS, (long)SRAM2_end,
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 0);
 
   printf("\nSTM32WB (%d kB Flash)\n", *FLASH_SIZE);
 }

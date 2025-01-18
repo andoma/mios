@@ -67,7 +67,8 @@ stm32f4_init(void)
   printf("\nSTM32F4%s (0x%x, %d kB Flash)\n", name, idcode, *FLASH_SIZE);
 
   // SRAM1
-  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end, MEM_TYPE_DMA);
+  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end,
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 10);
 
   pbuf_data_add((void *)0x20000000 + 112 * 1024,
                 (void *)0x20000000 + 128 * 1024);

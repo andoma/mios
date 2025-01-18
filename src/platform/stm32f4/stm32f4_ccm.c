@@ -29,7 +29,7 @@ stm32f4_ccm_init(void)
   // Last 256 bytes are used as panic-buffer as CCM is not cleared on reset
 
   clk_enable(CLK_CCMDATARAMEN);
-  heap_add_mem(0x10000000 + sizeof(cpu_t), 0x1000ff00, MEM_TYPE_LOCAL);
+  heap_add_mem(0x10000000 + sizeof(cpu_t), 0x1000ff00, MEM_TYPE_LOCAL, 5);
 
   if(panic_buf->magic == PANIC_MAGIC) {
     evlog(LOG_ERR, "Previous panic: %s", panic_buf->message);

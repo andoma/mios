@@ -385,8 +385,10 @@ stm32h7_eth_init(void)
   se->se_tx_wrptr = 0;
   se->se_next_rx = 0;
   STAILQ_INIT(&se->se_rx_scatter_queue);
-  se->se_txring = xalloc(sizeof(desc_t) * ETH_TX_RING_SIZE, 0, MEM_TYPE_DMA);
-  se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0, MEM_TYPE_DMA);
+  se->se_txring = xalloc(sizeof(desc_t) * ETH_TX_RING_SIZE, 0,
+                         MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
+  se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0,
+                         MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
 
   clk_enable(CLK_SYSCFG);
 

@@ -58,7 +58,8 @@ stm32g4_init(void)
          *FLASH_SIZE, category, sram1_size, sram2_size, ccm_size, chipid);
 
   void *SRAM1_end   = (void *)0x20000000 + sram1_size * 1024;
-  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end, MEM_TYPE_DMA);
+  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end,
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 20);
 
   void *SRAM2_start = SRAM1_end;
   void *SRAM2_end   = SRAM2_start + sram2_size * 1024;
@@ -66,7 +67,7 @@ stm32g4_init(void)
 
   void *CCM_start = (void *)0x10000000 + sizeof(cpu_t);
   void *CCM_end = (void *)0x10000000 + ccm_size * 1024;
-  heap_add_mem((long)CCM_start, (long)CCM_end, MEM_TYPE_LOCAL);
+  heap_add_mem((long)CCM_start, (long)CCM_end, MEM_TYPE_LOCAL, 10);
 
   // Enable cycle counter
   *SCB_DEMCR |= 0x01000000;

@@ -40,6 +40,7 @@ stm32g0_init(void)
   void *SRAM1_end   = (void *)0x20000000 + ramsize * 1024;
 
   // SRAM1
-  heap_add_mem((long)SRAM1_start, (long)SRAM1_end, MEM_TYPE_DMA);
+  heap_add_mem((long)SRAM1_start, (long)SRAM1_end,
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 10);
 
 }
