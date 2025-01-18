@@ -29,24 +29,14 @@ cpu_fpu_enable(int on)
 }
 
 static inline void
-cpu_unmap_null(int size_power_of_two)
-{
-  static volatile uint32_t * const MPU_RBAR = (uint32_t *)0xe000ed9c;
-  static volatile uint32_t * const MPU_RASR = (uint32_t *)0xe000eda0;
-
-  size_power_of_two--;
-  *MPU_RBAR = 0 | 0x16;                     // Set MPU to region 6 and address 0
-
-  // Map no access and no-execute
-  *MPU_RASR = (1 << 28) | (size_power_of_two << 1) | 1;
-}
-
-
-static inline void
 cpu_stack_redzone(thread_t *t)
 {
+#ifdef CPU_STACK_REDZONE_SIZE
   static volatile unsigned int * const MPU_RBAR = (unsigned int *)0xe000ed9c;
-  *MPU_RBAR = (intptr_t)t->t_sp_bottom | 0x17;
+  extern uint32_t redzone_rbar_bits;
+
+  *MPU_RBAR = (intptr_t)t->t_sp_bottom | redzone_rbar_bits;
+#endif
 }
 
 void cpu_fpu_ctx_init(int *ctx);

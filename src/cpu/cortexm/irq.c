@@ -4,7 +4,9 @@
 #include <malloc.h>
 #include <string.h>
 #include <mios/mios.h>
+
 #include "irq.h"
+#include "cache.h"
 
 static volatile unsigned int * const ICSR    = (unsigned int *)0xe000ed04;
 
@@ -68,6 +70,9 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
   NVIC_IPR[irq] = IRQ_LEVEL_TO_PRI(level);
 #endif
   NVIC_ISER[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
+
+  dcache_op(vtable, (16 + CORTEXM_IRQ_COUNT) * sizeof(void *), DCACHE_CLEAN);
+  icache_invalidate();
   irq_permit(q);
 }
 
@@ -106,6 +111,9 @@ irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg)
   memcpy(p, irq_fpu_trampoline, sizeof(irq_fpu_trampoline));
   p[13] = (uint32_t)fn;
   p[14] = (uint32_t)arg;
+
+  dcache_op(p, sizeof(irq_fpu_trampoline), DCACHE_CLEAN);
+
   irq_enable_fn(irq, level, (void *)p + 1);
 }
 
@@ -130,6 +138,9 @@ irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg)
   p[1] = 0x47184801;
   p[2] = (uint32_t)fn;
   p[3] = (uint32_t)arg;
+
+  dcache_op(p, 16, DCACHE_CLEAN);
+
   irq_enable_fn(irq, level, (void *)p + 1);
 }
 

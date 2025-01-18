@@ -8,6 +8,7 @@
 #include "stm32f4_reg.h"
 #include "cpu.h"
 #include "irq.h"
+#include "mpu.h"
 
 #include <net/pbuf.h>
 
@@ -86,7 +87,7 @@ stm32f4_init(void)
   *DWT_LAR = 0xC5ACCE55; // unlock
   *DWT_CONTROL = 1;
 
-  cpu_unmap_null(27); // Map first 128MB unreachable
+  mpu_add_region(NULL, 27, MPU_XN);
 }
 
 static void

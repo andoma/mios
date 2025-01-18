@@ -78,3 +78,17 @@ cpu_idle(void)
     asm volatile ("wfi");
   }
 }
+
+
+void __attribute__((weak))
+dcache_op(void *addr, size_t size, uint32_t flags)
+{
+
+}
+
+
+void __attribute__((weak))
+icache_invalidate(void)
+{
+
+}
