@@ -7,6 +7,8 @@
 #include <net/pbuf.h>
 
 #include "stm32h7_clk.h"
+#include "cache.h"
+#include "mpu.h"
 
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1FF1E880;
 static volatile uint32_t *const LINE_ID      = (volatile uint32_t *)0x1FF1E8c0;
@@ -61,17 +63,34 @@ stm32h7_init(void)
 
   if(axi_sram_size)
     heap_add_mem(0x24000000, 0x24000000 + axi_sram_size * 1024,
-                 MEM_TYPE_DMA);
+                 MEM_TYPE_VECTOR_TABLE | MEM_TYPE_DMA, 20);
 
   // DTCM
   void *DTCM_end   = (void *)0x20000000 + 128 * 1024;
-  heap_add_mem(HEAP_START_EBSS, (long)DTCM_end, 0);
+  heap_add_mem(HEAP_START_EBSS, (long)DTCM_end,
+               MEM_TYPE_VECTOR_TABLE | MEM_TYPE_LOCAL, 10);
 
-  // Packet buffers from SRAM2
-  //  pbuf_data_add((void *)0x30020000, (void *)0x30020000 + 32 * 1024);
+  switch(line_id) {
+  case 0x48373233: // STM32H723
+    // SRAM1
+    mpu_add_region((void *)0x30000000, 14,
+                   MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
+    pbuf_data_add((void *)0x30000000, (void *)0x30004000);
+
+    // SRAM2
+    mpu_add_region((void *)0x30004000, 14,
+                   MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
+    heap_add_mem(0x30004000, 0x30008000,
+                 MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 30);
+
+    // SRAM4
+    mpu_add_region((void *)0x38000000, 14,
+                   MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
+    heap_add_mem(0x38000000, 0x38004000,
+                 MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
+    break;
+  }
 }
-
-
 
 
 const struct serial_number

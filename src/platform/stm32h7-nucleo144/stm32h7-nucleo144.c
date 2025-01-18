@@ -15,7 +15,12 @@
 static void __attribute__((constructor(101)))
 board_setup_clocks(void)
 {
-  stm32h7_init_pll();
+  stm32h7_init_pll(8, STM32H7_HSE_NO_XTAL);
+
+  static stm32_uart_stream_t console;
+  stdio = stm32h7_uart_init(&console, 3, 115200, GPIO_PD(8), GPIO_PD(9),
+                            UART_CTRLD_IS_PANIC, "console");
+
 }
 
 
@@ -26,9 +31,6 @@ board_setup_clocks(void)
 static void __attribute__((constructor(110)))
 board_init_console(void)
 {
-  static stm32_uart_stream_t console;
-  stdio = stm32h7_uart_init(&console, 3, 115200, GPIO_PD(8), GPIO_PD(9),
-                            UART_CTRLD_IS_PANIC, "console");
 
   gpio_conf_af(GPIO_PC(9), 0, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 

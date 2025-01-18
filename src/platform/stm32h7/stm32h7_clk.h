@@ -91,7 +91,9 @@ clk_disable(uint16_t id)
 
 unsigned int clk_get_freq(uint16_t id);
 
-void stm32h7_init_pll(void);
+#define STM32H7_HSE_NO_XTAL   0x1 // HSE is a clock, no xtal
+
+const char *stm32h7_init_pll(unsigned int hse_freq, uint32_t flags);
 
 #define RST_ID(reg, bit) ((((reg) & 0xff) << 8) | (bit))
 
