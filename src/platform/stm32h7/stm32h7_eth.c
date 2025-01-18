@@ -120,7 +120,7 @@ typedef struct {
 #define ETH_TX_RING_SIZE 16
 #define ETH_TX_RING_MASK (ETH_TX_RING_SIZE - 1)
 
-#define ETH_RX_RING_SIZE 16
+#define ETH_RX_RING_SIZE 8
 #define ETH_RX_RING_MASK (ETH_RX_RING_SIZE - 1)
 
 typedef struct stm32h7_eth {
@@ -286,7 +286,7 @@ static void
 handle_irq_tx(stm32h7_eth_t *se)
 {
   while(se->se_tx_rdptr != se->se_tx_wrptr) {
-    desc_t *tx = se->se_txring + (se->se_tx_rdptr & ETH_RX_RING_MASK);
+    desc_t *tx = se->se_txring + (se->se_tx_rdptr & ETH_TX_RING_MASK);
 
     const uint32_t w3 = tx->w3;
     if(w3 & ETH_TDES3_OWN)
