@@ -47,7 +47,8 @@ voltage_scaling(int level)
 
 
 /*
-
+ PLL1p will be configured to run at CPU_SYSCLK_MHZ
+ This also generates the bus clocks as follows:
  D1 DOMAIN
    CPU Freq  @ CPU_SYSCLK_MHZ
    |
@@ -67,21 +68,28 @@ voltage_scaling(int level)
  D3 DOMAIN  |
             +------------ => AHB4
             +--- /D3PPRE  => APB4  CPU_SYSCLK_MHZ / 4
+
 */
+
+
+static uint32_t ahb_freq = 64000000; // Default after reset
+static uint32_t apb_freq = 64000000; // Default after reset
+static uint32_t pll2q_freq;
 
 
 const char *
 stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 {
+  int pll2_freq = 500000000;
+
   reg_clr_bit(PWR_CR3, 2); // Disable SMPS
   while(reg_get_bit(PWR_CSR1, 13) == 0) {}
 
   int sysclk_freq = CPU_SYSCLK_MHZ;
   int axi_freq = sysclk_freq / 2;
 
-  const uint32_t pll1m = 1; // Input prescaler (1 == divide  by 1)
-  const uint32_t pll2m = 1; // Input prescaler (1 == divide  by 1)
-  const uint32_t pll3m = 1; // Input prescaler (1 == divide  by 1)
+  ahb_freq = 1000000 * sysclk_freq / 2;
+  apb_freq = 1000000 * sysclk_freq / 4;
 
   int vos;
   if(sysclk_freq > 400) {
@@ -119,10 +127,6 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
     hse_freq = 8;
   }
 
-  uint32_t plln = (sysclk_freq / hse_freq) - 1;
-  uint32_t pllp = 0;
-  uint32_t pllq = 20;
-
   uint32_t d1cpre  = 0;
   uint32_t hpre    = 0x8; // Divide by 2
   uint32_t d1ppre  = 0x4; // Divide by 2
@@ -145,6 +149,22 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   reg_wr(RCC_D3CFGR, d3ppre << 4);
 
 
+  const uint32_t pll1m = 1; // Input prescaler (1 == divide  by 1)
+  const uint32_t pll2m = 1; // Input prescaler (1 == divide  by 1)
+  const uint32_t pll3m = 1; // Input prescaler (1 == divide  by 1)
+
+  uint32_t pll1n = (sysclk_freq / hse_freq) - 1;
+  uint32_t pll1p = 0;
+  uint32_t pll1q = 0;
+  uint32_t pll1r = 0;
+
+  pll2q_freq = 100000000;
+
+  uint32_t pll2n = (pll2_freq / hse_freq) - 1;
+  uint32_t pll2p = 0;
+  uint32_t pll2q = (pll2_freq / pll2q_freq) - 1;
+  uint32_t pll2r = 0;
+
   // Set prescalers for PLLx
   reg_wr(RCC_PLLCKSELR,
          pllscr |
@@ -152,18 +172,18 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
          pll2m << 12 |
          pll3m << 20);
 
-
   // PLLx input rage (8-16 MHz) - output enables
   reg_wr(RCC_PLLCFGR,
          (3 << 2)  | // PLL1 Input range
          (3 << 6)  | // PLL2 Input range
          (3 << 10) | // PLL3 Input range
          (1 << 16) | // PLL1(p) enable
-         (1 << 17) | // PLL1(q) enable
+         (1 << 20) | // PLL2(q) enable
          0);
 
   // Write multiplier and output divider
-  reg_wr(RCC_PLL1DIVR, (pllq << 16) | (pllp << 9) | plln);
+  reg_wr(RCC_PLL1DIVR, (pll1r << 24) | (pll1q << 16) | (pll1p << 9) | pll1n);
+  reg_wr(RCC_PLL2DIVR, (pll2r << 24) | (pll2q << 16) | (pll2p << 9) | pll2n);
 
   set_flash_latency(axi_freq, vos);
 
@@ -171,13 +191,29 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 
   // Start PLL1
   reg_set_bit(RCC_CR, 24);
-
   // Wait for PLL1
   while(!(reg_rd(RCC_CR) & (1 << 25))) {}
+
+  // Start PLL2
+  reg_set_bit(RCC_CR, 26);
+  // Wait for PLL2
+  while(!(reg_rd(RCC_CR) & (1 << 27))) {}
 
   // Switch to PLL1
   reg_set_bits(RCC_CFGR, 0, 3, 3);
   while(((reg_rd(RCC_CFGR) >> 3) & 0x7) != 3) {}
+
+  // Turn on HSI48 (USB and RNG)
+  reg_set_bit(RCC_CR, 12);
+  while(!reg_get_bit(RCC_CR, 13)) {}
+
+  reg_wr(RCC_D2CCIP1R,
+         (0b10 << 28) | // FDCAN clocked from pll2q
+         0);
+
+  reg_wr(RCC_D2CCIP2R,
+         (0b11 << 20) | // USB clocked from HSI48
+         0);
 
   return NULL;
 }
@@ -186,11 +222,33 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 unsigned int
 clk_get_freq(uint16_t id)
 {
-  // TODO: Fix this incorrect hack
-  return CPU_SYSTICK_RVR / 4;
+  uint8_t bus = id >> 8;
+
+  switch(id) {
+  case CLK_FDCAN:
+    return pll2q_freq;
+  }
+
+  switch(bus) {
+  case RCC_AHB1RSTR & 0xff:
+  case RCC_AHB1ENR & 0xff:
+  case RCC_AHB4ENR & 0xff:
+  case RCC_AHB1LPENR & 0xff:
+    return ahb_freq;
+
+  case RCC_APB1LRSTR & 0xff:
+  case RCC_APB1HRSTR & 0xff:
+  case RCC_APB1LENR & 0xff:
+  case RCC_APB1HENR & 0xff:
+  case RCC_APB2ENR & 0xff:
+  case RCC_APB4ENR & 0xff:
+    return apb_freq;
+  default:
+    panic("Can't resolve clkid 0x%x into freq", id);
+  }
 }
 
-#include <stdio.h>
+
 void
 reset_peripheral(uint16_t id)
 {

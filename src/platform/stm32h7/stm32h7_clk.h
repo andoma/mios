@@ -13,6 +13,9 @@
 #define RCC_PLLCKSELR     (RCC_BASE + 0x28)
 #define RCC_PLLCFGR       (RCC_BASE + 0x2c)
 #define RCC_PLL1DIVR      (RCC_BASE + 0x30)
+#define RCC_PLL2DIVR      (RCC_BASE + 0x38)
+#define RCC_PLL3DIVR      (RCC_BASE + 0x40)
+#define RCC_D2CCIP1R      (RCC_BASE + 0x50)
 #define RCC_D2CCIP2R      (RCC_BASE + 0x54)
 
 #define RCC_AHB1RSTR      (RCC_BASE + 0x80)
@@ -31,6 +34,7 @@
 #define CLK_ID(reg, bit) ((((reg) & 0xff) << 8) | (bit))
 
 
+#define CLK_FDCAN     CLK_ID(RCC_APB1HENR, 8)
 #define CLK_CSR       CLK_ID(RCC_APB1HENR, 1)
 
 #define CLK_DMA1      CLK_ID(RCC_AHB1ENR, 0)
