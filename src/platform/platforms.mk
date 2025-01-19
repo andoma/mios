@@ -5,9 +5,12 @@ ALLPLATFORMS := \
 	stm32f407g-disc1 \
 	bluefruit-nrf52 \
 	stm32f439-nucleo144 \
+	stm32g4-usb \
 	vexpress-a9 \
 
 ${ALLPLATFORMS}:
 	$(MAKE) PLATFORM=$@
 
 allplatforms: ${ALLPLATFORMS}
+
+.NOTPARALLEL: ${ALLPLATFORMS}
