@@ -51,8 +51,6 @@ mpu_add_region(void *ptr, int size_power_of_two, uint32_t flags)
     (size_power_of_two << 1) | // size
     1; // enable
 
-  printf("RBAR: 0x%08x  RASR: 0x%08x\n", rbar, rasr);
-
   *MPU_RBAR = rbar;
   *MPU_RASR = rasr;
 }
