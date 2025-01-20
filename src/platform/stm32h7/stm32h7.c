@@ -45,6 +45,7 @@ stm32h7_init(void)
 
   switch(line_id) {
   case 0x48373233: // STM32H723
+  case 0x48373235: // STM32H725
     axi_sram_size = 128;
     break;
 
@@ -72,6 +73,7 @@ stm32h7_init(void)
 
   switch(line_id) {
   case 0x48373233: // STM32H723
+  case 0x48373235: // STM32H725
     // SRAM1
     mpu_add_region((void *)0x30000000, 14,
                    MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
