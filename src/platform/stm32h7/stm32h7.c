@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <malloc.h>
+#include <string.h>
 
 #include <mios/sys.h>
 #include <mios/cli.h>
@@ -22,7 +23,18 @@ enter_dfu(void)
 
 }
 
-
+static const char *packages =
+  "VFQFPN68\0"
+  "LQFP100 Legacy / TFBGA100 Legacy\0"
+  "LQFP100\0"
+  "TFBGA100\0"
+  "WLCSP115\0"
+  "LQFP144\0"
+  "UFBGA144\0"
+  "LQFP144\0"
+  "UFBGA169\0"
+  "UFBGA176+25\0"
+  "LQFP176\0\0";
 
 static void  __attribute__((constructor(120)))
 stm32h7_init(void)
@@ -30,14 +42,7 @@ stm32h7_init(void)
   clk_enable(CLK_SYSCFG);
 
   uint32_t pkg = *SYSCFG_PKGR & 0xf;
-  const char *pkgstr = "???";
-
-  switch(pkg) {
-  case 0: pkgstr = "LQFP100"; break;
-  case 2: pkgstr = "TQFP144"; break;
-  case 5: pkgstr = "TQFP176/UFBGA176"; break;
-  case 8: pkgstr = "LQFP208/TFBGA240"; break;
-  }
+  const char *pkgstr = strtbl(packages, pkg);
 
   const int flash_size = *FLASH_SIZE;
   const uint32_t line_id = *LINE_ID;
@@ -47,7 +52,7 @@ stm32h7_init(void)
          line_id >> 16,
          line_id >> 8,
          line_id,
-         pkgstr, flash_size);
+         pkgstr ?: "???", flash_size);
 
 
   long axi_sram_size = 0;
