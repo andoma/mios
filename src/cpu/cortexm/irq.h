@@ -168,4 +168,4 @@ irq_ack(int irq)
 
 void systick_deinit(void);
 
-void softreset(void) __attribute__((noreturn));
+void softreset(unsigned int vtor) __attribute__((noreturn));

@@ -23,7 +23,6 @@ static volatile unsigned int * const NVIC_ISER = (unsigned int *)0xe000e100;
 static volatile unsigned int * const NVIC_ICER = (unsigned int *)0xe000e180;
 static volatile unsigned int * const NVIC_ICPR = (unsigned int *)0xe000e280;
 static volatile unsigned int * const VTOR  = (unsigned int *)0xe000ed08;
-static volatile unsigned int * const MPU_CTRL = (unsigned int *)0xe000ed94;
 
 #ifdef HAVE_BASEPRI
 static volatile uint8_t * const NVIC_IPR  = (uint8_t *)0xe000e400;
@@ -155,16 +154,14 @@ irq_init(void)
 #endif
 }
 
-extern void cpu_softreset(void) __attribute__((noreturn));
+extern void cpu_softreset(uint32_t vtor) __attribute__((noreturn));
 
 void
-softreset(void)
+softreset(uint32_t vtor)
 {
-  *MPU_CTRL = 0;      // Disable MPU
-
   asm volatile ("cpsid i;isb;dsb");
 
-  *VTOR = 0;
+  *VTOR = vtor;
 
   for(int i = 0; i < (CORTEXM_IRQ_COUNT + 31) / 32; i++) {
     NVIC_ICER[i] = 0xffffffff;
@@ -177,5 +174,5 @@ softreset(void)
 
   *SYST_SHPR3 = 0;
 #endif
-  cpu_softreset();
+  cpu_softreset(vtor);
 }

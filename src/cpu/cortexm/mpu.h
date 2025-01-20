@@ -13,3 +13,5 @@
 #define MPU_NORMAL_NON_SHARED_NON_CACHED ((0b001 << 19))
 
 void mpu_add_region(void *ptr, int size_power_of_two, uint32_t flags);
+
+void mpu_disable(void);

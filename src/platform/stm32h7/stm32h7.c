@@ -3,16 +3,25 @@
 #include <malloc.h>
 
 #include <mios/sys.h>
+#include <mios/cli.h>
 
 #include <net/pbuf.h>
 
 #include "stm32h7_clk.h"
 #include "cache.h"
 #include "mpu.h"
+#include "irq.h"
 
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1FF1E880;
 static volatile uint32_t *const LINE_ID      = (volatile uint32_t *)0x1FF1E8c0;
 static volatile uint32_t *const SYSCFG_PKGR  = (volatile uint32_t *)0x58000524;
+
+static void __attribute__((constructor(101)))
+enter_dfu(void)
+{
+
+}
+
 
 
 static void  __attribute__((constructor(120)))
@@ -103,3 +112,16 @@ sys_get_serial_number(void)
   sn.len = 12;
   return sn;
 }
+
+
+static error_t
+cmd_dfu(cli_t *cli, int argc, char **argv)
+{
+  irq_forbid(IRQ_LEVEL_ALL);
+  mpu_disable();
+  fini();
+  systick_deinit();
+  softreset(0x1ff09800);
+}
+
+CLI_CMD_DEF("dfu", cmd_dfu);

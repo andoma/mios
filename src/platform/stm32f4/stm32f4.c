@@ -116,18 +116,17 @@ cpu_idle(void)
 
 
 static volatile uint32_t *const SYSCFG_MEMRMP = (volatile uint32_t *)0x40013800;
-static volatile uint32_t * const MPU_CTRL = (uint32_t *)0xe000ed94;
 
 static error_t
 cmd_dfu(cli_t *cli, int argc, char **argv)
 {
-  *MPU_CTRL = 0; // Disable MPU
-
   irq_forbid(IRQ_LEVEL_ALL);
+  mpu_disable();
+
   fini();
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
   systick_deinit();
-  softreset();
+  softreset(0);
 }
 
 CLI_CMD_DEF("dfu", cmd_dfu);

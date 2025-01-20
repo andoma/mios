@@ -11,6 +11,13 @@ static volatile uint32_t * const MPU_CTRL = (uint32_t *)0xe000ed94;
 static volatile uint32_t * const MPU_RBAR = (uint32_t *)0xe000ed9c;
 static volatile uint32_t * const MPU_RASR = (uint32_t *)0xe000eda0;
 
+
+void
+mpu_disable(void)
+{
+  *MPU_CTRL = 0;
+}
+
 static void __attribute__((constructor(151)))
 mpu_init(void)
 {

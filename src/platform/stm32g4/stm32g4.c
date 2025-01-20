@@ -8,6 +8,7 @@
 
 #include "cpu.h"
 #include "irq.h"
+#include "mpu.h"
 
 #include "stm32g4_clk.h"
 #include "stm32g4_usb.h"
@@ -81,12 +82,13 @@ static error_t
 cmd_dfu(cli_t *cli, int argc, char **argv)
 {
   irq_forbid(IRQ_LEVEL_ALL);
+  mpu_disable();
   fini();
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
   stm32g4_usb_stop();
   stm32g4_deinit_clk();
   systick_deinit();
-  softreset();
+  softreset(0);
 }
 
 CLI_CMD_DEF("dfu", cmd_dfu);

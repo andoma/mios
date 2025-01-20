@@ -12,7 +12,7 @@
 
 #define BLINK_GPIO  GPIO_PB(0) // Green led (User LD1)
 
-static void __attribute__((constructor(101)))
+static void __attribute__((constructor(102)))
 board_setup_clocks(void)
 {
   stm32h7_init_pll(8, STM32H7_HSE_NO_XTAL);

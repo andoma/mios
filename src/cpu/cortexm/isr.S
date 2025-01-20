@@ -6,7 +6,7 @@
 start:
         cpsid i
 
-        // Initialize MSP stack with known value
+        // Fill MSP stack with poison value
         ldr r0,=_sdata
         ldr r1,=#0x20000000
         ldr r2,=#0xdeadcafe
@@ -69,11 +69,11 @@ pendsv:
 
         .global cpu_softreset
 cpu_softreset:
-        movs r0, #0
-        msr control, r0
-        msr primask, r0
-        msr faultmask, r0
-        msr basepri, r0
+        movs r0, #1
+        msr control, r1
+        msr primask, r1
+        msr faultmask, r1
+        msr basepri, r1
         isb
         ldr r1, [r0]
         ldr r2, [r0, #4]
