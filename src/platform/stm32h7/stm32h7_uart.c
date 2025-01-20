@@ -33,11 +33,12 @@ static const struct {
   uint8_t irq;
   uint8_t af;
 } uart_config[] = {
-  { 0,      0,          37, 7},
+  { 0x0110, CLK_USART1, 37, 7},
   { 0x0044, CLK_USART2, 38, 7},
   { 0x0048, CLK_USART3, 39, 7},
   { 0x004c, CLK_USART4, 52, 8},
   { 0x0050, CLK_USART5, 53, 8},
+  { 0x0114, CLK_USART6, 71, 7},
 };
 
 
@@ -72,3 +73,4 @@ void irq_38(void) { uart_irq(uarts[1]); }
 void irq_39(void) { uart_irq(uarts[2]); }
 void irq_52(void) { uart_irq(uarts[3]); }
 void irq_53(void) { uart_irq(uarts[4]); }
+void irq_71(void) { uart_irq(uarts[5]); }
