@@ -15,7 +15,7 @@
 static void __attribute__((constructor(102)))
 board_setup_clocks(void)
 {
-  stm32h7_init_pll(8, STM32H7_HSE_NO_XTAL);
+  stm32h7_init_pll(8000000, STM32H7_HSE_NO_XTAL);
 
   static stm32_uart_stream_t console;
   stdio = stm32h7_uart_init(&console, 3, 115200, GPIO_PD(8), GPIO_PD(9),
