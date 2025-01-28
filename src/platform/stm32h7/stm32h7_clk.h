@@ -61,6 +61,13 @@
 
 #define CLK_CRC       CLK_ID(RCC_AHB4ENR, 19)
 
+#define CLK_TIM2    CLK_ID(RCC_APB1LENR, 0)
+#define CLK_TIM3    CLK_ID(RCC_APB1LENR, 1)
+#define CLK_TIM4    CLK_ID(RCC_APB1LENR, 2)
+#define CLK_TIM5    CLK_ID(RCC_APB1LENR, 3)
+#define CLK_TIM6    CLK_ID(RCC_APB1LENR, 4)
+#define CLK_TIM7    CLK_ID(RCC_APB1LENR, 5)
+
 #define CLK_SPI2    CLK_ID(RCC_APB1LENR, 14)
 #define CLK_SPI3    CLK_ID(RCC_APB1LENR, 15)
 
@@ -97,6 +104,12 @@ static inline void
 clk_disable(uint16_t id)
 {
   reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
+}
+
+static inline int
+clk_is_enabled(uint16_t id)
+{
+  return reg_get_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
 
 unsigned int clk_get_freq(uint16_t id);
