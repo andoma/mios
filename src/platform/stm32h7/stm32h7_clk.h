@@ -17,6 +17,7 @@
 #define RCC_PLL3DIVR      (RCC_BASE + 0x40)
 #define RCC_D2CCIP1R      (RCC_BASE + 0x50)
 #define RCC_D2CCIP2R      (RCC_BASE + 0x54)
+#define RCC_D3CCIPR       (RCC_BASE + 0x58)
 
 #define RCC_AHB1RSTR      (RCC_BASE + 0x80)
 #define RCC_APB1LRSTR     (RCC_BASE + 0x90)
@@ -39,6 +40,7 @@
 
 #define CLK_DMA1      CLK_ID(RCC_AHB1ENR, 0)
 #define CLK_DMA2      CLK_ID(RCC_AHB1ENR, 1)
+#define CLK_ADC12     CLK_ID(RCC_AHB1ENR, 5)
 
 #define CLK_ETH1MACEN CLK_ID(RCC_AHB1ENR, 15)
 #define CLK_ETH1RXEN  CLK_ID(RCC_AHB1ENR, 16)

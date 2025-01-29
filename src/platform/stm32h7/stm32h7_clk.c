@@ -69,6 +69,10 @@ voltage_scaling(int level)
             +------------ => AHB4
             +--- /D3PPRE  => APB4  CPU_SYSCLK_MHZ / 4
 
+
+ For a duty cycle close to 50%, DIV[P/Q/R]x divisor shall be even.
+ Thus the value in the register should be odd
+
 */
 
 
@@ -83,7 +87,7 @@ static uint32_t pll2p_freq;
 const char *
 stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 {
-  int pll2_freq = 500 * MHZ;
+  int pll2_freq = 400 * MHZ;
 
   reg_clr_bit(PWR_CR3, 2); // Disable SMPS
   while(reg_get_bit(PWR_CSR1, 13) == 0) {}
@@ -162,12 +166,13 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   const uint32_t pll1r = 0;
 
   pll2q_freq = 100 * MHZ;
-  pll2p_freq = 100 * MHZ;
+  pll2p_freq = 200 * MHZ;
 
   const uint32_t pll2n = (pll2_freq / hse_freq) - 1;
   const uint32_t pll2p = (pll2_freq / pll2p_freq) - 1;
   const uint32_t pll2q = (pll2_freq / pll2q_freq) - 1;
   const uint32_t pll2r = 0;
+
 
   // Set prescalers for PLLx
   reg_wr(RCC_PLLCKSELR,
@@ -234,7 +239,9 @@ clk_get_freq(uint16_t id)
   case CLK_SPI1:
   case CLK_SPI2:
   case CLK_SPI3:
+  case CLK_ADC12:
     return pll2p_freq;
+
   case CLK_FDCAN:
     return pll2q_freq;
   }

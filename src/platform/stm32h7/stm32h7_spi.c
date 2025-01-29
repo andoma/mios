@@ -9,17 +9,6 @@
 
 #include <stdlib.h>
 
-#define SPI_CR1    0x00
-#define SPI_CR2    0x04
-#define SPI_CFG1   0x08
-#define SPI_CFG2   0x0c
-#define SPI_IER    0x10
-#define SPI_SR     0x14
-#define SPI_IFCR   0x18
-#define SPI_TXDR   0x20
-#define SPI_RXDR   0x30
-
-
 typedef struct stm32h7_spi {
   spi_t spi;
   uint32_t reg_base;
@@ -31,9 +20,6 @@ typedef struct stm32h7_spi {
 
 } stm32h7_spi_t;
 
-#define SPI1_BASE 0x40013000
-#define SPI2_BASE 0x40003800
-#define SPI3_BASE 0x40003c00
 
 static const struct {
   uint32_t reg_base;
