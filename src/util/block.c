@@ -168,7 +168,7 @@ verifier_write(struct block_iface *bi, size_t block,
     return err;
   }
 
-  void *copy = xalloc(length, 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  void *copy = xalloc(length, CACHE_LINE_SIZE, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(copy == NULL) {
     if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
       panic("blockverifier: no mem");
@@ -211,7 +211,7 @@ verifier_read(struct block_iface *bi, size_t block,
   if(v->flags & BLOCK_VERIFIER_DUMP)
     sthexdump(stdio, "READ ", data, length, block * 4096 + offset);
 
-  void *copy = xalloc(length, 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  void *copy = xalloc(length, CACHE_LINE_SIZE, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(copy == NULL) {
     if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
       panic("blockverifier: no mem");

@@ -43,7 +43,7 @@ icache_enable(void)
   uint32_t ways = ((ccsidr >> 3) & 0x3ff) + 1;
 
   printf("I-Cache %dkB (Sets:%d Ways:%d)\n",
-         (32 * sets * ways) / 1024, sets, ways);
+         (CACHE_LINE_SIZE * sets * ways) / 1024, sets, ways);
 
   icache_invalidate();
   *SCB_CCR |= (1 << 17);
@@ -57,9 +57,9 @@ dcache_op(void *addr, size_t size, uint32_t flags)
   uint32_t begin = (intptr_t)addr;
   uint32_t end = (intptr_t)addr + size;
 
-  begin &= ~31;
-  end += 31;
-  end &= ~31;
+  begin &= ~(CACHE_LINE_SIZE - 1);
+  end += (CACHE_LINE_SIZE - 1);
+  end &= ~(CACHE_LINE_SIZE - 1);
 
   asm volatile("dsb");
 
@@ -76,7 +76,7 @@ dcache_op(void *addr, size_t size, uint32_t flags)
 
   while(begin < end) {
     *reg = begin;
-    begin += 32;
+    begin += CACHE_LINE_SIZE;
   }
   asm volatile("dsb\n\tisb");
 }
@@ -94,7 +94,7 @@ dcache_enable(void)
   uint32_t ways = ((ccsidr >> 3) & 0x3ff) + 1;
 
   printf("D-Cache %dkB (Sets:%d Ways:%d)\n",
-         (32 * sets * ways) / 1024, sets, ways);
+         (CACHE_LINE_SIZE * sets * ways) / 1024, sets, ways);
 
   // Invalidate entire D-cache before we enable
   for(uint32_t s = 0; s < sets; s++) {

@@ -8,17 +8,28 @@
 #include <mios/mios.h>
 #include <mios/fs.h>
 
+#if CACHE_LINE_SIZE
+
+#define LFS_READ_SIZE CACHE_LINE_SIZE
+#define LFS_LOOKAHEAD_SIZE CACHE_LINE_SIZE
+
+#else
+
 #define LFS_READ_SIZE 32
+#define LFS_LOOKAHEAD_SIZE 32
+
+#endif
+
 
 #define LFS_CACHE_SIZE (LFS_READ_SIZE * 1)
 
-#define LFS_LOOKAHEAD_SIZE 32
 
 typedef struct fs {
   struct lfs_config cfg; // Must be first
   lfs_t lfs;
   mutex_t lock;
-  uint8_t lookahead_buffer[LFS_LOOKAHEAD_SIZE];
+  uint8_t lookahead_buffer[LFS_LOOKAHEAD_SIZE]
+    __attribute__ ((aligned (CACHE_LINE_SIZE)));
   uint8_t read_buffer[LFS_CACHE_SIZE];
   uint8_t prog_buffer[LFS_CACHE_SIZE];
 
@@ -81,7 +92,7 @@ fs_blk_unlock(const struct lfs_config *c)
 void
 fs_init(block_iface_t *bi)
 {
-  fs_t *fs = xalloc(sizeof(fs_t), 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  fs_t *fs = xalloc(sizeof(fs_t), CACHE_LINE_SIZE, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(fs == NULL) {
     evlog(LOG_ERR, "fs_init: No memory");
     return;
@@ -101,7 +112,7 @@ fs_init(block_iface_t *bi)
   fs->cfg.block_size = bi->block_size;
   fs->cfg.block_count = bi->num_blocks;
   fs->cfg.cache_size = LFS_CACHE_SIZE;
-  fs->cfg.lookahead_size = 32;
+  fs->cfg.lookahead_size = LFS_LOOKAHEAD_SIZE;
   fs->cfg.read_buffer = fs->read_buffer;
   fs->cfg.prog_buffer = fs->prog_buffer;
   fs->cfg.lookahead_buffer = fs->lookahead_buffer;
@@ -204,7 +215,8 @@ _Static_assert(FS_APPEND == LFS_O_APPEND);
 struct fs_file {
   lfs_file_t file;
   struct lfs_file_config config;
-  uint8_t buffer[LFS_CACHE_SIZE];
+  uint8_t buffer[LFS_CACHE_SIZE]
+    __attribute__ ((aligned (CACHE_LINE_SIZE)));
 };
 
 error_t
@@ -213,7 +225,7 @@ fs_open(const char *path, int flags, fs_file_t **fp)
   if(g_fs == NULL)
     return ERR_NO_DEVICE;
 
-  fs_file_t *f = xalloc(sizeof(fs_file_t), 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  fs_file_t *f = xalloc(sizeof(fs_file_t), CACHE_LINE_SIZE, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(f == NULL)
     return ERR_NO_MEMORY;
   memset(f, 0, sizeof(fs_file_t));
