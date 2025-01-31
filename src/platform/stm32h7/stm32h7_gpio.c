@@ -17,6 +17,12 @@
 #define GPIO_AFRH(x)    (GPIO_PORT_ADDR(x) + 0x24)
 
 
+void
+gpio_disconnect(gpio_t gpio)
+{
+  gpio_conf_input(gpio, GPIO_PULL_NONE);
+}
+
 
 void
 gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
