@@ -304,6 +304,8 @@ malloc0(size_t size, size_t align, int type)
     void *x = heap_alloc(hb, size, align);
     if(x) {
       mutex_unlock(&heap_mutex);
+      if(type & MEM_CLEAR)
+        memset(x, 0, size);
       return x;
     }
   }
@@ -327,9 +329,7 @@ void *
 calloc(size_t nmemb, size_t size)
 {
   size *= nmemb;
-  void *x = malloc0(size, 0, 0);
-  memset(x, 0, size);
-  return x;
+  return malloc0(size, 0, MEM_CLEAR);
 }
 
 void

@@ -15,6 +15,7 @@ int free_try(void *ptr);
 #define MEM_TYPE_VECTOR_TABLE   0x8
 
 #define MEM_MAY_FAIL   0x80000000
+#define MEM_CLEAR      0x40000000
 
 #define HEAP_START_EBSS 0xffffffff
 
