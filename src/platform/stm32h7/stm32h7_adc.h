@@ -47,7 +47,7 @@
 #define ADC12_CDR      0x4002230c
 
 
-void stm32h7_adc_init(uint32_t base);
+void stm32h7_adc_init(uint32_t base, uint32_t difsel);
 
 void stm32h7_adc_set_smpr(uint32_t base, uint32_t channel, uint32_t value);
 

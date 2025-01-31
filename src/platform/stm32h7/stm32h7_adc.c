@@ -12,7 +12,7 @@
 
 
 void
-stm32h7_adc_init(uint32_t base)
+stm32h7_adc_init(uint32_t base, uint32_t difsel)
 {
   const char *name = NULL;
   switch(base) {
@@ -68,6 +68,8 @@ stm32h7_adc_init(uint32_t base)
   while(reg_get_bit(base + ADC12_CR, 31)) {}
   reg_clr_bit(base + ADC12_CR, 30);
 
+  reg_wr(base + ADC12_DIFSEL, difsel);
+
   reg_set_bit(base + ADC12_CR, 0); // Turn on ADEN
   while(reg_get_bit(base + ADC12_ISR, 0) == 0) { }
 
@@ -83,4 +85,18 @@ stm32h7_adc_set_smpr(uint32_t base, uint32_t channel, uint32_t value)
   } else {
     reg_set_bits(base + ADC12_SMPR2, (channel - 10) * 3, 3, value);
   }
+}
+
+
+int
+stm32h7_adc_read_channel(uint32_t base, int channel)
+{
+  reg_wr(base + ADC12_SQR1, channel << 6);
+  reg_set_bit(base + ADC12_CR, 2);
+
+  while(1) {
+    if(reg_get_bit(base + ADC12_ISR, 2))
+      break;
+  }
+  return reg_rd(base + ADC12_DR);
 }
