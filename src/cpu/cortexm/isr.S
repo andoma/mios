@@ -69,7 +69,7 @@ pendsv:
 
         .global cpu_softreset
 cpu_softreset:
-        movs r0, #1
+        movs r1, #0
         msr control, r1
         msr primask, r1
         msr faultmask, r1
