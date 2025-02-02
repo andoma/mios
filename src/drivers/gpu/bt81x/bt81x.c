@@ -154,10 +154,13 @@ bt81x_reset(bt81x_t *b)
   gpio_set_output(b->gpio_pd, 1);
   usleep(20000);
 
-  const int clock_mul = 6;  // 12MHz * 6 = 72MHz
+  uint32_t freq = 60000000;
+  if(b->timings->clksel) {
+    bt81x_cmd(b, EVE_CMD_CLKEXT, 0);
+    bt81x_cmd(b, EVE_CMD_CLKSEL, b->timings->clksel);
+    freq = 12000000 * b->timings->clksel;
+  }
 
-  bt81x_cmd(b, EVE_CMD_CLKEXT, 0);
-  bt81x_cmd(b, EVE_CMD_CLKSEL, 0x4 | clock_mul);
   bt81x_cmd(b, EVE_CMD_ACTIVE, 0);
 
   usleep(20000);
@@ -179,7 +182,7 @@ bt81x_reset(bt81x_t *b)
     usleep(10000);
   }
 
-  bt81x_wr32(b, EVE_REG_FREQUENCY, 12000000 * clock_mul);
+  bt81x_wr32(b, EVE_REG_FREQUENCY, freq);
   return 0;
 }
 
@@ -530,7 +533,7 @@ bt81x_initialize(bt81x_t *b)
   // Enable backlight and pixelclock
   bt81x_wr16(b, EVE_REG_GPIOX, bt81x_rd16(b, EVE_REG_GPIOX) | 0x8000);
 
-  bt81x_wr8(b, EVE_REG_PCLK, 2);
+  bt81x_wr8(b, EVE_REG_PCLK, t->pclk);
 
   // Enable interrupts
   bt81x_wr16(b, EVE_REG_INT_MASK, 0x81);

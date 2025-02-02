@@ -30,6 +30,13 @@ typedef struct {
   // Pixelclock polarity
   uint8_t pclk_pol;
 
+  // clock multiplier for external crystal.
+  // if 0 == use internal clock
+
+  uint8_t clksel;
+
+  uint8_t pclk; // pixel clock divider
+
 } bt81x_timings_t;
 
 __attribute__((access(read_only, 5), access(read_only, 6, 7)))
