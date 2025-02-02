@@ -462,7 +462,9 @@ bt81x_initialize(bt81x_t *b)
     return err;
   }
 
-  evlog(LOG_DEBUG, "bt81x: Initialized");
+  uint32_t id = bt81x_rd32(b, EVE_CHIP_ID_ADDRESS);
+
+  evlog(LOG_DEBUG, "bt81x: Initialized. ID:0x%08x", id);
 
   // Disable pixel clock
   bt81x_wr8(b, EVE_REG_PCLK, 0);
