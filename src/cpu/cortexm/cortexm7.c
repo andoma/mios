@@ -18,6 +18,7 @@ static volatile uint32_t * const SCB_ICIALLU  = (uint32_t *)0xe000ef50;
 static volatile uint32_t * const SCB_DCIMVAC  = (uint32_t *)0xe000ef5c;
 static volatile uint32_t * const SCB_DCISW    = (uint32_t *)0xe000ef60;
 static volatile uint32_t * const SCB_DCCMVAC  = (uint32_t *)0xe000ef68;
+static volatile uint32_t * const SCB_DCCSW    = (uint32_t *)0xe000ef6c;
 static volatile uint32_t * const SCB_DCCIMVAC = (uint32_t *)0xe000ef70;
 
 
@@ -30,6 +31,14 @@ icache_invalidate(void)
   asm volatile("dsb\n\tisb");
 }
 
+
+static void
+icache_disable(void)
+{
+  asm volatile("dsb\n\tisb");
+  *SCB_CCR &= ~(1 << 17);
+  asm volatile("dsb\n\tisb");
+}
 
 static void
 icache_enable(void)
@@ -108,6 +117,29 @@ dcache_enable(void)
 }
 
 
+static void
+dcache_disable(void)
+{
+  *SCB_CCSELR = 0;  // Select L1 Dcache
+
+  asm volatile("dsb");
+  uint32_t ccsidr = *SCB_CCSIDR;
+
+  uint32_t sets = ((ccsidr >> 13) & 0x7fff) + 1;
+  uint32_t ways = ((ccsidr >> 3) & 0x3ff) + 1;
+
+  // Clean entire D-cache before we disable
+  for(uint32_t s = 0; s < sets; s++) {
+    for(uint32_t w = 0; w < ways; w++) {
+      *SCB_DCCSW = (w << 30) | (s << 5);
+    }
+  }
+  asm volatile("dsb\n\tisb");
+  *SCB_CCR &= ~(1 << 16);
+  asm volatile("dsb\n\tisb");
+}
+
+
 static void __attribute__((constructor(150)))
 cortexm7_init(void)
 {
@@ -116,4 +148,14 @@ cortexm7_init(void)
 
   icache_enable();
   dcache_enable();
+}
+
+
+static void __attribute__((constructor(150)))
+cortexm7_fini(void)
+{
+  dcache_disable();
+  icache_disable();
+
+  *SHCSR &= ~(0x7 << 16); // Disable UsageFault, BusFault, MemFault handlers
 }
