@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
+#include <malloc.h>
 
 #include "bt81x_def.h"
 #include "irq.h"
@@ -662,7 +663,9 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
              void *opaque,
              int enabled)
 {
-  bt81x_t *b = calloc(1, sizeof(bt81x_t) + sizeof(uint32_t) * num_bitmaps);
+  bt81x_t *b = xalloc(sizeof(bt81x_t) + sizeof(uint32_t) * num_bitmaps,
+                      0, MEM_TYPE_DMA | MEM_CLEAR);
+
   g_bt81x = b;
 
   task_waitable_init(&b->irq_waitq, "gpu");
