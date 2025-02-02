@@ -981,6 +981,8 @@ init_interfaces(usb_ctrl_t *uc)
   STAILQ_FOREACH(ui, &uc->uc_ifaces, ui_link) {
 
     o += ui->ui_gen_desc(o, ui->ui_opaque, iface_index);
+    ui->ui_index = iface_index;
+
     iface_index++;
 
     for(size_t j = 0; j < ui->ui_num_endpoints; j++)  {
