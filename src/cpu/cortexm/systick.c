@@ -96,7 +96,7 @@ systick_init(void)
 }
 
 
-void
+static void  __attribute__((destructor(130)))
 systick_deinit(void)
 {
   *SYST_RVR = 0;

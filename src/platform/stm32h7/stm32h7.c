@@ -118,14 +118,12 @@ sys_get_serial_number(void)
   return sn;
 }
 
-
 static error_t
 cmd_dfu(cli_t *cli, int argc, char **argv)
 {
   irq_forbid(IRQ_LEVEL_ALL);
   mpu_disable();
   fini();
-  systick_deinit();
   softreset(0x1ff09800);
 }
 

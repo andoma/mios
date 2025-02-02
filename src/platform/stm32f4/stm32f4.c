@@ -125,7 +125,6 @@ cmd_dfu(cli_t *cli, int argc, char **argv)
 
   fini();
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
-  systick_deinit();
   softreset(0);
 }
 

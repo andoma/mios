@@ -87,7 +87,6 @@ cmd_dfu(cli_t *cli, int argc, char **argv)
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
   stm32g4_usb_stop();
   stm32g4_deinit_clk();
-  systick_deinit();
   softreset(0);
 }
 
