@@ -8,7 +8,7 @@ SRCS += ${SRC}/util/bumpalloc.c \
 	${SRC}/util/crc4.c \
 	${SRC}/util/hdlc.c \
 	${SRC}/util/ntcpoly.c \
-	${SRC}/util/pipe.c \
+	${SRC}/util/splice.c \
 	${SRC}/util/block.c \
 	${SRC}/util/datetime.c \
 
