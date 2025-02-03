@@ -22,8 +22,6 @@ SRCS-${ENABLE_MCP23008} += \
 SRCS-${ENABLE_TCAL9539} += \
 	${SRC}/drivers/tcal9539.c
 
-SRCS += ${SRC}/drivers/spiflash.c
-
 SRCS-${ENABLE_SSD1306} += \
 	${SRC}/drivers/ssd1306.c
 
