@@ -21,6 +21,7 @@ SRCS += \
 	${C}/clock.c \
 	${C}/cpu.c \
 	${C}/exc.c \
+	${C}/rnd.c \
 
 
 ENTRYPOINT ?= start

@@ -4,9 +4,10 @@
 
 #include <mios/timer.h>
 #include <mios/mios.h>
+#include <mios/prng.h>
 
 #include <stdio.h>
-
+#include <stdlib.h>
 
 #define TKE_SHARED_BASE 0x0c0f0000
 #define TKE_SHARED_TSC0 (TKE_SHARED_BASE + 0x0)
@@ -108,4 +109,15 @@ systick_init(void)
          (1 << 31) |
          (1 << 30) |
          10000);
+}
+
+
+// XXX: This is a bad PRNG as it only uses the systick timer as source
+
+int  __attribute__((weak))
+rand(void)
+{
+  static prng_t state;
+  uint32_t src = reg_rd(TKE_SHARED_TSC0);
+  return prng_get(&state, src) & RAND_MAX;
 }

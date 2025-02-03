@@ -204,7 +204,7 @@ board_init_early(void)
   stdio = &tcu_early_console;
 
   heap_add_mem(HEAP_START_EBSS, 0xffff000000200000ull + 2 * 1024 * 1024,
-               MEM_TYPE_DMA);
+               MEM_TYPE_DMA, 10);
 
   printf("\nMIOS on Tegra234 CCPLEX\n");
 

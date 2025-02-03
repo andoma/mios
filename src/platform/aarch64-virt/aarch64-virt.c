@@ -7,7 +7,7 @@ static void __attribute__((constructor(101)))
 board_init_early(void)
 {
   heap_add_mem(HEAP_START_EBSS, 0xffff000000200000ull + 2 * 1024 * 1024,
-               MEM_TYPE_DMA);
+               MEM_TYPE_DMA, 10);
   stdio = pl011_uart_init(0x09000000, 115200, 33);
 
   long wut;

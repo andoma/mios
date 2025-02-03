@@ -39,8 +39,8 @@ cmd_perftest(cli_t *cli, int argc, char **argv)
     }
     rounds++;
   }
-  cli_printf(cli, "SHA1 bytes/second: %d\n",
-             sha1bytes * rounds * 100);
+  cli_printf(cli, "SHA1 bytes/second: %ld\n",
+             (long)(sha1bytes * rounds * 100));
 
 #ifdef ENABLE_MATH
   float v = rand();

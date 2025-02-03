@@ -9,7 +9,7 @@ spe_init_early(void)
 {
   uint32_t ramsize = 256 * 1024;
   void *RAM_end = (void *)0x0c480000 + ramsize;
-  heap_add_mem(HEAP_START_EBSS, (long)RAM_end, MEM_TYPE_DMA);
+  heap_add_mem(HEAP_START_EBSS, (long)RAM_end, MEM_TYPE_DMA, 10);
 }
 
 static void  __attribute__((constructor(1000)))
