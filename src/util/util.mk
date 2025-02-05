@@ -11,6 +11,7 @@ SRCS += ${SRC}/util/bumpalloc.c \
 	${SRC}/util/splice.c \
 	${SRC}/util/block.c \
 	${SRC}/util/datetime.c \
+	${SRC}/util/smux.c \
 	${SRC}/util/pipe.c \
 
 ${MOS}/util/%.o : CFLAGS += ${NOFPU}
