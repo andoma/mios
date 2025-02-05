@@ -16,8 +16,7 @@ static void  __attribute__((constructor(1000)))
 spe_init_late(void)
 {
   uint32_t hidrev = reg_rd(0x100004); // MISCREG_HIDREV_0
-
-  printf("\n\nSensor Processing Engine on Tegra SoC: t%03x-%c%02d\n",
+  printf("Sensor Processing Engine on Tegra SoC: t%03x-%c%02d\n",
          (hidrev >> 4) & 0xfff,
          ((hidrev >> 18) & 3) + 'A',
          (hidrev >> 16) & 3);
