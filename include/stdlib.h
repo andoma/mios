@@ -10,6 +10,8 @@ void free(void *ptr);
 
 void *memalign(size_t size, size_t alignment) __attribute__((malloc,warn_unused_result));
 
+int abs(int j);
+
 int atoi(const char *s);
 
 unsigned int xtoi(const char *s);
