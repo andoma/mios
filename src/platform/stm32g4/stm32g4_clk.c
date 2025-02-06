@@ -10,10 +10,22 @@ static uint32_t apb2clock;
 #define FLASH_ACR   0x40022000
 
 
+static uint8_t g_hse_freq;
+static uint8_t g_p_freq;
+static uint8_t g_q_freq;
+
 int
 clk_get_freq(uint16_t id)
 {
   uint32_t r;
+
+  switch(id) {
+  case CLK_FDCAN:
+    return g_q_freq * 1000000;
+
+  default:
+    break;
+  }
 
   switch(id >> 8) {
   default:
@@ -33,8 +45,6 @@ clk_get_freq(uint16_t id)
   return r;
 }
 
-static uint8_t g_hse_freq;
-static uint8_t g_p_freq;
 
 void
 stm32g4_reinit_pll(void)
@@ -63,18 +73,22 @@ stm32g4_reinit_pll(void)
     pllcfgr = 3;
   }
 
+  const int fvco = CPU_SYSCLK_MHZ * 2;
+
   if(g_p_freq) {
     pllcfgr |= (1 << 16); // PLLP Enable
 
-    const int fvco = CPU_SYSCLK_MHZ * 2;
     int pdiv = fvco / g_p_freq;
     assert(pdiv >= 2 && pdiv < 32);
     pllcfgr |= (pdiv << 27);
   }
 
+  g_q_freq = fvco / 6;
 
   reg_wr(RCC_PLLCFGR,
          (1 << 24) |                   // PLLR enable
+         (1 << 20) |                   // PLLQ Enable
+         (0b10 << 21) |                // PLLQ = FVCO / 6
          pllcfgr |
          ((pll_m - 1) << 4) |          // input division
          ((CPU_SYSCLK_MHZ / 2) << 8) | // PLL multiplication
@@ -88,6 +102,8 @@ stm32g4_reinit_pll(void)
   reg_set_bits(RCC_CFGR, 0, 2, 3); // Use PLL as system clock
 
   while((reg_rd(RCC_CFGR) & 0xc) != 0xc) {}
+
+  reg_set_bits(RCC_CCIPR, 24, 2, 0b01); // FDCAN clocked from PLLQ
 }
 
 
