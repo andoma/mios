@@ -63,6 +63,22 @@ emit_str(fmtcb_t *cb, void *aux, const char *str,
   return total;
 }
 
+static size_t __attribute__((noinline))
+emit_hexdump(fmtcb_t *cb, void *aux, const uint8_t *data,
+             const fmtparam_t *fp, size_t len)
+{
+  size_t total = 0;
+  char buf[3];
+  buf[2] = '.';
+  for(size_t i = 0; i < len; i++) {
+    uint8_t v = data[i];
+    buf[0] = "0123456789abcdef"[v >> 4];
+    buf[1] = "0123456789abcdef"[v & 0xf];
+    total += cb(aux, buf, fp->la && i != len - 1 ? 3 : 2);
+  }
+  return total;
+}
+
 static size_t  __attribute__((noinline))
 emit_intstr(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int neg,
             const char *end, int digits)
@@ -185,7 +201,7 @@ static size_t  __attribute__((noinline))
 emit_fix16(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
 {
   char buf[13];
-  fix16_to_str(x, buf, fp->decimals != -1 ? fp->decimals : 5);
+  fix16_to_str(x, buf, fp->decimals != INT16_MIN ? fp->decimals : 5);
   return emit_str(cb, aux, buf, fp);
 }
 #endif
@@ -416,9 +432,14 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     if(fmt[0] == '.') {
       fmt++;
-      fp.decimals = parse_dec(&fmt, -1);
+      if(fmt[0] == '*') {
+        fmt++;
+        fp.decimals = va_arg(ap, int);
+      } else {
+        fp.decimals = parse_dec(&fmt, INT16_MIN);
+      }
     } else {
-      fp.decimals = -1;
+      fp.decimals = INT16_MIN;
     }
 
 #ifdef ENABLE_NET_IPV4
@@ -470,7 +491,12 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       total += cb(aux, &c, 1);
       break;
     case 's':
-      total += emit_str(cb, aux, va_arg(ap, const char *), &fp);
+      if(fp.decimals != INT16_MIN && fp.decimals < 0) {
+        total += emit_hexdump(cb, aux, va_arg(ap, const uint8_t *), &fp,
+                              -fp.decimals);
+      } else {
+        total += emit_str(cb, aux, va_arg(ap, const char *), &fp);
+      }
       break;
     case 'x':
 #ifndef DISABLE_FMT_64BIT

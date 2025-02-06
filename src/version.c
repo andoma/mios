@@ -41,20 +41,16 @@ void
 log_sysinfo(void)
 {
   evlog(LOG_NOTICE, "System booted");
-  char hex[41];
 
   if(APPNAME[0]) {
-    bin2hex(hex, _appversion, 20);
-    evlog(LOG_NOTICE, "%s version: %s%s", APPNAME, hex,
-          _appversion[20] ? "-dirty" : "");
+    evlog(LOG_NOTICE, "%s version: %.*s%s", APPNAME,
+          -20, _appversion, _appversion[20] ? "-dirty" : "");
   }
 
-  bin2hex(hex, _miosversion, 20);
-  evlog(LOG_NOTICE, "Mios version: %s%s", hex,
-        _miosversion[20] ? "-dirty" : "");
+  evlog(LOG_NOTICE, "Mios version: %.*s%s",
+        -20, _miosversion, _miosversion[20] ? "-dirty" : "");
 
-  bin2hex(hex, mios_build_id(), 20);
-  evlog(LOG_NOTICE, "Build: %s", hex);
+  evlog(LOG_NOTICE, "Build: %.*s", -20, mios_build_id());
 }
 
 
