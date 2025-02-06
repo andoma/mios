@@ -23,11 +23,14 @@ typedef struct device_class {
 } device_class_t;
 
 
+#define DEVICE_F_DEBUG 0x1
+
 typedef struct device {
   const char *d_name;
   const device_class_t *d_class;
   STAILQ_ENTRY(device) d_link;
   int d_refcount;
+  unsigned int d_flags;
 } device_t;
 
 void device_register(device_t *d);

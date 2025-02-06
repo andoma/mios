@@ -3,6 +3,8 @@
 #include <mios/task.h>
 #include <mios/mios.h>
 
+#include <string.h>
+
 #include "irq.h"
 
 static STAILQ_HEAD(, device) devices = STAILQ_HEAD_INITIALIZER(devices);
@@ -76,9 +78,25 @@ device_get_next(device_t *cur)
 static error_t
 cmd_dev(cli_t *cli, int argc, char **argv)
 {
+  device_t *d = NULL;
+  if(argc > 1) {
+    if(argc != 3)
+      return ERR_INVALID_ARGS;
+
+    while((d = device_get_next(d)) != NULL) {
+      if(strcmp(d->d_name, argv[1]))
+        continue;
+      const char *cmd = argv[2];
+      if(!strcmp(cmd, "+debug"))
+        d->d_flags |= DEVICE_F_DEBUG;
+      if(!strcmp(cmd, "-debug"))
+        d->d_flags &= ~DEVICE_F_DEBUG;
+    }
+    return 0;
+  }
+
   cli_printf(cli, "\nDevices:\n");
 
-  device_t *d = NULL;
   while((d = device_get_next(d)) != NULL) {
     cli_printf(cli, "\n[%s]\n", d->d_name);
     if(d->d_class->dc_print_info)
