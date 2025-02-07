@@ -64,6 +64,9 @@ static ssize_t
 pipe_write(pipe_stream_t *ps, const void *buf,
           size_t size, int flags)
 {
+  if(!can_sleep())
+    return size;
+
   mutex_lock(&ps->mutex);
 
   // Protect from racing when having multiple writers
