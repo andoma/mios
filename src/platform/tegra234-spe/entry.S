@@ -10,7 +10,7 @@ vector_table:
         b start
         b undef_instruction
         b swi
-        b prefetch_abort
+        b prefetch_abort0
         b data_abort0
         nop
         b irq
@@ -82,8 +82,12 @@ undef_instruction:
         b .
 swi:
         b .
-prefetch_abort:
-        b .
+prefetch_abort0:
+        push {r0-r12}
+        sub r0,lr,#8
+        mrs r1, spsr
+        mov r2, sp
+        b prefetch_abort
 data_abort0:
         push {r0-r12}
         sub r0,lr,#8
