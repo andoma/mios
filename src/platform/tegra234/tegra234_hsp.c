@@ -14,13 +14,14 @@
 #include "irq.h"
 
 typedef struct hsp {
-  handler_t irqs[16];
+  handler_t handlers[16];
   uint8_t irq_route;
 } hsp_t;
 
 
 static hsp_t g_aon_hsp;
 static hsp_t g_top0_hsp;
+static hsp_t g_top1_hsp;
 
 typedef struct hsp_stream {
   stream_t st;
@@ -34,11 +35,12 @@ typedef struct hsp_stream {
   uint32_t tx_drops;
   uint32_t rx_overruns;
 
+  uint32_t tx_ie;
+  uint32_t rx_ie;
+
   uint8_t tx_mbox;
   uint8_t rx_mbox;
   uint8_t pending_clear;
-  uint8_t tx_irq_route;
-  uint8_t rx_irq_route;
 
   FIFO_DECL(rx_fifo, 128);
 
@@ -62,8 +64,7 @@ hsp_stream_rx_irq(void *arg)
   } else {
     // FIFO almost full, disable interrupts until FIFO has cleared
     hs->pending_clear = 1;
-    reg_clr_bit(hs->rx_hsp_base + 0x100 + hs->rx_irq_route * 4,
-                8 + hs->rx_mbox);
+    reg_clr_bit(hs->rx_ie, HSP_MBOX_IRQ_FULL(hs->rx_mbox));
   }
   task_wakeup(&hs->rx_waitq, 1);
 }
@@ -115,8 +116,7 @@ hsp_stream_read(struct stream *s, void *buf, size_t size, size_t required)
   if(hs->pending_clear && fifo_avail(&hs->rx_fifo) > 3) {
     reg_wr(hs->rx_hsp_base + 0x10000 + hs->rx_mbox * 0x8000, 0);
     hs->pending_clear = 0;
-    reg_set_bit(hs->rx_hsp_base + 0x100 + hs->rx_irq_route * 4,
-                8 + hs->rx_mbox);
+    reg_set_bit(hs->rx_ie, HSP_MBOX_IRQ_FULL(hs->rx_mbox));
   }
 
   irq_permit(q);
@@ -128,7 +128,7 @@ static void
 hsp_stream_tx_irq(void *arg)
 {
   hsp_stream_t *hs = arg;
-  reg_clr_bit(hs->tx_hsp_base + 0x100 + hs->tx_irq_route * 4, hs->tx_mbox);
+  reg_clr_bit(hs->tx_ie, hs->tx_mbox);
   task_wakeup(&hs->tx_waitq, 1);
 }
 
@@ -157,12 +157,10 @@ hsp_stream_write(struct stream *s, const void *buf, size_t size, int flags)
       if(!can_sleep())
         continue;
 
-      reg_set_bit(hs->tx_hsp_base + 0x100 + hs->tx_irq_route * 4,
-                  hs->tx_mbox);
+      reg_set_bit(hs->tx_ie, hs->tx_mbox);
       if(task_sleep_deadline(&hs->tx_waitq, deadline)) {
         hs->tx_drops++;
-        reg_clr_bit(hs->tx_hsp_base + 0x100 + hs->tx_irq_route * 4,
-                    hs->tx_mbox);
+        reg_clr_bit(hs->tx_ie, hs->tx_mbox);
         break;
       }
       continue;
@@ -205,9 +203,8 @@ static const stream_vtable_t hsp_stream_vtable_txonly = {
 };
 
 
-static uint8_t
-hsp_connect_mbox(uint32_t addr, void (*fn)(void *arg), void *arg,
-                 uint8_t mbox)
+uint32_t
+hsp_connect_mbox(uint32_t addr, void (*fn)(void *arg), void *arg, uint32_t irq)
 {
   hsp_t *hsp;
   switch(addr) {
@@ -219,14 +216,18 @@ hsp_connect_mbox(uint32_t addr, void (*fn)(void *arg), void *arg,
   case NV_ADDRESS_MAP_TOP0_HSP_BASE:
     hsp = &g_top0_hsp;
     break;
+  case NV_ADDRESS_MAP_TOP1_HSP_BASE:
+    hsp = &g_top1_hsp;
+    break;
   default:
     panic("Unsupported HSP address 0x%x", addr);
   }
 
-  handler_t *irq = &hsp->irqs[mbox];
-  irq->arg = arg;
-  irq->fn = fn;
-  return hsp->irq_route;
+  handler_t *h = &hsp->handlers[irq];
+  h->arg = arg;
+  h->fn = fn;
+
+  return addr + 0x100 + hsp->irq_route * 4;
 }
 
 
@@ -240,16 +241,15 @@ hsp_mbox_stream(uint32_t rx_hsp_base, uint32_t rx_mbox,
 
   hs->rx_hsp_base = rx_hsp_base;
   hs->rx_mbox = rx_mbox;
-  hs->rx_irq_route =
-    hsp_connect_mbox(rx_hsp_base, hsp_stream_rx_irq, hs, 8 + rx_mbox);
+  hs->rx_ie = hsp_connect_mbox(rx_hsp_base, hsp_stream_rx_irq, hs,
+                               HSP_MBOX_IRQ_FULL(rx_mbox));
 
   hs->tx_hsp_base = tx_hsp_base;
   hs->tx_mbox = tx_mbox;
-  hs->tx_irq_route =
-    hsp_connect_mbox(tx_hsp_base, hsp_stream_tx_irq, hs, tx_mbox);
+  hs->tx_ie = hsp_connect_mbox(tx_hsp_base, hsp_stream_tx_irq, hs, tx_mbox);
 
   if(rx_hsp_base) {
-    reg_set_bit(rx_hsp_base + 0x100 + hs->rx_irq_route * 4, 8 + rx_mbox);
+    reg_set_bit(hs->rx_ie, HSP_MBOX_IRQ_FULL(rx_mbox));
     hs->st.vtable = &hsp_stream_vtable;
   } else {
     hs->st.vtable = &hsp_stream_vtable_txonly;
@@ -267,8 +267,8 @@ hsp_dispatch_irq(hsp_t *hsp, uint32_t base_addr, uint32_t enabled)
   uint32_t pending = active & 0xffff & enabled;
   if(pending) {
     int id = 31 - __builtin_clz(pending);
-    if(id < ARRAYSIZE(hsp->irqs)) {
-      const handler_t *irq = &hsp->irqs[id];
+    if(id < ARRAYSIZE(hsp->handlers)) {
+      const handler_t *irq = &hsp->handlers[id];
       if(irq->fn) {
         irq->fn(irq->arg);
         return;
@@ -295,5 +295,15 @@ hsp_top0_irq(void *arg)
   hsp_t *hsp = arg;
   hsp_dispatch_irq(hsp, NV_ADDRESS_MAP_TOP0_HSP_BASE,
                    reg_rd(NV_ADDRESS_MAP_TOP0_HSP_BASE + 0x100 +
+                          hsp->irq_route * 4));
+}
+
+
+static void
+hsp_top1_irq(void *arg)
+{
+  hsp_t *hsp = arg;
+  hsp_dispatch_irq(hsp, NV_ADDRESS_MAP_TOP1_HSP_BASE,
+                   reg_rd(NV_ADDRESS_MAP_TOP1_HSP_BASE + 0x100 +
                           hsp->irq_route * 4));
 }
