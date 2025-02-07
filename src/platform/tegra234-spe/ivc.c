@@ -16,11 +16,14 @@ ccplex_ivc_rx(void *arg)
   uint32_t val = hsp_mbox_rd(NV_ADDRESS_MAP_TOP1_HSP_BASE, mbox) & 0x7fffffff;
 
   if(val == 0x2AAA5555) {
+
     // IVC Ready. Kernel sends us physical addr + size of shared memory
-    uint32_t carveout_base = hsp_ss_sta(NV_ADDRESS_MAP_AON_HSP_BASE, 0);
-    hsp_ss_clr(NV_ADDRESS_MAP_AON_HSP_BASE, 0, carveout_base);
-    uint32_t carveout_size = hsp_ss_sta(NV_ADDRESS_MAP_AON_HSP_BASE, 1);
-    hsp_ss_clr(NV_ADDRESS_MAP_AON_HSP_BASE, 1, carveout_size);
+    // in two shared semaphores. A bit odd, but works I suppose?
+
+    uint32_t carveout_base = hsp_ss_rd_and_clr(NV_ADDRESS_MAP_AON_HSP_BASE,
+                                               IVC_SS_CARVEOUT_BASE);
+    uint32_t carveout_size = hsp_ss_rd_and_clr(NV_ADDRESS_MAP_AON_HSP_BASE,
+                                               IVC_SS_CARVEOUT_SIZE);
 
     ast_set_region(NV_ADDRESS_MAP_AON_AST_0_BASE,
                    1,

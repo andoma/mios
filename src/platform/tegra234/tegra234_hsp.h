@@ -38,7 +38,7 @@ hsp_mbox_wr(uint32_t base, uint32_t mbox, uint32_t value)
 }
 
 static inline uint32_t
-hsp_ss_sta(uint32_t base, uint32_t sem)
+hsp_ss_rd(uint32_t base, uint32_t sem)
 {
   return reg_rd(base + 0x10000 + 0x8000 * 8 + sem * 0x10000);
 }
@@ -53,4 +53,12 @@ static inline void
 hsp_ss_clr(uint32_t base, uint32_t sem, uint32_t bits)
 {
   reg_wr(base + 0x10000 + 0x8000 * 8 + sem * 0x10000 + 8, bits);
+}
+
+static inline uint32_t
+hsp_ss_rd_and_clr(uint32_t base, uint32_t sem)
+{
+  uint32_t bits = hsp_ss_rd(base, sem);
+  hsp_ss_clr(base, sem, bits);
+  return bits;
 }
