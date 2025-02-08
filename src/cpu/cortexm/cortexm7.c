@@ -151,7 +151,7 @@ cortexm7_init(void)
 }
 
 
-static void __attribute__((constructor(150)))
+static void __attribute__((destructor(150)))
 cortexm7_fini(void)
 {
   dcache_disable();
