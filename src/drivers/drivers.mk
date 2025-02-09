@@ -35,3 +35,6 @@ ${MOS}/drivers/uart_16550.o : CFLAGS += ${NOFPU}
 
 SRCS += ${SRC}/drivers/spiflash.c
 ${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}
+
+SRCS += ${SRC}/drivers/tps92682.c
+${MOS}/drivers/tps92682.o : CFLAGS += ${NOFPU}
