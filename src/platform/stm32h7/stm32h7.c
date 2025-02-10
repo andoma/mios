@@ -124,6 +124,7 @@ cmd_dfu(cli_t *cli, int argc, char **argv)
   irq_forbid(IRQ_LEVEL_ALL);
   mpu_disable();
   fini();
+  stm32h7_clk_deinit();
   softreset(0x1ff09800);
 }
 

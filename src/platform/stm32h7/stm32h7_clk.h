@@ -19,9 +19,15 @@
 #define RCC_D2CCIP2R      (RCC_BASE + 0x54)
 #define RCC_D3CCIPR       (RCC_BASE + 0x58)
 
+#define RCC_AHB3RSTR      (RCC_BASE + 0x7c)
 #define RCC_AHB1RSTR      (RCC_BASE + 0x80)
+#define RCC_AHB2RSTR      (RCC_BASE + 0x84)
+#define RCC_AHB4RSTR      (RCC_BASE + 0x88)
+#define RCC_APB3RSTR      (RCC_BASE + 0x8c)
 #define RCC_APB1LRSTR     (RCC_BASE + 0x90)
 #define RCC_APB1HRSTR     (RCC_BASE + 0x94)
+#define RCC_APB2RSTR      (RCC_BASE + 0x98)
+#define RCC_APB4RSTR      (RCC_BASE + 0x9c)
 
 #define RCC_AHB1ENR       (RCC_BASE + 0xd8)
 #define RCC_AHB4ENR       (RCC_BASE + 0xe0)
@@ -128,3 +134,4 @@ const char *stm32h7_init_pll(unsigned int hse_freq, uint32_t flags);
 
 void reset_peripheral(uint16_t id);
 
+void stm32h7_clk_deinit(void);
