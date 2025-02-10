@@ -34,6 +34,8 @@ typedef struct usb_cdc {
   usb_interface_t *comm_iface;
   usb_interface_t *data_iface;
 
+  uint64_t line_state_changed; // Timestamp when line state last changed
+
 } usb_cdc_t;
 
 
@@ -317,16 +319,31 @@ cdc_write(struct stream *s, const void *buf, size_t size, int flags)
   int q = irq_forbid(IRQ_LEVEL_NET);
 
   if(flags & STREAM_WRITE_WAIT_DTR) {
-    while(!(uc->line_state & USB_CDC_LINE_STATE_DTR)) {
-      task_sleep(&uc->tx_waitq);
 
-      /* Linux have this strange idea of echoing back characters
-         until the TTY is set in RAW mode.
-         Thus we sleep for a while to give it a chance to get
-         things in order.
-      */
-      usleep(10000);
+    while(!(uc->line_state & USB_CDC_LINE_STATE_DTR)) {
+      if(flags & STREAM_WRITE_NO_WAIT)
+        goto done;
+      task_sleep(&uc->tx_waitq);
     }
+  }
+
+  if(uc->line_state_changed) {
+    /* Linux have this strange idea of echoing back characters
+       until the TTY is set in RAW mode.
+       Thus we hold off for a while to give it a chance to get
+       things in order.
+    */
+
+    uint64_t when = uc->line_state_changed + 25000;
+    if(flags & STREAM_WRITE_NO_WAIT) {
+      if(clock_get() < when) {
+        irq_permit(q);
+        return 0;
+      }
+    } else {
+      sleep_until(when);
+    }
+    uc->line_state_changed = 0;
   }
 
   for(size_t i = 0; i < size; i++) {
@@ -367,6 +384,7 @@ usb_cdc_iface_cfg(void *opaque, int req, int value)
   usb_cdc_t *cdc = opaque;
   if(req == USB_CDC_SET_CONTROL_LINE_STATE) {
     cdc->line_state = value;
+    cdc->line_state_changed = clock_get();
     task_wakeup(&cdc->tx_waitq, 1);
   }
 }
