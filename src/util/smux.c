@@ -16,6 +16,8 @@ typedef struct smux {
 
   pollset_t *ps;
 
+  uint32_t write_flags;
+
   int16_t current;
 
   uint8_t delimiter;
@@ -123,7 +125,7 @@ smux_rx_thread(void *arg)
         if(buf[i] != smux->delimiter) {
 
           if(channel) {
-            stream_write(channel, buf, j, 0);
+            stream_write(channel, buf, j, smux->write_flags);
             j = 0;
           }
 
@@ -154,7 +156,7 @@ smux_rx_thread(void *arg)
     }
 
     if(channel) {
-      stream_write(channel, buf, j, 0);
+      stream_write(channel, buf, j, smux->write_flags);
     }
   }
 }
@@ -162,7 +164,7 @@ smux_rx_thread(void *arg)
 void
 smux_create(stream_t *muxed, uint8_t delimiter, uint8_t reset_token,
             size_t count, const uint8_t *idvec,
-            stream_t **streamvec)
+            stream_t **streamvec, int write_flags)
 {
   smux_t *smux = calloc(1, sizeof(smux_t) + count);
   smux->muxed = muxed;
@@ -171,6 +173,7 @@ smux_create(stream_t *muxed, uint8_t delimiter, uint8_t reset_token,
   smux->reset_token = reset_token;
   smux->current = -1;
   smux->num_channels = count;
+  smux->write_flags = write_flags;
 
   smux->ps = calloc(count, sizeof(pollset_t));
   pollset_t *ps = smux->ps;
