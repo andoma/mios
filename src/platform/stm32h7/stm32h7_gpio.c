@@ -142,12 +142,13 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   if(gpio_irqs[bit].cb)
     panic("GPIO-IRQ for line %d already in use", bit);
 
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+
   gpio_conf_input(gpio, pull);
 
   gpio_irqs[bit].cb  = cb;
   gpio_irqs[bit].arg = arg;
 
-  int q = irq_forbid(IRQ_LEVEL_SCHED);
 
   if(edge & GPIO_FALLING_EDGE)
     reg_set_bit(EXTI_FTSR1, bit);
@@ -163,27 +164,32 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
 
   reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
 
-  irq_permit(q);
-
   int irq;
   int group;
+  uint32_t group_bits = 1 << bit;
   if(bit < 5) {
     irq = bit + 6;
     group = bit;
   } else if(bit < 10) {
     irq = 23;
     group = 5;
+    group_bits = 0b1111100000;
   } else {
     irq = 40;
     group = 6;
+    group_bits = 0b1111110000000000;
   }
 
   if(gpio_irq_level[group] && gpio_irq_level[group] != level) {
     panic("IRQ level conflict for group %d", group);
   }
 
-  gpio_irq_level[group] = level;
-  irq_enable(irq, level);
+  if(!gpio_irq_level[group]) {
+    reg_wr(EXTI_CPUPR1, group_bits);
+    gpio_irq_level[group] = level;
+    irq_enable(irq, level);
+  }
+  irq_permit(q);
 }
 
 
