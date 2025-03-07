@@ -39,21 +39,18 @@ typedef struct tps92682 {
 } tps92682_t;
 
 
-// Fix this, can't be global stuff unless we have some kind of mutex
-
 static error_t
 write_reg(tps92682_t *t, uint8_t reg, uint8_t value)
 {
   t->tx[0] = 0x80 | reg << 1;
   t->tx[1] = value;
   t->tx[0] |= !(__builtin_popcount(t->tx[0] ^ t->tx[1]) & 1);
-  error_t err = t->spi->rw(t->spi, t->tx, NULL, 2, t->cs, t->spi_config);
-  return err;
+  return t->spi->rw(t->spi, t->tx, NULL, 2, t->cs, t->spi_config);
 }
 
 
-static int
-read_reg(tps92682_t *t, uint8_t reg)
+int
+tps92682_read_reg(tps92682_t *t, uint8_t reg)
 {
   error_t err;
   t->tx[0] = reg << 1;
@@ -83,7 +80,7 @@ tps92682_init(tps92682_t *t)
 {
   write_reg(t, TPS92682_RESET, 0xc3); // Magic value for reset
 
-  int val = read_reg(t, TPS92682_EN);
+  int val = tps92682_read_reg(t, TPS92682_EN);
   if(val < 0)
     return val;
 
@@ -92,10 +89,7 @@ tps92682_init(tps92682_t *t)
 
   write_reg(t, TPS92682_CFG1, 0x40);  // Internal PWM
 
-  write_reg(t, TPS92682_FEN1, 0xff); // Enable all faults
-  write_reg(t, TPS92682_FEN2, 0x3f); // Enable all faults
-
-  read_reg(t, TPS92682_FLT1); // Read to ACK faults
+  tps92682_read_reg(t, TPS92682_FLT1); // Read to ACK faults
 
   write_reg(t, TPS92682_CH1ADJ, 0x00); // Max current limit to zer0
   write_reg(t, TPS92682_CH2ADJ, 0x00); // Max current limit to zer0
