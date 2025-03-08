@@ -299,6 +299,7 @@ hsp_top0_irq(void *arg)
 }
 
 
+__attribute__((unused))
 static void
 hsp_top1_irq(void *arg)
 {
