@@ -62,12 +62,13 @@ stm32h7_adc_init(uint32_t base, uint32_t difsel)
   while(reg_get_bit(base + ADC12_CR, 31)) {}
   reg_clr_bit(base + ADC12_CR, 16);
 
-  // Differential calibration
-  reg_set_bit(base + ADC12_CR, 30);
-  reg_set_bit(base + ADC12_CR, 31);
-  while(reg_get_bit(base + ADC12_CR, 31)) {}
-  reg_clr_bit(base + ADC12_CR, 30);
-
+  if(difsel) {
+    // Differential calibration
+    reg_set_bit(base + ADC12_CR, 30);
+    reg_set_bit(base + ADC12_CR, 31);
+    while(reg_get_bit(base + ADC12_CR, 31)) {}
+    reg_clr_bit(base + ADC12_CR, 30);
+  }
   reg_wr(base + ADC12_DIFSEL, difsel);
 
   reg_set_bit(base + ADC12_CR, 0); // Turn on ADEN
