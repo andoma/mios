@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "stm32h7_dma.h"
+
 #define ADC1_BASE      0x40022000
 #define ADC2_BASE      0x40022100
 
@@ -59,3 +61,4 @@ uint32_t stm32h7_adc_set_channels(uint32_t base, uint32_t channels);
 
 int stm32h7_adc_read_channel(uint32_t base, int channel);
 
+stm32_dma_instance_t stm32h7_adc_init_dma(uint32_t base, uint32_t channels);
