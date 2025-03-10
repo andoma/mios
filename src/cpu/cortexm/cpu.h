@@ -26,6 +26,7 @@ cpu_fpu_enable(int on)
 {
   static volatile unsigned int * const CPACR = (unsigned int *)0xe000ed88;
   *CPACR = on ? 0xf << 20 : 0;
+  asm volatile("isb");
 }
 
 static inline void
