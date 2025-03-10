@@ -426,6 +426,9 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
     } else if(*fmt == '-') {
       fp.la = 1;
       fmt++;
+    } else if(*fmt == '+') {
+      fp.plus = 1;
+      fmt++;
     }
 
     fp.width = parse_dec(&fmt, -1);
