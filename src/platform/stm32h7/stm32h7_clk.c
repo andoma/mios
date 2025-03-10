@@ -166,7 +166,7 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   const uint32_t pll1r = 0;
 
   pll2q_freq = 100 * MHZ;
-  pll2p_freq = 200 * MHZ;
+  pll2p_freq = 100 * MHZ;
 
   const uint32_t pll2n = (pll2_freq / hse_freq) - 1;
   const uint32_t pll2p = (pll2_freq / pll2p_freq) - 1;
