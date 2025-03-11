@@ -75,6 +75,7 @@ include ${SRC}/lib/usb/usb.mk
 include ${SRC}/lib/gui/gui.mk
 include ${SRC}/lib/tig/tig.mk
 include ${SRC}/lib/metric/metric.mk
+include ${SRC}/lib/diag/diag.mk
 include ${SRC}/lib/rpc/rpc.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
