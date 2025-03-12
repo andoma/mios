@@ -22,6 +22,7 @@ typedef struct http_request {
   char *hr_upgrade;
   char *hr_connection;
   char *hr_wskey;
+  char *hr_wsproto;
 
   void *hr_body;
   size_t hr_body_size;
@@ -52,7 +53,8 @@ int http_request_accept_websocket(http_request_t *hr,
                                             http_connection_t *hc,
                                             balloc_t *ba),
                                   void *opaque,
-                                  http_connection_t **hcp);
+                                  http_connection_t **hcp,
+                                  const char *selected_protocol);
 
 
 struct stream *http_websocket_output_begin(http_connection_t *hc,

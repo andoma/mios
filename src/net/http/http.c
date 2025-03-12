@@ -105,17 +105,19 @@ static http_server_t g_http_server;
 #define OUTPUT_ENCODING_CHUNKED   1
 #define OUTPUT_ENCODING_WEBSOCKET 2
 
-#define HEADER_HOST              0x1
-#define HEADER_SEC_WEBSOCKET_KEY 0x2
-#define HEADER_CONTENT_TYPE      0x4
-#define HEADER_CONNECTION        0x8
-#define HEADER_UPGRADE           0x10
+#define HEADER_HOST                   0x1
+#define HEADER_SEC_WEBSOCKET_KEY      0x2
+#define HEADER_CONTENT_TYPE           0x4
+#define HEADER_CONNECTION             0x8
+#define HEADER_UPGRADE                0x10
+#define HEADER_SEC_WEBSOCKET_PROTOCOL 0x20
 
 #define HEADER_ALL (HEADER_HOST | \
                     HEADER_SEC_WEBSOCKET_KEY | \
                     HEADER_CONTENT_TYPE | \
                     HEADER_CONNECTION | \
-                    HEADER_UPGRADE)
+                    HEADER_UPGRADE | \
+                    HEADER_SEC_WEBSOCKET_PROTOCOL)
 
 
 
@@ -525,12 +527,20 @@ header_upgrade(void *opaque, const char *str, size_t len)
   return header_append(hr, str, len, (void **)&hr->hr_upgrade);
 }
 
+static int
+header_sec_websocket_protocol(void *opaque, const char *str, size_t len)
+{
+  http_request_t *hr = opaque;
+  return header_append(hr, str, len, (void **)&hr->hr_wsproto);
+}
+
 static const http_header_callback_t server_headers[] = {
   { "host", header_host },
   { "sec-websocket-key", header_sec_websocket_key },
   { "content-type", header_content_type },
   { "connection", header_connection },
   { "upgrade", header_upgrade },
+  { "sec-websocket-protocol", header_sec_websocket_protocol },
 };
 
 static int
@@ -1045,7 +1055,8 @@ http_request_accept_websocket(http_request_t *hr,
                                         http_connection_t *hc,
                                         balloc_t *ba),
                               void *opaque,
-                              http_connection_t **hcp)
+                              http_connection_t **hcp,
+                              const char *protocol)
 {
   SHA1_CTX shactx;
 
@@ -1079,11 +1090,16 @@ http_request_accept_websocket(http_request_t *hr,
            "HTTP/1.1 %d %s\r\n"
            "Connection: Upgrade\r\n"
            "Upgrade: websocket\r\n"
-           "Sec-WebSocket-Accept: %s\r\n"
-           "\r\n",
+           "Sec-WebSocket-Accept: %s\r\n",
            101, http_status_str(101),
            sig);
 
+  if(protocol) {
+    stprintf(hc->hc_socket,
+             "Sec-WebSocket-Protocol: %s\r\n",
+             protocol);
+  }
+  stream_write(hc->hc_socket, "\r\n", 2, 0);
   return 0;
 }
 
