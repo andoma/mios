@@ -62,7 +62,7 @@ tcu_init_late(void)
     TCU_CHANNEL_RCE,
   };
 
-  smux_create(uartc, 0xff, 0xfd, 6, tcuids, svec);
+  smux_create(uartc, 0xff, 0xfd, 6, tcuids, svec, 0);
 }
 
 static void  __attribute__((destructor(5000)))
