@@ -16,6 +16,7 @@
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1FF1E880;
 static volatile uint32_t *const LINE_ID      = (volatile uint32_t *)0x1FF1E8c0;
 static volatile uint32_t *const SYSCFG_PKGR  = (volatile uint32_t *)0x58000524;
+static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
 
 static void __attribute__((constructor(101)))
 enter_dfu(void)
@@ -106,6 +107,9 @@ stm32h7_init(void)
                  MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
     break;
   }
+
+  *DWT_CONTROL = 1;
+
 }
 
 
