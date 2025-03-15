@@ -38,3 +38,5 @@ ${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}
 
 SRCS += ${SRC}/drivers/tps92682.c
 ${MOS}/drivers/tps92682.o : CFLAGS += ${NOFPU}
+
+SRCS += ${SRC}/drivers/pmbus.c
