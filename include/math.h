@@ -85,6 +85,8 @@ float sinf(float) __attribute__ ((const));
 
 float cosf(float) __attribute__ ((const));
 
+float tanf(float) __attribute__ ((const));
+
 float frexprf(float x, int *e)  __attribute__ ((const));
 
 float logf(float x)  __attribute__ ((const));
