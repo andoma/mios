@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "irq.h"
-
+#include "cpu.h"
 extern unsigned long _init_array_begin;
 extern unsigned long _init_array_end;
 extern unsigned long _fini_array_begin;
@@ -85,7 +85,15 @@ init(void)
   extern unsigned long _ebss;
   memset(&_sbss, 0, (void *)&_ebss - (void *)&_sbss);
 
+#ifdef HAVE_FPU
+  cpu_fpu_enable(1);
+#endif
+
   call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
+
+#ifdef HAVE_FPU
+  cpu_fpu_enable(0);
+#endif
 
   log_sysinfo();
 
