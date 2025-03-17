@@ -124,6 +124,7 @@ cmd_dfu(cli_t *cli, int argc, char **argv)
   mpu_disable();
 
   fini();
+  stm32f4_clk_deinit();
   *SYSCFG_MEMRMP = 1; // Map system flash to 0x0
   softreset(0);
 }

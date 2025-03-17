@@ -5,6 +5,7 @@
 
 #define RST_AHB1 0x10
 #define RST_AHB2 0x14
+#define RST_AHB3 0x18
 #define RST_APB1 0x20
 #define RST_APB2 0x24
 
@@ -128,3 +129,5 @@ clk_disable(uint16_t id)
 int clk_get_freq(uint16_t id);
 
 void stm32f4_init_pll(int hse_freq);
+
+void stm32f4_clk_deinit(void);

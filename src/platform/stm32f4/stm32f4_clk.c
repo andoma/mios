@@ -110,3 +110,26 @@ reset_peripheral(uint16_t id)
   reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
   reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
+
+
+void
+stm32f4_clk_deinit(void)
+{
+  // Switch to HSI
+  reg_set_bits(RCC_CFGR, 0, 2, 0);
+  while((reg_rd(RCC_CFGR) & 0xc) != 0x0) {}
+
+  // Reset everything
+  //                            fedcba9876543210fedcba9876543210
+  reg_wr(RCC_BASE + RST_AHB1, 0b00100010011000000001000111111111);
+  reg_wr(RCC_BASE + RST_AHB2, 0b00000000000000000000000011110001);
+  reg_wr(RCC_BASE + RST_AHB3, 0b00000000000000000000000000000001);
+  reg_wr(RCC_BASE + RST_APB1, 0b00110110111111101100100111111111);
+  reg_wr(RCC_BASE + RST_APB2, 0b00000000000001110101100100110011);
+
+  reg_wr(RCC_BASE + RST_AHB1, 0);
+  reg_wr(RCC_BASE + RST_AHB2, 0);
+  reg_wr(RCC_BASE + RST_AHB3, 0);
+  reg_wr(RCC_BASE + RST_APB1, 0);
+  reg_wr(RCC_BASE + RST_APB2, 0);
+}
