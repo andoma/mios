@@ -20,6 +20,12 @@
 
 
 void
+gpio_disconnect(gpio_t gpio)
+{
+  gpio_conf_input(gpio, GPIO_PULL_NONE);
+}
+
+void
 gpio_conf_analog(gpio_t gpio, gpio_pull_t pull)
 {
   const int port = gpio >> 4;
