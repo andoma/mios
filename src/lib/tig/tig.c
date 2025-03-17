@@ -79,6 +79,7 @@ tig_prep_display(void *opaque, struct gfx_display *gd,
                  const gfx_rect_t *display_size)
 {
   tig_ctx_t *tc = opaque;
+  tc->tc_gd = gd;
   tc->tc_prep(tc, tc->tc_opaque);
 }
 
