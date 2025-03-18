@@ -66,7 +66,9 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
 
   fdcan_t *fc = calloc(1, sizeof(fdcan_t));
   fc->reg_base = stm32h7_can_interfaces[instance].reg_base;
-  fc->ram_base = CAN_RAM;
+
+  uint32_t ram_offset = instance * 1024;
+  fc->ram_base = CAN_RAM + ram_offset;
 
   stm32_fdcan_cce(fc);
 
@@ -75,19 +77,19 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   }
 
   reg_wr(fc->reg_base + FDCAN_TXBC,
-         FDCAN_TXBUF(0, 0) |
+         (ram_offset + FDCAN_TXBUF(0, 0)) |
          (0 << 16) |
          (3 << 24));
 
   reg_wr(fc->reg_base + FDCAN_TXESC, 7); // 64 byte data field
 
   reg_wr(fc->reg_base + FDCAN_RXF0C,
-         FDCAN_RXFIFO0(0, 0) |
+         (ram_offset + FDCAN_RXFIFO0(0, 0)) |
          (3 << 16) |
          0);
 
   reg_wr(fc->reg_base + FDCAN_RXF1C,
-         FDCAN_RXFIFO1(0, 0) |
+         (ram_offset + FDCAN_RXFIFO1(0, 0)) |
          (3 << 16) |
          0);
 
