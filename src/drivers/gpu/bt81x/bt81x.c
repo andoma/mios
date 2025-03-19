@@ -691,6 +691,7 @@ static bt81x_t *g_bt81x;
 
 struct gfx_display *
 bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
+             gpio_output_speed_t drive_strength,
              const bt81x_timings_t *timings,
              const bt81x_bitmap_t bitmaps[],
              size_t num_bitmaps,
@@ -721,9 +722,9 @@ bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
   b->bitmaps = bitmaps;
   b->num_bitmaps = num_bitmaps;
 
-  gpio_conf_output(b->gpio_ncs, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_output(b->gpio_ncs, GPIO_PUSH_PULL, drive_strength, GPIO_PULL_NONE);
   gpio_set_output(b->gpio_ncs, 1);
-  gpio_conf_output(b->gpio_pd, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_output(b->gpio_pd, GPIO_PUSH_PULL, drive_strength, GPIO_PULL_NONE);
 
   gpio_conf_irq(b->gpio_irq, GPIO_PULL_UP, bt81x_irq, b,
                 GPIO_FALLING_EDGE | GPIO_RISING_EDGE,
