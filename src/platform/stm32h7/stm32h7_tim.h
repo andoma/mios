@@ -1,6 +1,7 @@
 #pragma once
 
 #define TIM7_BASE  0x40001400
+#define TIM8_BASE  0x40010400
 
 #define TIM15_BASE 0x40014000
 #define TIM16_BASE 0x40014400
