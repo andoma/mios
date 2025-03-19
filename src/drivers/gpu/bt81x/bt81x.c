@@ -40,6 +40,7 @@ typedef struct bt81x {
   uint8_t enabled;
   uint8_t running;
   uint8_t backlight;
+  uint8_t init_err;
   task_waitable_t irq_waitq;
 
   // IO
@@ -485,9 +486,14 @@ bt81x_initialize(bt81x_t *b)
 {
   error_t err = bt81x_reset(b);
   if(err) {
-    evlog(LOG_ERR, "bt81x: Failed to initialize, err=%d", err);
+
+    if(!b->init_err) {
+      evlog(LOG_ERR, "bt81x: Failed to initialize, err=%d", err);
+      b->init_err = 1;
+    }
     return err;
   }
+  b->init_err = 0;
 
   uint32_t id = bt81x_rd32(b, EVE_CHIP_ID_ADDRESS);
 
