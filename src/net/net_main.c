@@ -8,6 +8,7 @@
 #include <mios/timer.h>
 #include <mios/eventlog.h>
 #include <mios/cli.h>
+#include <mios/ghook.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -50,13 +51,15 @@ netif_task_cb(net_task_t *nt, uint32_t signals)
 
   if(signals & NETIF_TASK_STATUS_UP && !(ni->ni_flags & NETIF_F_UP)) {
     ni->ni_flags |= NETIF_F_UP;
-    if(ni->ni_status_change != NULL)
+    if(ni->ni_status_change)
       ni->ni_status_change(ni);
+    ghook_invoke(GHOOK_NETIF_LINK_STATUS, ni);
   }
   if(signals & NETIF_TASK_STATUS_DOWN && (ni->ni_flags & NETIF_F_UP)) {
     ni->ni_flags &= ~NETIF_F_UP;
     if(ni->ni_status_change)
       ni->ni_status_change(ni);
+    ghook_invoke(GHOOK_NETIF_LINK_STATUS, ni);
   }
   irq_permit(q);
 }

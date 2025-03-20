@@ -1,10 +1,13 @@
 #pragma once
 
+#include <mios/mios.h>
+
 // Global update hooks
 
 typedef enum {
   GHOOK_DHCP_UPDATE,
   GHOOK_BLE_STATUS,
+  GHOOK_NETIF_LINK_STATUS,
 } ghook_type_t;
 
 typedef void (*ghook_t)(ghook_type_t type, ...);
