@@ -86,12 +86,12 @@ stm32f4_adc_init(int unit, int mode)
 
 
 uint16_t
-adc_read_channel(int channel)
+adc_read_channel(int unit, int channel)
 {
   mutex_lock(&adc_mutex);
 
   int r = 0;
-  const uint32_t base = stm32f4_adc_init(1, 1);
+  const uint32_t base = stm32f4_adc_init(unit, 1);
   if(base) {
     reg_wr(base + ADCx_SR, 0);
     reg_wr(base + ADCx_SQR3, channel);
@@ -112,7 +112,7 @@ adc_read_channel(int channel)
 int
 stm32f4_adc_vref(void)
 {
-  return 1210 * 4096 / adc_read_channel(17);
+  return 1210 * 4096 / adc_read_channel(1, 17);
 }
 
 

@@ -71,7 +71,7 @@ void stm32f4_adc_set_smpr(uint32_t adc_base, uint32_t channel, uint32_t value);
 
 uint32_t stm32f4_adc_init(int unit, int mode);
 
-uint16_t adc_read_channel(int channel);
+uint16_t adc_read_channel(int unit, int channel);
 
 uint32_t stm32f4_adc_init_dma(int unit, uint32_t mask);
 
