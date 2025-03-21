@@ -96,7 +96,8 @@ cmd_dev(cli_t *cli, int argc, char **argv)
   while((d = device_get_next(d)) != NULL) {
     if(argc == 2 && strcmp(d->d_name, argv[1]))
        continue;
-    cli_printf(cli, "\n[%s]\n", d->d_name);
+    cli_printf(cli, "\n[%s]%s\n", d->d_name,
+               d->d_flags & DEVICE_F_DEBUG ? " +debug" : "");
     if(d->d_class->dc_print_info)
       d->d_class->dc_print_info(d, cli->cl_stream);
   }
