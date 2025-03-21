@@ -458,7 +458,7 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
 
     if(fmt[0] == 'l') {
       fmt++;
-      if(fmt[1] == 'l') {
+      if(fmt[0] == 'l') {
         scalar_is_64bit = 1;
         fmt++;
       }
