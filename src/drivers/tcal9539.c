@@ -127,7 +127,7 @@ tcal9539_conf_output(indirect_gpio_t *ig, unsigned int line,
 
 
 static error_t
-tcal9539_set_output(indirect_gpio_t *ig, unsigned int line, int on)
+tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
 
@@ -145,7 +145,7 @@ tcal9539_set_output(indirect_gpio_t *ig, unsigned int line, int on)
 
 
 static error_t
-tcal9539_get_input(indirect_gpio_t *ig, unsigned int line, int *status)
+tcal9539_get_pin(indirect_gpio_t *ig, unsigned int line, int *status)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
 
@@ -153,7 +153,7 @@ tcal9539_get_input(indirect_gpio_t *ig, unsigned int line, int *status)
     return ERR_INVALID_ID;
 
   uint8_t val;
-  error_t err = i2c_read_u8(tc->i2c, tc->address, line >> 4, &val);
+  error_t err = i2c_read_u8(tc->i2c, tc->address, line >> 3, &val);
   if(err)
     return err;
 
@@ -162,12 +162,30 @@ tcal9539_get_input(indirect_gpio_t *ig, unsigned int line, int *status)
   return 0;
 }
 
+static error_t
+tcal9539_get_port(indirect_gpio_t *ig, unsigned int port, uint32_t *status)
+{
+  tcal9539_t *tc = (tcal9539_t *)ig;
+
+  if(port >= 2)
+    return ERR_INVALID_ID;
+
+  uint8_t val;
+  error_t err = i2c_read_u8(tc->i2c, tc->address, port, &val);
+  if(err)
+    return err;
+
+  *status = val;
+  return 0;
+}
+
 
 static const gpio_vtable_t tcal9539_vtable = {
   .conf_input = tcal9539_conf_input,
   .conf_output = tcal9539_conf_output,
-  .set_output = tcal9539_set_output,
-  .get_input = tcal9539_get_input,
+  .set_pin = tcal9539_set_pin,
+  .get_pin = tcal9539_get_pin,
+  .get_port = tcal9539_get_port,
 };
 
 

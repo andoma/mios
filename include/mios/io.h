@@ -123,10 +123,16 @@ typedef struct gpio_vtable {
                          gpio_output_type_t type, gpio_output_speed_t speed,
                          gpio_pull_t pull);
 
-  error_t (*set_output)(struct indirect_gpio *ig, unsigned int line, int on);
+  // Read a single GPIO pin (one bit)
+  error_t (*set_pin)(struct indirect_gpio *ig, unsigned int line, int on);
 
-  error_t (*get_input)(struct indirect_gpio *ig, unsigned int gpio,
-                       int *status);
+  error_t (*get_pin)(struct indirect_gpio *ig, unsigned int gpio,
+                     int *status);
+
+  // Read a full port (number of pins depends on the pin multiplex)
+  error_t (*get_port)(struct indirect_gpio *ig, unsigned int port,
+                      uint32_t *pins);
+
 } gpio_vtable_t;
 
 typedef struct indirect_gpio {
