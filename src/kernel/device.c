@@ -79,9 +79,7 @@ static error_t
 cmd_dev(cli_t *cli, int argc, char **argv)
 {
   device_t *d = NULL;
-  if(argc > 1) {
-    if(argc != 3)
-      return ERR_INVALID_ARGS;
+  if(argc == 3) {
 
     while((d = device_get_next(d)) != NULL) {
       if(strcmp(d->d_name, argv[1]))
@@ -95,9 +93,9 @@ cmd_dev(cli_t *cli, int argc, char **argv)
     return 0;
   }
 
-  cli_printf(cli, "\nDevices:\n");
-
   while((d = device_get_next(d)) != NULL) {
+    if(argc == 2 && strcmp(d->d_name, argv[1]))
+       continue;
     cli_printf(cli, "\n[%s]\n", d->d_name);
     if(d->d_class->dc_print_info)
       d->d_class->dc_print_info(d, cli->cl_stream);
