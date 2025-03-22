@@ -1,5 +1,10 @@
 #pragma once
 
+#define TIM2_BASE  0x40000000
+#define TIM3_BASE  0x40000400
+#define TIM4_BASE  0x40000800
+#define TIM5_BASE  0x40000c00
+#define TIM6_BASE  0x40001000
 #define TIM7_BASE  0x40001400
 #define TIM8_BASE  0x40010400
 
