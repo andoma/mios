@@ -156,9 +156,10 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 
   reg_wr(RCC_D3CFGR, d3ppre << 4);
 
-  const uint32_t pll1m = 1; // Input prescaler (1 == divide  by 1)
-  const uint32_t pll2m = 1; // Input prescaler (1 == divide  by 1)
-  const uint32_t pll3m = 1; // Input prescaler (1 == divide  by 1)
+  hse_freq /= 2;
+  const uint32_t pll1m = 2; // Input prescaler (2 == divide  by 2)
+  const uint32_t pll2m = 2; // Input prescaler (2 == divide  by 2)
+  const uint32_t pll3m = 2; // Input prescaler (2 == divide  by 2)
 
   const uint32_t pll1n = (sysclk_freq / hse_freq) - 1;
   const uint32_t pll1p = 0;
