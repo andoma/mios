@@ -52,6 +52,10 @@ stm32_fdcan_irq(void *arg)
     pbuf_t *pb = pbuf_make(0, 0);
     if(pb != NULL) {
       uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 0));
+#ifdef ENABLE_NET_TIMESTAMPING
+      uint32_t w1 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 1));
+      pb->pb_timestamp = w1 & 0xffff;
+#endif
       uint32_t *dst = pbuf_data(pb, 0);
       dst[0] = w0 & 0x1fffffff;
       int words = (len + 3) / 4;

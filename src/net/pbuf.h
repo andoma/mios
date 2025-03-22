@@ -29,6 +29,10 @@ typedef struct pbuf {
 
   void *pb_data;
 
+#ifdef ENABLE_NET_TIMESTAMPING
+  uint64_t pb_timestamp;
+#endif
+
 } pbuf_t;
 
 void pbuf_reset(pbuf_t *pb, size_t header_size, size_t len);
