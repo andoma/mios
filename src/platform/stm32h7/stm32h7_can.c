@@ -10,6 +10,8 @@
 #define FDCAN_TEST   0x010
 #define FDCAN_CCCR   0x018
 #define FDCAN_NBTP   0x01c
+#define FDCAN_TSCC   0x020
+#define FDCAN_TSCV   0x024
 #define FDCAN_ECR    0x040
 #define FDCAN_PSR    0x044
 #define FDCAN_IR     0x050
@@ -53,7 +55,8 @@ void
 stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
                  unsigned int nominal_bitrate,
                  unsigned int data_bitrate,
-                 const struct dsig_filter *output_filter)
+                 const struct dsig_filter *output_filter,
+                 uint32_t flags)
 {
   instance--;
   if(instance >= ARRAYSIZE(stm32h7_can_interfaces))
@@ -98,6 +101,10 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
          (7 << 4) |
          0);
 
+  if(flags & STM32H7_CAN_TIM3_TIMESTAMPING) {
+    // Timestamp packets using TIM3_CNT
+    reg_wr(fc->reg_base + FDCAN_TSCC, 2);
+  }
 
   const char *name = stm32h7_can_interfaces[instance].name;
   error_t err = stm32_fdcan_init(fc, name,
