@@ -236,6 +236,19 @@ clk_get_freq(uint16_t id)
   uint8_t bus = id >> 8;
 
   switch(id) {
+  case CLK_TIM1:
+  case CLK_TIM2:
+  case CLK_TIM3:
+  case CLK_TIM4:
+  case CLK_TIM5:
+  case CLK_TIM6:
+  case CLK_TIM7:
+  case CLK_TIM8:
+  case CLK_TIM15:
+  case CLK_TIM16:
+  case CLK_TIM17:
+    return apb_freq * 2;
+
   case CLK_SPI1:
   case CLK_SPI2:
   case CLK_SPI3:
