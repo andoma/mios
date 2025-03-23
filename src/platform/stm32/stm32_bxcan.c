@@ -17,6 +17,7 @@
 #define CAN_TSR      0x008
 #define CAN_RF(x)   (0x00c + (x) * 4)
 #define CAN_IER      0x014
+#define CAN_ESR      0x018
 #define CAN_BTR      0x01c
 
 #define CAN_TI(x)   (0x180 + (x) * 0x10)
@@ -49,20 +50,18 @@ typedef struct bxcan {
 
   uint32_t reg_base;
 
-  uint32_t queued;
+  size_t qlen;
 
   char name[5];
 
 } bxcan_t;
 
 static void
-stm32_bxcan_send(bxcan_t *bx, pbuf_t *pb, uint32_t id, int mailbox)
+stm32_bxcan_send(bxcan_t *bx, const void *data, size_t len,
+                 uint32_t id, int mailbox)
 {
   uint32_t reg_base = bx->reg_base;
-
-  int len = MIN(pb->pb_buflen, 8);
-
-  const void *data = pbuf_data(pb, 0);
+  len = MIN(len, 8);
 
   if(len) {
     uint32_t u32 = 0;
@@ -76,10 +75,40 @@ stm32_bxcan_send(bxcan_t *bx, pbuf_t *pb, uint32_t id, int mailbox)
   }
 
   reg_wr(reg_base + CAN_TDT(mailbox), len);
-  reg_wr(reg_base + CAN_TI(mailbox), (id << 3) | 0x5);
+  if(id < 2048) {
+    reg_wr(reg_base + CAN_TI(mailbox), (id << 21) | 0x1);
+  } else {
+    reg_wr(reg_base + CAN_TI(mailbox), (id << 3) | 0x5);
+  }
   bx->tx_status[mailbox] = 1;
 }
 
+
+static void
+stm32_bxcan_send_pb(bxcan_t *bx, pbuf_t *pb, uint32_t id, int mailbox)
+{
+  stm32_bxcan_send(bx, pbuf_data(pb, 0), pb->pb_buflen, id, mailbox);
+}
+
+
+static error_t
+stm32_bxcan_low_latency_output(can_netif_t *cni, const void *buf,
+                               size_t len, uint32_t id)
+{
+  bxcan_t *bx = (bxcan_t *)cni;
+  error_t err = 0;
+
+  int mailbox = 1;
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  if(!bx->tx_status[mailbox]) {
+    stm32_bxcan_send(bx, buf, len, id, mailbox);
+  } else {
+    err = ERR_NO_BUFFER;
+  }
+  irq_permit(q);
+  return err;
+}
 
 
 static pbuf_t *
@@ -95,7 +124,7 @@ stm32_bxcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
       wr32_le(pbuf_data(pb, 0), id);
       if(!pbuf_pullup(pb, pb->pb_pktlen)) {
         STAILQ_INSERT_TAIL(&bx->tx_queue[mailbox], pb, pb_link);
-        bx->queued++;
+        bx->qlen++;
         pb = NULL;
       }
     }
@@ -103,7 +132,7 @@ stm32_bxcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
   } else {
 
     if(!pbuf_pullup(pb, pb->pb_pktlen)) {
-      stm32_bxcan_send(bx, pb, id, mailbox);
+      stm32_bxcan_send_pb(bx, pb, id, mailbox);
     }
   }
   irq_permit(q);
@@ -122,14 +151,21 @@ stm32_bxcan_tx_irq(void *arg)
     uint32_t mbstatus = (tsr >> (i * 8)) & 0xff;
     if(!(mbstatus & 1))
       continue;
+
+    if(i == 1) {
+      uint16_t ts = reg_rd(bx->reg_base + CAN_TDT(i)) >> 16;
+      bx->cni.cni_low_latency_output_timestamp = ts;
+    }
+
     reg_wr(bx->reg_base + CAN_TSR, 1 << (i * 8));
     pbuf_t *pb = pbuf_splice(&bx->tx_queue[i]);
     if(pb == NULL) {
       bx->tx_status[i] = 0;
     } else {
+      bx->qlen--;
       uint32_t group = rd32_le(pbuf_data(pb, 0));
       pb = pbuf_drop(pb, 4);
-      stm32_bxcan_send(bx, pb, group, i);
+      stm32_bxcan_send_pb(bx, pb, group, i);
     }
   }
 }
@@ -280,7 +316,7 @@ calc_btr(int clk_ratio, int spa)
 }
 
 
-static void
+static can_netif_t *
 stm32_bxcan_init(int instance, int bitrate, int irq_base,
                  const struct dsig_filter *input_filter,
                  const struct dsig_filter *output_filter)
@@ -309,7 +345,12 @@ stm32_bxcan_init(int instance, int bitrate, int irq_base,
   }
 
   reg_wr(reg_base + CAN_BTR, btr);
-  reg_wr(reg_base + CAN_MCR, 0x10001);
+  reg_wr(reg_base + CAN_MCR,
+         (1 << 16) | // Freeze during debug
+         (1 << 7) |  // Enable timestamp in mailboxes
+         (1 << 6) |  // Automatic bus-off management
+         (1 << 0) |  // Init request
+         0);
 
   // Enter Normal mode
   reg_clr_bit(reg_base + CAN_MCR, 0);
@@ -324,6 +365,7 @@ stm32_bxcan_init(int instance, int bitrate, int irq_base,
   reg_clr_bit(reg_base + CAN_FMR, 0);
 
   bx->cni.cni_output = stm32_bxcan_output;
+  bx->cni.cni_low_latency_output = stm32_bxcan_low_latency_output;
   snprintf(bx->name, sizeof(bx->name), "can%d", instance);
   can_netif_attach(&bx->cni, bx->name, &stm32_bxcan_device_class,
                    output_filter);
@@ -332,4 +374,5 @@ stm32_bxcan_init(int instance, int bitrate, int irq_base,
          (1 << 5) |
          (1 << 1) |
          (1 << 0));
+  return &bx->cni;
 }
