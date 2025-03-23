@@ -18,6 +18,8 @@ struct dsig_filter {
   uint32_t prefix;
   uint8_t prefixlen;
   uint16_t flags;
+  void (*handler)(const void *data, size_t len, uint32_t id,
+                  uint32_t timestamp);
 };
 
 #define DSIG_FLAG_EXTENDED 0x1
