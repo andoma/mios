@@ -230,6 +230,20 @@ stm32_bxcan_sce_irq(void *arg)
 static void
 stm32_bxcan_print_info(struct device *dev, struct stream *st)
 {
+  bxcan_t *bx = (bxcan_t *)dev;
+
+  uint32_t esr = reg_rd(bx->reg_base + CAN_ESR);
+
+  uint32_t rec = (esr >> 24) & 0xff;
+  uint32_t tec = (esr >> 16) & 0xff;
+  uint32_t lec = (esr >> 4) & 7;
+
+  stprintf(st, "\tReceive error counter: %d\n", rec);
+  stprintf(st, "\tTransmit error counter: %d\n", tec);
+  stprintf(st, "\tLast error code: %d\n", lec);
+  stprintf(st, "\tBus Off: %s\n", esr & 0x4 ? "Yes" : "No");
+  stprintf(st, "\tError Passive: %s\n", esr & 0x2 ? "Yes" : "No");
+  stprintf(st, "\tError Warning: %s\n", esr & 0x1 ? "Yes" : "No");
 }
 
 static const device_class_t stm32_bxcan_device_class = {
