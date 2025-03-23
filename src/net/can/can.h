@@ -7,6 +7,11 @@ typedef struct can_netif {
 
   pbuf_t *(*cni_output)(struct can_netif *cni, pbuf_t *pb, uint32_t id);
 
+  error_t (*cni_low_latency_output)(struct can_netif *cni, const void *buf,
+                                    size_t len, uint32_t id);
+
+  uint16_t cni_low_latency_output_timestamp;
+
 } can_netif_t;
 
 struct dsig_filter;
