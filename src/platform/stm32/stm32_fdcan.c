@@ -1,17 +1,20 @@
-
 #include "irq.h"
 
+#include <assert.h>
+
 #include <mios/eventlog.h>
+#include <mios/dsig.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include "net/can/can.h"
+#include "net/net.h"
 
 #include <mios/bytestream.h>
 
-#define FDCAN_FLSSA         0x000
+#define FDCAN_FLSSA(x)     (0x000 + 4 * (x))
 #define FDCAN_FLESA         0x070
 #define FDCAN_RXFIFO0(x,y) (0x0b0 + 72 * (x) + 4 * (y))
 #define FDCAN_RXFIFO1(x,y) (0x188 + 72 * (x) + 4 * (y))
@@ -25,6 +28,13 @@ typedef struct fdcan {
 
   uint32_t ram_base;
 
+  uint8_t num_std_filters;
+  uint8_t num_ext_filters;
+
+  uint8_t *std_input_filter_map;
+
+  const struct dsig_filter *input_filter;
+
 } fdcan_t;
 
 
@@ -32,16 +42,61 @@ static const uint8_t dlc_to_len[16] = {
   0,1,2,3,4,5,6,7, 8,12,16,20,24,32,48,64
 };
 
+
+static uint32_t
+id_from_w0(uint32_t w0)
+{
+  if(w0 & (1 << 30))
+    return w0 & 0x1fffffff;
+  else
+    return (w0 >> 18) & 0x7ff;
+}
+
+
 static void
-stm32_fdcan_irq(void *arg)
+stm32_fdcan_irq1(void *arg)
 {
   fdcan_t *fc = arg;
 
   uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
-  reg_wr(fc->reg_base + FDCAN_IR, bits);
+  if(bits & (1 << 4)) {
+    // RX-Fifo 1 not empty
+    reg_wr(fc->reg_base + FDCAN_IR, (1 << 4));
+
+    uint32_t rstatus = reg_rd(fc->reg_base + FDCAN_RXF1S);
+    uint32_t get_index = (rstatus >> 8) & 3;
+
+    uint32_t w1 = reg_rd(fc->ram_base + FDCAN_RXFIFO1(get_index, 1));
+    if(!(w1 & (1 << 31))) {
+      // We need a filter match here
+      uint32_t fidx = (w1 >> 24) & 0x7f;
+      uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 0));
+      uint32_t len = dlc_to_len[(w1 >> 16) & 0xf];
+
+      if(w0 & (1 << 30)) {
+        // Extended ID (Ignored for now)
+      } else {
+
+        fidx = fc->std_input_filter_map[fidx];
+        void *pkt = (void *)fc->ram_base + FDCAN_RXFIFO0(get_index, 2);
+        fc->input_filter[fidx].handler(pkt, len, w0 & 0x1fffffff, w1 & 0xffff);
+      }
+    }
+    reg_wr(fc->reg_base + FDCAN_RXF1A, get_index);
+  }
+}
+
+static void
+stm32_fdcan_irq0(void *arg)
+{
+  fdcan_t *fc = arg;
+
+  uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
 
   if(bits & (1 << 0)) {
     // RX-Fifo 0 not empty
+
+    reg_wr(fc->reg_base + FDCAN_IR, (1 << 0));
 
     uint32_t rstatus = reg_rd(fc->reg_base + FDCAN_RXF0S);
     uint32_t get_index = (rstatus >> 8) & 3;
@@ -53,11 +108,10 @@ stm32_fdcan_irq(void *arg)
     if(pb != NULL) {
       uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 0));
 #ifdef ENABLE_NET_TIMESTAMPING
-      uint32_t w1 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 1));
       pb->pb_timestamp = w1 & 0xffff;
 #endif
       uint32_t *dst = pbuf_data(pb, 0);
-      dst[0] = w0 & 0x1fffffff;
+      dst[0] = id_from_w0(w0);
       int words = (len + 3) / 4;
       for(int i = 0; i < words; i++) {
         dst[1 + i] = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 2 + i));
@@ -205,8 +259,24 @@ fdcan_calculate_timings(int source_clk, int target_rate, int spa,
 
 
 static void
-stm32_fdcan_cce(fdcan_t *fc)
+stm32_fdcan_cce(fdcan_t *fc, const struct dsig_filter *input_filter)
 {
+  if(input_filter) {
+    while(input_filter->prefixlen != 0xff) {
+
+      if(input_filter->flags & DSIG_FLAG_EXTENDED) {
+        fc->num_ext_filters++;
+      } else {
+        fc->num_std_filters++;
+      }
+      input_filter++;
+    }
+
+    if(fc->num_std_filters)
+      fc->std_input_filter_map = calloc(1, fc->num_std_filters);
+  }
+
+
   reg_wr(fc->reg_base + FDCAN_CCCR,
          (1 << 0) | // INIT
          (1 << 1) | // Configuration Change Enable
@@ -220,10 +290,52 @@ static error_t
 stm32_fdcan_init(fdcan_t *fc, const char *name,
                  uint32_t nominal_bitrate, uint32_t data_bitrate,
                  uint32_t clockfreq,
-                 const struct dsig_filter *output_filter)
+                 const struct dsig_filter *dif,
+                 const struct dsig_filter *dof)
 {
-  reg_wr(fc->reg_base + FDCAN_IKE, 1);
-  reg_wr(fc->reg_base + FDCAN_IE, (1 << 0));
+  int stdidx = 0;
+
+  fc->input_filter = dif;
+
+  if(dif) {
+
+    int i = 0;
+    while(dif->prefixlen != 0xff) {
+
+      if(dif->flags & DSIG_FLAG_EXTENDED) {
+
+      } else {
+
+        if(dif->handler) {
+          uint32_t mask = mask_from_prefixlen(dif->prefixlen) & 0x7ff;
+
+          reg_wr(fc->ram_base + FDCAN_FLSSA(stdidx),
+                 (0b010 << 27) | // Redirect to FIFO1
+                 (dif->prefix << 16) |
+                 mask |
+                 0);
+
+        }
+
+        fc->std_input_filter_map[stdidx] = i;
+        stdidx++;
+      }
+      i++;
+      dif++;
+    }
+  }
+
+  assert(stdidx == fc->num_std_filters);
+
+  reg_wr(fc->reg_base + FDCAN_ILE, 3); // Enable both IRQs
+  reg_wr(fc->reg_base + FDCAN_IE,
+         (1 << 4) | // RX Fifo 1 new message
+         (1 << 0) | // RX Fifo 0 new message
+         0);
+
+  reg_wr(fc->reg_base + FDCAN_ILS,
+         (1 << 4) | // RX fifo 1 to IRQ-1
+         0);
 
   can_timing_t nom, data;
   error_t err;
@@ -265,7 +377,6 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
   while(reg_rd(fc->reg_base + FDCAN_CCCR) & 1) {}
 
   fc->cni.cni_output = stm32_fdcan_output;
-  can_netif_attach(&fc->cni, name, &stm32_fdcan_device_class,
-                   output_filter);
+  can_netif_attach(&fc->cni, name, &stm32_fdcan_device_class, dof);
   return 0;
 }

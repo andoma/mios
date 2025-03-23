@@ -16,7 +16,10 @@
 #define FDCAN_PSR    0x044
 #define FDCAN_IR     0x050
 #define FDCAN_IE     0x054
-#define FDCAN_IKE    0x05c
+#define FDCAN_ILS    0x058
+#define FDCAN_ILE    0x05c
+
+#define FDCAN_SIDFC  0x084
 
 #define FDCAN_RXF0C  0x0a0
 #define FDCAN_RXF0S  0x0a4
@@ -55,6 +58,7 @@ void
 stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
                  unsigned int nominal_bitrate,
                  unsigned int data_bitrate,
+                 const struct dsig_filter *input_filter,
                  const struct dsig_filter *output_filter,
                  uint32_t flags)
 {
@@ -73,11 +77,15 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   uint32_t ram_offset = instance * 1024;
   fc->ram_base = CAN_RAM + ram_offset;
 
-  stm32_fdcan_cce(fc);
+  stm32_fdcan_cce(fc, input_filter);
 
   for(size_t i = 0; i < 10240 / 4; i++) {
     reg_wr(fc->ram_base + i * 4, 0);
   }
+
+  reg_wr(fc->reg_base + FDCAN_SIDFC,
+         (ram_offset + FDCAN_FLSSA(0)) |
+         (fc->num_std_filters << 16));
 
   reg_wr(fc->reg_base + FDCAN_TXBC,
          (ram_offset + FDCAN_TXBUF(0, 0)) |
@@ -110,6 +118,7 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate, data_bitrate,
                                  clk_get_freq(CLK_FDCAN),
+                                 input_filter,
                                  output_filter);
   if(err) {
     printf("%s: Failed to initialize\n", name);
@@ -117,7 +126,10 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   }
 
   irq_enable_fn_arg(stm32h7_can_interfaces[instance].irq0,
-                    IRQ_LEVEL_NET, stm32_fdcan_irq, fc);
+                    IRQ_LEVEL_NET, stm32_fdcan_irq0, fc);
+
+  irq_enable_fn_arg(stm32h7_can_interfaces[instance].irq1,
+                    IRQ_LEVEL_HIGH, stm32_fdcan_irq1, fc);
 
   printf("%s: Initialized. Nominal bitrate:%d Data bitrate:%d\n",
          name, nominal_bitrate, data_bitrate);
