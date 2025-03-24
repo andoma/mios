@@ -12,10 +12,13 @@
 #define FDCAN_PSR    0x044
 #define FDCAN_IR     0x050
 #define FDCAN_IE     0x054
+#define FDCAN_ILS    0x058
 #define FDCAN_IKE    0x05c
 
 #define FDCAN_RXF0S  0x090
 #define FDCAN_RXF0A  0x094
+#define FDCAN_RXF1S  0x098
+#define FDCAN_RXF1A  0x09c
 
 #define FDCAN_TXFQS  0x0c4
 
@@ -47,7 +50,7 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
   fc->reg_base = FDCAN_BASE(instance);
   fc->ram_base = FDCAN_RAM(instance);
 
-  stm32_fdcan_cce(fc);
+  stm32_fdcan_cce(fc, NULL);
 
   for(size_t i = 0; i < 0x350; i += 4) {
     reg_wr(fc->ram_base + i, 0);
@@ -59,13 +62,15 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate,
                                  data_bitrate, clk_get_freq(CLK_FDCAN),
+                                 NULL,
                                  output_filter);
   if(err) {
     printf("%s: Failed to initialize\n", name);
     return;
   }
 
-  irq_enable_fn_arg(21, IRQ_LEVEL_NET, stm32_fdcan_irq, fc);
+  irq_enable_fn_arg(21, IRQ_LEVEL_NET, stm32_fdcan_irq0, fc);
+  irq_enable_fn_arg(22, IRQ_LEVEL_NET, stm32_fdcan_irq1, fc);
 
   printf("%s: Initialized. Nominal bitrate:%d Data bitrate:%d\n",
          name, nominal_bitrate, data_bitrate);
