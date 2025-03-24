@@ -35,6 +35,9 @@ typedef struct fdcan {
 
   const struct dsig_filter *input_filter;
 
+  uint32_t rx_fifo0;
+  uint32_t rx_fifo1;
+
 } fdcan_t;
 
 
@@ -83,6 +86,7 @@ stm32_fdcan_irq1(void *arg)
       }
     }
     reg_wr(fc->reg_base + FDCAN_RXF1A, get_index);
+    fc->rx_fifo1++;
   }
 }
 
@@ -123,6 +127,7 @@ stm32_fdcan_irq0(void *arg)
       netif_wakeup(&fc->cni.cni_ni);
     }
     reg_wr(fc->reg_base + FDCAN_RXF0A, get_index);
+    fc->rx_fifo0++;
     return;
   }
   if(bits & (1 << 9)) {
@@ -137,10 +142,31 @@ stm32_fdcan_irq0(void *arg)
 }
 
 
+
 static void
 stm32_fdcan_print_info(struct device *dev, struct stream *st)
 {
-  stprintf(st, "no info yet\n");
+  fdcan_t *fc = (fdcan_t *)dev;
+
+  uint32_t ecr = reg_rd(fc->reg_base + FDCAN_ECR);
+  uint32_t rec = ecr >> 8 & 0x7f;
+  uint32_t tec = ecr & 0xff;
+
+  stprintf(st, "\tReceived packets, Fifo0:%u  Fifo1:%u\n",
+           fc->rx_fifo0, fc->rx_fifo1);
+
+  stprintf(st, "\tReceive error counter:%d  Transmit error counter:%d\n",
+           rec, tec);
+  stprintf(st, "\tReceiver passive: %s\n", ecr & 0x8000 ? "Yes" : "No");
+
+  uint32_t psr = reg_rd(fc->reg_base + FDCAN_PSR);
+
+  stprintf(st, "\tActivity: %s\n",
+           strtbl("Synchronizing\0Idle\0Receiver\0Transmitter\0\0",
+                  (psr >> 3) & 3));
+  stprintf(st, "\tLast error code: %s\n",
+           strtbl("None\0Stuffing\0Form\0AckErr\0Bit1Err\0Big0Err\0CRC\0NoChange\0\0",
+                  psr & 7));
 }
 
 

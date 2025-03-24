@@ -60,7 +60,7 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
                  unsigned int data_bitrate,
                  const struct dsig_filter *input_filter,
                  const struct dsig_filter *output_filter,
-                 uint32_t flags)
+                 uint32_t flags, const char *name)
 {
   instance--;
   if(instance >= ARRAYSIZE(stm32h7_can_interfaces))
@@ -114,7 +114,7 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
     reg_wr(fc->reg_base + FDCAN_TSCC, 2);
   }
 
-  const char *name = stm32h7_can_interfaces[instance].name;
+  name = name ?: stm32h7_can_interfaces[instance].name;
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate, data_bitrate,
                                  clk_get_freq(CLK_FDCAN),
