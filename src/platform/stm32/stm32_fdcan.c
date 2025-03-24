@@ -353,7 +353,7 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
 
   assert(stdidx == fc->num_std_filters);
 
-  reg_wr(fc->reg_base + FDCAN_IKE, 3); // Enable both IRQs
+  reg_wr(fc->reg_base + FDCAN_ILE, 3); // Enable both IRQs
   reg_wr(fc->reg_base + FDCAN_IE,
          (1 << 4) | // RX Fifo 1 new message
          (1 << 0) | // RX Fifo 0 new message
