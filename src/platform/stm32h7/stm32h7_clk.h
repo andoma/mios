@@ -29,6 +29,7 @@
 #define RCC_APB2RSTR      (RCC_BASE + 0x98)
 #define RCC_APB4RSTR      (RCC_BASE + 0x9c)
 
+#define RCC_RSR           (RCC_BASE + 0xd0)
 #define RCC_AHB1ENR       (RCC_BASE + 0xd8)
 #define RCC_AHB4ENR       (RCC_BASE + 0xe0)
 #define RCC_APB1LENR      (RCC_BASE + 0xe8)
