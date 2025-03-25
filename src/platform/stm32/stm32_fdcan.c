@@ -223,7 +223,11 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
   }
 
   int bufidx = (txfqs >> 16) & 0x1f;
-  reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), id | (1 << 30));
+  if(id < 2048) {
+    reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), id << 18);
+  } else {
+    reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), id | (1 << 30));
+  }
 
   //  w1 |= 1 << 20; // Bitrate switching
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 1), w1);
