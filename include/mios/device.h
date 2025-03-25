@@ -3,6 +3,7 @@
 #include <sys/queue.h>
 
 #include "error.h"
+#include "atomic.h"
 
 struct stream;
 struct device;
@@ -29,7 +30,7 @@ typedef struct device {
   const char *d_name;
   const device_class_t *d_class;
   STAILQ_ENTRY(device) d_link;
-  int d_refcount;
+  atomic_t d_refcount;
   unsigned int d_flags;
 } device_t;
 

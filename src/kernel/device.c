@@ -14,7 +14,7 @@ static mutex_t devs_mutex = MUTEX_INITIALIZER("devss");
 void
 device_register(device_t *d)
 {
-  d->d_refcount = 1;
+  atomic_set(&d->d_refcount, 1);
 
   mutex_lock(&devs_mutex);
   STAILQ_INSERT_TAIL(&devices, d, d_link);
@@ -34,7 +34,7 @@ device_unregister(device_t *d)
 void
 device_release(device_t *d)
 {
-  if(__sync_add_and_fetch(&d->d_refcount, -1))
+  if(atomic_dec(&d->d_refcount))
     return;
 
   if(d->d_class->dc_dtor == NULL)
@@ -42,11 +42,13 @@ device_release(device_t *d)
   d->d_class->dc_dtor(d);
 }
 
+
 void
 device_retain(device_t *d)
 {
-  __sync_add_and_fetch(&d->d_refcount, 1);
+  atomic_inc(&d->d_refcount);
 }
+
 
 device_t *
 device_get_next(device_t *cur)
