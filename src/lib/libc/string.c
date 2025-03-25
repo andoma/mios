@@ -220,3 +220,27 @@ strdup(const char *line)
   strlcpy(new, line, len + 1);
   return new;
 }
+
+
+int
+glob(const char *str, const char *pat)
+{
+  const char *s = str, *p = pat;
+  const char *star = NULL, *ss = NULL;
+
+  while (*s) {
+    if (*p == '?' || *p == *s) {
+      s++; p++;
+    } else if (*p == '*') {
+      star = p++;
+      ss = s;
+    } else if (star) {
+      p = star + 1;
+      s = ++ss;
+    } else {
+      return 0;
+    }
+  }
+  while (*p == '*') p++;
+  return *p == 0;
+}

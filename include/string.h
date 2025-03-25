@@ -45,3 +45,6 @@ char *strdup(const char *src);
 
 __attribute__((access(write_only, 1), access(read_only, 2)))
 void bin2hex(char *s, const void *data, size_t len);
+
+__attribute__((access(read_only, 1), access(read_only, 2)))
+int glob(const char *str, const char *pat);
