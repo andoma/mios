@@ -885,7 +885,7 @@ draw_rect(gfx_display_t *gd,
   b->dl[b->dlptr++] = EVE_ENC_END();
 }
 
-static void
+static int
 draw_text(gfx_display_t *gd,
           const gfx_position_t *pos,
           gfx_font_id_t font,
@@ -894,7 +894,7 @@ draw_text(gfx_display_t *gd,
   bt81x_t *b = (bt81x_t *)gd;
 
   if(!ensure_display_list(b, 2 + 4 + len + 1))
-    return;
+    return 0;
 
   const struct bt81x_font *f = &fonts[font];
 
@@ -925,6 +925,7 @@ draw_text(gfx_display_t *gd,
   }
   b->dl[b->dlptr++] = EVE_ENC_END();
   b->dl[b->dlptr++] = EVE_ENC_RESTORE_CONTEXT();
+  return x;
 }
 
 

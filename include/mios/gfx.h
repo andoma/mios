@@ -47,11 +47,11 @@ typedef struct gfx_display_class {
                       const gfx_rect_t *r,
                       int corner_radius);
 
-  void (*text)(gfx_display_t *gd,
-               const gfx_position_t *pos,
+  int (*text)(gfx_display_t *gd,
+              const gfx_position_t *pos,
                gfx_font_id_t font,
-               const char *text,
-               size_t len);
+              const char *text,
+              size_t len);
 
   void (*bitmap)(gfx_display_t *gd,
                  const gfx_position_t *pos,
