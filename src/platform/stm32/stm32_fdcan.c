@@ -73,7 +73,7 @@ stm32_fdcan_irq1(void *arg)
     if(!(w1 & (1 << 31))) {
       // We need a filter match here
       uint32_t fidx = (w1 >> 24) & 0x7f;
-      uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 0));
+      uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO1(get_index, 0));
       uint32_t len = dlc_to_len[(w1 >> 16) & 0xf];
 
       if(w0 & (1 << 30)) {
@@ -81,7 +81,7 @@ stm32_fdcan_irq1(void *arg)
       } else {
 
         fidx = fc->std_input_filter_map[fidx];
-        void *pkt = (void *)fc->ram_base + FDCAN_RXFIFO0(get_index, 2);
+        void *pkt = (void *)fc->ram_base + FDCAN_RXFIFO1(get_index, 2);
         fc->input_filter[fidx].handler(pkt, len, w0 & 0x1fffffff, w1 & 0xffff);
       }
     }
