@@ -13,7 +13,7 @@
 #define FDCAN_IR     0x050
 #define FDCAN_IE     0x054
 #define FDCAN_ILS    0x058
-#define FDCAN_IKE    0x05c
+#define FDCAN_ILE    0x05c
 
 #define FDCAN_RXF0S  0x090
 #define FDCAN_RXF0A  0x094
