@@ -4,12 +4,6 @@
 #define EVENTLOG_SIZE 256
 #endif
 
-#if EVENTLOG_SIZE
-
-#include <stddef.h>
-
-#include <mios/error.h>
-
 typedef enum {
   LOG_EMERG,
   LOG_ALERT,
@@ -20,6 +14,13 @@ typedef enum {
   LOG_INFO,
   LOG_DEBUG,
 } event_level_t;
+
+
+#if EVENTLOG_SIZE
+
+#include <stddef.h>
+
+#include <mios/error.h>
 
 struct stream;
 
