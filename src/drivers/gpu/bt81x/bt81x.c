@@ -913,7 +913,7 @@ draw_text(gfx_display_t *gd,
     if(c == '\t' && ti < gd->gd_tab_offsets_size) {
       x = gd->gd_tab_offsets[ti++] - absx;
     } else if(c >= 32 && c < 128) {
-      if(x > 512) {
+      if(x >= 512) {
         b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X((x + pos->x) << 4);
         absx = x;
         x = 0;
