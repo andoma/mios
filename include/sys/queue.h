@@ -238,6 +238,30 @@ struct {								\
 	SLIST_FIRST(head2) = swap_first;				\
 } while (0)
 
+#define SLIST_INSERT_SORTED(head, elm, field, cmpfunc) do {	\
+        if(SLIST_EMPTY(head)) {					\
+          SLIST_INSERT_HEAD(head, elm, field);			\
+        } else {						\
+          typeof(elm) _tmp, _prev = NULL;                       \
+          SLIST_FOREACH(_tmp,head,field) {			\
+            if(cmpfunc(elm,_tmp) <= 0) {			\
+              if(_prev == NULL) {                               \
+                SLIST_INSERT_HEAD(head, elm, field);            \
+              } else {                                          \
+                SLIST_INSERT_AFTER(_prev,elm,field);            \
+              }                                                 \
+              break;                                            \
+            }                                                   \
+            if(!SLIST_NEXT(_tmp,field)) {			\
+              SLIST_INSERT_AFTER(_tmp,elm,field);		\
+              break;						\
+            }							\
+            _prev = _tmp;                                       \
+          }							\
+        }							\
+  } while(0)
+
+
 /*
  * Singly-linked Tail queue declarations.
  */
