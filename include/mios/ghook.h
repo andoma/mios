@@ -8,6 +8,7 @@ typedef enum {
   GHOOK_DHCP_UPDATE,
   GHOOK_BLE_STATUS,
   GHOOK_NETIF_LINK_STATUS,
+  GHOOK_ALERT_UPDATED,
 } ghook_type_t;
 
 typedef void (*ghook_t)(ghook_type_t type, ...);
