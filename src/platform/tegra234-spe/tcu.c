@@ -17,13 +17,13 @@
 // TCU init. Signal RESET + SPE output
 static const uint8_t tcu_reset_seq[] = {0xff, 0xfd, 0xff, 0xe0};
 
-static stream_t *uartc;
+stream_t *g_uartc;
 
 static void  __attribute__((constructor(108)))
 tcu_init_early(void)
 {
-  uartc = uart_16550_create(0x0c280000, 22); // UART-C
-  stdio = uartc;
+  g_uartc = uart_16550_create(0x0c280000, 22); // UART-C
+  stdio = g_uartc;
   stream_write(stdio, tcu_reset_seq, sizeof(tcu_reset_seq), 0);
   printf("\nTCU console initialized\n");
 }
@@ -62,7 +62,7 @@ tcu_init_late(void)
     TCU_CHANNEL_RCE,
   };
 
-  smux_create(uartc, 0xff, 0xfd, 6, tcuids, svec, 0);
+  smux_create(g_uartc, 0xff, 0xfd, 6, tcuids, svec, 0);
 }
 
 static void  __attribute__((destructor(5000)))
@@ -70,6 +70,6 @@ tcu_fini_late(void)
 {
   // Interrupts are off now (panic, etc)
   // Revert back from multiplexed console and send reset sequence
-  stdio = uartc;
+  stdio = g_uartc;
   stream_write(stdio, tcu_reset_seq, sizeof(tcu_reset_seq), 0);
 }
