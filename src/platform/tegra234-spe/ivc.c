@@ -7,6 +7,8 @@
 
 #include "tegra234_ast.h"
 
+#define IVC_SS_CARVEOUT_BASE 0
+#define IVC_SS_CARVEOUT_SIZE 1
 
 static void
 ccplex_ivc_rx(void *arg)
