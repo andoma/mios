@@ -14,7 +14,7 @@
 #define TCU_CHANNEL_TZ     0xe4
 #define TCU_CHANNEL_RCE    0xe5
 
-// TCU init. Seignal RESET + SPE output
+// TCU init. Signal RESET + SPE output
 static const uint8_t tcu_reset_seq[] = {0xff, 0xfd, 0xff, 0xe0};
 
 static stream_t *uartc;
