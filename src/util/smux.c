@@ -179,9 +179,16 @@ smux_create(stream_t *muxed, uint8_t delimiter, uint8_t reset_token,
   pollset_t *ps = smux->ps;
 
   for(size_t i = 0; i < count; i++) {
-    ps[i].type = POLL_STREAM_READ;
-    ps[i].obj = streamvec[i];
     smux->channelids[i] = idvec[i];
+    ps[i].obj = streamvec[i];
+
+    // Only poll if channel have a read() interface
+    if(streamvec[i]->vtable->read != NULL) {
+      ps[i].type = POLL_STREAM_READ;
+    } else {
+      _Static_assert(POLL_NONE == 0);
+      // ps[i].type = POLL_NONE;
+    }
   }
 
   thread_create(smux_rx_thread, smux, 1024, "smux_rx", TASK_DETACHED, 4);
