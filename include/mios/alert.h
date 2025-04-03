@@ -15,8 +15,8 @@ typedef struct alert_source {
 
 
 typedef struct alert_class {
-  void (*ac_message)(struct alert_source *as, struct stream *output);
-  event_level_t (*ac_level)(struct alert_source *as);
+  void (*ac_message)(const struct alert_source *as, struct stream *output);
+  event_level_t (*ac_level)(const struct alert_source *as);
   void (*ac_refcount)(struct alert_source *as, int value);
 } alert_class_t;
 

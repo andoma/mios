@@ -15,7 +15,7 @@ static mutex_t power_rail_mutex;
 
 
 static void
-power_rail_alert_message(struct alert_source *as, struct stream *output)
+power_rail_alert_message(const struct alert_source *as, struct stream *output)
 {
   power_rail_t *pr = container_of(as, power_rail_t, pr_alert);
   const power_rail_class_t *prc = pr->pr_class;
@@ -98,7 +98,7 @@ power_rail_alert_message(struct alert_source *as, struct stream *output)
 
 
 static event_level_t
-power_rail_alert_level(struct alert_source *as)
+power_rail_alert_level(const struct alert_source *as)
 {
   if(as->as_code & (POWER_RAIL_TEMP |
                     POWER_RAIL_FAN |
