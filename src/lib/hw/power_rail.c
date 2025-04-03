@@ -118,6 +118,10 @@ is_rail_on(power_rail_t *pr)
   uint64_t now = clock_get();
 
   while(pr != NULL) {
+
+    if(pr->pr_hw_power_good == 1)
+      return true;
+
     if(pr->pr_class->prc_set_enable && !pr->pr_on)
       return false;
 
