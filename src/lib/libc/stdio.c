@@ -431,7 +431,12 @@ fmtv(fmtcb_t *cb, void *aux, const char *fmt, va_list ap)
       fmt++;
     }
 
-    fp.width = parse_dec(&fmt, -1);
+    if(fmt[0] == '*') {
+      fmt++;
+      fp.width = va_arg(ap, int);
+    } else {
+      fp.width = parse_dec(&fmt, -1);
+    }
 
     if(fmt[0] == '.') {
       fmt++;
