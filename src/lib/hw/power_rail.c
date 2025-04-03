@@ -51,6 +51,12 @@ power_rail_alert_message(struct alert_source *as, struct stream *output)
              V, prc->prc_voltage_nominal + prc->prc_voltage_alert_deviation,
              prc->prc_voltage_nominal);
     del = ", ";
+  } else if(as->as_code & POWER_RAIL_OV_WARNING) {
+    stprintf(output, "%sOver-voltage %.2f V > %.2f V Nominal:%.2f V",
+             del,
+             V, prc->prc_voltage_nominal + prc->prc_voltage_warning_deviation,
+             prc->prc_voltage_nominal);
+    del = ", ";
   }
 
   if(as->as_code & POWER_RAIL_UV_ALERT) {
@@ -59,11 +65,21 @@ power_rail_alert_message(struct alert_source *as, struct stream *output)
              V, prc->prc_voltage_nominal - prc->prc_voltage_alert_deviation,
              prc->prc_voltage_nominal);
     del = ", ";
+  } else if(as->as_code & POWER_RAIL_UV_WARNING) {
+    stprintf(output, "%sUnder-voltage %.2f V < %.2f V Nominal:%.2f V",
+             del,
+             V, prc->prc_voltage_nominal - prc->prc_voltage_warning_deviation,
+             prc->prc_voltage_nominal);
+    del = ", ";
   }
 
   if(as->as_code & POWER_RAIL_OC_ALERT) {
     stprintf(output, "%sOver-current %.3f A > %.3f A",
              del, I, prc->prc_over_current_alert);
+    del = ", ";
+  } else if(as->as_code & POWER_RAIL_OC_WARNING) {
+    stprintf(output, "%sOver-current %.3f A > %.3f A",
+             del, I, prc->prc_over_current_warning);
     del = ", ";
   }
 
@@ -71,35 +87,13 @@ power_rail_alert_message(struct alert_source *as, struct stream *output)
     stprintf(output, "%sUnder-current %.3f A < %.3f ",
              del, I, prc->prc_under_current_alert);
     del = ", ";
-  }
-
-  if(as->as_code & POWER_RAIL_OC_WARNING) {
-    stprintf(output, "%sOver-current %.3f A > %.3f A",
-             del, I, prc->prc_over_current_warning);
-    del = ", ";
-  }
-
-  if(as->as_code & POWER_RAIL_UC_WARNING) {
+  } else if(as->as_code & POWER_RAIL_UC_WARNING) {
     stprintf(output, "%sUnder-current %.3f A < %.3f A",
              del, I, prc->prc_under_current_warning);
     del = ", ";
   }
 
-  if(as->as_code & POWER_RAIL_OV_WARNING) {
-    stprintf(output, "%sOver-voltage %.2f V > %.2f V Nominal:%.2f V",
-             del,
-             V, prc->prc_voltage_nominal + prc->prc_voltage_warning_deviation,
-             prc->prc_voltage_nominal);
-    del = ", ";
-  }
 
-  if(as->as_code & POWER_RAIL_UV_WARNING) {
-    stprintf(output, "%sUnder-voltage %.2f V < %.2f V Nominal:%.2f V",
-             del,
-             V, prc->prc_voltage_nominal - prc->prc_voltage_warning_deviation,
-             prc->prc_voltage_nominal);
-    del = ", ";
-  }
 }
 
 
