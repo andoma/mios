@@ -313,10 +313,10 @@ power_rail_set_on(power_rail_t *pr, bool on)
 }
 
 
+__attribute__((noinline))
 power_rail_t *
 power_rail_get_next(power_rail_t *cur)
 {
-
   mutex_lock(&power_rail_mutex);
   power_rail_t *pr = cur ? SLIST_NEXT(cur, pr_link) : SLIST_FIRST(&power_rails);
   if(pr)
@@ -341,6 +341,57 @@ power_good_str(int8_t v)
     return "No";
   return "Yes";
 }
+
+__attribute__((noinline))
+static void
+print_rail(cli_t *cli, const power_rail_t *pr, int indent)
+{
+  cli_printf(cli, "%*.s%-*s ", indent, "", 11 - indent, pr->pr_name);
+  if(isfinite(pr->pr_measured_voltage)) {
+    cli_printf(cli, "%-8.2f ", pr->pr_measured_voltage);
+  } else {
+    cli_printf(cli, "---      ");
+  }
+
+  if(isfinite(pr->pr_measured_current)) {
+    cli_printf(cli, "%-8.3f ", pr->pr_measured_current);
+  } else {
+    cli_printf(cli, "---      ");
+  }
+
+  if(pr->pr_class->prc_set_enable) {
+    cli_printf(cli, "%-5s ", pr->pr_on ? "ON" : "OFF");
+  } else {
+    cli_printf(cli, "---   ");
+  }
+
+  cli_printf(cli, "%-3s %-3s  ",
+             power_good_str(pr->pr_hw_power_good),
+             power_good_str(pr->pr_sw_power_good));
+
+  if(pr->pr_alert.as_code) {
+    const alert_source_t *as = &pr->pr_alert;
+    const alert_class_t *ac = as->as_class;
+    cli_printf(cli, "%s ", alert_level_to_string(ac->ac_level(as)));
+    ac->ac_message(as, cli->cl_stream);
+  }
+  cli_printf(cli, "\n");
+}
+
+
+__attribute__((noinline))
+static void
+print_rails_for_parent(cli_t *cli, power_rail_t *parent, int indent)
+{
+  power_rail_t *pr = NULL;
+  while((pr = power_rail_get_next(pr)) != NULL) {
+    if(pr->pr_parent == parent) {
+      print_rail(cli, pr, indent);
+      print_rails_for_parent(cli, pr, indent + 1);
+    }
+  }
+}
+
 
 
 static error_t
@@ -373,44 +424,18 @@ cmd_rail(cli_t *cli, int argc, char **argv)
 
   const char *pat = argc > 1 ? argv[1] : NULL;
 
-  cli_printf(cli, "                                  PwrGood\n");
-  cli_printf(cli, "Name      Voltage  Current  Ctrl  HW  SW   Alert\n");
+  cli_printf(cli, "                                    PwrGood\n");
+  cli_printf(cli, "Name        Voltage  Current  Ctrl  HW  SW   Alert\n");
   cli_printf(cli, "========================================================\n");
-  while((pr = power_rail_get_next(pr)) != NULL) {
-    if(pat && !glob(pr->pr_name, pat))
-      continue;
 
-    cli_printf(cli, "%-9s ", pr->pr_name);
-    if(isfinite(pr->pr_measured_voltage)) {
-      cli_printf(cli, "%-8.2f ", pr->pr_measured_voltage);
-    } else {
-      cli_printf(cli, "---      ");
+  if(pat) {
+    while((pr = power_rail_get_next(pr)) != NULL) {
+      if(!glob(pr->pr_name, pat))
+        continue;
+      print_rail(cli, pr, 0);
     }
-
-    if(isfinite(pr->pr_measured_current)) {
-      cli_printf(cli, "%-8.3f ", pr->pr_measured_current);
-    } else {
-      cli_printf(cli, "---      ");
-    }
-
-    if(pr->pr_class->prc_set_enable) {
-      cli_printf(cli, "%-5s ", pr->pr_on ? "ON" : "OFF");
-    } else {
-      cli_printf(cli, "---   ");
-    }
-
-    cli_printf(cli, "%-3s %-3s  ",
-               power_good_str(pr->pr_hw_power_good),
-               power_good_str(pr->pr_sw_power_good));
-
-    if(pr->pr_alert.as_code) {
-      alert_source_t *as = &pr->pr_alert;
-      const alert_class_t *ac = as->as_class;
-      cli_printf(cli, "%s ", alert_level_to_string(ac->ac_level(as)));
-      ac->ac_message(as, cli->cl_stream);
-    }
-
-    cli_printf(cli, "\n");
+  } else {
+    print_rails_for_parent(cli, NULL, 0);
   }
   cli_printf(cli, "\n");
   return 0;
