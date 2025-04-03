@@ -12,7 +12,7 @@
 
 
 void
-stm32h7_adc_init(uint32_t base, uint32_t difsel)
+stm32h7_adc_init(uint32_t base, uint32_t pcsel, uint32_t difsel)
 {
   const char *name = NULL;
   switch(base) {
@@ -70,6 +70,7 @@ stm32h7_adc_init(uint32_t base, uint32_t difsel)
     reg_clr_bit(base + ADC12_CR, 30);
   }
   reg_wr(base + ADC12_DIFSEL, difsel);
+  reg_wr(base + ADC12_PCSEL, pcsel);
 
   reg_set_bit(base + ADC12_CR, 0); // Turn on ADEN
   while(reg_get_bit(base + ADC12_ISR, 0) == 0) { }
