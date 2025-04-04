@@ -62,25 +62,6 @@ float sqrtf(float) __attribute__ ((const));
 #endif
 
 
-
-// ================
-// Double precision
-// ================
-
-#if __ARM_FP & 8
-
-static inline double __attribute__((always_inline))
-sqrt(double f)
-{
-  double r;
-  asm("vsqrt.f64 %P0, %P1" : "=w"(r) : "w" (f));
-  return r;
-}
-
-#endif
-
-
-
 float sinf(float) __attribute__ ((const));
 
 float cosf(float) __attribute__ ((const));
@@ -102,3 +83,28 @@ float atan2f(float, float)  __attribute__ ((const));
 float asinf(float)  __attribute__ ((const));
 
 float fmodf(float x, float y) __attribute__ ((const));
+
+
+// ================
+// Double precision
+// ================
+
+#if __ARM_FP & 8
+
+static inline double __attribute__((always_inline))
+sqrt(double f)
+{
+  double r;
+  asm("vsqrt.f64 %P0, %P1" : "=w"(r) : "w" (f));
+  return r;
+}
+
+#endif
+
+// ================
+// Half precision
+// ================
+
+uint16_t float32_to_float16(float f);
+
+float float16_to_float32(uint16_t h);
