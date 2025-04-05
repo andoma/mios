@@ -120,6 +120,7 @@ static volatile uint32_t *const SYSCFG_MEMRMP = (volatile uint32_t *)0x40013800;
 static error_t
 cmd_dfu(cli_t *cli, int argc, char **argv)
 {
+  shutdown_notification("DFU");
   irq_forbid(IRQ_LEVEL_ALL);
   mpu_disable();
 

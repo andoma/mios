@@ -3,6 +3,7 @@
 #include <malloc.h>
 
 #include <mios/cli.h>
+#include <mios/mios.h>
 
 #include <net/pbuf.h>
 
@@ -81,6 +82,7 @@ stm32g4_init(void)
 static error_t
 cmd_dfu(cli_t *cli, int argc, char **argv)
 {
+  shutdown_notification("DFU");
   irq_forbid(IRQ_LEVEL_ALL);
   mpu_disable();
   fini();

@@ -5,6 +5,8 @@
 #include <mios/eventlog.h>
 #include <mios/version.h>
 #include <mios/hostname.h>
+#include <mios/ghook.h>
+
 #include <stdio.h>
 #include <string.h>
 #include "irq.h"
@@ -185,4 +187,11 @@ void  __attribute__((weak))
 wakelock_release(void)
 {
 
+}
+
+
+void
+shutdown_notification(const char *reason)
+{
+  ghook_invoke(GHOOK_SYSTEM_SHUTDOWN, reason);
 }
