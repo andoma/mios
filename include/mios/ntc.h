@@ -5,13 +5,13 @@
 static inline float
 resistor_divider_get_top(float bottom_resistance, float voltage_ratio)
 {
-  return bottom_resistance * (voltage_ratio - 1.0f);
+  return bottom_resistance * (1.0f / voltage_ratio - 1.0f);
 }
 
 static inline float
 resistor_divider_get_bottom(float top_resistance, float voltage_ratio)
 {
-  return top_resistance / (voltage_ratio - 1.0f);
+  return -(voltage_ratio * top_resistance) / (voltage_ratio - 1.0f);
 }
 
 static inline float
