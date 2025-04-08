@@ -9,6 +9,7 @@
 #define TPS92682_EN   0x00
 #define TPS92682_CFG1 0x01
 #define TPS92682_CFG2 0x02
+#define TPS92682_FM   0x05
 
 #define TPS92682_CH1ADJ 0x07
 #define TPS92682_CH2ADJ 0x08
@@ -121,4 +122,12 @@ tps92682_set_ilimit_raw(struct tps92682 *t, unsigned int channel,
 {
   write_reg(t, TPS92682_CHxADJ(channel), value);
   return 0;
+}
+
+
+error_t
+tps92682_set_spread_specturm(struct tps92682 *t, int magnitude)
+{
+  uint8_t val = (magnitude << 4) | 0b0101;
+  return write_reg(t, TPS92682_FM, val);
 }
