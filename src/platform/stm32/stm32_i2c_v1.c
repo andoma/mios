@@ -313,6 +313,10 @@ i2c_irq_er(stm32_i2c_t *i2c)
     reg_wr(i2c->base_addr + I2C_SR1, sr1 & ~(1 << 8));
     return i2c_irq_result(i2c, ERR_BUS_ERROR);
   }
+  if(sr1 & (1 << 9)) {
+    reg_wr(i2c->base_addr + I2C_SR1, sr1 & ~(1 << 9));
+    return i2c_irq_result(i2c, ERR_BUS_ERROR);
+  }
   panic("%s: sr1=%x\n", __FUNCTION__, sr1);
 }
 
