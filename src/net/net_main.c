@@ -122,6 +122,8 @@ void
 net_timer_arm(timer_t *t, uint64_t deadline)
 {
   timer_arm_on_queue(t, deadline, &net_timers);
+  if(t == LIST_FIRST(&net_timers))
+    task_wakeup(&net_waitq, 0);
 }
 
 
