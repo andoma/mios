@@ -98,18 +98,18 @@ static void
 stm32_fdcan_irq0(void *arg)
 {
   fdcan_t *fc = arg;
+  uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
 
-  while(1) {
-    uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
+  if(bits & (1 << 0)) {
+    // RX-Fifo 0 not empty
 
-    if(bits & (1 << 0)) {
-      // RX-Fifo 0 not empty
-
-      reg_wr(fc->reg_base + FDCAN_IR, (1 << 0));
-
+    while(1) {
       uint32_t rstatus = reg_rd(fc->reg_base + FDCAN_RXF0S);
-      uint32_t get_index = (rstatus >> 8) & 3;
+      uint32_t fl = rstatus & 0x7f;
+      if(fl == 0)
+        break;
 
+      uint32_t get_index = (rstatus >> 8) & 3;
       uint32_t w1 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 1));
       uint32_t len = dlc_to_len[(w1 >> 16) & 0xf];
 
@@ -133,17 +133,16 @@ stm32_fdcan_irq0(void *arg)
       }
       reg_wr(fc->reg_base + FDCAN_RXF0A, get_index);
       fc->rx_fifo0++;
-      continue;
     }
+    reg_wr(fc->reg_base + FDCAN_IR, (1 << 0));
+  }
 
-    if(bits & (1 << 25)) {
-      // Bus off
-      reg_wr(fc->reg_base + FDCAN_IR, (1 << 25));
-      if(reg_rd(fc->reg_base + FDCAN_PSR) & 0x80) {
-        net_timer_arm(&fc->recovery_timer, clock_get_irq_blocked() + 250000);
-      }
+  if(bits & (1 << 25)) {
+    // Bus off
+    reg_wr(fc->reg_base + FDCAN_IR, (1 << 25));
+    if(reg_rd(fc->reg_base + FDCAN_PSR) & 0x80) {
+      net_timer_arm(&fc->recovery_timer, clock_get_irq_blocked() + 250000);
     }
-    return;
   }
 }
 
