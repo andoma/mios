@@ -495,9 +495,11 @@ bt81x_initialize(bt81x_t *b)
   }
   b->init_err = 0;
 
+  const bt81x_timings_t *t = b->timings;
   uint32_t id = bt81x_rd32(b, EVE_CHIP_ID_ADDRESS);
 
-  evlog(LOG_DEBUG, "bt81x: Initialized. ID:0x%08x", id);
+  evlog(LOG_DEBUG, "bt81x: Initialized. ID:0x%08x  PCLK:%d Hz", id,
+        bt81x_rd32(b, EVE_REG_FREQUENCY) / t->pclk);
 
   // Disable pixel clock
   bt81x_wr8(b, EVE_REG_PCLK, 0);
@@ -507,7 +509,6 @@ bt81x_initialize(bt81x_t *b)
 
 
   // Initialize scanout
-  const bt81x_timings_t *t = b->timings;
   bt81x_wr16(b, EVE_REG_HSIZE,   t->width);
   bt81x_wr16(b, EVE_REG_HCYCLE,  t->hcycle);
   bt81x_wr16(b, EVE_REG_HOFFSET, t->hoffset);
