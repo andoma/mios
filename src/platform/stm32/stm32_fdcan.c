@@ -37,7 +37,11 @@ typedef struct fdcan {
 
   uint32_t rx_fifo0;
   uint32_t rx_fifo1;
+  uint32_t tx;
+  uint32_t tx_drop;
+  uint32_t recovery_attempts;
 
+  timer_t recovery_timer;
 } fdcan_t;
 
 
@@ -95,50 +99,52 @@ stm32_fdcan_irq0(void *arg)
 {
   fdcan_t *fc = arg;
 
-  uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
+  while(1) {
+    uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
 
-  if(bits & (1 << 0)) {
-    // RX-Fifo 0 not empty
+    if(bits & (1 << 0)) {
+      // RX-Fifo 0 not empty
 
-    reg_wr(fc->reg_base + FDCAN_IR, (1 << 0));
+      reg_wr(fc->reg_base + FDCAN_IR, (1 << 0));
 
-    uint32_t rstatus = reg_rd(fc->reg_base + FDCAN_RXF0S);
-    uint32_t get_index = (rstatus >> 8) & 3;
+      uint32_t rstatus = reg_rd(fc->reg_base + FDCAN_RXF0S);
+      uint32_t get_index = (rstatus >> 8) & 3;
 
-    uint32_t w1 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 1));
-    uint32_t len = dlc_to_len[(w1 >> 16) & 0xf];
+      uint32_t w1 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 1));
+      uint32_t len = dlc_to_len[(w1 >> 16) & 0xf];
 
-    pbuf_t *pb = pbuf_make(0, 0);
-    if(pb != NULL) {
-      uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 0));
+      pbuf_t *pb = pbuf_make(0, 0);
+      if(pb != NULL) {
+        uint32_t w0 = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 0));
 #ifdef ENABLE_NET_TIMESTAMPING
-      pb->pb_timestamp = w1 & 0xffff;
+        pb->pb_timestamp = w1 & 0xffff;
 #endif
-      uint32_t *dst = pbuf_data(pb, 0);
-      dst[0] = id_from_w0(w0);
-      int words = (len + 3) / 4;
-      for(int i = 0; i < words; i++) {
-        dst[1 + i] = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 2 + i));
-      }
+        uint32_t *dst = pbuf_data(pb, 0);
+        dst[0] = id_from_w0(w0);
+        int words = (len + 3) / 4;
+        for(int i = 0; i < words; i++) {
+          dst[1 + i] = reg_rd(fc->ram_base + FDCAN_RXFIFO0(get_index, 2 + i));
+        }
 
-      pb->pb_buflen = len + 4;
-      pb->pb_pktlen = len + 4;
-      STAILQ_INSERT_TAIL(&fc->cni.cni_ni.ni_rx_queue, pb, pb_link);
-      netif_wakeup(&fc->cni.cni_ni);
+        pb->pb_buflen = len + 4;
+        pb->pb_pktlen = len + 4;
+        STAILQ_INSERT_TAIL(&fc->cni.cni_ni.ni_rx_queue, pb, pb_link);
+        netif_wakeup(&fc->cni.cni_ni);
+      }
+      reg_wr(fc->reg_base + FDCAN_RXF0A, get_index);
+      fc->rx_fifo0++;
+      continue;
     }
-    reg_wr(fc->reg_base + FDCAN_RXF0A, get_index);
-    fc->rx_fifo0++;
+
+    if(bits & (1 << 25)) {
+      // Bus off
+      reg_wr(fc->reg_base + FDCAN_IR, (1 << 25));
+      if(reg_rd(fc->reg_base + FDCAN_PSR) & 0x80) {
+        net_timer_arm(&fc->recovery_timer, clock_get_irq_blocked() + 250000);
+      }
+    }
     return;
   }
-  if(bits & (1 << 9)) {
-    return;
-  }
-  return;
-#if 0
-  if(bits == 0)
-    return;
-  panic("bits=0x%x", bits);
-#endif
 }
 
 
@@ -151,15 +157,19 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
   uint32_t ecr = reg_rd(fc->reg_base + FDCAN_ECR);
   uint32_t rec = ecr >> 8 & 0x7f;
   uint32_t tec = ecr & 0xff;
+  uint32_t psr = reg_rd(fc->reg_base + FDCAN_PSR);
 
   stprintf(st, "\tReceived packets, Fifo0:%u  Fifo1:%u\n",
            fc->rx_fifo0, fc->rx_fifo1);
+  stprintf(st, "\tTransmitted packets:%u  Drops:%u\n",
+           fc->tx, fc->tx_drop);
 
   stprintf(st, "\tReceive error counter:%d  Transmit error counter:%d\n",
            rec, tec);
-  stprintf(st, "\tReceiver passive: %s\n", ecr & 0x8000 ? "Yes" : "No");
-
-  uint32_t psr = reg_rd(fc->reg_base + FDCAN_PSR);
+  stprintf(st, "\tBus off recovery attempts:%u\n",
+           fc->recovery_attempts);
+  stprintf(st, "\tBus state: O%s, ", psr & 0x80 ? "ff" : "n");
+  stprintf(st, "Receiver passive: %s\n", ecr & 0x8000 ? "Yes" : "No");
 
   stprintf(st, "\tActivity: %s\n",
            strtbl("Synchronizing\0Idle\0Receiver\0Transmitter\0\0",
@@ -219,6 +229,7 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
   w1 |= len << 16;
 
   if(txfqs & (1 << 21)) {
+    fc->tx_drop++;
     return pb; // Fifo full
   }
 
@@ -237,6 +248,7 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
     reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 2 + w), u32[w]);
   }
   reg_wr(fc->reg_base + FDCAN_TXBAR, 1 << bufidx);
+  fc->tx++;
   return pb;
 }
 
@@ -316,6 +328,17 @@ stm32_fdcan_cce(fdcan_t *fc, const struct dsig_filter *input_filter)
 }
 
 
+static void
+stm32_fdcan_recovery(void *opaque, uint64_t now)
+{
+  fdcan_t *fc = opaque;
+  fc->recovery_attempts++;
+  evlog(LOG_DEBUG, "%s: Reinitialize due to bus-off (attempt %u)",
+        fc->cni.cni_ni.ni_dev.d_name,
+        fc->recovery_attempts);
+  reg_clr_bit(fc->reg_base + FDCAN_CCCR, 0);
+}
+
 static error_t
 stm32_fdcan_init(fdcan_t *fc, const char *name,
                  uint32_t nominal_bitrate, uint32_t data_bitrate,
@@ -324,6 +347,9 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
                  const struct dsig_filter *dof)
 {
   int stdidx = 0;
+
+  fc->recovery_timer.t_cb = stm32_fdcan_recovery;
+  fc->recovery_timer.t_opaque = fc;
 
   fc->input_filter = dif;
 
@@ -359,8 +385,9 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
 
   reg_wr(fc->reg_base + FDCAN_ILE, 3); // Enable both IRQs
   reg_wr(fc->reg_base + FDCAN_IE,
-         (1 << 4) | // RX Fifo 1 new message
-         (1 << 0) | // RX Fifo 0 new message
+         (1 << 25) | // Bus off
+         (1 << 4)  | // RX Fifo 1 new message
+         (1 << 0)  | // RX Fifo 0 new message
          0);
 
   reg_wr(fc->reg_base + FDCAN_ILS,
@@ -398,9 +425,6 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
 
   // Enable bitrate switching
   reg_set_bit(fc->reg_base + FDCAN_CCCR, 9);
-
-  // Disable automatic re-transmission
-  //  reg_set_bit(fc->reg_base + FDCAN_CCCR, 6);
 
   // Clear init and wait for propgation
   reg_clr_bit(fc->reg_base + FDCAN_CCCR, 0);
