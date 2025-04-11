@@ -39,3 +39,15 @@ atomic_set(atomic_t *a, int v)
 {
   __atomic_store_n(&a->v, v, __ATOMIC_SEQ_CST);
 }
+
+static inline int
+atomic_set_bits(atomic_t *a, int v)
+{
+  return __sync_or_and_fetch(&a->v, v);
+}
+
+static inline int
+atomic_clr_bits(atomic_t *a, int v)
+{
+  return __sync_and_and_fetch(&a->v, ~v);
+}
