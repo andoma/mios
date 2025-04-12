@@ -1,5 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
+
 #include <mios/mios.h>
 #include <mios/timer.h>
 
@@ -7,7 +9,14 @@
 #include "systick.h"
 #include "cpu.h"
 
+#ifdef CPU_SYSTICK_RVR
+
+#define TICKS_PER_US ((CPU_SYSTICK_RVR + 999999) / 1000000)
+#define TICKS_PER_HZ ((CPU_SYSTICK_RVR + HZ - 1) / HZ)
+
 _Static_assert(TICKS_PER_HZ < 0xffffff);
+
+#endif
 
 static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
 static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
@@ -29,6 +38,8 @@ exc_systick(void)
 }
 
 
+#ifdef CPU_SYSTICK_RVR
+
 uint64_t
 clock_get_irq_blocked(void)
 {
@@ -46,6 +57,8 @@ clock_get_irq_blocked(void)
     return c;
   }
 }
+
+#endif
 
 static int
 timer_cmp(const timer_t *a, const timer_t *b)
@@ -86,6 +99,7 @@ udelay(unsigned int usec)
   irq_permit(s);
 }
 
+#ifdef CPU_SYSTICK_RVR
 
 static void __attribute__((constructor(130)))
 systick_init(void)
@@ -95,6 +109,7 @@ systick_init(void)
   *SYST_CSR = 7;
 }
 
+#endif
 
 static void  __attribute__((destructor(130)))
 systick_deinit(void)
