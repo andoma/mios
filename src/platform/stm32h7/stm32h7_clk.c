@@ -1,14 +1,11 @@
 #include <mios/mios.h>
-
 #include <stddef.h>
 
 #include "stm32h7_clk.h"
 #include "stm32h7_pwr.h"
+#include "stm32h7_flash.h"
 
 #define SCB_CCR   0xe000ed14
-
-#define FLASH_ACR 0x52002000
-
 
 #define VOS_LEVEL_0 0
 #define VOS_LEVEL_1 3
