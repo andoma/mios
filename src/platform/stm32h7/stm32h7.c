@@ -61,7 +61,9 @@ stm32h7_init(void)
   switch(line_id) {
   case 0x48373233: // STM32H723
   case 0x48373235: // STM32H725
-    axi_sram_size = 128;
+
+    // This actually depends on TCM_AXI_SHARED option bits
+    axi_sram_size = 320;
     break;
 
   default:
