@@ -5,6 +5,8 @@
 #include "stm32h7_pwr.h"
 #include "stm32h7_flash.h"
 
+#include "systick.h"
+
 #define SCB_CCR   0xe000ed14
 
 #define VOS_LEVEL_0 0
@@ -12,6 +14,41 @@
 #define VOS_LEVEL_2 2
 #define VOS_LEVEL_3 1
 
+#ifndef CPU_SYSTICK_RVR
+
+// Dynamic core clock frequency
+
+static volatile unsigned int * const SYST_CSR = (unsigned int *)0xe000e010;
+static volatile unsigned int * const SYST_RVR = (unsigned int *)0xe000e014;
+static volatile unsigned int * const SYST_VAL = (unsigned int *)0xe000e018;
+
+
+static uint32_t ticks_per_us;
+static uint32_t ticks_per_hz;
+
+uint64_t
+clock_get_irq_blocked(void)
+{
+  extern uint64_t clock;
+
+  while(1) {
+    uint32_t v = *SYST_VAL;
+    uint32_t remain = v / ticks_per_us;
+    uint64_t c = clock;
+
+    c += (1000000 / HZ) - remain;
+
+    if(unlikely(*SYST_CSR & 0x10000)) {
+      clock += 1000000 / HZ;
+      continue;
+    }
+    return c;
+  }
+}
+
+#endif
+
+static uint32_t sysclk_freq;
 
 static void
 set_flash_latency(int axi_freq, int vos)
@@ -89,8 +126,30 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   reg_clr_bit(PWR_CR3, 2); // Disable SMPS
   while(reg_get_bit(PWR_CSR1, 13) == 0) {}
 
+#ifdef CPU_SYSTICK_RVR
+  // Compile-time core clock frequency
   const int sysclk_freq_mhz = CPU_SYSCLK_MHZ;
-  const int sysclk_freq = sysclk_freq_mhz * MHZ;
+  sysclk_freq = sysclk_freq_mhz * MHZ;
+#else
+
+  // Dynamic core clock frequency
+
+  int sysclk_freq_mhz = 520;
+
+  if(reg_get_bit(FLASH_OPTSR2_CUR, 2)) {
+    sysclk_freq_mhz = 550; // CPUFREQ_BOOST
+  }
+
+  sysclk_freq = sysclk_freq_mhz * MHZ;
+
+  ticks_per_us =  (sysclk_freq + 999999) / 1000000;
+  ticks_per_hz =  (sysclk_freq + HZ - 1) / HZ;
+
+  // We also need to configure systick
+  *SYST_RVR = ticks_per_hz;
+  *SYST_VAL = 0;
+  *SYST_CSR = 7;
+#endif
 
   const int axi_freq = sysclk_freq / 2;
 
@@ -231,6 +290,9 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 unsigned int
 clk_get_freq(uint16_t id)
 {
+  if(id == 0)
+    return sysclk_freq;
+
   uint8_t bus = id >> 8;
 
   switch(id) {
@@ -312,4 +374,20 @@ stm32h7_clk_deinit(void)
   reg_wr(RCC_APB1HRSTR, 0);
   reg_wr(RCC_APB2RSTR, 0);
   reg_wr(RCC_APB3RSTR, 0);
+}
+
+
+error_t
+stm32h7_set_cpu_freq_boost(int on)
+{
+  reg_wr(FLASH_OPTKEYR, 0x08192A3B);
+  reg_wr(FLASH_OPTKEYR, 0x4c5d6e7f);
+  asm volatile("dmb");
+  reg_set_bits(FLASH_OPTSR2_PRG, 2, 1, on);
+  asm volatile("dmb");
+  reg_set_bit(FLASH_OPTCR, 1);
+  asm volatile("dmb");
+
+  while(reg_get_bit(FLASH_OPTCR, 1)) {}
+  return 0;
 }
