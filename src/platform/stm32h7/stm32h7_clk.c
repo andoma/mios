@@ -375,19 +375,3 @@ stm32h7_clk_deinit(void)
   reg_wr(RCC_APB2RSTR, 0);
   reg_wr(RCC_APB3RSTR, 0);
 }
-
-
-error_t
-stm32h7_set_cpu_freq_boost(int on)
-{
-  reg_wr(FLASH_OPTKEYR, 0x08192A3B);
-  reg_wr(FLASH_OPTKEYR, 0x4c5d6e7f);
-  asm volatile("dmb");
-  reg_set_bits(FLASH_OPTSR2_PRG, 2, 1, on);
-  asm volatile("dmb");
-  reg_set_bit(FLASH_OPTCR, 1);
-  asm volatile("dmb");
-
-  while(reg_get_bit(FLASH_OPTCR, 1)) {}
-  return 0;
-}

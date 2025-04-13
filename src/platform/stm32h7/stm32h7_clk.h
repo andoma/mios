@@ -145,5 +145,3 @@ const char *stm32h7_init_pll(unsigned int hse_freq, uint32_t flags);
 void reset_peripheral(uint16_t id);
 
 void stm32h7_clk_deinit(void);
-
-error_t stm32h7_set_cpu_freq_boost(int on);

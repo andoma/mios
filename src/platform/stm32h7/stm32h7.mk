@@ -23,6 +23,7 @@ SRCS += ${C}/systick.c \
 	${P}/stm32h7_systim.c \
 	${P}/stm32h7_idle.c \
 	${P}/stm32h7_info.c \
+	${P}/stm32h7_flash.c \
 
 SRCS-${ENABLE_NET_IPV4} += \
 	${P}/stm32h7_eth.c \
