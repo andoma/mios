@@ -7,8 +7,26 @@
 
 #include "tegra234_ast.h"
 
+#include "net/netif.h"
+
+
+#include <stdio.h>
+
 #define IVC_SS_CARVEOUT_BASE 0
 #define IVC_SS_CARVEOUT_SIZE 1
+#define IVC_SS_RX            2
+#define IVC_SS_TX            3
+
+
+static void
+ivc_notify_cb(struct net_task *task, uint32_t signals)
+{
+  uint32_t channels = hsp_ss_rd_and_clr(NV_ADDRESS_MAP_AON_HSP_BASE, IVC_SS_TX);
+  printf("ivc notify %x\n", channels);
+}
+
+static net_task_t ivc_mbox_task = { ivc_notify_cb };
+>>>>>>> Stashed changes
 
 static void
 ccplex_ivc_rx(void *arg)
@@ -33,6 +51,8 @@ ccplex_ivc_rx(void *arg)
                    0x80000000,
                    carveout_size,
                    1); // StreamID för AON
+  } else if(val == 0xaabb) {
+    net_task_raise(&ivc_mbox_task, 1);
   } else {
     panic("IVC_RX Unknown mailbox operation: 0x%x", val);
   }

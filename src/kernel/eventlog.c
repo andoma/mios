@@ -124,7 +124,8 @@ evl_fmt_cb(void *aux, const char *s, size_t len)
 
   const int head = ef->head;
   const int curlen = ef->data[head & EVENTLOG_MASK];
-  const int to_copy = MAX(MIN(len, 100 - curlen), 0);
+  const int max_entry_size = MIN(EVENTLOG_SIZE / 4, 192);
+  const int to_copy = MAX(MIN(len, max_entry_size - curlen), 0);
 
   evl_ensure(ef, curlen + to_copy);
 
