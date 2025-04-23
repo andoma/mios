@@ -34,7 +34,7 @@ hsp_mbox_rd(uint32_t base, uint32_t mbox)
 static inline void
 hsp_mbox_wr(uint32_t base, uint32_t mbox, uint32_t value)
 {
-  reg_wr(base + 0x10000 + 0x8000 * mbox, 0);
+  reg_wr(base + 0x10000 + 0x8000 * mbox, value);
 }
 
 static inline uint32_t
