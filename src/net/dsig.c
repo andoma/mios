@@ -115,9 +115,15 @@ struct pbuf *
 dsig_input(uint32_t id, struct pbuf *pb, struct netif *ni)
 {
   if(ni->ni_dev.d_flags & DEVICE_F_DEBUG) {
-    evlog(LOG_DEBUG, "%s: RX: 0x%x: %.*s",
-          ni->ni_dev.d_name, id, -pb->pb_buflen,
-          (const char *)pbuf_cdata(pb, 0));
+    if(pb->pb_buflen) {
+      evlog(LOG_DEBUG, "%s: RX: 0x%x: {%d} %.*s",
+            ni->ni_dev.d_name, id, pb->pb_buflen,
+            -pb->pb_buflen,
+            (const char *)pbuf_cdata(pb, 0));
+    } else {
+      evlog(LOG_DEBUG, "%s: RX: 0x%x: <no payload>",
+            ni->ni_dev.d_name, id);
+    }
   }
   if(pbuf_pullup(pb, pb->pb_pktlen))
     return pb;
