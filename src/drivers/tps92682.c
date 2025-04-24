@@ -126,8 +126,10 @@ tps92682_set_ilimit_raw(struct tps92682 *t, unsigned int channel,
 
 
 error_t
-tps92682_set_spread_specturm(struct tps92682 *t, int magnitude)
+tps92682_set_spread_specturm(struct tps92682 *t, unsigned int magnitude)
 {
+  if(magnitude > 3)
+    return ERR_INVALID_ARGS;
   uint8_t val = (magnitude << 4) | 0b0101;
   return write_reg(t, TPS92682_FM, val);
 }

@@ -13,4 +13,4 @@ error_t tps92682_set_ilimit_raw(struct tps92682 *drv, unsigned int channel,
 
 int tps92682_read_reg(struct tps92682 *drv, uint8_t reg);
 
-error_t tps92682_set_spread_specturm(struct tps92682 *t, int magnitude);
+error_t tps92682_set_spread_specturm(struct tps92682 *t, unsigned int magnitude);
