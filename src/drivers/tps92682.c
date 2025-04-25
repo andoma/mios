@@ -40,8 +40,8 @@ typedef struct tps92682 {
 } tps92682_t;
 
 
-static error_t
-write_reg(tps92682_t *t, uint8_t reg, uint8_t value)
+error_t
+tps92682_write_reg(tps92682_t *t, uint8_t reg, uint8_t value)
 {
   t->tx[0] = 0x80 | reg << 1;
   t->tx[1] = value;
@@ -71,15 +71,15 @@ static void
 tps92682_set_duty(tps92682_t *t, int channel, unsigned int duty)
 {
   duty &= 0x3ff;
-  write_reg(t, TPS92682_CHxPWMH(channel), duty >> 8);
-  write_reg(t, TPS92682_CHxPWML(channel), duty & 0xff);
+  tps92682_write_reg(t, TPS92682_CHxPWMH(channel), duty >> 8);
+  tps92682_write_reg(t, TPS92682_CHxPWML(channel), duty & 0xff);
 }
 
 
 error_t
 tps92682_init(tps92682_t *t)
 {
-  write_reg(t, TPS92682_RESET, 0xc3); // Magic value for reset
+  tps92682_write_reg(t, TPS92682_RESET, 0xc3); // Magic value for reset
 
   int val = tps92682_read_reg(t, TPS92682_EN);
   if(val < 0)
@@ -88,17 +88,17 @@ tps92682_init(tps92682_t *t)
   if(val != 0x3c)
     return ERR_NO_DEVICE;
 
-  write_reg(t, TPS92682_CFG1, 0x40);  // Internal PWM
+  tps92682_write_reg(t, TPS92682_CFG1, 0x40);  // Internal PWM
 
   tps92682_read_reg(t, TPS92682_FLT1); // Read to ACK faults
 
-  write_reg(t, TPS92682_CH1ADJ, 0x00); // Max current limit to zer0
-  write_reg(t, TPS92682_CH2ADJ, 0x00); // Max current limit to zer0
+  tps92682_write_reg(t, TPS92682_CH1ADJ, 0x00); // Max current limit to zer0
+  tps92682_write_reg(t, TPS92682_CH2ADJ, 0x00); // Max current limit to zer0
 
   tps92682_set_duty(t, 0, 0x3ff);
   tps92682_set_duty(t, 1, 0x3ff);
 
-  write_reg(t, TPS92682_EN, 0xbf);
+  tps92682_write_reg(t, TPS92682_EN, 0xbf);
   return 0;
 }
 
@@ -120,7 +120,7 @@ error_t
 tps92682_set_ilimit_raw(struct tps92682 *t, unsigned int channel,
                         unsigned int value)
 {
-  write_reg(t, TPS92682_CHxADJ(channel), value);
+  tps92682_write_reg(t, TPS92682_CHxADJ(channel), value);
   return 0;
 }
 
@@ -131,5 +131,5 @@ tps92682_set_spread_specturm(struct tps92682 *t, unsigned int magnitude)
   if(magnitude > 3)
     return ERR_INVALID_ARGS;
   uint8_t val = (magnitude << 4) | 0b1101;
-  return write_reg(t, TPS92682_FM, val);
+  return tps92682_write_reg(t, TPS92682_FM, val);
 }
