@@ -88,13 +88,15 @@ prefetch_abort0:
         mrs r1, spsr
         mov r2, sp
         b prefetch_abort
+
 data_abort0:
-        push {r0-r12}
+        push {r0-r12,lr}
         sub r0,lr,#8
         mrs r1, spsr
         mov r2, sp
-        b data_abort
-
+        bl data_abort
+        pop {r0-r12,lr}
+        subs pc,lr,#4
 
 fiq:
         b .

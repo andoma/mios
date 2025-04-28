@@ -5,15 +5,21 @@
 
 #include "cpu.h"
 
+int ignore_data_abort;
+uint32_t data_aborts;
+
 void
 data_abort(uint32_t pc, uint32_t psr, uint32_t *regs)
 {
+  data_aborts++;
+
+  if(ignore_data_abort)
+    return;
   printf("\n*** Exception: Data Abort\n");
   for(int i = 0; i < 13; i++) {
     printf("R%-2d 0x%08x\n", i, regs[i]);
   }
   printf("PC  0x%08x\nPSR 0x%08x\n", pc, psr);
-
   panic("Data abort");
 }
 
