@@ -20,6 +20,7 @@ include ${SRC}/cpu/aarch32/aarch32.mk
 SRCS += ${P}/entry.s \
 	${P}/tegra234-spe.c \
 	${P}/tegra234-spe_hsp.c \
+	${P}/tegra234-spe_can.c \
 	${P}/tcu.c \
 	${P}/ivc.c \
 	${P}/systick.c \
