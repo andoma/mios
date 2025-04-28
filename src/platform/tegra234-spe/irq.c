@@ -186,6 +186,6 @@ orin_spe_irq_init(void)
   extern void cpu_task_switch(void);
   vic_enable(VIC_BASE(0), 17, IRQ_LEVEL_SWITCH, cpu_task_switch);
 
-  irq_enable_fn(28, IRQ_LEVEL_IO, irq_lic_io);
-  irq_enable_fn(30, IRQ_LEVEL_NET, irq_lic_net);
+  irq_enable_fn(IRQ_LIC0, IRQ_LEVEL_IO, irq_lic_io);
+  irq_enable_fn(IRQ_LIC2, IRQ_LEVEL_NET, irq_lic_net);
 }

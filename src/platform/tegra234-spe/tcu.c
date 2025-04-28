@@ -6,6 +6,7 @@
 
 #include "drivers/uart_16550.h"
 #include "tegra234_hsp.h"
+#include "irq.h"
 
 #define TCU_CHANNEL_SPE    0xe0
 #define TCU_CHANNEL_CCPLEX 0xe1

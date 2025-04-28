@@ -102,7 +102,7 @@ timer0_irq(void)
 static void  __attribute__((constructor(122)))
 systick_init(void)
 {
-  irq_enable_fn(2, IRQ_LEVEL_CLOCK, timer0_irq);
+  irq_enable_fn(IRQ_TIMER0, IRQ_LEVEL_CLOCK, timer0_irq);
 
   reg_wr(TIMER0_BASE + TIMER_CSSR, 0);
   reg_wr(TIMER0_BASE + TIMER_CR,
