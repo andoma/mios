@@ -20,11 +20,54 @@ static const uint8_t tcu_reset_seq[] = {0xff, 0xfd, 0xff, 0xe0};
 
 stream_t *g_uartc;
 
+static stream_t *spe_tcu_console;
+
+static stream_t *
+spe_console_stream(void)
+{
+  static uint8_t spe_console_can_sleep;
+
+  if(!spe_tcu_console)
+    return g_uartc;
+
+  int s = can_sleep();
+  if(s != spe_console_can_sleep) {
+    spe_console_can_sleep = s;
+    stream_write(g_uartc, tcu_reset_seq, sizeof(tcu_reset_seq), 0);
+  }
+  return s ? spe_tcu_console : g_uartc;
+}
+
+static ssize_t
+spe_stdio_read(struct stream *s, void *buf, size_t size, size_t required)
+{
+  return stream_read(spe_console_stream(), buf, size, required);
+}
+
+
+static ssize_t
+spe_stdio_write(struct stream *s, const void *buf, size_t size, int flags)
+{
+  return stream_write(spe_console_stream(), buf, size, flags);
+}
+
+
+static const stream_vtable_t spe_stdio_vtable = {
+  .read = spe_stdio_read,
+  .write = spe_stdio_write,
+};
+
+stream_t spe_stdio = {
+  .vtable = &spe_stdio_vtable
+};
+
+
 static void  __attribute__((constructor(108)))
 tcu_init_early(void)
 {
-  g_uartc = uart_16550_create(0x0c280000, 22); // UART-C
-  stdio = g_uartc;
+  g_uartc = uart_16550_create(0x0c280000, IRQ_UART_1);
+  stdio = &spe_stdio;
+
   stream_write(stdio, tcu_reset_seq, sizeof(tcu_reset_seq), 0);
   printf("\nTCU console initialized\n");
 }
@@ -36,7 +79,7 @@ tcu_init_late(void)
   stream_t *svec[6];
 
   // SPE (this is us)
-  pipe(&svec[0], &stdio);
+  pipe(&svec[0], &spe_tcu_console);
 
   // CCPLEX
   svec[1] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 1,
@@ -64,13 +107,4 @@ tcu_init_late(void)
   };
 
   smux_create(g_uartc, 0xff, 0xfd, 6, tcuids, svec, 0);
-}
-
-static void  __attribute__((destructor(5000)))
-tcu_fini_late(void)
-{
-  // Interrupts are off now (panic, etc)
-  // Revert back from multiplexed console and send reset sequence
-  stdio = g_uartc;
-  stream_write(stdio, tcu_reset_seq, sizeof(tcu_reset_seq), 0);
 }
