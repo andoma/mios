@@ -17,9 +17,18 @@ data_abort(uint32_t pc, uint32_t psr, uint32_t *regs)
     return;
   printf("\n*** Exception: Data Abort\n");
   for(int i = 0; i < 13; i++) {
-    printf("R%-2d 0x%08x\n", i, regs[i]);
+    printf("R%-2d  0x%08x\n", i, regs[i]);
   }
-  printf("PC  0x%08x\nPSR 0x%08x\n", pc, psr);
+  printf("PC   0x%08x\nPSR  0x%08x\n", pc, psr);
+
+  uint32_t dfsr;
+  asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r"(dfsr));
+  printf("DFSR 0x%08x\n", dfsr);
+
+  uint32_t dfar;
+  asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r"(dfar));
+  printf("DFAR 0x%08x\n", dfar);
+
   panic("Data abort");
 }
 
