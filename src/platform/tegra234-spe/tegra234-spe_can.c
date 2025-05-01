@@ -38,7 +38,7 @@
 #include "platform/stm32/stm32_fdcan.c"
 
 
-void
+can_netif_t *
 tegra243_spe_can_init(unsigned int nominal_bitrate,
                       unsigned int data_bitrate,
                       const struct dsig_filter *input_filter,
@@ -94,7 +94,7 @@ tegra243_spe_can_init(unsigned int nominal_bitrate,
                                  output_filter);
   if(err) {
     printf("%s: Failed to initialize\n", name);
-    return;
+    return NULL;
   }
 
   irq_enable_fn_arg(IRQ_CAN1_0, IRQ_LEVEL_NET, stm32_fdcan_irq0, fc);
@@ -102,4 +102,5 @@ tegra243_spe_can_init(unsigned int nominal_bitrate,
 
   printf("%s: Initialized. Nominal bitrate:%d Data bitrate:%d\n",
          name, nominal_bitrate, data_bitrate);
+  return &fc->cni;
 }

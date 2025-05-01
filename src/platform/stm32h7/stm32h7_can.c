@@ -54,7 +54,7 @@ static const struct {
 
 
 
-void
+can_netif_t *
 stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
                  unsigned int nominal_bitrate,
                  unsigned int data_bitrate,
@@ -122,7 +122,7 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
                                  output_filter);
   if(err) {
     printf("%s: Failed to initialize\n", name);
-    return;
+    return NULL;
   }
 
   irq_enable_fn_arg(stm32h7_can_interfaces[instance].irq0,
@@ -133,4 +133,5 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
 
   printf("%s: Initialized. Nominal bitrate:%d Data bitrate:%d\n",
          name, nominal_bitrate, data_bitrate);
+  return &fc->cni;
 }
