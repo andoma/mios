@@ -271,7 +271,7 @@ fdcan_calculate_timings(int source_clk, int target_rate, int spa,
   int best_spa = INT32_MAX;
   error_t err = ERR_BAD_CONFIG;
 
-  for(int p = 1; p <= prescaler_max; p++) {
+  for(int p = prescaler_max; p >= 1; p--) {
     if(source_clk % (target_rate * p))
       continue;
     const int total = source_clk / (target_rate * p);
