@@ -63,8 +63,8 @@ dsig_filter_match(const struct dsig_filter *dof, uint32_t addr)
     uint32_t mask = mask_from_prefixlen(dof->prefixlen);
     if((addr & mask) == prefix)
       return dof;
+    dof++;
   }
-  dof++;
   return NULL;
 }
 
