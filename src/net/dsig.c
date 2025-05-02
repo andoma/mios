@@ -22,6 +22,8 @@ static SLIST_HEAD(, dsig_sub) dsig_pending_subs;
 
 static mutex_t dsig_sub_mutex = MUTEX_INITIALIZER("dsigsub");
 
+static dsig_sub_t *g_solo;
+
 struct dsig_sub {
   SLIST_ENTRY(dsig_sub) ds_link;
   void (*ds_cb)(void *opaque, const pbuf_t *pb, uint32_t signal);
@@ -46,6 +48,9 @@ dsig_dispatch(uint32_t signal, const pbuf_t *pb)
   dsig_sub_t *ds;
 
   SLIST_FOREACH(ds, &dsig_subs, ds_link) {
+    if(g_solo && ds != g_solo)
+      continue;
+
     if((signal & ds->ds_mask) == ds->ds_signal) {
       if(!now)
         now = clock_get();
@@ -240,6 +245,34 @@ dsig_sub(uint32_t signal, uint32_t mask, uint16_t ttl,
   mutex_unlock(&dsig_sub_mutex);
   net_task_raise(&dsig_sub_insert_task, 1);
   return ds;
+}
+
+
+void
+dsig_solo(dsig_sub_t *which)
+{
+  dsig_sub_t *ds;
+
+  if(which) {
+
+    SLIST_FOREACH(ds, &dsig_subs, ds_link) {
+      if(ds == which)
+        continue;
+      timer_disarm(&ds->ds_timer);
+    }
+
+  } else {
+
+    uint64_t now = clock_get();
+
+    SLIST_FOREACH(ds, &dsig_subs, ds_link) {
+      if(ds == g_solo)
+        continue;
+      net_timer_arm(&ds->ds_timer, now + ds->ds_ttl * 1000);
+    }
+  }
+
+  g_solo = which;
 }
 
 

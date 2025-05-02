@@ -25,3 +25,9 @@ struct dsig_filter {
 #define DSIG_FLAG_EXTENDED 0x1
 
 #define DSIG_FILTER_END { .prefixlen = 0xff }
+
+
+// Will disable all subscriptions except one.
+// Sometimes useful in various firmware upgrade scenarios, etc
+// This is only safe to call from net-thread (such as a dsig sub callback)
+void dsig_solo(dsig_sub_t *sub);
