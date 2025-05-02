@@ -4,7 +4,9 @@ GLOBALDEPS += ${P}/stm32h7.mk
 
 CPPFLAGS += -iquote${P} -include ${P}/stm32h7.h
 
-LDSCRIPT = ${P}/stm32h7.ld
+LDSCRIPT ?= ${P}/stm32h7$(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),_bootloader,).ld
+
+ENTRYPOINT ?= $(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),bl_start,start)
 
 include ${SRC}/cpu/cortexm/cortexm7.mk
 
@@ -31,3 +33,8 @@ SRCS-${ENABLE_NET_IPV4} += \
 
 ${MOS}/platform/stm32h7/%.o : CFLAGS += ${NOFPU}
 
+SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
+	${P}/boot/stm32h7_bootloader.c \
+	${P}/boot/isr.s \
+
+${MOS}/platform/stm32h7/boot/stm32h7_bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -mgeneral-regs-only -include ${BOOTLOADER_DEFS}
