@@ -75,8 +75,7 @@ relocation_label:
         cps #MODE_SYS
         cpsie i
         isb
-1:      wfi
-        b 1b
+        b cpu_idle
 
 undef_instruction:
         b .

@@ -18,6 +18,7 @@ LDSCRIPT = ${P}/${PLATFORM}.ld
 include ${SRC}/cpu/aarch32/aarch32.mk
 
 SRCS += ${P}/entry.s \
+	${P}/idle.c \
 	${P}/tegra234-spe.c \
 	${P}/tegra234-spe_hsp.c \
 	${P}/tegra234-spe_can.c \
