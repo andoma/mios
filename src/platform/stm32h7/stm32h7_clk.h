@@ -137,11 +137,16 @@ unsigned int clk_get_freq(uint16_t id);
 
 const char *stm32h7_init_pll(unsigned int hse_freq, uint32_t flags);
 
-#define RST_ID(reg, bit) ((((reg) & 0xff) << 8) | (bit))
+__attribute__((always_inline))
+static inline void
+reset_peripheral(uint16_t id)
+{
+  id -= 0x5800;  // CLK and RST register are the same, just offseted
+  reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
+  asm volatile("dmb");
+  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
+  asm volatile("dmb");
+}
 
-#define RST_OTG       RST_ID(RCC_AHB1RSTR, 25)
-#define RST_CSR       RST_ID(RCC_APB1HRSTR, 1)
-
-void reset_peripheral(uint16_t id);
 
 void stm32h7_clk_deinit(void);

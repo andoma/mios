@@ -24,12 +24,12 @@ stm32h7_otghs_create(uint16_t vid, uint16_t pid,
   while(reg_get_bit(PWR_CR3, 26) == 0) {}
 
   clk_enable(CLK_CSR);
-  reset_peripheral(RST_CSR);
+  reset_peripheral(CLK_CSR);
 
   reg_or(CRS_CR, 0x60); // Clock recovery from USB
 
   clk_enable(CLK_OTG);
-  reset_peripheral(RST_OTG);
+  reset_peripheral(CLK_OTG);
 
   stm32_otg_create(vid, pid, manfacturer_string, product_string, q, 77);
 }
