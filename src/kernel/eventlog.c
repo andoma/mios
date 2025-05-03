@@ -571,6 +571,7 @@ eventlog_to_fs_thread(void *arg)
 
   LIST_INSERT_HEAD(&ef->followers, &sf.f, link);
 
+  int64_t sync_deadline = 0;
   int64_t ts = ef->ts_tail;
 
   while(1) {
@@ -578,15 +579,18 @@ eventlog_to_fs_thread(void *arg)
     uint16_t ptr = sf.f.ptr;
 
     if(ptr == ef->head) {
-      if(f) {
-        mutex_unlock(&ef->mutex);
-        fs_fsync(f);
-        mutex_lock(&ef->mutex);
-      }
-      if(ptr == ef->head) {
+
+      if(sync_deadline && f) {
+        if(cond_wait_timeout(&sf.c, &ef->mutex, sync_deadline)) {
+          mutex_unlock(&ef->mutex);
+          fs_fsync(f);
+          sync_deadline = 0;
+          mutex_lock(&ef->mutex);
+        }
+      } else {
         cond_wait(&sf.c, &ef->mutex);
-        continue;
       }
+      continue;
     }
 
     const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
@@ -632,6 +636,9 @@ eventlog_to_fs_thread(void *arg)
       }
     }
     fs_write(f, linebuf, buflen);
+
+    if(sync_deadline == 0)
+      sync_deadline = clock_get() + 1000000;
 
     if(fs_size(f) > g_logfile_max_size) {
       fs_close(f);
