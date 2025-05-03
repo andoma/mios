@@ -54,7 +54,8 @@ dsig_dispatch(uint32_t signal, const pbuf_t *pb)
     if((signal & ds->ds_mask) == ds->ds_signal) {
       if(!now)
         now = clock_get();
-      net_timer_arm(&ds->ds_timer, now + ds->ds_ttl * 1000);
+      if(ds->ds_ttl)
+        net_timer_arm(&ds->ds_timer, now + ds->ds_ttl * 1000);
       ds->ds_cb(ds->ds_opaque, pb, signal);
     }
   }
@@ -268,7 +269,8 @@ dsig_solo(dsig_sub_t *which)
     SLIST_FOREACH(ds, &dsig_subs, ds_link) {
       if(ds == g_solo)
         continue;
-      net_timer_arm(&ds->ds_timer, now + ds->ds_ttl * 1000);
+      if(ds->ds_ttl)
+        net_timer_arm(&ds->ds_timer, now + ds->ds_ttl * 1000);
     }
   }
 
