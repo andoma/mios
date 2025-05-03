@@ -596,6 +596,11 @@ eventlog_to_fs_thread(void *arg)
     const uint8_t len = ef->data[(ptr + 0) & EVENTLOG_MASK];
     const uint8_t flags = ef->data[(ptr + 1) & EVENTLOG_MASK];
     const uint8_t level = flags & 7;
+    if(level == LOG_DEBUG) {
+      // Don't write DEBUG to flash
+      sf.f.ptr = ptr + len;
+      continue;
+    }
     const uint8_t tlen = (flags >> 3) & 7;
     uint16_t msglen = len - 2 - tlen;
     const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
