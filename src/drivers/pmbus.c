@@ -1,3 +1,5 @@
+#ifdef HAVE_FPU
+
 #include <mios/pmbus.h>
 
 #include <mios/io.h>
@@ -110,3 +112,4 @@ pmbus_create(struct i2c *bus, uint8_t address, int com_interval_us)
   p->com_interval = com_interval_us;
   return p;
 }
+#endif
