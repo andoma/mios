@@ -68,7 +68,7 @@ tegra243_spe_can_init(unsigned int nominal_bitrate,
   reg_wr(fc->reg_base + FDCAN_TXBC,
          (ram_offset + FDCAN_TXBUF(0, 0)) |
          (0 << 16) |
-         (3 << 24));
+         (8 << 24));
 
   reg_wr(fc->reg_base + FDCAN_TXESC, 7); // 64 byte data field
 

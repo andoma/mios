@@ -91,7 +91,7 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   reg_wr(fc->reg_base + FDCAN_TXBC,
          (ram_offset + FDCAN_TXBUF(0, 0)) |
          (0 << 16) |
-         (3 << 24));
+         (8 << 24));
 
   reg_wr(fc->reg_base + FDCAN_TXESC, 7); // 64 byte data field
 
