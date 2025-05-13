@@ -67,6 +67,11 @@ schedule(void)
 
 static inline int can_sleep(void)
 {
+  unsigned long daif;
+  asm volatile ("mrs %0, daif\n\t" : "=r" (daif));
+  if(daif & 0x80)
+    return 0;
+
   unsigned int spsel;
   asm volatile ("mrs %0, spsel\n\t" : "=r" (spsel));
   return spsel == 0; // spsel == 0 means we run on a thread
