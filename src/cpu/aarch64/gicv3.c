@@ -82,6 +82,9 @@ static irq_handler_t irqs[1024];
 void
 trap_irq(uint32_t irq)
 {
+  if(irq == 1023)
+    return;
+
   if(irqs[irq].fn == NULL)
     panic("Spurious IRQ %d", irq);
   irqs[irq].fn(irqs[irq].arg);
