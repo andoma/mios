@@ -45,7 +45,7 @@ cmd_wr32(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  const long addr = atoix(argv[1]);
+  const long addr = atolx(argv[1]);
   const int value = atoix(argv[2]);
 
   uint32_t *ptr = (uint32_t *)addr;
@@ -67,13 +67,12 @@ cmd_rd32(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  const long start = atoix(argv[1]);
-  const int count = argc > 2 ? atoix(argv[2]) : 1;
-
+  const long start = atolx(argv[1]);
+  const long count = argc > 2 ? atolx(argv[2]) : 1;
   uint32_t *ptr = (uint32_t *)start;
-  for(int i = 0; i < count; i++) {
+  for(long i = 0; i < count; i++) {
     uint32_t val = *ptr;
-    cli_printf(cli, "0x%04x: 0x%08x ",
+    cli_printf(cli, "0x%04lx: 0x%08x ",
            4 * i, val);
 
     for(int i = 28; i >= 0; i -= 4) {
