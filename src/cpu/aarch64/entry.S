@@ -29,6 +29,11 @@ el1:
         .text
         .global vstart
 vstart:
+        adr x0, load_addr
+        str x16, [x0]
+        adr x0, fdt_addr
+        str x7, [x0]
+
         adr x0, vectors
         msr vbar_el1, x0
 
@@ -42,9 +47,19 @@ vstart:
         isb
         // Enable interrupts
         msr daifclr, #2
+        // Enable async aborts
+        msr daifclr, #4
 1:      wfi
         b 1b
         .pool
+
+        .global load_addr
+load_addr:
+        .xword 0
+        .global fdt_addr
+fdt_addr:
+        .xword 0
+
 
 curr_el_sp0_irq:
         stp x20, x21, [sp, #-16]!
@@ -261,9 +276,18 @@ vectors:
 mmusetup:
 
         adr x8, binary_end
+        mov x7, x8
 
         // Check and skip FDT
+        ldr w0, [x8]
+        ldr w1, =0xedfe0dd0
+        cmp w0, w1
+        bne 1f
+        ldr w0, [x8, #4]
+        rev w0, w0
+        add x8, x8, w0, uxtw
 
+1:
         add x8, x8, #4095
         and x8, x8, #~4095
 
