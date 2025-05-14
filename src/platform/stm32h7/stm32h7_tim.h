@@ -14,6 +14,7 @@
 
 #define TIMx_CR1    0x0
 #define TIMx_CR2    0x4
+#define TIMx_SMCR   0x8
 #define TIMx_DIER   0xc
 #define TIMx_SR     0x10
 #define TIMx_CCMR1  0x18
