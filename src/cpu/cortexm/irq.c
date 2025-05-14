@@ -46,6 +46,8 @@ irq_disable(int irq)
   NVIC_ICER[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
 }
 
+#define VECTOR_COUNT (16 + CORTEXM_IRQ_COUNT)
+#define VECTOR_ALIGN (VECTOR_COUNT >= 128 ? 0x400 : 0x200)
 
 void
 irq_enable_fn(int irq, int level, void (*fn)(void))
@@ -57,8 +59,8 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
 
   if(curvecs == (uint32_t)&vectors) {
     // Not yet relocated
-    const size_t vecsize = (16 + CORTEXM_IRQ_COUNT) * sizeof(void *);
-    void *p = xalloc(vecsize, 0x200, MEM_TYPE_VECTOR_TABLE);
+    const size_t vecsize = VECTOR_COUNT * sizeof(void *);
+    void *p = xalloc(vecsize, VECTOR_ALIGN, MEM_TYPE_VECTOR_TABLE);
     memcpy(p, &vectors, vecsize);
     *VTOR = (uint32_t)p;
   }
@@ -70,7 +72,7 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
 #endif
   NVIC_ISER[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
 
-  dcache_op(vtable, (16 + CORTEXM_IRQ_COUNT) * sizeof(void *), DCACHE_CLEAN);
+  dcache_op(vtable, VECTOR_COUNT * sizeof(void *), DCACHE_CLEAN);
   icache_invalidate();
   irq_permit(q);
 }
