@@ -77,12 +77,6 @@ SECTIONS {
 
         } >FLASH
 
-        .build_id : {
-                . = ALIGN(4);
-                PROVIDE(_build_id = .);
-                KEEP(*(.note.gnu.build-id))
-        } >FLASH
-
         .miosversion : {
                 . = ALIGN(4);
                 PROVIDE(_miosversion = .);
@@ -103,7 +97,7 @@ SECTIONS {
                  _etext = .;
         } >FLASH
 
-        .data : AT ( _etext ) {
+        .data : {
                 . = ALIGN(8);
                 _sdata = .;
                 *(ramcode)
@@ -111,7 +105,13 @@ SECTIONS {
                 *(.data.*)
                 . = ALIGN(4);
                 _edata = .;
-        } >RAM
+        } >RAM AT >FLASH
+
+        .build_id : {
+                . = ALIGN(4);
+                PROVIDE(_build_id = .);
+                KEEP(*(.note.gnu.build-id))
+        } >FLASH
 
         .bss : {
                 . = ALIGN(4);

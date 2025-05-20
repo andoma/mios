@@ -83,6 +83,9 @@ mios_image_from_elf_mem(const void *elf, size_t elfsize)
     const elf32phdr_t *phdr = elf + elfhdr->program_header_table_offset +
       i * elfhdr->program_header_entry_size;
 
+    if(phdr->filesz == 0)
+      continue;
+
     image_begin = MIN(phdr->paddr, image_begin);
     image_end = MAX(phdr->paddr + phdr->filesz, image_end);
   }
