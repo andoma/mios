@@ -87,6 +87,9 @@ mios_image_from_elf_mem(const void *elf, size_t elfsize)
     image_end = MAX(phdr->paddr + phdr->filesz, image_end);
   }
 
+  // Align to 64 bytes
+  image_end = (image_end + 63) & ~63;
+
   const size_t image_size = image_end - image_begin;
 
   mios_image_t *mi = calloc(1, sizeof(mios_image_t) + image_size);
