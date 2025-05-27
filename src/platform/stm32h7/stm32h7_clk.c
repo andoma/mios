@@ -313,6 +313,7 @@ clk_get_freq(uint16_t id)
   case CLK_SPI2:
   case CLK_SPI3:
   case CLK_ADC12:
+  case CLK_ADC3:
     return pll2p_freq;
 
   case CLK_FDCAN:
