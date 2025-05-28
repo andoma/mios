@@ -46,6 +46,8 @@ static const struct {
   { SPI1_BASE, 38, 37, CLK_SPI1, 5, 35, 16 },
   { SPI2_BASE, 40, 39, CLK_SPI2, 5, 36, 16 },
   { SPI3_BASE, 62, 61, CLK_SPI3, 6, 51, 16 },
+  { SPI4_BASE, 84, 83, CLK_SPI4, 5, 84, 8 },
+  { SPI5_BASE, 86, 85, CLK_SPI5, 5, 85, 8 },
 };
 
 
@@ -343,7 +345,8 @@ stm32h7_spi_create(unsigned int instance, gpio_t clk, gpio_t miso,
 
   const uint8_t af = spi_config[instance].af;
   gpio_conf_af(clk,  af, GPIO_PUSH_PULL,  speed, GPIO_PULL_NONE);
-  gpio_conf_af(miso, af, GPIO_OPEN_DRAIN, speed, GPIO_PULL_UP);
+  if (miso != GPIO_UNUSED)
+    gpio_conf_af(miso, af, GPIO_OPEN_DRAIN, speed, GPIO_PULL_UP);
   gpio_conf_af(mosi, af, GPIO_PUSH_PULL,  speed, GPIO_PULL_NONE);
 
   stm32h7_spi_t *spi = calloc(1, sizeof(stm32h7_spi_t));
