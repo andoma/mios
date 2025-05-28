@@ -15,6 +15,8 @@
 #define SPI1_BASE 0x40013000
 #define SPI2_BASE 0x40003800
 #define SPI3_BASE 0x40003c00
+#define SPI4_BASE 0x40013400
+#define SPI5_BASE 0x40015000
 
 spi_t *stm32h7_spi_create(unsigned int instance, gpio_t clk, gpio_t miso,
                           gpio_t mosi, gpio_output_speed_t speed);
