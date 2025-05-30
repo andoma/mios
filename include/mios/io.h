@@ -144,6 +144,7 @@ typedef struct indirect_gpio {
   const gpio_vtable_t *vtable;
 } indirect_gpio_t;
 
+
 static inline error_t
 indirect_gpio_conf_input(indirect_gpio_t *ig, unsigned int line,
                          gpio_pull_t pull)
