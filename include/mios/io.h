@@ -138,3 +138,41 @@ typedef struct gpio_vtable {
 typedef struct indirect_gpio {
   const gpio_vtable_t *vtable;
 } indirect_gpio_t;
+
+__attribute__((always_inline))
+static inline error_t
+gpio_ind_conf_input(indirect_gpio_t *ig, unsigned int line, gpio_pull_t pull)
+{
+  return ig->vtable->conf_input(ig, line, pull);
+}
+
+__attribute__((always_inline))
+static inline error_t
+gpio_ind_conf_output(indirect_gpio_t *ig, unsigned int line,
+                              gpio_output_type_t type,
+                              gpio_output_speed_t speed,
+                              gpio_pull_t pull)
+{
+  return ig->vtable->conf_output(ig, line, type, speed, pull);
+}
+
+__attribute__((always_inline))
+static inline error_t
+gpio_ind_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
+{
+  return ig->vtable->set_pin(ig, line, on);
+}
+
+__attribute__((always_inline))
+static inline error_t
+gpio_ind_get_pin(indirect_gpio_t *ig, unsigned int gpio, int *status)
+{
+  return ig->vtable->get_pin(ig, gpio, status);
+}
+
+__attribute__((always_inline))
+static inline error_t
+gpio_ind_get_port(indirect_gpio_t *ig, unsigned int port, uint32_t *pins)
+{
+  return ig->vtable->get_port(ig, port, pins);
+}
