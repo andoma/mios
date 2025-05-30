@@ -96,3 +96,10 @@ stream_flush(struct stream *s)
 {
   return s->vtable->write(s, NULL, 0, 0);
 }
+
+__attribute__((always_inline))
+static inline struct task_waitable *
+stream_poll(struct stream *s, poll_type_t pt)
+{
+  return s->vtable->poll(s, pt);
+}
