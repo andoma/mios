@@ -25,6 +25,9 @@ SRCS-${ENABLE_TCAL9539} += \
 SRCS-${ENABLE_SSD1306} += \
 	${SRC}/drivers/ssd1306.c
 
+SRCS-${ENABLE_DAC8563} += \
+	${SRC}/drivers/dac8563.c
+
 SRCS-${ENABLE_PL011} += \
 	${SRC}/drivers/pl011.c
 ${MOS}/drivers/pl011.o : CFLAGS += ${NOFPU}
