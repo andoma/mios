@@ -13,7 +13,8 @@ enum  DAC_CMDS {
   REG_INPUT_B_UPD,
   REG_PWR_UP_A,
   REG_PWR_UP_B,
-  REG_PWR_DWN_HIZ,
+  REG_PWR_DWN_HIZ_A,
+  REG_PWR_DWN_HIZ_B,
   REG_RST,
   REG_NO_LDAC,
   REG_INT_REF,
@@ -21,14 +22,15 @@ enum  DAC_CMDS {
 
 
 static const uint8_t dac_cmds[][3] = {
-  [REG_INPUT_A_UPD] = { 0b00011000, 0, 0},
-  [REG_INPUT_B_UPD] = { 0b00011001, 0, 0},
-  [REG_PWR_UP_A] =    { 0b00100000, 0, 0b00000001},
-  [REG_PWR_UP_B] =    { 0b00100000, 0, 0b00000010},
-  [REG_PWR_DWN_HIZ] = { 0b00100000, 0, 0b00011011},
-  [REG_RST] =         { 0b00100000, 0, 0b00011011},
-  [REG_NO_LDAC] =     { 0b00110000, 0, 0b00000011},
-  [REG_INT_REF] =     { 0b00111000, 0, 0b00000001},
+  [REG_INPUT_A_UPD] =   { 0b00011000, 0, 0},
+  [REG_INPUT_B_UPD] =   { 0b00011001, 0, 0},
+  [REG_PWR_UP_A] =      { 0b00100000, 0, 0b00000001},
+  [REG_PWR_UP_B] =      { 0b00100000, 0, 0b00000010},
+  [REG_PWR_DWN_HIZ_A] = { 0b00100000, 0, 0b00011001},
+  [REG_PWR_DWN_HIZ_B] = { 0b00100000, 0, 0b00011010},
+  [REG_RST] =           { 0b00100000, 0, 0b00011011},
+  [REG_NO_LDAC] =       { 0b00110000, 0, 0b00000011},
+  [REG_INT_REF] =       { 0b00111000, 0, 0b00000001},
 };
 
 struct dac8563 {
@@ -83,17 +85,14 @@ dac8563_t *dac8563_create(spi_t *bus, gpio_t nss)
 }
 
 
-error_t dac8563_power_down(dac8563_t *dac)
-{
-  return write_cmd(dac, REG_PWR_DWN_HIZ, NULL);
-}
-
-error_t dac8563_power_up(dac8563_t *dac, uint8_t channel)
+error_t dac8563_power(dac8563_t *dac, uint8_t channel, bool on)
 {
   if (channel > 1) {
     return ERR_INVALID_PARAMETER;
   }
-  return write_cmd(dac, REG_PWR_UP_A + channel, NULL);
+  int reg = on ? REG_PWR_UP_A : REG_PWR_DWN_HIZ_A;
+
+  return write_cmd(dac, reg + channel, NULL);
 }
 
 error_t dac8563_set_dac(dac8563_t *dac, uint8_t channel, uint16_t value)
