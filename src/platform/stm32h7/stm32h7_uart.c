@@ -46,14 +46,17 @@ static stm32_uart_stream_t *uarts[6];
 
 stream_t *
 stm32h7_uart_init(stm32_uart_stream_t *u, unsigned int instance, int baudrate,
-                  gpio_t tx, gpio_t rx, uint8_t flags, const char *name)
+                  gpio_t tx, gpio_t rx, uint16_t flags, const char *name)
 {
   instance--;
   if(instance >= ARRAYSIZE(uart_config))
     return NULL;
 
   const int af = uart_config[instance].af;
-  gpio_conf_af(tx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+
+  const gpio_output_type_t ot = flags & UART_TX_OPEN_DRAIN ?
+    GPIO_OPEN_DRAIN : GPIO_PUSH_PULL;
+  gpio_conf_af(tx, af, ot, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_conf_af(rx, af, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_UP);
 
 
