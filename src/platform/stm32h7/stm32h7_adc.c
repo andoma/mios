@@ -93,6 +93,8 @@ stm32h7_adc_init(uint32_t base, uint32_t pcsel, uint32_t difsel)
 
   if (base != ADC3_BASE)
     reg_wr(base + ADCX_PCSEL, pcsel);
+  else
+    reg_set_bits(base + ADCX_CFGR, 15, 1, 1); // left align
 
   reg_set_bit(base + ADCX_CR, 0); // Turn on ADEN
   while(reg_get_bit(base + ADCX_ISR, 0) == 0) { }
