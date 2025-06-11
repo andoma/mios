@@ -28,6 +28,9 @@ SRCS-${ENABLE_SSD1306} += \
 SRCS-${ENABLE_DAC8563} += \
 	${SRC}/drivers/dac8563.c
 
+SRCS-${ENABLE_TUSB8041} += \
+	${SRC}/drivers/tusb8041.c
+
 SRCS-${ENABLE_PL011} += \
 	${SRC}/drivers/pl011.c
 ${MOS}/drivers/pl011.o : CFLAGS += ${NOFPU}
