@@ -6,35 +6,11 @@
 
 // https://www.ti.com/lit/ds/symlink/tps92682-q1.pdf
 
-#define TPS92682_EN   0x00
-#define TPS92682_CFG1 0x01
-#define TPS92682_CFG2 0x02
-#define TPS92682_FM   0x05
-
-#define TPS92682_CH1ADJ 0x07
-#define TPS92682_CH2ADJ 0x08
-
-#define TPS92682_CHxADJ(x) (0x07 + (x))
-
-#define TPS92682_CH1PWML 0x0a
-#define TPS92682_CH1PWMH 0x0b
-#define TPS92682_CH2PWML 0x0c
-#define TPS92682_CH2PWMH 0x0d
-
-#define TPS92682_CHxPWML(x) (0x0a + (x) * 2)
-#define TPS92682_CHxPWMH(x) (0x0b + (x) * 2)
-
-#define TPS92682_FLT1  0x11
-#define TPS92682_FLT2  0x12
-#define TPS92682_FEN1  0x13
-#define TPS92682_FEN2  0x14
-
-#define TPS92682_RESET 0x26
 
 typedef struct tps92682 {
   spi_t *spi;
-  gpio_t cs;
   uint32_t spi_config;
+  gpio_t cs;
   uint8_t tx[2];
   uint8_t rx[2];
 } tps92682_t;
@@ -63,6 +39,10 @@ tps92682_read_reg(tps92682_t *t, uint8_t reg)
   err = t->spi->rw(t->spi, t->tx, t->rx, 2, t->cs, t->spi_config);
   if(err)
     return err;
+
+  if((t->rx[0] & 0x78) != 0x60)  // Bit pattern always 0b1100
+    return ERR_NO_DEVICE;
+
   return t->rx[1];
 }
 
@@ -77,7 +57,7 @@ tps92682_set_duty(tps92682_t *t, int channel, unsigned int duty)
 
 
 error_t
-tps92682_init(tps92682_t *t)
+tps92682_init(tps92682_t *t, int clear_faults)
 {
   tps92682_write_reg(t, TPS92682_RESET, 0xc3); // Magic value for reset
 
@@ -86,11 +66,13 @@ tps92682_init(tps92682_t *t)
     return val;
 
   if(val != 0x3c)
-    return ERR_NO_DEVICE;
+    return ERR_INVALID_ID;
+
+  if(clear_faults) {
+    tps92682_read_reg(t, TPS92682_FLT1);
+  }
 
   tps92682_write_reg(t, TPS92682_CFG1, 0x40);  // Internal PWM
-
-  tps92682_read_reg(t, TPS92682_FLT1); // Read to ACK faults
 
   tps92682_write_reg(t, TPS92682_CH1ADJ, 0x00); // Max current limit to zer0
   tps92682_write_reg(t, TPS92682_CH2ADJ, 0x00); // Max current limit to zer0
