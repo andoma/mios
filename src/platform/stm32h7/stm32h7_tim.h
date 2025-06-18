@@ -30,3 +30,5 @@
 #define TIMx_CCR4   0x40
 
 #define TIMx_BDTR   0x44
+
+#define TIMx_CCRx(x)  (0x30 + (x) * 4)
