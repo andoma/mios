@@ -77,6 +77,7 @@ void tig_scroll_end(tig_ctx_t *tc, tig_scroll_state_t *tss);
                            TIG_VALIGN_VIEW_CENTERED)
 
 #define TIG_INLINE 0x20
+#define TIG_SELECTED 0x40
 
 void tig_text(tig_ctx_t *ctx, int flags, const char *fmt, ...)
   __attribute__ ((format(printf, 3, 4)));

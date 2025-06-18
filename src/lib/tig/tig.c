@@ -210,6 +210,9 @@ tig_pressed(tig_ctx_t *tc, const gfx_rect_t *r)
   const int x2 = x1 + r->siz.width;
   const int y2 = y1 + r->siz.height;
 
+  if(tc->tc_tts == TTS_NONE)
+    return 0;
+
   return
     x1 <= tc->tc_touch_pos.x &&
     y1 <= tc->tc_touch_pos.y &&
@@ -502,7 +505,12 @@ tig_button(tig_ctx_t *tc, int flags, int width, const char *str)
         gdc->filled_rect(gd, &rect, 1);
         gdc->set_color(gd, GFX_COLOR_PALETTE(1));
       }
+    } else if(flags & TIG_SELECTED) {
+      gdc->set_color(gd, GFX_COLOR_PALETTE(2));
+      gdc->filled_rect(gd, &rect, 1);
+      gdc->set_color(gd, GFX_COLOR_PALETTE(1));
     }
+
     gdc->rect(gd, &rect, 1);
 
     pos.x += rect.siz.width / 2 - size.width / 2;
