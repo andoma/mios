@@ -36,7 +36,7 @@ tcal9539_write_shadow(tcal9539_t *tc, unsigned int line,
                       uint16_t shadow, int reg)
 {
   if(line < 8) {
-    return i2c_write_u8(tc->i2c, tc->address, reg, shadow && 0xff);
+    return i2c_write_u8(tc->i2c, tc->address, reg, shadow & 0xff);
   } else {
     return i2c_write_u8(tc->i2c, tc->address, reg + 1, shadow >> 8);
   }
@@ -109,24 +109,6 @@ tcal9539_conf_input(indirect_gpio_t *ig, unsigned int line, gpio_pull_t pull)
 
 
 static error_t
-tcal9539_conf_output(indirect_gpio_t *ig, unsigned int line,
-                     gpio_output_type_t type, gpio_output_speed_t speed,
-                     gpio_pull_t pull)
-{
-  tcal9539_t *tc = (tcal9539_t *)ig;
-
-  if(line >= 16)
-    return ERR_INVALID_ID;
-
-  error_t err = tcal9539_conf_pull(tc, line, pull);
-  if(err)
-    return err;
-
-  return tcal9539_clr_bit_in_reg(tc, line, &tc->direction, TCAL9539_CFG0);
-}
-
-
-static error_t
 tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
@@ -145,6 +127,30 @@ tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
 
 
 static error_t
+tcal9539_conf_output(indirect_gpio_t *ig, unsigned int line,
+                     gpio_output_type_t type, gpio_output_speed_t speed,
+                     gpio_pull_t pull, int initial_value)
+{
+  tcal9539_t *tc = (tcal9539_t *)ig;
+
+  if(line >= 16)
+    return ERR_INVALID_ID;
+
+  error_t err = tcal9539_conf_pull(tc, line, pull);
+  if(err)
+    return err;
+
+  if(initial_value != -1) {
+    err = tcal9539_set_pin(ig, line, initial_value);
+    if(err)
+      return err;
+  }
+
+  return tcal9539_clr_bit_in_reg(tc, line, &tc->direction, TCAL9539_CFG0);
+}
+
+
+static error_t
 tcal9539_get_pin(indirect_gpio_t *ig, unsigned int line, int *status)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
@@ -152,13 +158,20 @@ tcal9539_get_pin(indirect_gpio_t *ig, unsigned int line, int *status)
   if(line >= 16)
     return ERR_INVALID_ID;
 
-  uint8_t val;
-  error_t err = i2c_read_u8(tc->i2c, tc->address, line >> 3, &val);
-  if(err)
-    return err;
 
-  int bit = line & 0x7;
-  *status = !!(val & (1 << bit));
+  if((1 << line) & tc->direction) {
+
+    uint8_t val;
+    error_t err = i2c_read_u8(tc->i2c, tc->address, line >> 3, &val);
+    if(err)
+      return err;
+
+    int bit = line & 0x7;
+    *status = !!(val & (1 << bit));
+  } else {
+    *status = (tc->output >> line) & 1;
+  }
+
   return 0;
 }
 
@@ -179,6 +192,54 @@ tcal9539_get_port(indirect_gpio_t *ig, unsigned int port, uint32_t *status)
   return 0;
 }
 
+static int
+tcal9539_get_mode(indirect_gpio_t *ig, unsigned int line)
+{
+  tcal9539_t *tc = (tcal9539_t *)ig;
+  return (tc->direction >> line) & 1;
+}
+
+
+
+
+
+static error_t
+tcal9539_read_u16(tcal9539_t *tc, uint8_t reg, uint16_t *value)
+{
+  uint8_t lo, hi;
+  error_t err;
+
+  err = i2c_read_u8(tc->i2c, tc->address, reg, &lo);
+  if(err)
+    return err;
+  err = i2c_read_u8(tc->i2c, tc->address, reg + 1, &hi);
+  if(err)
+    return err;
+
+  *value = ((uint16_t)hi << 8) | lo;
+  return 0;
+}
+
+
+static error_t
+tcal9539_refresh_shadow(indirect_gpio_t *ig)
+{
+  tcal9539_t *tc = (tcal9539_t *)ig;
+  error_t err;
+
+  err = tcal9539_read_u16(tc, TCAL9539_OUTPUT0, &tc->output);
+  if(err)
+    return err;
+  err = tcal9539_read_u16(tc, TCAL9539_CFG0, &tc->direction);
+  if(err)
+    return err;
+  err = tcal9539_read_u16(tc, TCAL9539_PUD0, &tc->pull_direction);
+  if(err)
+    return err;
+
+  return tcal9539_read_u16(tc, TCAL9539_PE0, &tc->pull_enable);
+}
+
 
 static const gpio_vtable_t tcal9539_vtable = {
   .conf_input = tcal9539_conf_input,
@@ -186,6 +247,8 @@ static const gpio_vtable_t tcal9539_vtable = {
   .set_pin = tcal9539_set_pin,
   .get_pin = tcal9539_get_pin,
   .get_port = tcal9539_get_port,
+  .get_mode = tcal9539_get_mode,
+  .refresh_shadow = tcal9539_refresh_shadow,
 };
 
 

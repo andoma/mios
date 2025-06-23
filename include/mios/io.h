@@ -121,7 +121,7 @@ typedef struct gpio_vtable {
 
   error_t (*conf_output)(struct indirect_gpio *ig, unsigned int line,
                          gpio_output_type_t type, gpio_output_speed_t speed,
-                         gpio_pull_t pull);
+                         gpio_pull_t pull, int initial_value);
 
   // Read a single GPIO pin (one bit)
   error_t (*set_pin)(struct indirect_gpio *ig, unsigned int line, int on);
@@ -133,8 +133,52 @@ typedef struct gpio_vtable {
   error_t (*get_port)(struct indirect_gpio *ig, unsigned int port,
                       uint32_t *pins);
 
+  // Return 1 if port is input, 0 if output
+  int (*get_mode)(struct indirect_gpio *ig, unsigned int line);
+
+  error_t (*refresh_shadow)(struct indirect_gpio *ig);
+
 } gpio_vtable_t;
 
 typedef struct indirect_gpio {
   const gpio_vtable_t *vtable;
 } indirect_gpio_t;
+
+static inline error_t
+indirect_gpio_conf_input(indirect_gpio_t *ig, unsigned int line,
+                         gpio_pull_t pull)
+{
+  return ig->vtable->conf_input(ig, line, pull);
+}
+
+static inline error_t
+indirect_gpio_conf_output(indirect_gpio_t *ig, unsigned int line,
+                          gpio_output_type_t type, gpio_output_speed_t speed,
+                          gpio_pull_t pull, int initial_value)
+{
+  return ig->vtable->conf_output(ig, line, type, speed, pull, initial_value);
+}
+
+static inline error_t
+indirect_gpio_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
+{
+  return ig->vtable->set_pin(ig, line, on);
+}
+
+static inline error_t
+indirect_gpio_get_pin(indirect_gpio_t *ig, unsigned int line, int *status)
+{
+  return ig->vtable->get_pin(ig, line, status);
+}
+
+static inline int
+indirect_gpio_get_mode(indirect_gpio_t *ig, unsigned int line)
+{
+  return ig->vtable->get_mode(ig, line);
+}
+
+static inline error_t
+indirect_gpio_refresh_shadow(indirect_gpio_t *ig)
+{
+  return ig->vtable->refresh_shadow(ig);
+}
