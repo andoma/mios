@@ -62,3 +62,40 @@ hsp_ss_rd_and_clr(uint32_t base, uint32_t sem)
   hsp_ss_clr(base, sem, bits);
   return bits;
 }
+
+static inline uint32_t
+hsp_db_base(uint32_t base, uint32_t index)
+{
+  return base + 0x10000 + 0x8000 * 8 + 0x10000 * 4 + index * 0x100;
+}
+
+static inline void
+hsp_db_ring(uint32_t base, uint32_t index)
+{
+  base = hsp_db_base(base, index);
+  reg_wr(base, 1);
+}
+
+#include <stdio.h>
+static inline void
+hsp_db_enable(uint32_t base, uint32_t index, uint32_t bit, int secure)
+{
+  base = hsp_db_base(base, index) + 0x4;
+
+  if(bit > 16) {
+    base += 0x20;
+    bit &= ~15;
+  }
+
+  if(secure)
+    bit += 16;
+  printf("reg_set_bit %d in reg %x\n", bit, base);
+  reg_set_bit(base, bit);
+}
+
+static inline uint32_t
+hsp_db_enabled(uint32_t base, uint32_t index)
+{
+  base = hsp_db_base(base, index) + 0x4;
+  return reg_rd(base);
+}

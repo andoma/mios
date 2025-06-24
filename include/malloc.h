@@ -13,6 +13,7 @@ int free_try(void *ptr);
 #define MEM_TYPE_DMA            0x2
 #define MEM_TYPE_NO_CACHE       0x4
 #define MEM_TYPE_VECTOR_TABLE   0x8
+#define MEM_TYPE_CHAINLOADER    0x10
 
 #define MEM_MAY_FAIL   0x80000000
 #define MEM_CLEAR      0x40000000

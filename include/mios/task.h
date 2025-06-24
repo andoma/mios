@@ -133,8 +133,9 @@ void thread_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 #define TASK_DETACHED  0x2  // Should be auto-joined by system on thread_exit
 
 // Remaining flags are only used during thread_create
-#define TASK_NO_FPU       0x100
-#define TASK_NO_DMA_STACK 0x200
+#define TASK_NO_FPU            0x100
+#define TASK_NO_DMA_STACK      0x200
+#define TASK_MEMTYPE_SHIFT     16
 
 thread_t *thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                         const char *name, int flags, unsigned int prio);

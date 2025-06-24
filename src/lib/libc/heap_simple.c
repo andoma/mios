@@ -294,7 +294,7 @@ malloc0(size_t size, size_t align, int type)
 {
   mutex_lock(&heap_mutex);
 
-  int heap_type = type & 0xf;
+  int heap_type = type & 0xffff;
 
   heap_header_t *hh;
 

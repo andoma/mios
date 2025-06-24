@@ -12,5 +12,8 @@ include ${SRC}/cpu/aarch64/aarch64.mk
 
 SRCS += ${P}/tegra234-ccplex.c \
 	${P}/tegra234-ccplex_hsp.c \
+	${P}/efiruntime.c \
 
 ENABLE_TASK_ACCOUNTING := no
+
+${MOS}/src/platform/tegra234-ccplex/efiruntime.o : CFLAGS += -fpic
