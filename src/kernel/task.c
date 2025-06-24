@@ -357,9 +357,12 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   }
 #endif
 
+  uint32_t type = flags >> TASK_MEMTYPE_SHIFT;
+  if(!type)
+    type = flags & TASK_NO_DMA_STACK ? 0 : MEM_TYPE_DMA;
+
   void *sp_bottom = xalloc(stack_size + fpu_ctx_size + sizeof(thread_t),
-                           CPU_STACK_ALIGNMENT, MEM_MAY_FAIL |
-                           (flags & TASK_NO_DMA_STACK ? 0 : MEM_TYPE_DMA));
+                           CPU_STACK_ALIGNMENT, MEM_MAY_FAIL | type);
   if(sp_bottom == NULL)
     return NULL;
 
@@ -367,7 +370,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   void *sp = sp_bottom + stack_size;
   thread_t *t = sp + fpu_ctx_size;
 
-#if 0
+#if 1
   printf("Created new task sp_bottom:%p sp:%p t:%p flags:0x%x %s\n",
          sp_bottom, sp, t, flags, name);
 #endif

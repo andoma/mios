@@ -42,7 +42,7 @@ typedef struct pl011 {
 #define UART_FR    0x018
 #define UART_IMSC  0x038
 
-static void
+static void __attribute__((noinline))
 printchar(pl011_t *u, char c)
 {
   while(reg_rd(u->base + UART_FR) & (1 << 5)) {

@@ -14,3 +14,16 @@ board_init_early(void)
   asm volatile("mrs %0, ID_AA64MMFR0_EL1\n\r" : "=r"(wut));
   printf("ID_AA64MMFR0_EL1 = %lx\n", wut);
 }
+
+
+#include <mios/cli.h>
+
+static error_t
+cmd_el2(cli_t *cli, int argc, char **argv)
+{
+  extern void (*el2_trampoline)(void);
+  el2_trampoline();
+  return 0;
+}
+
+CLI_CMD_DEF("el2", cmd_el2);

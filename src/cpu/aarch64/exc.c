@@ -23,8 +23,10 @@ curr_el_sp0_sync(void)
   asm volatile ("mrs %0, esr_el1\n\t" : "=r" (esr));
   void *far;
   asm volatile ("mrs %0, far_el1\n\t" : "=r" (far));
-  panic("Synchronous Exception @ SP0. ELR:%p ESR:0x%08x FAR:%p SPSR:%x",
-        elr, esr, far, spsr_el1);
+
+  uint32_t inst = *(uint32_t *)elr;
+  panic("Synchronous Exception @ SP0. ELR:%p (*ELR:0x%x) ESR:0x%08x FAR:%p SPSR:%x",
+        elr, inst, esr, far, spsr_el1);
 }
 
 void
