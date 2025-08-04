@@ -42,11 +42,12 @@ static const struct {
   uint32_t reg_base;
   uint8_t irq0;
   uint8_t irq1;
+  uint8_t af;
   char name[4];
 } stm32h7_can_interfaces[] = {
-  { 0x4000a000, 19,  21,  "can1" },
-  { 0x4000a400, 20,  22,  "can2" },
-  { 0x4000d400, 159, 160, "can3" },
+  { 0x4000a000, 19,  21,  9, "can1" },
+  { 0x4000a400, 20,  22,  9, "can2" },
+  { 0x4000d400, 159, 160, 2, "can3" },
 };
 
 // 10240 bytes of shared CAN RAM
@@ -66,8 +67,9 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   if(instance >= ARRAYSIZE(stm32h7_can_interfaces))
     panic("Invalid CAN interface %u", instance + 1);
 
-  gpio_conf_af(can_tx, 9, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_af(can_rx, 9, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  uint8_t af = stm32h7_can_interfaces[instance].af;
+  gpio_conf_af(can_tx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_conf_af(can_rx, af, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
   clk_enable(CLK_FDCAN);
 
