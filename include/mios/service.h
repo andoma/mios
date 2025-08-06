@@ -30,14 +30,16 @@ typedef struct service {
 
 const service_t *service_find_by_name(const char *name);
 
+const service_t *service_find_by_namelen(const char *name, size_t len);
+
 const service_t *service_find_by_ble_psm(uint8_t psm);
 
 const service_t *service_find_by_ip_port(uint16_t port);
 
 #define SERVICE_DEF_STREAM(name, port, open)  \
-static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, .ip_port = port, .open_stream = open};
+static const service_t MIOS_JOIN(servicedef, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, .ip_port = port, .open_stream = open};
 
 
 #define SERVICE_DEF_PUSHPULL(name, ip_port, ble_psm, open)  \
-static const service_t MIOS_JOIN(servicedev, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, .open_pushpull = open};
+static const service_t MIOS_JOIN(servicedef, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, .open_pushpull = open};
 
