@@ -289,18 +289,37 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, const pushpull_t *pp)
 pbuf_t *
 pbuf_drop(pbuf_t *pb, size_t bytes)
 {
-  while(pb) {
-    if(bytes > pb->pb_buflen) {
-      // Fix this case
-      pbuf_dump("pbuf_drop", pb, 1);
-      panic("pbuf_drop r:%zd bl:%d pl:%d pb:%p",
-            bytes, pb->pb_buflen, pb->pb_pktlen, pb);
-    }
+  if(pb == NULL)
+    return NULL;
 
-    pb->pb_offset += bytes;
-    pb->pb_buflen -= bytes;
-    pb->pb_pktlen -= bytes;
-    break;
+  while(1) {
+    size_t chunk = MIN(bytes, pb->pb_buflen);
+
+    pb->pb_offset += chunk;
+    pb->pb_buflen -= chunk;
+    pb->pb_pktlen -= chunk;
+    bytes -= chunk;
+
+    if(pb->pb_buflen)
+      return pb;
+
+    if(pb->pb_buflen == 0) {
+      pbuf_t *n = pb->pb_next;
+
+      if(n != NULL) {
+        n->pb_pktlen = pb->pb_pktlen;
+        n->pb_flags |= pb->pb_flags & PBUF_SOP;
+      }
+
+      int q = irq_forbid(IRQ_LEVEL_NET);
+      pbuf_data_put(pb->pb_data);
+      pbuf_put(pb);
+      irq_permit(q);
+
+      if(n == NULL)
+        return NULL;
+      pb = n;
+    }
   }
   return pb;
 }
