@@ -8,9 +8,6 @@ struct pbuf;
 // Functions defined by the application side
 typedef struct pushpull_app_fn {
 
-  __attribute__((warn_unused_result))
-  size_t (*push_partial)(void *opaque, struct pbuf *pb);
-
   // Data from network to service
   // Return an event-mask
   __attribute__((warn_unused_result))
@@ -22,9 +19,9 @@ typedef struct pushpull_app_fn {
   __attribute__((warn_unused_result))
   struct pbuf *(*pull)(void *opaque);
 
-  // Once called by then network side,
-  // The network side will not call anything again
-  // reason is only compile-time-constants (no dynamic allocation)
+  // Once this is called by the network side,
+  // The network side will not call anything again.
+  // 'reason' are only compile-time-constant strings (no dynamic allocation)
   void (*close)(void *opaque, const char *reason);
 } pushpull_app_fn_t;
 
