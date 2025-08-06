@@ -203,7 +203,7 @@ sigcapture_create(size_t depth_power_of_2, size_t channels,
 
   const size_t depth = 1 << depth_power_of_2;
 
-  if(channels > 8)
+  if(channels > 16)
     return NULL;
 
   int16_t *storage = xalloc(depth * channels * sizeof(int16_t), 0,
