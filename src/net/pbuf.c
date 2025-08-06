@@ -6,7 +6,7 @@
 #include <mios/mios.h>
 #include <sys/queue.h>
 #include <sys/param.h>
-#include <mios/mios.h>
+#include <mios/pushpull.h>
 
 #include "irq.h"
 #include "pbuf.h"
@@ -228,7 +228,7 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
 
 
 pbuf_t *
-pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
+pbuf_write(pbuf_t *head, const void *data, size_t len, const pushpull_t *pp)
 {
   if(head == NULL)
     return NULL;
@@ -242,7 +242,7 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
 
   while(len) {
 
-    if(pb->pb_buflen >= max_fill) {
+    if(pb->pb_buflen >= pp->max_fragment_size) {
 
       pb->pb_flags &= ~PBUF_EOP;
 
@@ -258,7 +258,7 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
           n->pb_flags = PBUF_EOP;
           n->pb_credits = 0;
           n->pb_pktlen = 0;
-          n->pb_offset = 0;
+          n->pb_offset = pp->preferred_offset;
           n->pb_buflen = 0;
         }
       }
@@ -272,7 +272,8 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, size_t max_fill)
       pb = n;
     }
 
-    size_t to_copy = MIN(len, max_fill - pb->pb_buflen - pb->pb_offset);
+    size_t to_copy =
+      MIN(len, pp->max_fragment_size - pb->pb_buflen - pb->pb_offset);
     memcpy(pb->pb_data + pb->pb_offset + pb->pb_buflen, data, to_copy);
 
     head->pb_pktlen += to_copy;

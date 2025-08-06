@@ -425,20 +425,19 @@ evlog_svc_pull(void *opaque)
     hdr |= tslen << 3;
 
     pb = pbuf_make(esf->p->preferred_offset, 0);
-    const int mfs = esf->p->max_fragment_size;
     if(pb != NULL) {
-      pb = pbuf_write(pb, &hdr, 1, mfs);
+      pb = pbuf_write(pb, &hdr, 1, esf->p);
 
       if(hdr & 0x40) {
-        pb = pbuf_write(pb, &ef->seq_tail, 4, mfs);
+        pb = pbuf_write(pb, &ef->seq_tail, 4, esf->p);
       }
-      pb = pbuf_write(pb, tsbuf, tslen, mfs);
+      pb = pbuf_write(pb, tsbuf, tslen, esf->p);
 
       if(msgend >= msgstart) {
-        pb = pbuf_write(pb, ef->data + msgstart, msglen, mfs);
+        pb = pbuf_write(pb, ef->data + msgstart, msglen, esf->p);
       } else {
-        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart, mfs);
-        pb = pbuf_write(pb, ef->data, msgend, mfs);
+        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart, esf->p);
+        pb = pbuf_write(pb, ef->data, msgend, esf->p);
       }
     }
     if(pb != NULL) {

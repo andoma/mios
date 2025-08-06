@@ -74,7 +74,7 @@ ota_send_final_status(svc_ota_t *sa, uint8_t status)
 {
   pbuf_t *reply = pbuf_make(0,0);
   if(reply) {
-    reply = pbuf_write(reply, &status, 1, 10);
+    reply = pbuf_write(reply, &status, 1, sa->sa_sock);
     mutex_lock(&sa->sa_mutex);
     sa->sa_info = reply;
     mutex_unlock(&sa->sa_mutex);
@@ -304,7 +304,7 @@ static const pushpull_app_fn_t ota_fn = {
 
 
 error_t
-ota_open_with_args(pushpull_t *s,
+ota_open_with_args(pushpull_t *pp,
                    struct block_iface *partition,
                    int skip_kb,
                    void (*platform_upgrade)(uint32_t flow_header,
@@ -320,17 +320,17 @@ ota_open_with_args(pushpull_t *s,
   memset(sa, 0, sizeof(svc_ota_t));
   sa->sa_partition = partition;
   sa->sa_platform_upgrade = platform_upgrade;
-  sa->sa_blocksize = s->max_fragment_size;
+  sa->sa_blocksize = pp->max_fragment_size;
   sa->sa_skipped_bytes = skip_kb * 1024;
 
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb != NULL) {
     uint8_t hdr[4] = {0, 'r', sa->sa_blocksize, skip_kb};
 
-    pb = pbuf_write(pb, hdr, sizeof(hdr), s->max_fragment_size);
-    pb = pbuf_write(pb, mios_build_id(), 20, s->max_fragment_size);
+    pb = pbuf_write(pb, hdr, sizeof(hdr), pp);
+    pb = pbuf_write(pb, mios_build_id(), 20, pp);
     const char *appname = mios_get_app_name();
-    pb = pbuf_write(pb, appname, strlen(appname), s->max_fragment_size);
+    pb = pbuf_write(pb, appname, strlen(appname), pp);
   }
 
   if(pb == NULL) {
@@ -338,9 +338,9 @@ ota_open_with_args(pushpull_t *s,
     return ERR_NO_BUFFER;
   }
 
-  sa->sa_sock = s;
-  s->app = &ota_fn;
-  s->app_opaque = sa;
+  sa->sa_sock = pp;
+  pp->app = &ota_fn;
+  pp->app_opaque = sa;
 
   ota_busy = 1;
   sa->sa_info = pb;
