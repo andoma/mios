@@ -1,5 +1,3 @@
-#if 0
-
 #include <mios/service.h>
 #include <mios/suspend.h>
 #include <mios/stream.h>
@@ -19,12 +17,11 @@ shell_thread(void *arg)
 }
 
 
-
 static error_t
-shell_open_raw(stream_t *s, int is_telnet)
+shell_open(stream_t *s)
 {
   wakelock_acquire();
-  error_t r = thread_create_shell(shell_thread, s, "remotecli", s);
+  error_t r = thread_create_shell(shell_thread, s, "shell", s);
   if(r) {
     wakelock_release();
     return r;
@@ -32,12 +29,4 @@ shell_open_raw(stream_t *s, int is_telnet)
   return 0;
 }
 
-
-static error_t
-shell_open(stream_t *s)
-{
-  return shell_open_raw(s, 0);
-}
-
-SERVICE_DEF_STREAM("shell", 23, 23, shell_open);
-#endif
+SERVICE_DEF_STREAM("shell", 0, shell_open);
