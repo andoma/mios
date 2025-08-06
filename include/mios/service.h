@@ -36,6 +36,8 @@ const service_t *service_find_by_ble_psm(uint8_t psm);
 
 const service_t *service_find_by_ip_port(uint16_t port);
 
+error_t service_open_pushpull(const service_t *svc, pushpull_t *pp);
+
 #define SERVICE_DEF_STREAM(name, port, open)  \
 static const service_t MIOS_JOIN(servicedef, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, .ip_port = port, .open_stream = open};
 

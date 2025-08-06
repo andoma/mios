@@ -12,7 +12,9 @@ ENABLE_NET_ETHER := $(findstring yes,${ENABLE_NET_IPV4})
 ENABLE_NET_DSIG := $(findstring yes,${ENABLE_NET_MBUS}${ENABLE_NET_CAN})
 
 SRCS-${ENABLE_NET_DSIG} += \
-	${SRC}/net/dsig.c
+	${SRC}/net/dsig.c \
+	${SRC}/net/vllp.c \
+	${SRC}/net/pushpull.c \
 
 SRCS-${ENABLE_NET_MBUS} += \
 	${SRC}/net/mbus/mbus.c \

@@ -1,0 +1,235 @@
+
+## Overview
+
+The vlink layer assumes there is a predefined set of nodes
+communicating on a network with a defined address (CAN-ID) for each
+combination. The addressing (discovery, setup, allocation, etc) is not
+part of the link protocol. The protocol is designed to work on network
+with small MTU such as legacy CAN (8 bytes).
+
+The vlink layer is not fully symetrical. A link is always established
+from the client to the server. For example on your spaceship's CAN
+network, CAN-ID 0x530,0x531 may be used for vlink communication
+between the "Hyperspace drive" (client transmits to 0x530) and "Fusion
+core" (server transmits to 0x531). In this setup only the "Hyperspace
+drive" can initialize the vlink and open new channels. If the reverse
+type of communication is required, another CAN ID pair must be used.
+Note: Once a channel has been opened, both parties and send/receive
+messages at will.
+
+The link layer uses 1 bit SEQ/ACK counters. In other words each packet
+must be ACKed by the remote before next packet can be sent. (This is
+similar to how BLE works)
+
+The Link layer framing supports 16 channels (0-15) between each peer.
+The highest numbered channels are reserved for link management and
+channel setup. In particular channel 15 is not a real channel and the
+corresponding bit pattern is instead used for link initialization.
+
+Channel 14 is used for management of the remaining channels (0-13)
+which are available for the user.
+
+## Packet format
+
+Every packet have the following single byte header.
+
+```
+FSEL_CCCC
+
+F = Flow-control bit
+S = Sequence
+E = Expected Sequence
+L = Last fragment
+C = Channel
+```
+
+As mentioned in the overview, the highest channel (15) is not an
+actual channel but rather used to synchronize the link with the
+following packets:
+
+### SYN
+
+```
+0000_1111 [32bit cookie]
+```
+
+### ACK
+
+```
+0SE1_1111 [16bit flow-control] [CRC32]
+```
+
+Normally, ACK packets are not sent as a response to an ACK packet (as
+that would result in a continuous ping-pong of ACK packets).
+
+However, if the F bit is set, we ask the remote to respond with an ACK
+packet. The use-case for this is to get an update of all channels
+flow-status.
+
+
+## Link establishment
+
+The client send an SYN packet with a randomized 32 bit value ("cookie").
+
+```
+0000_1111 CCCC_CCCC CCCC_CCCC CCCC_CCCC CCCC_CCCC
+```
+
+If the server already have a link established with the client that
+session is immediately teared down and all channels are closed.
+
+The server (and the client) both keeps the randomized cookie and uses
+it as initializer for all CRC32 calculations related to this session.
+This additionally protect the link from desychronizations due to
+software/hardware resets.
+
+Once the server receives the Init-packet it responds with an ACK-packet
+
+A client will keep trying to send Init-packets every second until it
+receives an ACK-packet. (Typical case if the server is not available)
+
+## Sequencing and retransmission
+
+The S and E bits indicate the 1-bit sequence of the current packet and
+which sequence we expect from the peer. If a peer receives a packet
+which S-bit does not match what we expect we immediately send back a
+ACK-packet with the E-bit set to what we expect.
+
+The S bit is only toggled for channels != 15. Thus, an ACK packet
+which carries no real payload (except flow-control and CRC) does not
+flip the S-bit.
+
+The sending party needs to keep the most recently sent packet in a
+retransmission buffer and can only remove it (and advance to the next
+packet in queue) once we get back a E-bit indicating the receiving
+part accepted our packet.
+
+The S/E bits are shared by all channels on the link.
+
+## Keep-alive
+
+If no data has been sent for 1 second, an unsolicited ACK packet is sent.
+
+If a peer has not received data for 3 seconds, the link is deemed down
+and will be teared down.
+
+If a server receives any non-SYN packet without having seen an SYN
+packet yet that packet is dropped.
+
+## Flow-control
+
+Each peer keep a set of flow-control for each channel if it is willing
+to accept data on a channel ("rx-flow-bits"). How those are updated
+are implementation defined and outside the scope of this document. For
+example on a memory contrained system you might want to reduce local
+buffering. On the other hand on a system with lots of memory you might
+just not really care and be ready to accept a lot of data anyway. Thus
+the rx-bits can be kept fixed to 1.
+
+These set of 16 rx-bits is sent in all ACK packets so each peer also
+keep track of the flow-control for the remote. These are then called
+("tx-flow-bits"). In adition for a regular data-fragment for channel N
+the rx-flow-bit for that specific channels is passed in the F-bit in
+the header.
+
+When a packet is sent the sending peer will clear the corresponding
+tx-flow-bit. Thus, it cannot send anything on that channel until it
+has received an updated flow-control status for that channel.
+
+This can happen either via an ACK packets (all channels) or a
+transmission on the specific channel (F-bit).
+
+
+## Link teardown
+
+There are currently no explicit way to tear down an established link.
+
+## Channel messages
+
+Messages are split into multiple fragments and sent over a channel,
+one fragment at the time (the sender needs to wait for each fragment
+do be ACKed by the S/E bits). Note that the receiving party may use
+other channel messages (if it has something to send) the ACK to
+piggy-back on.
+
+The last fragment of a message will have the 'L bit set to indicate
+message boundary.
+
+CRC32 is optional for channel messages and, if enabled, it is only
+only sent together with the LAST fragment and the CRC applies to the
+entire message (and thus, does not cover the 8 bit header)
+
+The built-in "Channel Manangement Channel" (14) is always open,
+cannot be closed and CRC32 is always enabled.
+
+## Channel management
+
+The payload for the "Channel Manangement Channel" (14) are as follows:
+
+OOOC_CCCC [...]
+
+O = 3 bit opcode
+C = 5 bit target channel (The channel this message operates on)
+
+Channel numbers are allocated by the client.
+
+Opcodes:
+
+0   : Request to open channel with CRC32.
+1   : Request to open channel without CRC32.
+2   : Open channel response
+3   : Close channel
+4-7 : Reserved
+
+### Open channel request (code 0 and 1)
+
+The remaining part of the message is an ASCII string identifying the
+service name. The names are not defined in this document but could be
+things such as "rpc", "shell","log", etc
+
+The "open channel request" can only be sent by the client.
+
+### Open channel response
+
+002C_CCCC [16 bit error code]
+
+Errorcode = 0 means successful open.
+
+The "open channel response" can only be sent by the server.
+
+### Close channel
+
+003C_CCCC [16 bit error code]
+
+Errorcode = 0 means regular close ("EOF")
+
+The "Close channel" message can be sent by both peers.
+
+## CAN network adaptation
+
+The protocol is designed to work both on legacy CAN (8 byte MTU) and
+FDCAN (64 byte MTU) or other similar transports.
+
+However, FDCAN can not transmit packets of arbitrary length. In
+particular only the following packet length can be represented by the
+DLC field. {0,1,2,3,4,5,6,7,8,12,16,20,24,32,48,64}.
+
+Since vlink assumes it can send any packet length up to the given MTU
+an adaption is needed. If the packet to be sent/received is > 8 bytes
+an additional byte is inserted at the END of the packet which contains
+number of padding bytes present.
+
+For example, we want to a vlink packet that is 9 bytes:
+
+[HH dd dd dd dd dd dd dd dd]
+
+HH = vlink header
+dd = data
+
+On FDCAN we send 12 bytes:
+
+[HH dd dd dd dd dd dd dd dd 00 00 03]
+
+The receiving end knows that if packetlength > 8 padding is always
+present and strips accordingly. This effectivly limits the MTU for
+channel fragments to 62 (one header and one pad byte).
