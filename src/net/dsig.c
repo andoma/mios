@@ -201,6 +201,18 @@ dsig_emit(uint32_t signal, const void *data, size_t len)
 }
 
 
+void
+dsig_emit_pbuf(uint32_t signal, pbuf_t *pb)
+{
+  pb = pbuf_prepend(pb, 4, 0, 0);
+  if(pb == NULL)
+    return;
+  uint8_t *pkt = pbuf_data(pb, 0);
+  wr32_le(pkt, signal);
+  dsig_send(pb);
+}
+
+
 
 
 static void

@@ -9,6 +9,8 @@ typedef struct dsig_sub dsig_sub_t;
 
 void dsig_emit(uint32_t signal, const void *data, size_t len);
 
+void dsig_emit_pbuf(uint32_t signal, struct pbuf *pb);
+
 dsig_sub_t *dsig_sub(uint32_t signal, uint32_t mask, uint16_t ttl_ms,
                      void (*cb)(void *opaque, const struct pbuf *pb,
                                 uint32_t signal),
