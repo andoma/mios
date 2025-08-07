@@ -123,7 +123,9 @@ spi_xfer(struct stm32h7_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
          uint32_t cfg1, uint32_t cfg2)
 {
   if(len < 4 ||
+     (tx && (intptr_t)tx < 0x24000000) ||
      (rx && ((len & (CACHE_LINE_SIZE - 1)) ||
+             ((intptr_t)rx < 0x24000000) ||
              ((intptr_t)rx & (CACHE_LINE_SIZE - 1))))) {
     return spi_xfer_pio(spi, tx, rx, len, cfg1, cfg2);
   }
