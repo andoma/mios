@@ -415,6 +415,57 @@ spiflash_erase0(void)
   spiflash_wait_ready();
 }
 
+//======================================================================
+// FLASH
+//======================================================================
+
+#define FLASH_BASE 0x52002000
+
+#define FLASH_KEYR (FLASH_BASE + 0x004)
+#define FLASH_CR   (FLASH_BASE + 0x00c)
+#define FLASH_SR   (FLASH_BASE + 0x010)
+
+
+static void __attribute__((section("bltext"),noinline,unused))
+flash_unlock(void)
+{
+  reg_wr(FLASH_KEYR, 0x45670123);
+  reg_wr(FLASH_KEYR, 0xCDEF89AB);
+}
+
+static void __attribute__((section("bltext"),noinline,unused))
+flash_lock(void)
+{
+  reg_wr(FLASH_CR, 1);
+}
+
+static void __attribute__((section("bltext"),noinline,unused))
+flash_erase_sector(int sector)
+{
+  reg_wr(FLASH_CR,
+         (1 << 2) |     // SER
+         (sector << 8));
+  reg_set_bit(FLASH_CR, 7);
+  while(reg_rd(FLASH_SR) & (1 << 2)) {}
+}
+
+static void __attribute__((section("bltext"),noinline,unused))
+flash_write(uint32_t offset, const uint8_t *s)
+{
+  volatile uint32_t *dst = (void *)0x8000000 + offset;
+  reg_wr(FLASH_CR, 0x2);
+  for(size_t i = 0; i < BLOCKSIZE; i+= 8) {
+    const uint32_t w0 = s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24);
+    const uint32_t w1 = s[4] | (s[5] << 8) | (s[6] << 16) | (s[7] << 24);
+    dst[0] = w0;
+    dst[1] = w1;
+    s += 8;
+    dst += 2;
+    while(reg_rd(FLASH_SR) & (1 << 2)) {}
+  }
+}
+
+
 
 //======================================================================
 // Main
@@ -430,10 +481,16 @@ reboot(void)
 
 
 __attribute__((section("bldata")))
-static const char welcomestr[] = "\nSTM32 SPI Bootloader, flashid:0x";
+static const char welcomestr[] = "\nMIOS STM32H7 SPI Bootloader, flashid:0x";
 
 __attribute__((section("bldata")))
-static const char valid_image[] = "Valid image found, flashing: ";
+static const char valid_header[] = "\n* Valid header found";
+
+__attribute__((section("bldata")))
+static const char valid_image[] = "\n* Valid image found, flashing: ";
+
+__attribute__((section("bldata")))
+static const char successful[] = " Successful\n";
 
 __attribute__((section("bldata")))
 static const char hfstr[] = "\nHard fault\n";
@@ -491,41 +548,43 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
   uint32_t crc = ~bl_crc32(0, &hdr, sizeof(hdr));
   if(!crc && hdr.magic == 0x3141544f) {
     // Upgrade header is valid
+    console_print_string(valid_header);
 
     uint32_t buffer[BLOCKSIZE / sizeof(uint32_t)];
 
     crc = 0;
     for(size_t i = 0; i < hdr.size; i += BLOCKSIZE) {
       size_t chunk = MIN(BLOCKSIZE, hdr.size - i);
-      spiflash_read(buffer, 2048 + i, chunk);
+      spiflash_read(buffer, 4096 + i, chunk);
       crc = bl_crc32(crc, buffer, chunk);
     }
     crc = ~crc;
     if(crc == hdr.image_crc) {
       console_print_string(valid_image);
-#if 0
+
       flash_unlock();
 
       for(size_t i = 0; i < hdr.size; i += BLOCKSIZE) {
         spiflash_read(buffer, 4096 + i, BLOCKSIZE);
 
-        int page = (i >> 11) + 1;
-        if((i & 2047) == 0) {
-          console_print('.');
-          flash_erase_page(page);
-        }
-        flash_write(2048 + i, (const void *)buffer);
-      }
+        uint32_t flash_addr = i + 0x20000;
+        uint32_t sector = flash_addr >> 17;
 
+        if((flash_addr & 0x1ffff) == 0) {
+          console_print('.');
+          flash_erase_sector(sector);
+        }
+        flash_write(flash_addr, (const void *)buffer);
+      }
       flash_lock();
-      crc = ~bl_crc32(0, (void*)(intptr_t)2048, hdr.size);
+
+      crc = ~bl_crc32(0, (void*)(intptr_t)0x8020000, hdr.size);
       if(crc == hdr.image_crc) {
         console_print_string(successful);
         spiflash_erase0();
       } else {
         reboot();
       }
-#endif
     }
   }
 
