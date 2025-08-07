@@ -173,7 +173,7 @@ vllp_channel_find(vllp_t *v, int channel_id)
   return NULL;
 }
 
-static void
+static int
 vllp_refresh_local_flow_status(vllp_t *v)
 {
   uint16_t bits = 0xffff;
@@ -186,7 +186,11 @@ vllp_refresh_local_flow_status(vllp_t *v)
     if(!vc->pp.app->may_push || !vc->pp.app->may_push(vc->pp.app_opaque))
       bits &= ~(1 << vc->id);
   }
+
+  if(v->local_flow_status == bits)
+    return 0;
   v->local_flow_status = bits;
+  return 1;
 }
 
 
@@ -219,6 +223,9 @@ static void
 vllp_disconnect(vllp_t *v, const char *reason)
 {
   vllp_channel_t *vc, *n;
+
+  if(!v->connected)
+    return;
 
   evlog(LOG_DEBUG, "VLLP: Disconnected -- %s", reason);
 
@@ -306,7 +313,7 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
 
   vc->state = VLLP_CHANNEL_STATE_ESTABLISHED;
 
-  vc->pp.max_fragment_size = PBUF_DATA_SIZE - 4;
+  vc->pp.max_fragment_size = v->mtu - 1 - 4;
   vc->pp.preferred_offset = 0;
   vc->pp.net = &vllp_net_fn;
   vc->pp.net_opaque = vc;
@@ -757,13 +764,19 @@ static void
 vllp_channel_task_cb(net_task_t *nt, uint32_t signals)
 {
   vllp_channel_t *vc = ((void *)nt) - offsetof(vllp_channel_t, task);
+  vllp_t *v = vc->vllp;
 
   if(signals & PUSHPULL_EVENT_CLOSE) {
     vc->app_closed = 1;
-    if(vllp_channel_maybe_destroy(vc->vllp, vc))
+    if(vllp_channel_maybe_destroy(v, vc))
       return;
   }
-  vllp_maybe_tx(vc->vllp);
+
+  if(vllp_refresh_local_flow_status(v)) {
+    vllp_tx_ack(v);
+  }
+
+  vllp_maybe_tx(v);
 }
 
 
