@@ -18,10 +18,7 @@
 #include "util/crc32.h"
 #include "irq.h"
 
-// #define OTA_BLOCKSIZE 32
-
 static char ota_busy;
-
 
 typedef struct {
   uint8_t magic[4];
@@ -37,7 +34,7 @@ typedef struct svc_ota {
   pbuf_t *sa_info;
   uint8_t sa_blocksize;
   uint8_t sa_shutdown;
-  uint16_t sa_skipped_bytes;
+  uint8_t sa_skipped_kbytes;
 
   thread_t *sa_thread;
   mutex_t sa_mutex;
@@ -136,9 +133,9 @@ ota_perform(svc_ota_t *sa)
       }
     }
 
-    while(pb->pb_pktlen) {
+    while(pb) {
 
-      uint32_t byte_offset = sa->sa_skipped_bytes + current_byte;
+      uint32_t byte_offset = (sa->sa_skipped_kbytes * 1024) + current_byte;
       uint32_t sector = byte_offset >> 12;
       uint32_t sector_offset = byte_offset & 4095;
       if(sector > erased_sector) {
@@ -168,8 +165,6 @@ ota_perform(svc_ota_t *sa)
       pb = pbuf_drop(pb, chunk_size);
       current_byte += chunk_size;
     }
-    pbuf_free(pb);
-    pb = NULL;
   }
 
   crc_acc = ~crc_acc;
@@ -241,7 +236,7 @@ ota_push(void *opaque, struct pbuf *pb)
       return 0;
     }
 
-    sa->sa_thread = thread_create(ota_thread, sa, 512, "ota", 0, 2);
+    sa->sa_thread = thread_create(ota_thread, sa, 0, "ota", 0, 2);
   }
   mutex_lock(&sa->sa_mutex);
   if(sa->sa_rxbuf == NULL) {
@@ -306,7 +301,9 @@ static const pushpull_app_fn_t ota_fn = {
 error_t
 ota_open_with_args(pushpull_t *pp,
                    struct block_iface *partition,
-                   int skip_kb,
+                   int xfer_skip_kb,
+                   int writeout_skip_kb,
+                   int blocksize,
                    void (*platform_upgrade)(uint32_t flow_header,
                                             pbuf_t *pb))
 {
@@ -314,18 +311,19 @@ ota_open_with_args(pushpull_t *pp,
     return ERR_NOT_READY;
   }
 
-  svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0, MEM_MAY_FAIL | MEM_TYPE_DMA);
+  svc_ota_t *sa = xalloc(sizeof(svc_ota_t), 0,
+                         MEM_MAY_FAIL | MEM_TYPE_DMA | MEM_CLEAR);
   if(sa == NULL)
     return ERR_NO_MEMORY;
-  memset(sa, 0, sizeof(svc_ota_t));
+
   sa->sa_partition = partition;
   sa->sa_platform_upgrade = platform_upgrade;
-  sa->sa_blocksize = pp->max_fragment_size;
-  sa->sa_skipped_bytes = skip_kb * 1024;
+  sa->sa_blocksize = blocksize ?: pp->max_fragment_size;
+  sa->sa_skipped_kbytes = writeout_skip_kb;
 
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb != NULL) {
-    uint8_t hdr[4] = {0, 'r', sa->sa_blocksize, skip_kb};
+    uint8_t hdr[4] = {0, 'r', sa->sa_blocksize, xfer_skip_kb};
 
     pb = pbuf_write(pb, hdr, sizeof(hdr), pp);
     pb = pbuf_write(pb, mios_build_id(), 20, pp);
