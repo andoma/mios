@@ -1343,7 +1343,10 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   // Step 8: Process payload
   //
 
-  pb = pbuf_drop(pb, hdr_len);
+  pb->pb_offset += hdr_len;
+  pb->pb_buflen -= hdr_len;
+  pb->pb_pktlen -= hdr_len;
+
 
   switch(tcb->tcb_state) {
   case TCP_STATE_ESTABLISHED:
