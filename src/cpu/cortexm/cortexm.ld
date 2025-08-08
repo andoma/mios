@@ -40,7 +40,7 @@ SECTIONS {
 
                 . = ALIGN(4);
                 _clicmd_array_begin = .;
-                KEEP(*(clicmd))
+                KEEP(*(SORT_BY_NAME(clicmd.*)))
                 _clicmd_array_end = .;
                 . = ALIGN(4);
 
