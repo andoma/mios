@@ -14,6 +14,7 @@
 
 #include "irq.h"
 #include "stm32h7_clk.h"
+#include "stm32h7_eth.h"
 
 #define DMA_BUFFER_PAD 2
 
@@ -139,6 +140,9 @@ typedef struct stm32h7_eth {
 
   uint8_t se_tx_rdptr; // Where DMA currently is
   uint8_t se_tx_wrptr; // Where we will write next TX desc
+
+  uint8_t se_phyaddr;
+
 } stm32h7_eth_t;
 
 
@@ -169,8 +173,11 @@ static const device_class_t stm32h7_eth_device_class = {
 };
 
 static uint16_t
-mii_read(int phyaddr, int reg)
+mii_read(void *arg, uint16_t reg)
 {
+  stm32h7_eth_t *se = arg;
+  int phyaddr = se->se_phyaddr;
+
   reg_wr(ETH_MACMDIOAR,
          (phyaddr << 21) |
          (reg << 16) |
@@ -180,9 +187,32 @@ mii_read(int phyaddr, int reg)
          (1 << 0));
 
   while(reg_rd(ETH_MACMDIOAR) & 1) {
-    usleep(10);
+    if(can_sleep()) {
+      usleep(10);
+    }
   }
   return reg_rd(ETH_MACMDIODR) & 0xffff;
+}
+
+
+
+static void
+mii_write(void *arg, uint16_t reg, uint16_t value)
+{
+  stm32h7_eth_t *se = arg;
+  int phyaddr = se->se_phyaddr;
+
+  reg_wr(ETH_MACMDIODR, value);
+  reg_wr(ETH_MACMDIOAR,
+         (phyaddr << 21) |
+         (reg << 16) |
+         (1 << 2) |
+         (1 << 0));
+  while(reg_rd(ETH_MACMDIOAR) & 1) {
+    if(can_sleep()) {
+      usleep(10);
+    }
+  }
 }
 
 
@@ -370,11 +400,55 @@ stm32h7_eth_irq(void *arg)
   reg_wr(ETH_DMACSR, dmacsr);
 }
 
+static const ethphy_reg_io_t stm32h7_eth_mdio = {
+  .read = mii_read,
+  .write = mii_write
+};
+
 
 void
-stm32h7_eth_init(void)
+stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
+                 const ethphy_driver_t *ethphy, int phy_addr,
+                 ethphy_mode_t mode)
 {
   stm32h7_eth_t *se = &stm32h7_eth;
+
+  clk_enable(CLK_SYSCFG);
+
+  if(mode == ETHPHY_MODE_RMII) {
+    reg_set_bits(SYSCFG_BASE + 0x4, 21, 3, 4);
+  } else {
+    reg_set_bits(SYSCFG_BASE + 0x4, 21, 3, 0);
+  }
+
+  for(size_t i = 0; i < gpio_count; i++) {
+    gpio_conf_af(gpios[i], 11, GPIO_PUSH_PULL,
+                 GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
+  }
+
+  if(phyrst != GPIO_UNUSED) {
+    gpio_conf_output(phyrst, GPIO_PUSH_PULL,
+                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_set_output(phyrst, 0);
+    udelay(10);
+    gpio_set_output(phyrst, 1);
+    udelay(10);
+  }
+
+  clk_enable(CLK_ETH1MACEN);
+  clk_enable(CLK_ETH1TXEN);
+  clk_enable(CLK_ETH1RXEN);
+
+  reset_peripheral(CLK_ETH1MACEN);
+  se->se_phyaddr = phy_addr;
+
+  if(ethphy) {
+    error_t err = ethphy->init(mode, &stm32h7_eth_mdio, se);
+    if(err) {
+      evlog(LOG_ERR, "stm32h7: PHY init failed");
+      return;
+    }
+  }
 
   se->se_eni.eni_addr[0] = 0x02;
   se->se_eni.eni_addr[1] = 0x00;
@@ -390,32 +464,18 @@ stm32h7_eth_init(void)
   se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0,
                          MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
 
-  clk_enable(CLK_SYSCFG);
-
-  static const uint8_t gpios[] =
-    { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7),
-      GPIO_PB(13),
-      GPIO_PC(1), GPIO_PC(4), GPIO_PC(5),
-      GPIO_PG(11), GPIO_PG(13)
-    };
-
-  for(size_t i = 0; i < sizeof(gpios); i++) {
-    gpio_conf_af(gpios[i], 11, GPIO_PUSH_PULL,
-                 GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
-  }
-
-  reg_set_bits(SYSCFG_BASE + 0x4, 21, 3, 4);
-
-  clk_enable(CLK_ETH1MACEN);
-  clk_enable(CLK_ETH1TXEN);
-  clk_enable(CLK_ETH1RXEN);
-
-  reg_set_bits(0x58024480, 15, 1, 1);
-  reg_set_bits(0x58024480, 15, 1, 0);
-
   // Soft reset
   reg_set_bit(ETH_DMAMR, 0);
-  while(reg_rd(ETH_DMAMR) & 1) {}
+
+  int i = 0;
+  while(reg_rd(ETH_DMAMR) & 1) {
+    i++;
+    if(i == 1000000) {
+      evlog(LOG_ERR, "Ethernet MAC failed to initialize, no clock?");
+      return;
+    }
+  }
+  udelay(10);
 
   reg_wr(ETH_MACPFR, 1 << 31);  // Receive ALL
 

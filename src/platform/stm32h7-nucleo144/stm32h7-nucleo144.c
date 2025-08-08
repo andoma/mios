@@ -50,6 +50,13 @@ blinker(void *arg)
   }
 }
 
+static const uint8_t nucleo144_eth_gpios[] =
+  { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7),
+    GPIO_PB(13),
+    GPIO_PC(1), GPIO_PC(4), GPIO_PC(5),
+    GPIO_PG(11), GPIO_PG(13)
+  };
+
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
