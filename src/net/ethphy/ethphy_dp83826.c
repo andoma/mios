@@ -1,8 +1,6 @@
 #include <mios/ethphy.h>
 #include <mios/eventlog.h>
 
-#include <stdio.h>
-
 // Datasheet: https://www.ti.com/lit/ds/symlink/dp83826e.pdf
 
 #define REG_PHYIDR1 0x0002
@@ -70,7 +68,6 @@ dp83826_init(ethphy_mode_t mode,
         id2 & 0xf, model == 0x13 ? "Enhanced" : "Basic", strapbits);
 
   uint16_t rcsr = reg_read(regio, arg, REG_RCSR);
-  printf("RCSR:%x\n", rcsr);
   if(mode == ETHPHY_MODE_RMII) {
     rcsr |= 0x20;
   } else {
@@ -78,11 +75,7 @@ dp83826_init(ethphy_mode_t mode,
   }
   evlog(LOG_DEBUG, "dp83826: Running in %sMII mode",
         mode == ETHPHY_MODE_RMII ? "R":"");
-  printf("RCSR:%x\n", rcsr);
   reg_write(regio, arg, REG_RCSR, rcsr);
-
-  rcsr = reg_read(regio, arg, REG_RCSR);
-  printf("RCSR:%x\n", rcsr);
   return 0;
 }
 
