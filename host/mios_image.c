@@ -70,7 +70,9 @@ get_shstrtab(const void *elf)
 }
 
 mios_image_t *
-mios_image_from_elf_mem(const void *elf, size_t elfsize)
+mios_image_from_elf_mem(const void *elf, size_t elfsize,
+                        size_t skip_bytes, size_t alignment,
+                        const char **errmsg)
 {
   const elf32hdr_t *elfhdr = elf;
 
@@ -90,18 +92,47 @@ mios_image_from_elf_mem(const void *elf, size_t elfsize)
     image_end = MAX(phdr->paddr + phdr->filesz, image_end);
   }
 
-  // Align to 64 bytes
-  image_end = (image_end + 63) & ~63;
+  image_begin += skip_bytes;
 
-  const size_t image_size = image_end - image_begin;
+  if(image_begin > image_end) {
+    *errmsg = "skip_bytes is larger than entire image";
+    return NULL;
+  }
 
-  mios_image_t *mi = calloc(1, sizeof(mios_image_t) + image_size);
+  for(size_t i = 0; i < elfhdr->section_header_entries; i++) {
+    const elf32shdr_t *shdr = elf + elfhdr->section_header_table_offset +
+      i * elfhdr->section_header_entry_size;
+
+    const char *nam = shstrtab + shdr->name;
+    if(!strcmp(nam, ".text") || !strcmp(nam, ".isr_vector")) {
+      if(shdr->addr < image_begin) {
+        *errmsg = "skip_bytes skips into text segment";
+        return NULL;
+      }
+    }
+  }
+
+  size_t image_size = image_end - image_begin;
+  if(alignment == 0)
+    alignment = 64;
+  image_size = ((image_size +  alignment - 1) / alignment) * alignment;
+
+  mios_image_t *mi = malloc(sizeof(mios_image_t) + image_size);
+  memset(mi, 0, sizeof(mios_image_t));
+  memset(mi->image, 0xff, image_size);
+
   mi->load_addr = image_begin;
   mi->image_size = image_size;
 
   for(size_t i = 0; i < elfhdr->program_header_entries; i++) {
     const elf32phdr_t *phdr = elf + elfhdr->program_header_table_offset +
       i * elfhdr->program_header_entry_size;
+
+    if(image_begin > phdr->paddr)
+      continue;
+
+    if(image_begin > phdr->paddr + phdr->filesz)
+      continue;
 
     uint32_t image_offset = phdr->paddr - image_begin;
     memcpy(mi->image + image_offset, elf + phdr->offset, phdr->filesz);
@@ -124,23 +155,31 @@ mios_image_from_elf_mem(const void *elf, size_t elfsize)
     if(!strcmp(nam, ".appversion")) {
       memcpy(mi->app_version, elf + shdr->offset, 21);
     }
+
+    if(!strcmp(nam, ".appname")) {
+      mi->appname = (const char *)mi->image + shdr->addr - image_begin;
+    }
   }
   return mi;
 }
 
 
 mios_image_t *
-mios_image_from_elf_file(const char *path)
+mios_image_from_elf_file(const char *path, size_t skip_bytes,
+                         size_t alignment, const char **errmsg)
 {
   int fd = open(path, O_RDONLY | O_CLOEXEC);
-  if (fd == -1)
+  if (fd == -1) {
+    *errmsg = strerror(errno);
     return NULL;
+  }
 
   struct stat st;
   if(fstat(fd, &st) == -1) {
     int err = errno;
     close(fd);
     errno = err;
+    *errmsg = strerror(errno);
     return NULL;
   }
 
@@ -150,10 +189,13 @@ mios_image_from_elf_file(const char *path)
   if(rlen != st.st_size) {
     free(mem);
     errno = ENODATA;
+    *errmsg = "Short read";
     return NULL;
   }
 
-  mios_image_t *mi = mios_image_from_elf_mem(mem, st.st_size);
+  mios_image_t *mi = mios_image_from_elf_mem(mem, st.st_size,
+                                             skip_bytes, alignment,
+                                             errmsg);
   free(mem);
   return mi;
 }
