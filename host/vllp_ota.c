@@ -12,7 +12,7 @@
 
 #include "vllp.h"
 
-const char *
+static const char *
 vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
 {
   int result;
