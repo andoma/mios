@@ -34,6 +34,7 @@ SRCS-${ENABLE_NET_IPV4} += \
 ${MOS}/platform/stm32h7/%.o : CFLAGS += ${NOFPU}
 
 SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
+	${P}/stm32h7_ota.c \
 	${P}/boot/stm32h7_bootloader.c \
 	${P}/boot/isr.s \
 
