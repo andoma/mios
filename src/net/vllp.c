@@ -140,6 +140,7 @@ vllp_channel_destroy(vllp_t *v, vllp_channel_t *vc)
   pbuf_free_queue_irq_blocked(&vc->txq);
   pbuf_free_queue_irq_blocked(&vc->rxq);
   irq_permit(q);
+  evlog(LOG_DEBUG, "VLLP: channel %d closed", vc->id);
   free(vc);
 }
 
@@ -328,7 +329,8 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
   }
 
   TAILQ_INSERT_TAIL(&v->established_channels, vc, qlink);
-  evlog(LOG_DEBUG, "VLLP: service open %s", s->name);
+  evlog(LOG_DEBUG, "VLLP: service open %s on channel %d", s->name,
+        vc->id);
   return 0;
 }
 
