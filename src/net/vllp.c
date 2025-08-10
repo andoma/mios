@@ -635,11 +635,13 @@ vllp_ack_payload(vllp_t *v)
   timer_disarm(&v->rtx_timer);
 
   v->current_tx_buf = pbuf_drop(v->current_tx_buf, v->current_tx_len);
-
-  if(v->current_tx_buf != NULL) {
-    // More data in message
+  if(v->current_tx_buf->pb_pktlen) {
     vllp_fragment(v);
+    return;
   }
+
+  pbuf_free(v->current_tx_buf);
+  v->current_tx_buf= NULL;
 }
 
 

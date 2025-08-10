@@ -293,6 +293,9 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
     return NULL;
 
   while(1) {
+    if(bytes > pb->pb_pktlen)
+      panic("pbuf_drop: Dropping more than packet contains");
+
     size_t chunk = MIN(bytes, pb->pb_buflen);
 
     pb->pb_offset += chunk;
@@ -305,23 +308,19 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
 
     if(pb->pb_buflen == 0) {
       pbuf_t *n = pb->pb_next;
-
-      if(n != NULL) {
-        n->pb_pktlen = pb->pb_pktlen;
-        n->pb_flags |= pb->pb_flags & PBUF_SOP;
-      }
+      if(n == NULL)
+        return pb;
+      n->pb_pktlen = pb->pb_pktlen;
+      n->pb_flags |= pb->pb_flags & PBUF_SOP;
 
       int q = irq_forbid(IRQ_LEVEL_NET);
       pbuf_data_put(pb->pb_data);
       pbuf_put(pb);
       irq_permit(q);
 
-      if(n == NULL)
-        return NULL;
       pb = n;
     }
   }
-  return pb;
 }
 
 
