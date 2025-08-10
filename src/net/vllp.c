@@ -513,7 +513,7 @@ fdcan_adapation_pad_ladder(int len)
 static void
 vllp_tx(vllp_t *v)
 {
-  const pbuf_t *src = v->current_tx_buf;
+  pbuf_t *src = v->current_tx_buf;
   if(src == NULL)
     return;
 
@@ -523,7 +523,11 @@ vllp_tx(vllp_t *v)
     pb->pb_pktlen = pb->pb_buflen = v->current_tx_len + 1;
     int last = src->pb_pktlen == v->current_tx_len ? VLLP_HDR_L : 0;
 
-    memcpy(pbuf_data(pb, 1), pbuf_cdata(src, 0), pb->pb_pktlen);
+    if(pbuf_pullup(src, v->current_tx_len)) {
+      panic("vllp_tx");
+    }
+
+    memcpy(pbuf_data(pb, 1), pbuf_cdata(src, 0), v->current_tx_len);
 
     if(pb->pb_buflen > 8) {
       int len = fdcan_adapation_pad_ladder(pb->pb_buflen);
