@@ -571,18 +571,19 @@ vllp_channel_receive(vllp_t *v, vllp_pkt_t *vp, int channel_id)
 
   vc->rxlen = 0;
 
-  if(vc == v->cmc) {
-    rval = cmc_rx(v, vc->rxbuf, msglen);
-  } else {
+  if(rval == 0) {
 
-    vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + msglen);
-    memcpy(vp->data, vc->rxbuf, msglen);
-    vp->len = msglen;
-    vp->is_close = 0;
-    TAILQ_INSERT_TAIL(&vc->rxq, vp, link);
-    pthread_cond_signal(&vc->rxq_cond);
+    if(vc == v->cmc) {
+      rval = cmc_rx(v, vc->rxbuf, msglen);
+    } else {
 
-    rval = 0;
+      vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + msglen);
+      memcpy(vp->data, vc->rxbuf, msglen);
+      vp->len = msglen;
+      vp->is_close = 0;
+      TAILQ_INSERT_TAIL(&vc->rxq, vp, link);
+      pthread_cond_signal(&vc->rxq_cond);
+    }
   }
 
   return rval;
