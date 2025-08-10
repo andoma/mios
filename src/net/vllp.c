@@ -798,7 +798,8 @@ vllp_channel_task_cb(net_task_t *nt, uint32_t signals)
 
 
 vllp_t *
-vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu)
+vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
+                   uint8_t timeout)
 {
   vllp_t *v = xalloc(sizeof(vllp_t), 0, MEM_MAY_FAIL | MEM_CLEAR);
   if(v == NULL)
@@ -828,6 +829,6 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu)
   v->ack_timer.t_opaque = v;
   v->ack_timer.t_name = "vllprtx";
 
-  dsig_sub(rxid, -1, 3000, vllp_dsig_rx, v);
+  dsig_sub(rxid, -1, timeout * 1000, vllp_dsig_rx, v);
   return v;
 }
