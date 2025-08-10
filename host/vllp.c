@@ -1296,7 +1296,8 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
     TAILQ_REMOVE(&v->pending_open, vc, qlink);
     vllp_channel_release(vc);
     vllp_channel_unlink(vc);
-    break;
+    pthread_mutex_unlock(&v->mutex);
+    return;
 
   case VLLP_CHANNEL_STATE_OPEN_SENT:
   case VLLP_CHANNEL_STATE_ESTABLISHED:
@@ -1332,7 +1333,7 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
 
   pthread_mutex_lock(&v->mutex);
 
-  if(timeout > 0) {
+  if(timeout < 0) {
     while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
       pthread_cond_wait(&vc->rxq_cond, &v->mutex);
       continue;

@@ -20,7 +20,7 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
   void *buf;
   size_t hdrsize;
 
-  result = vllp_channel_read(vc, &buf, &hdrsize, 10*1000*1000);
+  result = vllp_channel_read(vc, &buf, &hdrsize, 250000);
   if(result)
     return vllp_strerror(result);
   if(buf == NULL)
