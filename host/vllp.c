@@ -1346,7 +1346,7 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
     ts.tv_nsec = (deadline % 1000000) * 1000;
 
     while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
-      if(pthread_cond_timedwait(&v->cond, &v->mutex, &ts) == ETIMEDOUT) {
+      if(pthread_cond_timedwait(&vc->rxq_cond, &v->mutex, &ts) == ETIMEDOUT) {
         pthread_mutex_unlock(&v->mutex);
         *data = NULL;
         *lenp = 0;
