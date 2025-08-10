@@ -254,6 +254,9 @@ vllp_disconnect(vllp_t *v, int error)
 
     switch(vc->state) {
     case VLLP_CHANNEL_STATE_PENDING_OPEN:
+      if(vc->flags & VLLP_CHANNEL_RECONNECT) {
+        continue; // Just stay on this queue
+      }
       TAILQ_REMOVE(&v->pending_open, vc, qlink);
       vllp_channel_release(vc);
       break;
@@ -261,6 +264,14 @@ vllp_disconnect(vllp_t *v, int error)
     case VLLP_CHANNEL_STATE_ACTIVE:
       TAILQ_REMOVE(&v->active_channels, vc, qlink);
       vllp_channel_release(vc);
+      // FALLTHRU
+    case VLLP_CHANNEL_STATE_ESTABLISHED:
+      if(vc->flags & VLLP_CHANNEL_RECONNECT) {
+        vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_PENDING_OPEN);
+        TAILQ_INSERT_TAIL(&v->pending_open, vc, qlink);
+        vllp_channel_retain(vc);
+        continue;
+      }
       break;
 
     case VLLP_CHANNEL_STATE_CLOSE_SENT:
@@ -272,10 +283,10 @@ vllp_disconnect(vllp_t *v, int error)
     }
     LIST_REMOVE(vc, link);
     LIST_INSERT_HEAD(&tmp, vc, link);
-  }
 
-  if(is_client(v)) {
-    v->available_channel_ids = 0x3fff;
+    if(is_client(v)) {
+      v->available_channel_ids |= (1 << vc->id);
+    }
   }
 
   pthread_mutex_unlock(&v->mutex);

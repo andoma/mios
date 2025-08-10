@@ -274,7 +274,14 @@ vllp_telnetd_destroy(struct vllp_telnetd *vtd)
   while((vts = LIST_FIRST(&vtd->sockets)) != NULL) {
     LIST_REMOVE(vts, link);
     close(vts->fd);
+
+    if(vts->vc != NULL) {
+      vllp_channel_close(vts->vc, 0, 1);
+      vllp_channel_release(vts->vc);
+    }
+
     free(vts);
+
   }
 
   close(vtd->pfd);

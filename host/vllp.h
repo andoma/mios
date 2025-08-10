@@ -46,6 +46,7 @@ void vllp_start(vllp_t *v);
 void vllp_input(vllp_t *v, const void *data, size_t len);
 
 #define VLLP_CHANNEL_NO_CRC32       0x1
+#define VLLP_CHANNEL_RECONNECT      0x2
 
 vllp_channel_t *vllp_channel_create(vllp_t *v, const char *name,
                                     uint32_t flags,
