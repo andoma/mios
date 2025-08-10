@@ -184,6 +184,9 @@ vllp_refresh_local_flow_status(vllp_t *v)
     if(vc == v->cmc)
       continue;
 
+    if(vc->net_closed)
+      continue;
+
     if(!vc->pp.app->may_push || !vc->pp.app->may_push(vc->pp.app_opaque))
       bits &= ~(1 << vc->id);
   }
@@ -228,6 +231,9 @@ vllp_disconnect(vllp_t *v, const char *reason)
   if(!v->connected)
     return;
 
+  timer_disarm(&v->ack_timer);
+  timer_disarm(&v->rtx_timer);
+
   evlog(LOG_DEBUG, "VLLP: Disconnected -- %s", reason);
 
   for(vc = LIST_FIRST(&v->channels); vc != NULL; vc = n) {
@@ -244,7 +250,7 @@ vllp_disconnect(vllp_t *v, const char *reason)
 
   if(v->current_tx_buf) {
     pbuf_free(v->current_tx_buf);
-    v->current_tx_buf = 0;
+    v->current_tx_buf = NULL;
   }
   v->current_tx_len = 0;
   v->current_tx_channel = 0;
@@ -408,6 +414,9 @@ vllp_channel_receive(vllp_t *v, int channel_id,
     return 0;
   }
 
+  if(vc->net_closed)
+    return 0;
+
   if(last && !((1 << channel_id) & v->local_flow_status)) {
     return ERR_NO_BUFFER;
   }
@@ -508,9 +517,7 @@ vllp_tx(vllp_t *v)
   if(src == NULL)
     return;
 
-  pbuf_t *pb = pbuf_make(5, 0); /* offset:
-                                   1 byte for VLLP header
-                                   4 bytes for ID prefix in dsig.c */
+  pbuf_t *pb = pbuf_make(4, 0); /* offset: 4 bytes for ID prefix in dsig.c */
   if(pb != NULL) {
 
     pb->pb_pktlen = pb->pb_buflen = v->current_tx_len + 1;
@@ -614,6 +621,10 @@ vllp_maybe_tx(vllp_t *v)
         return;
 
       } else {
+
+        if(vc->net_closed)
+          continue;
+
         pb = vc->pp.app->pull(vc->pp.app_opaque);
       }
 
@@ -641,7 +652,7 @@ vllp_ack_payload(vllp_t *v)
   }
 
   pbuf_free(v->current_tx_buf);
-  v->current_tx_buf= NULL;
+  v->current_tx_buf = NULL;
 }
 
 
