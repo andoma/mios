@@ -69,8 +69,7 @@ struct vllp {
   uint8_t connected;
   uint8_t SE;
   uint8_t mtu;
-
-  const char *name;
+  uint8_t timeout;
 };
 
 static inline int
@@ -857,7 +856,7 @@ vllp_thread(void *arg)
       vp = TAILQ_FIRST(&v->rxq);
       TAILQ_REMOVE(&v->rxq, vp, link);
       if(vllp_handle_rx(v, vp, now) == 0) {
-        timeout = now + 3000000;
+        timeout = now + v->timeout * 1000000;
       } else {
         vllp_disconnect(v, VLLP_ERR_MALFORMED);
       }
@@ -1086,7 +1085,7 @@ cmc_rx(void *opaque, const void *data, size_t len)
 
 
 static vllp_t *
-vllp_create(int mtu, uint32_t flags, void *opaque,
+vllp_create(int mtu, int timeout, uint32_t flags, void *opaque,
              void (*tx)(void *opaque, const void *data, size_t len),
             void (*log)(void *opaque, int level, const char *msg))
 {
@@ -1101,6 +1100,7 @@ vllp_create(int mtu, uint32_t flags, void *opaque,
   v->tx = tx;
   v->log = log;
   v->opaque = opaque;
+  v->timeout = timeout;
   if(flags & VLLP_FDCAN_ADAPTATION && mtu > 8)
     mtu--;
   v->mtu = mtu;
@@ -1126,20 +1126,19 @@ vllp_create(int mtu, uint32_t flags, void *opaque,
 
 
 vllp_t *
-vllp_create_client(int mtu, uint32_t flags, void *opaque,
+vllp_create_client(int mtu, int timeout, uint32_t flags, void *opaque,
                    void (*tx)(void *opaque, const void *data,
                               size_t len),
                    void (*log)(void *opaque, int level, const char *msg))
 {
-  vllp_t *v = vllp_create(mtu, flags, opaque, tx, log);
-  v->name = "CLIENT";
+  vllp_t *v = vllp_create(mtu, timeout, flags, opaque, tx, log);
   v->available_channel_ids = 0x3fff; // channel 14 and 15 are not for user
   return v;
 }
 
 
 vllp_t *
-vllp_create_server(int mtu, uint32_t flags, void *opaque,
+vllp_create_server(int mtu, int timeout, uint32_t flags, void *opaque,
                    void (*tx)(void *opaque, const void *data, size_t len),
                    void (*log)(void *opaque, int level, const char *msg),
                    open_channel_result_t (*open_channel)(void *opaque,
@@ -1149,8 +1148,7 @@ vllp_create_server(int mtu, uint32_t flags, void *opaque,
   if(open_channel == NULL)
     return NULL;
 
-  vllp_t *v = vllp_create(mtu, flags, opaque, tx, log);
-  v->name = "SERVER";
+  vllp_t *v = vllp_create(mtu, timeout, flags, opaque, tx, log);
   v->open_channel = open_channel;
   return v;
 }

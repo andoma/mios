@@ -18,7 +18,7 @@ typedef struct vllp_channel vllp_channel_t;
 
 #define VLLP_FDCAN_ADAPTATION 0x1
 
-vllp_t *vllp_create_client(int mtu, uint32_t flags, void *opaque,
+vllp_t *vllp_create_client(int mtu, int timeout, uint32_t flags, void *opaque,
                            void (*tx)(void *opaque, const void *data,
                                       size_t len),
                            void (*log)(void *opaque, int syslog_level,
@@ -32,7 +32,7 @@ typedef struct {
   void *opaque;
 } open_channel_result_t;
 
-vllp_t *vllp_create_server(int mtu, uint32_t flags, void *opaque,
+vllp_t *vllp_create_server(int mtu, int timeout, uint32_t flags, void *opaque,
                            void (*tx)(void *opaque, const void *data,
                                       size_t len),
                            void (*log)(void *opaque, int syslog_level,
