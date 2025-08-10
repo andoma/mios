@@ -212,7 +212,7 @@ vllp_tx_ack(vllp_t *v)
 static int
 vllp_channel_maybe_destroy(vllp_t *v, vllp_channel_t *vc)
 {
-  if(vc->app_closed && vc->net_closed) {
+  if(vc->app_closed == 2 && vc->net_closed) {
     vllp_channel_destroy(v, vc);
     return 1;
   }
@@ -602,15 +602,16 @@ vllp_maybe_tx(vllp_t *v)
   vllp_channel_t *vc;
   TAILQ_FOREACH(vc, &v->established_channels, qlink) {
     pbuf_t *pb;
-
     if(vc->pp.app != NULL) {
 
-      if(vc->app_closed) {
-
+      if(vc->app_closed == 1) {
         if(vllp_tx_close(v, vc))
-          continue; // Close failed (no buffers)
+          continue; // Close failed (no buffers), retry later
 
-        return; // Ok we sent something
+        // Ok we sent something
+        vc->app_closed = 2;
+        vllp_channel_maybe_destroy(v, vc);
+        return;
 
       } else {
         pb = vc->pp.app->pull(vc->pp.app_opaque);
@@ -769,9 +770,10 @@ vllp_channel_task_cb(net_task_t *nt, uint32_t signals)
   vllp_t *v = vc->vllp;
 
   if(signals & PUSHPULL_EVENT_CLOSE) {
-    vc->app_closed = 1;
-    if(vllp_channel_maybe_destroy(v, vc))
+    if(vc->app_closed)
       return;
+
+    vc->app_closed = 1;
   }
 
   if(vllp_refresh_local_flow_status(v)) {
