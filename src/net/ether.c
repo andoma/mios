@@ -138,7 +138,7 @@ ether_input(netif_t *ni, pbuf_t *pb)
 
   const uint16_t etype = ntohs(eh->type);
 
-  pb = pbuf_drop(pb, 14);
+  pb = pbuf_drop(pb, 14, 0);
 
   switch(etype) {
   case ETHERTYPE_IPV4:

@@ -157,7 +157,7 @@ dsig_send_cb(net_task_t *nt, uint32_t signals)
       break;
 
     uint32_t group = rd32_le(pbuf_cdata(pb, 0));
-    pb = pbuf_drop(pb, 4); // Drop group
+    pb = pbuf_drop(pb, 4, 0); // Drop group
     pb = dsig_output(group, pb, NULL);
     if(pb != NULL)
       pbuf_free(pb);

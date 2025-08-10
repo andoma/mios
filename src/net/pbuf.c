@@ -287,7 +287,7 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, const pushpull_t *pp)
 
 
 pbuf_t *
-pbuf_drop(pbuf_t *pb, size_t bytes)
+pbuf_drop(pbuf_t *pb, size_t bytes, int free_when_empty)
 {
   if(pb == NULL)
     return NULL;
@@ -308,16 +308,20 @@ pbuf_drop(pbuf_t *pb, size_t bytes)
 
     if(pb->pb_buflen == 0) {
       pbuf_t *n = pb->pb_next;
-      if(n == NULL)
+      if(n != NULL) {
+        n->pb_pktlen = pb->pb_pktlen;
+        n->pb_flags |= pb->pb_flags & PBUF_SOP;
+      } else if(!free_when_empty) {
         return pb;
-      n->pb_pktlen = pb->pb_pktlen;
-      n->pb_flags |= pb->pb_flags & PBUF_SOP;
+      }
 
       int q = irq_forbid(IRQ_LEVEL_NET);
       pbuf_data_put(pb->pb_data);
       pbuf_put(pb);
       irq_permit(q);
 
+      if(n == NULL)
+        return NULL;
       pb = n;
     }
   }

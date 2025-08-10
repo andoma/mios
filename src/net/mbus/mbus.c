@@ -200,10 +200,10 @@ mbus_local(mbus_netif_t *mni, pbuf_t *pb)
     case 0:
       return mbus_ping(pb, src_addr, flow);
     case 1:
-      return mbus_seqpkt_accept(pbuf_drop(pb, 4), src_addr, flow);
+      return mbus_seqpkt_accept(pbuf_drop(pb, 4, 0), src_addr, flow);
 #ifdef ENABLE_RPC
     case 2:
-      return mbus_rpc_dispatch(pbuf_drop(pb, 4), src_addr, flow);
+      return mbus_rpc_dispatch(pbuf_drop(pb, 4, 0), src_addr, flow);
 #endif
     default:
       return pb;
@@ -211,7 +211,7 @@ mbus_local(mbus_netif_t *mni, pbuf_t *pb)
   } else {
     mbus_flow_t *mf = mbus_flow_find(src_addr, flow);
     if(mf != NULL)
-      return mf->mf_input(mf, pbuf_drop(pb, 3));
+      return mf->mf_input(mf, pbuf_drop(pb, 3, 0));
 
     return pb;
   }
@@ -278,8 +278,8 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 #ifdef ENABLE_NET_DSIG
     const uint16_t group = ((dst_addr & 0x1f) << 8) | hdr[1];
 
-    pb = pbuf_drop(pb, 2); // Drop header
-    pbuf_trim(pb, 4);      // Drop CRC
+    pb = pbuf_drop(pb, 2, 0); // Drop header
+    pbuf_trim(pb, 4);         // Drop CRC
 
     return dsig_input(group, pb, ni);
 #else

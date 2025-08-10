@@ -19,7 +19,7 @@ can_input(struct netif *ni, struct pbuf *pb)
   const void *data = pbuf_cdata(pb, 0);
   uint32_t signal = rd32_le(data);
 
-  pb = pbuf_drop(pb, 4);
+  pb = pbuf_drop(pb, 4, 0);
 
   return dsig_input(signal, pb, ni);
 }

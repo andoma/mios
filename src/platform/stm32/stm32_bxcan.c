@@ -164,7 +164,7 @@ stm32_bxcan_tx_irq(void *arg)
     } else {
       bx->qlen--;
       uint32_t group = rd32_le(pbuf_data(pb, 0));
-      pb = pbuf_drop(pb, 4);
+      pb = pbuf_drop(pb, 4, 0);
       stm32_bxcan_send_pb(bx, pb, group, i);
     }
   }

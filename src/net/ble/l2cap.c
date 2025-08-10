@@ -266,7 +266,7 @@ connection_push(l2cap_connection_t *lc)
       return pb;
     if(pb)
       pbuf_free(pb);
-    pb = pbuf_drop(pb2, 2);
+    pb = pbuf_drop(pb2, 2, 0);
     if(pbuf_pullup(pb, pb->pb_pktlen)) {
       panic("pullup failed");
     }
@@ -286,7 +286,7 @@ connection_push(l2cap_connection_t *lc)
 
         if(pb)
           pbuf_free(pb);
-        pb = pbuf_drop(pb2, 2);
+        pb = pbuf_drop(pb2, 2, 0);
         if(pbuf_pullup(pb, pb->pb_pktlen)) {
           panic("pullup failed");
         }
@@ -631,7 +631,7 @@ handle_att(l2cap_t *l2c, pbuf_t *pb)
   const uint8_t *hdr = pbuf_cdata(pb, 0);
 
   const uint8_t opcode = *hdr;
-  pb = pbuf_drop(pb, 1);
+  pb = pbuf_drop(pb, 1, 0);
 
   switch(opcode) {
   case ATT_EXCHANGE_MTU_REQ:
@@ -697,7 +697,7 @@ handle_packet(l2cap_t *l2c, pbuf_t *pb)
 
   int pdu_length = hdr->pdu_length;
   const int channel_id = hdr->channel_id;
-  pb = pbuf_drop(pb, 4);
+  pb = pbuf_drop(pb, 4, 0);
 
   if(pdu_length != pb->pb_pktlen) {
     printf("Got packet with unexpected pdu_length:%d pktlen:%d\n",

@@ -47,7 +47,7 @@ static inline const void *pbuf_cdata(const pbuf_t *pb, size_t offset) {
 
 // Remove from head
 __attribute__((warn_unused_result))
-pbuf_t *pbuf_drop(pbuf_t *pb, size_t bytes);
+pbuf_t *pbuf_drop(pbuf_t *pb, size_t bytes, int free_when_empty);
 
 // Remove from tail
 void pbuf_trim(pbuf_t *pb, size_t bytes);

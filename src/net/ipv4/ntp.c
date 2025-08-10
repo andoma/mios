@@ -77,7 +77,7 @@ ntp_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
   if(from != ntp_server)
     return pb;
 
-  pb = pbuf_drop(pb, udp_offset + 8);
+  pb = pbuf_drop(pb, udp_offset + 8, 0);
 
   const ntp_pkt_t *np = pbuf_cdata(pb, 0);
   int64_t server_rx = usec_from_ntp_ts(&np->rx_ts);

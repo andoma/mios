@@ -100,11 +100,7 @@ ota_perform(svc_ota_t *sa)
 
   memcpy(&num_blocks, pbuf_cdata(pb, 0), 4);
   memcpy(&crc, pbuf_cdata(pb, 4), 4);
-  pb = pbuf_drop(pb, 8);
-  if(pb->pb_pktlen == 0) {
-    pbuf_free(pb);
-    pb = NULL;
-  }
+  pb = pbuf_drop(pb, 8, 1);
 
   error_t err;
 
@@ -162,7 +158,7 @@ ota_perform(svc_ota_t *sa)
       }
 
       crc_acc = crc32(crc_acc, buf, chunk_size);
-      pb = pbuf_drop(pb, chunk_size);
+      pb = pbuf_drop(pb, chunk_size, 1);
       current_byte += chunk_size;
     }
   }

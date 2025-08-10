@@ -382,7 +382,7 @@ mbus_seqpkt_recv_data(mbus_seqpkt_con_t *msc, pbuf_t *pb)
 
   release_txq(msc);
 
-  pb = pbuf_drop(pb, 1);
+  pb = pbuf_drop(pb, 1, 0);
 
   if(pb->pb_pktlen) {
 

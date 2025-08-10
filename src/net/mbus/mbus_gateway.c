@@ -271,7 +271,7 @@ ms_inspect_from_svc(mbus_svc_t *ms, pbuf_t *pb)
   }
   const uint8_t *hdr = pbuf_cdata(pb, 0);
   uint8_t flags = hdr[3];
-  pb = pbuf_drop(pb, 4);
+  pb = pbuf_drop(pb, 4, 0);
   if(flags & SP_EOS) {
     evlog(LOG_DEBUG, "%s: SP_EOS", msc->msc_name);
     net_task_raise(&msc->msc_task, SOCKET_EVENT_CLOSE);
@@ -332,7 +332,7 @@ ms_output(struct mbus_netif *mni, pbuf_t *pb)
     const uint32_t tag = flow | (src_addr << 16) | (dst_addr << 24);
     mbus_seqpkt_con_t *msc = flow_find(ms, tag, 0);
     if(msc != NULL) {
-      pb = pbuf_drop(pb, 3); // Drop header
+      pb = pbuf_drop(pb, 3, 0); // Drop header
       pbuf_trim(pb, 4); // Trim CRC
       return msc->msc_flow.mf_input(&msc->msc_flow, pb);
     }

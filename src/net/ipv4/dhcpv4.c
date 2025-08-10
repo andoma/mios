@@ -360,14 +360,14 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
     uint8_t type = *(const uint8_t *)pbuf_data(pb, 0);
     if(type == 0xff) // END
       break;
-    pb = pbuf_drop(pb, 1);
+    pb = pbuf_drop(pb, 1, 0);
     if(type == 0)
       continue;
 
     if(pbuf_pullup(pb, 1))
       break;
     uint8_t length = *(const uint8_t *)pbuf_data(pb, 0);
-    pb = pbuf_drop(pb, 1);
+    pb = pbuf_drop(pb, 1, 0);
     if(length > pb->pb_pktlen)
       break;
 
@@ -396,7 +396,7 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
         break;
       }
     }
-    pb = pbuf_drop(pb, length);
+    pb = pbuf_drop(pb, length, 0);
   }
   return pb;
 }
@@ -411,7 +411,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
   const ipv4_header_t *ip = pbuf_data(pb, 0);
   const uint32_t from = ip->src_addr;
 
-  pb = pbuf_drop(pb, udp_offset + 8);
+  pb = pbuf_drop(pb, udp_offset + 8, 0);
 
   if(pbuf_pullup(pb, sizeof(dhcp_hdr_t)))
     return pb;
@@ -424,7 +424,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
     return pb;
 
   const uint32_t yiaddr = dh->yiaddr;
-  pb = pbuf_drop(pb, sizeof(dhcp_hdr_t));
+  pb = pbuf_drop(pb, sizeof(dhcp_hdr_t), 0);
 
   parsed_opts_t po;
   if((pb = parse_opts(pb, &po)) != NULL &&

@@ -1037,7 +1037,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   }
 
   uint32_t remote_addr = ip->src_addr;
-  pb = pbuf_drop(pb, tcp_offset);
+  pb = pbuf_drop(pb, tcp_offset, 0);
   if(pbuf_pullup(pb, sizeof(tcp_hdr_t))) {
     // XXX: counter
     return pb;
@@ -1343,7 +1343,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   // Step 8: Process payload
   //
 
-  pb = pbuf_drop(pb, hdr_len);
+  pb = pbuf_drop(pb, hdr_len, 0);
 
   switch(tcb->tcb_state) {
   case TCP_STATE_ESTABLISHED:

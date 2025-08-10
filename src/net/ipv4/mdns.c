@@ -231,7 +231,7 @@ mdns_input_locked(struct netif *ni, pbuf_t *pb, size_t udp_offset)
   const uint32_t from = ip->src_addr;
   const udp_hdr_t *udp = (void*)(ip + 1);
   const uint16_t srcport = ntohs(udp->src_port);
-  pb = pbuf_drop(pb, udp_offset + 8);
+  pb = pbuf_drop(pb, udp_offset + 8, 0);
 
   if(pbuf_pullup(pb, sizeof(dns_header_t)))
     return pb;

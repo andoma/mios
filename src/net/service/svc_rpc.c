@@ -120,7 +120,7 @@ rpc_push(void *opaque, struct pbuf *pb)
     return rpc_error(sr, pb, ERR_INVALID_RPC_ID);
   }
 
-  pb = pbuf_drop(pb, arg_offset);
+  pb = pbuf_drop(pb, arg_offset, 0);
 
   size_t in_len = pb->pb_pktlen;
   if(rm->in_size != 0xffff && rm->in_size != in_len) {
