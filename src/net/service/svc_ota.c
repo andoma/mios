@@ -180,12 +180,14 @@ ota_perform(svc_ota_t *sa)
   if(err)
     return err;
 
+  shutdown_notification("OTA");
+
   bi->ctrl(bi, BLOCK_SUSPEND);
 
   ota_send_final_status(sa, 0);
   evlog(LOG_NOTICE, "OTA: Transfer OK");
   printf("\n\t*** Reboot to OTA\n");
-  usleep(50000);
+  usleep(100000);
 
   irq_forbid(IRQ_LEVEL_ALL);
   fini();
