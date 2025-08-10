@@ -263,6 +263,10 @@ vllp_disconnect(vllp_t *v, int error)
       vllp_channel_release(vc);
       break;
 
+    case VLLP_CHANNEL_STATE_CLOSE_SENT:
+      vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
+      break;
+
     default:
       break;
     }
