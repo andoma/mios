@@ -386,10 +386,16 @@ pbuf_prepend(pbuf_t *pb, size_t bytes, int wait, size_t extra_offset)
 void *
 pbuf_append(pbuf_t *pb, size_t bytes)
 {
+  pb->pb_pktlen += bytes;
+
+  // Jump to end of chain
+  while(pb->pb_next) {
+    pb = pb->pb_next;
+  }
+
   assert(pb->pb_offset + pb->pb_buflen + bytes <= PBUF_DATA_SIZE);
   void *r = pb->pb_data + pb->pb_offset + pb->pb_buflen;
   pb->pb_buflen += bytes;
-  pb->pb_pktlen += bytes;
   return r;
 }
 
