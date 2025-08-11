@@ -129,6 +129,5 @@ vllp_ota(struct vllp *v, const char *elfpath)
   const char *errstr = vllp_do_ota(v, elfpath, vc);
 
   vllp_channel_close(vc, 0, 1);
-  vllp_channel_release(vc);
   return errstr;
 }

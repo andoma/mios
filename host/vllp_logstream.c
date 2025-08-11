@@ -85,6 +85,5 @@ void
 vllp_logstream_destroy(vllp_logstream_t *vl)
 {
   vllp_channel_close(vl->vc, 0, 1);
-  vllp_channel_release(vl->vc);
   free(vl);
 }

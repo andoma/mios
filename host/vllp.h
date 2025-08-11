@@ -45,6 +45,8 @@ void vllp_start(vllp_t *v);
 
 void vllp_input(vllp_t *v, const void *data, size_t len);
 
+void vllp_destroy(vllp_t *v);
+
 #define VLLP_CHANNEL_NO_CRC32       0x1
 #define VLLP_CHANNEL_RECONNECT      0x2
 
@@ -64,8 +66,6 @@ void vllp_channel_send(vllp_channel_t *vc, const void *data, size_t len);
 int vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout_us);
 
 void vllp_channel_close(vllp_channel_t *vc, int error_code, int wait);
-
-void vllp_channel_release(vllp_channel_t *vc);
 
 const char *vllp_strerror(int error);
 

@@ -72,7 +72,6 @@ vllp_terminal(vllp_t *v, const char *name)
 
   pthread_mutex_lock(&g_mtx);
   vllp_channel_close(g_vc, 0, 1);
-  vllp_channel_release(g_vc);
   pthread_mutex_unlock(&g_mtx);
   usleep(10000);
   printf("Exiting...\n");

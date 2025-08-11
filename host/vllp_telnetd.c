@@ -94,7 +94,6 @@ static void
 vts_close(vllp_telnetd_t *vtd, vllp_telnetd_sock_t *vts)
 {
   vllp_channel_close(vts->vc, 0, 0);
-  vllp_channel_release(vts->vc);
 
   epoll_ctl(vtd->pfd, EPOLL_CTL_DEL, vts->fd, NULL);
 
@@ -277,7 +276,6 @@ vllp_telnetd_destroy(struct vllp_telnetd *vtd)
 
     if(vts->vc != NULL) {
       vllp_channel_close(vts->vc, 0, 1);
-      vllp_channel_release(vts->vc);
     }
 
     free(vts);

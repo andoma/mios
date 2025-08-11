@@ -66,10 +66,13 @@ struct vllp {
   uint16_t remote_flow_status;
   uint16_t local_flow_status;
 
+  uint8_t run;
   uint8_t connected;
   uint8_t SE;
   uint8_t mtu;
   uint8_t timeout;
+
+  uint32_t refcount;
 };
 
 static inline int
@@ -142,6 +145,10 @@ struct vllp_channel {
 
 static int cmc_rx(void *opaque, const void *data, size_t len);
 
+static void vllp_retain(vllp_t *v);
+
+static void vllp_release(vllp_t *v);
+
 static int64_t
 get_ts(void)
 {
@@ -192,17 +199,17 @@ vllp_log(vllp_t *v, int level, const char *msg)
 }
 
 static void
-vllp_channel_retain(vllp_channel_t *vc)
+vllp_channel_retain(vllp_channel_t *vc, const char *whom)
 {
   __sync_add_and_fetch(&vc->refcount, 1);
 }
 
-void
-vllp_channel_release(vllp_channel_t *vc)
+static void
+vllp_channel_release(vllp_channel_t *vc, const char *whom)
 {
-  if(__sync_add_and_fetch(&vc->refcount, -1))
+  int r = __sync_add_and_fetch(&vc->refcount, -1);
+  if(r)
     return;
-
   vllp_pkt_t *vp;
   while((vp = TAILQ_FIRST(&vc->txq)) != NULL) {
     TAILQ_REMOVE(&vc->txq, vp, link);
@@ -215,6 +222,7 @@ vllp_channel_release(vllp_channel_t *vc)
 
   free(vc->rxbuf);
   free(vc->name);
+  vllp_release(vc->vllp);
   free(vc);
 }
 
@@ -232,7 +240,7 @@ static void
 vllp_channel_unlink(vllp_channel_t *vc)
 {
   LIST_REMOVE(vc, link);
-  vllp_channel_release(vc);
+  vllp_channel_release(vc, __FUNCTION__);
 }
 
 static void
@@ -257,18 +265,18 @@ vllp_disconnect(vllp_t *v, int error)
         continue; // Just stay on this queue
       }
       TAILQ_REMOVE(&v->pending_open, vc, qlink);
-      vllp_channel_release(vc);
+      vllp_channel_release(vc, "disconnect-in-pending-open");
       break;
 
     case VLLP_CHANNEL_STATE_ACTIVE:
       TAILQ_REMOVE(&v->active_channels, vc, qlink);
-      vllp_channel_release(vc);
+      vllp_channel_release(vc, "disconnect-in-active");
       // FALLTHRU
     case VLLP_CHANNEL_STATE_ESTABLISHED:
       if(vc->flags & VLLP_CHANNEL_RECONNECT) {
         vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_PENDING_OPEN);
         TAILQ_INSERT_TAIL(&v->pending_open, vc, qlink);
-        vllp_channel_retain(vc);
+        vllp_channel_retain(vc, "disconnect-need-reconnect");
         continue;
       }
       break;
@@ -509,7 +517,7 @@ channel_send_vp(vllp_t *v, vllp_channel_t *vc, vllp_pkt_t *vp)
   if(vc->state == VLLP_CHANNEL_STATE_ESTABLISHED) {
     vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ACTIVE);
     TAILQ_INSERT_TAIL(&v->active_channels, vc, qlink);
-    vllp_channel_retain(vc);
+    vllp_channel_retain(vc, __FUNCTION__);
     pthread_cond_signal(&v->cond);
   }
 }
@@ -534,7 +542,7 @@ channel_send_message(vllp_t *v, vllp_channel_t *vc,
 static void
 channel_send_close(vllp_t *v, vllp_channel_t *vc, int error_code)
 {
-  vllp_channel_retain(vc);
+  vllp_channel_retain(vc, __FUNCTION__);
 
   // We always make place for CRC
   vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + sizeof(int));
@@ -717,7 +725,7 @@ handle_pending_channels(vllp_t *v, int64_t now)
     assert(vc->state == VLLP_CHANNEL_STATE_PENDING_OPEN);
     vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_OPEN_SENT);
     enqueue_channel_open(v, vc);
-    vllp_channel_release(vc);
+    vllp_channel_release(vc, __FUNCTION__);
   }
 }
 
@@ -770,6 +778,7 @@ vllp_tx(vllp_t *v, int64_t now)
 
       TAILQ_REMOVE(&vc->txq, vp, link);
       TAILQ_REMOVE(&v->active_channels, vc, qlink);
+      vllp_channel_release(vc, "no-longer-active");
 
       if(vp->len == sizeof(int))
         memcpy(&error_code, vp->data, sizeof(int));
@@ -784,7 +793,7 @@ vllp_tx(vllp_t *v, int64_t now)
       if(is_client(v))
         v->available_channel_ids |= (1 << vc->id);
 
-      vllp_channel_release(vc);
+      vllp_channel_release(vc, "close-sent");
 
       return vllp_tx(v, now);
     }
@@ -806,11 +815,12 @@ vllp_tx(vllp_t *v, int64_t now)
     if(TAILQ_FIRST(&vc->txq) == NULL) {
       // Empty, move back to established state
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ESTABLISHED);
-      vllp_channel_release(vc);
+      vllp_channel_release(vc, "no-longer-active");
     } else {
       // Still things to send, insert at tail
       TAILQ_INSERT_TAIL(&v->active_channels, vc, qlink);
     }
+
     vllp_send_pkt(v, v->current_tx);
     return 0;
   }
@@ -838,7 +848,7 @@ vllp_thread(void *arg)
 
   pthread_mutex_lock(&v->mutex);
 
-  while(1) {
+  while(v->run) {
     const int64_t now = get_ts();
 
     if(v->connected) {
@@ -877,6 +887,20 @@ vllp_thread(void *arg)
       pthread_cond_timedwait(&v->cond, &v->mutex, &ts);
     }
   }
+
+  vllp_channel_t *vc = v->cmc;
+
+  if(vc->state == VLLP_CHANNEL_STATE_ACTIVE) {
+    TAILQ_REMOVE(&v->active_channels, vc, qlink);
+    vllp_channel_release(vc, "end-of-thread");
+  }
+
+  vllp_channel_unlink(vc);
+
+  pthread_mutex_unlock(&v->mutex);
+
+  vllp_channel_release(vc, "cmc ownership");
+
   return NULL;
 }
 
@@ -893,6 +917,8 @@ channel_make(vllp_t *v, int id, int state)
   TAILQ_INIT(&vc->mtxq);
   LIST_INSERT_HEAD(&v->channels, vc, link);
   vc->vllp = v;
+  vllp_retain(v);
+
   pthread_cond_init(&vc->state_cond, NULL);
 
   pthread_condattr_t cond_attr;
@@ -937,7 +963,7 @@ cmc_handle_open(vllp_t *v, int target_channel, const uint8_t *data, size_t len,
   } else {
     vllp_channel_unlink(vc);
     vc->state = VLLP_CHANNEL_STATE_CLOSED;
-    vllp_channel_release(vc);
+    vllp_channel_release(vc, "open-failed");
   }
 
   uint8_t response[3];
@@ -975,7 +1001,7 @@ cmc_handle_open_response(vllp_t *v, int target_channel,
     if(TAILQ_FIRST(&vc->mtxq) != NULL) {
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ACTIVE);
       TAILQ_INSERT_TAIL(&v->active_channels, vc, qlink);
-      vllp_channel_retain(vc);
+      vllp_channel_retain(vc, "active-after-open");
     } else {
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ESTABLISHED);
     }
@@ -985,7 +1011,7 @@ cmc_handle_open_response(vllp_t *v, int target_channel,
     v->available_channel_ids |= (1 << vc->id);
     LIST_REMOVE(vc, link);
     channel_enq_rx_eof(v, vc, err);
-    vllp_channel_release(vc);
+    vllp_channel_release(vc, "remote-open-failed");
   }
 
   return 0;
@@ -1025,7 +1051,7 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
     vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
     LIST_REMOVE(vc, link);
     channel_enq_rx_eof(v, vc, error_code);
-    vllp_channel_release(vc);
+    vllp_channel_release(vc, __FUNCTION__);
     return 0;
 
   case VLLP_CHANNEL_STATE_CLOSED:
@@ -1093,7 +1119,8 @@ vllp_create(int mtu, int timeout, uint32_t flags, void *opaque,
     return NULL;
 
   vllp_t *v = calloc(1, sizeof(vllp_t));
-
+  v->run = 1;
+  __atomic_store_n(&v->refcount, 1, __ATOMIC_SEQ_CST);
   v->remote_flow_status = 0xffff;
   v->local_flow_status = 0xffff;
   v->flags = flags;
@@ -1228,6 +1255,45 @@ vllp_channel_rx_thread(void *arg)
 }
 
 
+void
+vllp_destroy(vllp_t *v)
+{
+  pthread_mutex_lock(&v->mutex);
+  v->run = 0;
+  pthread_cond_signal(&v->cond);
+  pthread_mutex_unlock(&v->mutex);
+
+  pthread_join(v->tid, NULL);
+  vllp_release(v);
+}
+
+static void
+vllp_retain(vllp_t *v)
+{
+  __sync_add_and_fetch(&v->refcount, 1);
+}
+
+static void
+vllp_release(vllp_t *v)
+{
+  if(__sync_add_and_fetch(&v->refcount, -1))
+    return;
+
+  assert(LIST_FIRST(&v->channels) == NULL);
+  assert(TAILQ_FIRST(&v->pending_open) == NULL);
+  assert(TAILQ_FIRST(&v->active_channels) == NULL);
+
+  vllp_pkt_t *vp, *n;
+  for(vp = TAILQ_FIRST(&v->rxq); vp != NULL; vp = n) {
+    n = TAILQ_NEXT(vp, link);
+    free(vp);
+  }
+  free(v->current_tx);
+  free(v);
+}
+
+
+
 vllp_channel_t *
 vllp_channel_create(vllp_t *v, const char *name, uint32_t flags,
                     void (*rx)(void *opaque, const void *data, size_t length),
@@ -1254,11 +1320,11 @@ vllp_channel_create(vllp_t *v, const char *name, uint32_t flags,
     vc->flags = flags;
     v->available_channel_ids &= ~(1 << vc->id);
     TAILQ_INSERT_TAIL(&v->pending_open, vc, qlink);
-    vllp_channel_retain(vc);
+    vllp_channel_retain(vc, "initial-pending-open");
     pthread_cond_signal(&v->cond);
 
     if(rx) {
-      vllp_channel_retain(vc);
+      vllp_channel_retain(vc, "rx-dispatch");
       vc->rx_thread_run = 1;
       pthread_create(&vc->rx_thread, NULL, vllp_channel_rx_thread, vc);
     }
@@ -1299,7 +1365,7 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
       abort();
     }
     pthread_mutex_lock(&v->mutex);
-    vllp_channel_release(vc);
+    vllp_channel_release(vc, "rx-thread-closed");
   }
 
   switch(vc->state) {
@@ -1308,7 +1374,7 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
 
   case VLLP_CHANNEL_STATE_PENDING_OPEN:
     TAILQ_REMOVE(&v->pending_open, vc, qlink);
-    vllp_channel_release(vc);
+    vllp_channel_release(vc, "close-while-pending-open");
     vllp_channel_unlink(vc);
     pthread_mutex_unlock(&v->mutex);
     return;
@@ -1334,6 +1400,8 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
   }
 
   pthread_mutex_unlock(&v->mutex);
+
+  vllp_channel_release(vc, "close"); // Reference held by our caller
 }
 
 
