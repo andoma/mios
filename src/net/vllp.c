@@ -43,6 +43,7 @@ typedef struct vllp {
 
   uint16_t remote_flow_status;
   uint16_t local_flow_status;
+  uint16_t transmitted_local_flow_status;
 
   uint8_t connected;
   uint8_t SE;
@@ -205,6 +206,9 @@ vllp_tx_ack(vllp_t *v)
   pkt[0] = v->SE | 0x1f;
   pkt[1] = v->local_flow_status;
   pkt[2] = v->local_flow_status >> 8;
+
+  v->transmitted_local_flow_status = v->local_flow_status;
+
   vllp_append_crc(v, pkt, 3);
   dsig_emit(v->txid, pkt, sizeof(pkt));
 
@@ -541,6 +545,10 @@ vllp_tx(vllp_t *v)
     int channel = v->current_tx_channel;
     int flow = (1 << channel) & v->local_flow_status ? VLLP_HDR_F : 0;
 
+    v->transmitted_local_flow_status =
+      (v->transmitted_local_flow_status & ~(1 << channel)) |
+      (flow ? 1 << channel : 0);
+
     hdr[0] = v->SE | last | flow | channel;
 
     dsig_emit_pbuf(v->txid, pb);
@@ -641,6 +649,9 @@ vllp_maybe_tx(vllp_t *v)
     vllp_channel_tx(v, vc, pb);
     return;
   }
+
+  if(v->transmitted_local_flow_status != v->local_flow_status)
+    vllp_tx_ack(v);
 }
 
 
@@ -724,6 +735,7 @@ vllp_dsig_rx(void *opaque, const struct pbuf *pb, uint32_t signal)
 
       switch(err) {
       case 0:
+        v->transmitted_local_flow_status &= ~(1 << channel_id);
         v->SE ^= VLLP_HDR_E;
         break;
       case ERR_NO_BUFFER:
