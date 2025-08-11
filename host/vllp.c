@@ -1525,7 +1525,7 @@ vllp_strerror(int error)
   case VLLP_ERR_BAD_STATE:
     return "Bad state";
   case VLLP_ERR_NOT_FOUND:
-    return "Note found";
+    return "Not found";
   case VLLP_ERR_CRC_MISMATCH:
     return "Incorrect CRC";
   case VLLP_ERR_MALFORMED:
