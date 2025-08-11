@@ -262,7 +262,7 @@ print_timestamp_to_stream(stream_t *st, int64_t ts)
 
 
 
-static void
+static error_t
 stream_log(evlogfifo_t *ef, stream_t *st, int follow)
 {
   if(st->vtable->read == NULL)
@@ -278,6 +278,8 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
   LIST_INSERT_HEAD(&ef->followers, &sf.f, link);
 
   int64_t ts = ef->ts_tail;
+
+  error_t err = 0;
 
   while(1) {
 
@@ -305,29 +307,39 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
 
     ts += evl_read_delta_ts(ef, ptr);
 
-    print_timestamp_to_stream(st, ts);
-
-    stprintf(st, " %s : ", level2str[level]);
+    void *copy = xalloc(msglen, 0, MEM_MAY_FAIL);
+    if(copy == NULL) {
+      err = ERR_NO_MEMORY;
+      break;
+    }
 
     if(msgend >= msgstart) {
-      stream_write(st, ef->data + msgstart, msglen, 0);
+      memcpy(copy, ef->data + msgstart, msglen);
     } else {
-      stream_write(st, ef->data + msgstart, EVENTLOG_SIZE - msgstart, 0);
-      stream_write(st, ef->data, msgend, 0);
+      size_t first = EVENTLOG_SIZE - msgstart;
+      memcpy(copy, ef->data + msgstart, first);
+      memcpy(copy + first, ef->data, msgend);
     }
+    sf.f.ptr = ptr + len;
+    mutex_unlock(&ef->mutex);
+
+    print_timestamp_to_stream(st, ts);
+    stprintf(st, " %s : ", level2str[level]);
+    stream_write(st, copy, msglen, 0);
+    free(copy);
     stream_write(st, "\n", 1, 0);
 
-    sf.f.ptr = ptr + len;
+    mutex_lock(&ef->mutex);
   }
   LIST_REMOVE(&sf.f, link);
   mutex_unlock(&ef->mutex);
+  return err;
 }
 
 static error_t
 cmd_log(cli_t *cli, int argc, char **argv)
 {
-  stream_log(&ef0, cli->cl_stream, argc > 1);
-  return 0;
+  return stream_log(&ef0, cli->cl_stream, argc > 1);
 }
 
 CLI_CMD_DEF("log", cmd_log);
