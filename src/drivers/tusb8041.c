@@ -7,6 +7,7 @@
 #define POL_REG   0x0b
 #define CONF_REG  0x05
 #define PWR_REG   0x06
+#define CONF_DONE 0xf8
 
 struct tusb8041 {
 
@@ -14,20 +15,24 @@ struct tusb8041 {
   uint8_t address;
 
   uint8_t power;
-  uint8_t pol_swap;
-
   
 };
 
 
 error_t tusb8041_init(tusb8041_t *tusb, int swapped)
 {
-  if (tusb->pol_swap) {
-   error_t err = i2c_write_u8(tusb->i2c, tusb->address, POL_REG, 0x8f);
+  if (swapped) {
+   error_t err = i2c_write_u8(tusb->i2c, tusb->address,
+			      POL_REG, 0x80 | swapped);
    if (err)
      return err;
   }
-  return i2c_write_u8(tusb->i2c, tusb->address, CONF_REG, 0x00);
+
+  error_t err = i2c_write_u8(tusb->i2c, tusb->address, CONF_REG, 0x00);
+  if (err)
+    return err;
+  
+  return i2c_write_u8(tusb->i2c, tusb->address, CONF_DONE, 0x01);
 
 }
 

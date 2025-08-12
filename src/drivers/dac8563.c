@@ -28,7 +28,7 @@ static const uint8_t dac_cmds[][3] = {
   [REG_PWR_UP_B] =      { 0b00100000, 0, 0b00000010},
   [REG_PWR_DWN_HIZ_A] = { 0b00100000, 0, 0b00011001},
   [REG_PWR_DWN_HIZ_B] = { 0b00100000, 0, 0b00011010},
-  [REG_RST] =           { 0b00100000, 0, 0b00011011},
+  [REG_RST] =           { 0b00101000, 0, 0b00000001},
   [REG_NO_LDAC] =       { 0b00110000, 0, 0b00000011},
   [REG_INT_REF] =       { 0b00111000, 0, 0b00000001},
 };
@@ -49,7 +49,7 @@ write_cmd(dac8563_t *dev, uint8_t cmd, uint16_t *value)
     return dev->spi->rw(dev->spi, dac_cmds[cmd], NULL, 3, dev->nss, dev->spicfg);
 
   uint8_t tx[3];
-  memcpy(tx, &dac_cmds[cmd], 3);
+  tx[0] = dac_cmds[cmd][0];
   tx[1] = *value >> 8;
   tx[2] = *value;
   return dev->spi->rw(dev->spi, tx, NULL, sizeof(tx), dev->nss, dev->spicfg);
@@ -62,14 +62,20 @@ dac8563_t *dac8563_create(spi_t *bus, gpio_t nss)
   dev->spi = bus;
   dev->nss = nss;
 
-  dev->spicfg = bus->get_config(bus, 0, 2000000);
+  dev->spicfg = bus->get_config(bus, SPI_CPHA, 2000000);
 
   gpio_conf_output(nss, GPIO_PUSH_PULL,
                    GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_set_output(nss, 1);
 
   // init
-  error_t err = write_cmd(dev, REG_NO_LDAC, NULL);
+  error_t err = write_cmd(dev, REG_RST, NULL);
+  if (err) {
+    evlog(LOG_ERR, "dac8563: failed to reset: %s", error_to_string(err));
+    free(dev);
+    return NULL;
+  }
+  err = write_cmd(dev, REG_NO_LDAC, NULL);
   if (err) {
     evlog(LOG_ERR, "dac8563: failed to setup LDAC: %s", error_to_string(err));
     free(dev);
