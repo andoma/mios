@@ -12,7 +12,10 @@ include ${SRC}/cpu/aarch64/aarch64.mk
 
 SRCS += ${P}/tegra234-ccplex.c \
 	${P}/tegra234-ccplex_hsp.c \
+	${P}/tegra234-ccplex_ari.c \
+	${P}/tegra234-ccplex_bpmp.c \
 	${P}/efiruntime.c \
+	${P}/asm.s \
 
 ENABLE_TASK_ACCOUNTING := no
 

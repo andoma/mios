@@ -19,6 +19,7 @@ SRCS += \
 	${C}/entry.s \
 	${C}/gicv3.c \
 	${C}/clock.c \
+	${C}/cache.c \
 	${C}/cpu.c \
 	${C}/exc.c \
 	${C}/rnd.c \

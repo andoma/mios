@@ -14,7 +14,7 @@
 #include "irq.h"
 
 typedef struct hsp {
-  handler_t handlers[16];
+  handler_t handlers[26];
   uint8_t irq_route;
 } hsp_t;
 
@@ -64,7 +64,7 @@ hsp_stream_rx_irq(void *arg)
   } else {
     // FIFO almost full, disable interrupts until FIFO has cleared
     hs->pending_clear = 1;
-    reg_clr_bit(hs->rx_ie, HSP_MBOX_IRQ_FULL(hs->rx_mbox));
+    reg_clr_bit(hs->rx_ie, HSP_IRQ_MBOX_FULL(hs->rx_mbox));
   }
   task_wakeup(&hs->rx_waitq, 1);
 }
@@ -116,7 +116,7 @@ hsp_stream_read(struct stream *s, void *buf, size_t size, size_t required)
   if(hs->pending_clear && fifo_avail(&hs->rx_fifo) > 3) {
     reg_wr(hs->rx_hsp_base + 0x10000 + hs->rx_mbox * 0x8000, 0);
     hs->pending_clear = 0;
-    reg_set_bit(hs->rx_ie, HSP_MBOX_IRQ_FULL(hs->rx_mbox));
+    reg_set_bit(hs->rx_ie, HSP_IRQ_MBOX_FULL(hs->rx_mbox));
   }
 
   irq_permit(q);
@@ -204,7 +204,7 @@ static const stream_vtable_t hsp_stream_vtable_txonly = {
 
 
 uint32_t
-hsp_connect_mbox(uint32_t addr, void (*fn)(void *arg), void *arg, uint32_t irq)
+hsp_connect_irq(uint32_t addr, void (*fn)(void *arg), void *arg, uint32_t irq)
 {
   hsp_t *hsp;
   switch(addr) {
@@ -241,15 +241,15 @@ hsp_mbox_stream(uint32_t rx_hsp_base, uint32_t rx_mbox,
 
   hs->rx_hsp_base = rx_hsp_base;
   hs->rx_mbox = rx_mbox;
-  hs->rx_ie = hsp_connect_mbox(rx_hsp_base, hsp_stream_rx_irq, hs,
-                               HSP_MBOX_IRQ_FULL(rx_mbox));
+  hs->rx_ie = hsp_connect_irq(rx_hsp_base, hsp_stream_rx_irq, hs,
+                               HSP_IRQ_MBOX_FULL(rx_mbox));
 
   hs->tx_hsp_base = tx_hsp_base;
   hs->tx_mbox = tx_mbox;
-  hs->tx_ie = hsp_connect_mbox(tx_hsp_base, hsp_stream_tx_irq, hs, tx_mbox);
+  hs->tx_ie = hsp_connect_irq(tx_hsp_base, hsp_stream_tx_irq, hs, tx_mbox);
 
   if(rx_hsp_base) {
-    reg_set_bit(hs->rx_ie, HSP_MBOX_IRQ_FULL(rx_mbox));
+    reg_set_bit(hs->rx_ie, HSP_IRQ_MBOX_FULL(rx_mbox));
     hs->st.vtable = &hsp_stream_vtable;
   } else {
     hs->st.vtable = &hsp_stream_vtable_txonly;
@@ -264,7 +264,7 @@ static void
 hsp_dispatch_irq(hsp_t *hsp, uint32_t base_addr, uint32_t enabled)
 {
   uint32_t active = reg_rd(base_addr + 0x304);
-  uint32_t pending = active & 0xffff & enabled;
+  uint32_t pending = active & 0x3ffffff & enabled;
   if(pending) {
     int id = 31 - __builtin_clz(pending);
     if(id < ARRAYSIZE(hsp->handlers)) {

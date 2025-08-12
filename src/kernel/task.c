@@ -370,7 +370,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   void *sp = sp_bottom + stack_size;
   thread_t *t = sp + fpu_ctx_size;
 
-#if 1
+#if 0
   printf("Created new task sp_bottom:%p sp:%p t:%p flags:0x%x %s\n",
          sp_bottom, sp, t, flags, name);
 #endif

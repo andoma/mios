@@ -8,43 +8,26 @@ start:
 
         bl pagetablesetup
         dsb sy
-tut:
+
         mrs x0, currentel
         cmp x0, #4
         b.eq el1_entry
 
         adr x0, vectors_el2
         msr vbar_el2, x0
-/*
+
         // MAIR 0 - Device-nGnRnE memory
         // MAIR 1 - Normal Memory
         ldr x1, =0xff00
         msr mair_el2, x1
 
         // 4kb page size, etc
-        ldr x1, =0x5b090001b
+        ldr x1, =0x8005351b
         msr tcr_el2, x1
 
         msr ttbr0_el2, x9
-//        msr ttbr1_el2, x10
 
-        isb
-	tlbi	alle2
-	tlbi	vmalls12e1
-	dsb	sy
-
-        mrs x0, sctlr_el2
-//        mov x0, xzr
-//        orr x0, x0, (1 << 21)   // Implicit Error Synchronization
-        orr x0, x0, (1 << 0)    // MMU
-        orr x0, x0, (1 << 2)    // D-Cache
-        orr x0, x0, (1 << 12)   // I-Cache
-//        msr sctlr_el2, x0
-        isb
-
-*/
-       ldr x0, =(1 << 31) | (1 << 40) | (1 << 41)
-//        ldr x0, =(1 << 31)    // 64bit EL1
+        ldr x0, =(1 << 31)    // 64bit EL1
         msr hcr_el2, x0
 
         adr x0, el1_entry
@@ -98,14 +81,6 @@ putc:
         str     x0, [x1]
         ret
 */
-putc:
-        orr w0, w0, #0x80000000
-        orr w0, w0, #0x01000000
-        ldr x1, =0x0c168000
-1:      ldr     w2, [x1]
-        cbnz    w2, 1b
-        str     w0, [x1]
-        ret
 
 puthex:
         mov     x19, x0
@@ -262,17 +237,24 @@ vectors_el2:
         mrs     x19, sp_el0
         mov     sp, x19
 
-        dsb sy
-        isb
-        tlbi alle2
+        mrs x19, sctlr_el2
+        orr x19, x19, (1 << 0)    // MMU
+        orr x19, x19, (1 << 2)    // D-Cache
+        orr x19, x19, (1 << 12)   // I-Cache
+        msr sctlr_el2, x19
+
+        dsb   ish
+        tlbi  alle2is
+        dsb   ish
+        ic    iallu
+        dsb   ish
         isb
 
         mrs     x19, elr_el2
         br      x19
 
         adr     x0, 1f
-        bl puts
-        b halt
+        b el2trap
 1:               .asciz "EL2: lower_el_aarch64_sync"
         .pool
 
@@ -359,6 +341,12 @@ vstart:
 1:      wfi
         b 1b
         .pool
+
+
+        .global smc
+smc:
+        smc #0
+        ret
 
         .global load_addr
 load_addr:

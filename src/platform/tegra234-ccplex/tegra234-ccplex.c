@@ -7,12 +7,18 @@
 #include <mios/pmem.h>
 #include <mios/cli.h>
 #include <mios/task.h>
+#include <mios/mios.h>
+
+#include <fdt/fdt.h>
 
 #include "reg.h"
 #include "util/crc32.h"
 #include "tegra234_hsp.h"
 
 #include "efi.h"
+
+#include "cache.h"
+#include "irq.h"
 
 #define DEFAULT_BLINFO_LOCATION_ADDRESS  0x0C390154
 
@@ -167,6 +173,13 @@ typedef struct cpubl_params_v2 {
 
 
 void
+reboot(void)
+{
+  extern void smc(uint64_t cmd);
+  smc(0x84000009);
+}
+
+void
 outc(uint8_t c)
 {
   uint32_t reg = NV_ADDRESS_MAP_AON_HSP_BASE + 0x10000 + 0x8000 * 1;
@@ -192,15 +205,6 @@ static stream_vtable_t tcu_early_console_vtable = {
 static stream_t tcu_early_console = {
   .vtable = &tcu_early_console_vtable,
 };
-
-
-
-
-
-
-
-
-
 
 
 pmem_t tegra_pmem;
@@ -288,8 +292,8 @@ board_init_early(void)
   for(int i = 2; i < 16; i++) {
     ttbr0_el1[i] |= (1 << 2);
     asm volatile("dc civac, %0" :: "r"(&ttbr0_el1[i]));
-    asm volatile("dsb ishst");
   }
+  asm volatile("dsb ishst");
   asm volatile ("tlbi vmalle1; dsb ish; isb" ::: "memory");
 
   tegra_init_pmem();
@@ -299,8 +303,6 @@ board_init_early(void)
                      MEM_TYPE_CHAINLOADER, 30);
 }
 
-#include "irq.h"
-#include <mios/mios.h>
 
 
 static void
@@ -327,26 +329,11 @@ cbb_irq(void *arg)
 static void __attribute__((constructor(1000)))
 board_init_late(void)
 {
-  return;
   irq_enable_fn_arg(158, IRQ_LEVEL_CLOCK, cbb_irq, NULL);
   irq_enable_fn_arg(170, IRQ_LEVEL_CLOCK, cbb_irq, NULL);
   irq_enable_fn_arg(171, IRQ_LEVEL_CLOCK, cbb_irq, NULL);
   irq_enable_fn_arg(172, IRQ_LEVEL_CLOCK, cbb_irq, NULL);
   irq_enable_fn_arg(176, IRQ_LEVEL_CLOCK, cbb_irq, NULL);
-
-  printf("a0\n");
-  reg_wr(0x8d99000, 0x1ff);
-  printf("a1\n");
-  reg_wr(0x8fd7000, 0x1ff);
-  printf("a2\n");
-  //  reg_wr(0x9059000, 0x1ff);
-  printf("a3\n");
-  //  reg_wr(0x90d9000, 0x1ff);
-  printf("a4\n");
-  //  reg_wr(0x943a004, 0x1);
-  printf("a5\n");
-  //  reg_wr(0x9460000, 0x1ff);
-  printf("a6\n");
 }
 
 
@@ -357,103 +344,6 @@ board_init_console(void)
   stdio = hsp_mbox_stream(NV_ADDRESS_MAP_TOP0_HSP_BASE, 0,
                           NV_ADDRESS_MAP_AON_HSP_BASE, 1);
 }
-
-
-
-
-typedef struct ivc_ring {
-  uint32_t wr_ptr;
-  uint32_t state;
-  uint8_t pad1[56];
-
-  uint32_t rd_ptr;
-  uint8_t pad2[60];
-
-  uint8_t data[0];
-} ivc_ring_t;
-
-
-static error_t
-cmd_bpmp(cli_t *cli, int argc, char **argv)
-{
-  ivc_ring_t *tx = (ivc_ring_t *)0x40070000;
-  ivc_ring_t *rx = (ivc_ring_t *)0x40071000;
-
-
-  cli_printf(cli, "TXRING wr:%x rd:%d\n",
-             tx->wr_ptr, tx->rd_ptr);
-  cli_printf(cli, "RXRING wr:%x rd:%d\n",
-             rx->wr_ptr, rx->rd_ptr);
-
-  cli_printf(cli, "MBOX: %x\n", hsp_mbox_rd(NV_ADDRESS_MAP_TOP0_HSP_BASE, 0));
-
-  if(argc != 2)
-    return 0;
-
-  if(!strcmp(argv[1], "put")) {
-    tx->wr_ptr++;
-    asm volatile("dmb ish");
-    hsp_db_ring(NV_ADDRESS_MAP_TOP0_HSP_BASE, 3);
-  }
-
-  if(!strcmp(argv[1], "conf")) {
-    cli_printf(cli, "RING RING MY BELL: %x\n",
-               hsp_db_enabled(NV_ADDRESS_MAP_TOP0_HSP_BASE, 3));
-
-    hsp_db_enable(NV_ADDRESS_MAP_TOP0_HSP_BASE, 1, 3, 1);
-    for(int i = 0; i< 100; i++) {
-      cli_printf(cli, "RING RING MY BELL: %x\n",
-                 hsp_db_enabled(NV_ADDRESS_MAP_TOP0_HSP_BASE, 3));
-    }
-  }
-
-  return 0;
-}
-
-CLI_CMD_DEF("bpmp", cmd_bpmp);
-
-static error_t
-cmd_hsp(cli_t *cli, int argc, char **argv)
-{
-  for(int i = 0; i< 10 ; i++) {
-    uint32_t base = hsp_db_base(NV_ADDRESS_MAP_TOP0_HSP_BASE, i);
-
-    cli_printf(cli, "Doorbell %d\n", i);
-    cli_printf(cli, "\tEnabled: 0x%08x 0x%08x\n",
-           reg_rd(base + 0x4),
-           reg_rd(base + 0x24));
-    cli_printf(cli, "\t    Raw: 0x%08x 0x%08x\n",
-           reg_rd(base + 0x8),
-           reg_rd(base + 0x28));
-    cli_printf(cli, "\tPending: 0x%08x 0x%08x\n",
-           reg_rd(base + 0xc),
-           reg_rd(base + 0x2c));
-    cli_printf(cli, "\n");
-  }
-
-  return 0;
-}
-
-
-CLI_CMD_DEF("hsp", cmd_hsp);
-
-
-
-
-#if 0
-extern void smc(uint64_t cmd);
-
-static error_t
-cmd_rb(cli_t *cli, int argc, char **argv)
-{
-  smc(0x84000009);
-  return 0;
-}
-
-CLI_CMD_DEF("rb", cmd_rb);
-#endif
-
-
 
 
 static error_t
@@ -541,6 +431,20 @@ cmd_rcmblob(cli_t *cli, int argc, char **argv)
 
 
 CLI_CMD_DEF("rcmblob", cmd_rcmblob);
+
+
+static error_t
+cmd_eeprom(cli_t *cli, int argc, char **argv)
+{
+  const cpubl_params_v2_t *cbp =
+    (const void *)reg_rd64(DEFAULT_BLINFO_LOCATION_ADDRESS);
+
+  sthexdump(cli->cl_stream, "CVM", cbp->eeprom.cvm, cbp->eeprom.cvm_size, 0);
+  sthexdump(cli->cl_stream, "CVB", cbp->eeprom.cvb, cbp->eeprom.cvb_size, 0);
+  return 0;
+}
+
+CLI_CMD_DEF("eeprom", cmd_eeprom);
 
 
 
@@ -695,7 +599,7 @@ efi_boot_locate_handle(int, efi_guid_t *guid,
                        void *, unsigned long *,
                        efi_handle_t *)
 {
-  hexdump("efi_boot_locate_handle", guid, 16);
+  //  hexdump("efi_boot_locate_handle", guid, 16);
   return EFI_UNSUPPORTED;
 }
 
@@ -758,7 +662,7 @@ efi_boot_disconnect_controller(efi_handle_t,
 static efi_status_t
 efi_boot_locate_protocol(efi_guid_t *guid, void *, void **)
 {
-  hexdump("efi_boot_locate_protocol", guid, 16);
+  //  hexdump("efi_boot_locate_protocol", guid, 16);
   return EFI_UNSUPPORTED;
 }
 
@@ -823,148 +727,142 @@ efi_boot_thread(void *arg)
 }
 
 
-__attribute__((always_inline))
-static inline void
-flush_all_dcache_to_pou(void)
-{
-    uint64_t clidr;
-
-    /* Discover how many cache levels the core implements */
-    asm volatile ("mrs %0, clidr_el1" : "=r"(clidr));
-
-    for (int level = 0; level < 7; level++) {          /* max 7 levels EL1 */
-        unsigned ctype = (clidr >> (level * 3)) & 0x7; /* 0=No cache, 1=I, 2=D, 3=U */
-        if (ctype < 2)                 /* skip if I‑only or no cache      */
-            continue;                  /* we need Data (2) or Unified (3) */
-
-        /* ----------- point CSSELR at <level, data/unified> ------------ */
-        asm volatile ("msr csselr_el1, %0\n"
-                      "isb"            :: "r"((uint64_t)(level << 1)));
-
-        uint64_t ccsidr;
-        asm volatile ("mrs %0, ccsidr_el1" : "=r"(ccsidr));
-
-        unsigned line_len_log2 = (ccsidr & 0x7) + 4;          /* log2(bytes/line)  */
-        unsigned num_ways      = ((ccsidr >>  3) & 0x3ff) + 1;
-        unsigned num_sets      = ((ccsidr >> 13) & 0x7fff) + 1;
-        printf("level %d ways:%d sets:%d ctype:%d\n",
-               level, num_ways, num_sets, ctype);
-        /* Way bits are placed above Set bits; work out their shift amount */
-        unsigned way_shift = __builtin_clz(num_ways - 1);
-        printf("way shift:%d\n", way_shift);
-        printf("set shift:%d\n", line_len_log2);
-
-        /* ------------- sweep every <set, way> in this level ------------ */
-        for (int set = num_sets - 1; set >= 0; set--) {
-            for (int way = num_ways - 1; way >= 0; way--) {
-                uint64_t setway =
-                    ((uint64_t)level << 1) |
-                    ((uint64_t)way  << way_shift) |
-                    ((uint64_t)set  << line_len_log2);
-
-                asm volatile ("dc cisw, %0" :: "r"(setway));
-            }
-        }
-    }
-
-    /* Make sure every clean/invalid is complete & visible */
-    asm volatile ("dsb sy");
-    asm volatile ("isb");
-}
-
-static void
-cache_clear2(void *start, void *end)
-{
-  uint64_t xstart = (uint64_t)(uintptr_t)start;
-  uint64_t xend = (uint64_t)(uintptr_t)end;
-  // Get Cache Type Info.
-  static uint64_t ctr_el0 = 0;
-  if (ctr_el0 == 0)
-    __asm __volatile("mrs %0, ctr_el0" : "=r"(ctr_el0));
-  // The DC and IC instructions must use 64-bit registers so we don't use
-  // uintptr_t in case this runs in an IPL32 environment.
-  uint64_t addr;
-  // If CTR_EL0.IDC is set, data cache cleaning to the point of unification
-  // is not required for instruction to data coherence.
-  if (((ctr_el0 >> 28) & 0x1) == 0x0) {
-    printf("CTR_EL0.IDC = 0\n");
-    const size_t dcache_line_size = 4 << ((ctr_el0 >> 16) & 15);
-    for (addr = xstart & ~(dcache_line_size - 1); addr < xend;
-         addr += dcache_line_size)
-      __asm __volatile("dc cvau, %0" ::"r"(addr));
-  }
-  __asm __volatile("dsb ish");
-  // If CTR_EL0.DIC is set, instruction cache invalidation to the point of
-  // unification is not required for instruction to data coherence.
-  if (((ctr_el0 >> 29) & 0x1) == 0x0) {
-    printf("CTR_EL0.DIC = 0\n");
-    const size_t icache_line_size = 4 << ((ctr_el0 >> 0) & 15);
-    for (addr = xstart & ~(icache_line_size - 1); addr < xend;
-         addr += icache_line_size) {
-      printf("Invalidate %p\n", (void *)addr);
-      __asm __volatile("ic ivau, %0" ::"r"(addr));
-    }
-    __asm __volatile("dsb ish");
-  }
-  __asm __volatile("dsb sy");
-}
-
-
 static void
 relocate_runtime_services(efi_image_handle_t *h)
 {
-  uint64_t paddr = pmem_alloc(&tegra_pmem, 4096,
-                              EFI_CONVENTIONAL_MEMORY,
-                              EFI_RUNTIME_SERVICES_CODE,
-                              4096);
-  printf("paddr=%lx\n", paddr);
   extern unsigned long _efi_runtime_begin;
   extern unsigned long _efi_runtime_end;
+
+  void *paddr = (void *)pmem_alloc(&tegra_pmem, 4096,
+                                   EFI_CONVENTIONAL_MEMORY,
+                                   EFI_RUNTIME_SERVICES_CODE,
+                                   4096);
 
   void *efi_runtime_begin = (void *)&_efi_runtime_begin;
   void *efi_runtime_end = (void *)&_efi_runtime_end;
 
   const size_t efi_runtime_size = efi_runtime_end - efi_runtime_begin;
 
-  printf("Copy from %p to %p size: %zd (end:%p)\n",
-         efi_runtime_begin, (void *)paddr, efi_runtime_size,
-         efi_runtime_end);
-  memcpy((void *)paddr, efi_runtime_begin, efi_runtime_size);
+  memcpy(paddr, efi_runtime_begin, efi_runtime_size);
 
   size_t init_offset = (void *)&efi_init_runtime_services - efi_runtime_begin;
+  dcache_op(paddr, efi_runtime_size, DCACHE_CLEAN);
+  icache_invalidate();
 
-  void (*init)(efi_image_handle_t *h) = (void *)paddr + init_offset;
-  printf("init=%p\n", init);
-
-  asm volatile ("dsb sy" ::: "memory");
-
-  //  __builtin___clear_cache((void *)paddr, (void *)paddr + efi_runtime_size);
-
-  flush_all_dcache_to_pou();
-
-  cache_clear2((void *)paddr, (void *)paddr + efi_runtime_size);
-
-  // Invalidate the entire instruction cache to PoU
-  asm volatile ("ic iallu\n\t"
-                "dsb sy" ::: "memory");
-  asm volatile ("tlbi vmalle1\n\t"
-                "dsb sy\n\t"
-                "isb");
-
+  void (*init)(efi_image_handle_t *h) = paddr + init_offset;
   init(h);
-
-  printf("get_time=%p\n", h->runtime_services.get_time);
-  printf("ebs=%p\n", h->boot_services.exit_boot_services);
 }
 
 
-static error_t
-cmd_linux(cli_t *cli, int argc, char **argv)
+static uint32_t cpu_phandle[12];
+
+
+static int
+cleanup_fdt_node(void *opaque, fdt_walkctx_t *ctx)
+{
+  if(fdt_walk_match_node_name("/cpus/cpu@10000", ctx) ||
+     fdt_walk_match_node_name("/cpus/cpu@10100", ctx) ||
+     fdt_walk_match_node_name("/cpus/cpu@20000", ctx) ||
+     fdt_walk_match_node_name("/cpus/cpu@20100", ctx) ||
+     fdt_walk_match_node_name("/cpus/cpu@20200", ctx) ||
+     fdt_walk_match_node_name("/cpus/cpu@20300", ctx))
+    return 1;
+  return 0;
+}
+
+static size_t
+replace_cpu_cooling_map(void *data, size_t len)
+{
+  uint32_t *u32 = data;
+  u32[0] = cpu_phandle[0];
+  u32[3] = cpu_phandle[2];
+  u32[6] = cpu_phandle[6];
+  return 9 * 4;
+}
+
+static size_t
+cleanup_fdt_prop(void *opaque, struct fdt_walkctx *ctx, const char *name,
+                 void *data, size_t len)
+{
+  if(!strcmp(name, "phandle")) {
+    if(fdt_walk_match_node_name("/cpus/cpu@0", ctx))
+      memcpy(&cpu_phandle[0], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@100", ctx))
+      memcpy(&cpu_phandle[1], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@200", ctx))
+      memcpy(&cpu_phandle[2], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@300", ctx))
+      memcpy(&cpu_phandle[3], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@10000", ctx))
+      memcpy(&cpu_phandle[4], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@10100", ctx))
+      memcpy(&cpu_phandle[5], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@10200", ctx))
+      memcpy(&cpu_phandle[6], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@10300", ctx))
+      memcpy(&cpu_phandle[7], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@20000", ctx))
+      memcpy(&cpu_phandle[8], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@20100", ctx))
+      memcpy(&cpu_phandle[9], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@20200", ctx))
+      memcpy(&cpu_phandle[10], data, 4);
+    if(fdt_walk_match_node_name("/cpus/cpu@20300", ctx))
+      memcpy(&cpu_phandle[11], data, 4);
+  }
+
+  if(!strcmp(name, "cooling-device")) {
+    if(fdt_walk_match_node_name("/thermal-zones/cpu-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/gpu-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/cv0-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/cv1-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/cv2-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/soc0-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/soc1-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+    if(fdt_walk_match_node_name("/thermal-zones/soc2-thermal/cooling-maps/map-cpufreq", ctx)) {
+      return replace_cpu_cooling_map(data, len);
+    }
+
+  }
+  return len;
+}
+
+
+static void
+fdt_cleanup(void *fdt_addr)
+{
+  fdt_walkctx_t ctx;
+  fdt_init_walkctx(&ctx, fdt_addr);
+
+  ctx.node_cb = cleanup_fdt_node;
+  if(0)
+    ctx.prop_cb = cleanup_fdt_prop;
+
+  fdt_walk(&ctx);
+}
+
+
+
+static error_t __attribute__((unused))
+startlinux(void)
 {
   size_t ksize;
   void *kbin = kernel_from_rcmblob(&ksize);
   if(kbin == NULL) {
-    cli_printf(cli, "No kernel in rcmblob\n");
     return ERR_NOT_FOUND;
   }
 
@@ -974,7 +872,6 @@ cmd_linux(cli_t *cli, int argc, char **argv)
                                  0, MEM_TYPE_CHAINLOADER |
                                  MEM_MAY_FAIL | MEM_CLEAR);
   if(h == NULL) {
-    cli_printf(cli, "Unable to allocate handle\n");
     return ERR_NO_MEMORY;
   }
 
@@ -1003,7 +900,6 @@ cmd_linux(cli_t *cli, int argc, char **argv)
                               EFI_CONVENTIONAL_MEMORY, EFI_LOADER_CODE,
                               kalign);
   if(paddr == 0) {
-    cli_printf(cli, "No pmem\n");
     free(h);
     return ERR_NO_MEMORY;
   }
@@ -1011,16 +907,17 @@ cmd_linux(cli_t *cli, int argc, char **argv)
   h->loaded_image.image_base = (void *)paddr;
   h->loaded_image.image_size = ksize;
 
-  cli_printf(cli, "Copying kernel image from %p to %p (%zd bytes)\n",
-             kbin, h->loaded_image.image_base, ksize);
   memcpy(h->loaded_image.image_base, kbin, ksize);
-  __builtin___clear_cache(h->loaded_image.image_base,
-                          h->loaded_image.image_base + ksize);
-  flush_all_dcache_to_pou();
+
+  dcache_op(h->loaded_image.image_base, ksize, DCACHE_CLEAN);
+  icache_invalidate();
 
   memcpy(&h->config_tables[0].guid, guid_device_tree, 16);
 
   extern void *fdt_addr;
+
+  fdt_cleanup(fdt_addr);
+
   h->config_tables[0].table = fdt_addr;
 
   thread_t *t = thread_create(efi_boot_thread, h, 0, "efiboot",
@@ -1037,4 +934,12 @@ cmd_linux(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
+static error_t
+cmd_linux(cli_t *cli, int argc, char **argv)
+{
+  return startlinux();
+}
+
 CLI_CMD_DEF("linux", cmd_linux);
+
+

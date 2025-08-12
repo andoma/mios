@@ -17,12 +17,13 @@ struct stream *
 hsp_mbox_stream(uint32_t rx_hsp_base, uint32_t rx_mbox,
                 uint32_t tx_hsp_base, uint32_t tx_mbox);
 
-// Low level HSP mbox hookup. Returns address of interrupt enable register
-uint32_t hsp_connect_mbox(uint32_t addr, void (*fn)(void *arg), void *arg,
-                          uint32_t irq);
+// HSP IRQ hookup. Returns address of interrupt enable register
+uint32_t hsp_connect_irq(uint32_t addr, void (*fn)(void *arg), void *arg,
+                         uint32_t irq);
 
-#define HSP_MBOX_IRQ_EMPTY(mbox) (0 + (mbox))
-#define HSP_MBOX_IRQ_FULL(mbox)  (8 + (mbox))
+#define HSP_IRQ_MBOX_EMPTY(mbox) (0 + (mbox))
+#define HSP_IRQ_MBOX_FULL(mbox)  (8 + (mbox))
+#define HSP_IRQ_DOORBELL(db)     (16 + (db))
 
 
 static inline uint32_t
@@ -76,7 +77,6 @@ hsp_db_ring(uint32_t base, uint32_t index)
   reg_wr(base, 1);
 }
 
-#include <stdio.h>
 static inline void
 hsp_db_enable(uint32_t base, uint32_t index, uint32_t bit, int secure)
 {
@@ -84,12 +84,12 @@ hsp_db_enable(uint32_t base, uint32_t index, uint32_t bit, int secure)
 
   if(bit > 16) {
     base += 0x20;
-    bit &= ~15;
+    bit &= 0xf;
   }
 
   if(secure)
     bit += 16;
-  printf("reg_set_bit %d in reg %x\n", bit, base);
+
   reg_set_bit(base, bit);
 }
 
