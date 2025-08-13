@@ -1,6 +1,7 @@
 #include "nrf52_gpio.h"
 
 #include <mios/io.h>
+#include <mios/type_macros.h>
 
 #include "nrf52_reg.h"
 

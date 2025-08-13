@@ -3,7 +3,7 @@
 #include "stm32h7_clk.h"
 #include "stm32h7_dma.h"
 
-#include <mios/mios.h>
+#include <mios/type_macros.h>
 #include <mios/task.h>
 #include <sys/uio.h>
 #include <sys/param.h>

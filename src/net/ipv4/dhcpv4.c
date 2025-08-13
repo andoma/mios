@@ -4,7 +4,7 @@
 #include "ntp.h"
 
 #include <mios/eventlog.h>
-#include <mios/mios.h>
+#include <mios/type_macros.h>
 #include <mios/cli.h>
 #include <mios/version.h>
 #include <mios/ghook.h>

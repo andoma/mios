@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <malloc.h>
 
-#include <mios/mios.h>
+#include <mios/type_macros.h>
 #include <mios/cli.h>
 
 #include "stm32f4_clk.h"

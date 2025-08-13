@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <mios/io.h>
-#include <mios/mios.h>
+#include <mios/type_macros.h>
 #include <mios/task.h>
 #include <mios/cli.h>
 #include <mios/suspend.h>

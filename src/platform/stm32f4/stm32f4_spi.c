@@ -5,6 +5,8 @@
 
 #include "platform/stm32/stm32_spi.c"
 
+#include <mios/type_macros.h>
+
 static const struct {
   uint32_t reg_base;
   uint32_t tx_dma;

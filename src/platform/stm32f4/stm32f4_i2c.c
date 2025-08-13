@@ -4,6 +4,8 @@
 #include "stm32f4_reg.h"
 #include "stm32f4_clk.h"
 
+#include <mios/type_macros.h>
+
 #include "platform/stm32/stm32_i2c_v1.c"
 
 #define I2C_BASE(x)   (0x40005400 + ((x) * 0x400))

@@ -1,6 +1,8 @@
 #include "stm32h7_uart.h"
 #include "stm32h7_clk.h"
 
+#include <mios/type_macros.h>
+
 #include "irq.h"
 
 

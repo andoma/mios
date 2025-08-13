@@ -1,6 +1,6 @@
 #include "stm32h7_can.h"
 
-#include <mios/mios.h>
+#include <mios/type_macros.h>
 
 #include "stm32h7_reg.h"
 #include "stm32h7_clk.h"

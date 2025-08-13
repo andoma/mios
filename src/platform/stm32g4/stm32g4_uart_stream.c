@@ -3,6 +3,8 @@
 
 #include "platform/stm32/stm32_uart_stream.c"
 
+#include <mios/type_macros.h>
+
 static const stm32g4_uart_config_t uart_config[] = {
   { 0x0138, CLK_USART1, 37, 7, 25, 24},
   { 0x0044, CLK_USART2, 38, 7, 27, 26},
