@@ -1,4 +1,5 @@
 #include "tegra234-ccplex_bpmp.h"
+#include "tegra234-ccplex_clk.h"
 
 #include "tegra234_hsp.h"
 #include "tegra234_bpmp.h"
@@ -289,19 +290,22 @@ bpmp_xfer(uint32_t mrq,
     goto out;
   }
 
-  if(d->buf.payload_length > *out_size) {
-    err = ERR_BAD_PKT_SIZE;
-    goto out;
-  }
-
   if(d->buf.error) {
     // Fixme: Translate BPMP errors
     err = ERR_OPERATION_FAILED;
     goto out;
   }
 
-  *out_size = d->buf.payload_length;
-  memcpy(out, &d->buf.data, d->buf.payload_length);
+  if(out && out_size) {
+    if(d->buf.payload_length > *out_size) {
+      err = ERR_BAD_PKT_SIZE;
+      goto out;
+    }
+
+    *out_size = d->buf.payload_length;
+    memcpy(out, &d->buf.data, d->buf.payload_length);
+  }
+
  out:
   mutex_unlock(&d->mutex);
   return err;
@@ -378,3 +382,44 @@ cmd_clocks(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("clocks", cmd_clocks);
+
+
+error_t
+reset_peripheral(int id)
+{
+  struct bpmp_mrq_reset_req req = {BPMP_CMD_RESET_TOGGLE, id};
+  return bpmp_xfer(BPMP_MRQ_RESET, &req, sizeof(req), NULL, NULL);
+}
+
+error_t
+clk_enable(int id)
+{
+  struct bpmp_mrq_clk_req req = {BPMP_CMD_CLK_ENABLE, id};
+  return bpmp_xfer(BPMP_MRQ_CLK, &req, sizeof(req), NULL, NULL);
+}
+
+
+static error_t
+cmd_rst(cli_t *cli, int argc, char **argv)
+{
+  if(argc != 2)
+    return ERR_INVALID_ARGS;
+
+  return reset_peripheral(atoi(argv[1]));
+}
+
+CLI_CMD_DEF("rst", cmd_rst);
+
+
+
+static error_t
+cmd_clk_en(cli_t *cli, int argc, char **argv)
+{
+  if(argc != 2)
+    return ERR_INVALID_ARGS;
+
+  return clk_enable(atoi(argv[1]));
+}
+
+CLI_CMD_DEF("clk-en", cmd_clk_en);
+

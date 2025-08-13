@@ -1,7 +1,20 @@
 #pragma once
 
+#define BPMP_MRQ_RESET          20U
 #define BPMP_MRQ_CLK		22U
 
+
+struct bpmp_mrq_reset_req {
+  uint32_t cmd;
+  uint32_t reset_id;
+} __attribute__((packed));
+
+enum {
+  BPMP_CMD_RESET_ASSERT = 1,
+  BPMP_CMD_RESET_DEASSERT = 2,
+  BPMP_CMD_RESET_TOGGLE = 3,
+  BPMP_CMD_RESET_GET_MAX_ID = 4,
+};
 
 enum {
   BPMP_CMD_CLK_GET_RATE = 1,

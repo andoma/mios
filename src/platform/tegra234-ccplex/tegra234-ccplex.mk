@@ -14,6 +14,7 @@ SRCS += ${P}/tegra234-ccplex.c \
 	${P}/tegra234-ccplex_hsp.c \
 	${P}/tegra234-ccplex_ari.c \
 	${P}/tegra234-ccplex_bpmp.c \
+	${P}/tegra234-ccplex_qspi.c \
 	${P}/efiruntime.c \
 	${P}/asm.s \
 
