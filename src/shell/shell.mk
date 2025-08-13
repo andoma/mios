@@ -2,6 +2,7 @@ GLOBALDEPS += ${SRC}/shell/shell.mk
 
 SRCS +=	${SRC}/shell/cli.c \
 	${SRC}/shell/monitor.c \
+	${SRC}/shell/cmd_gpio.c \
 	${SRC}/shell/cmd_i2c.c \
 	${SRC}/shell/history.c \
 	${SRC}/shell/perf.c \
