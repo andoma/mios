@@ -260,6 +260,7 @@ tcal9539_create(i2c_t *i2c, uint8_t address)
   tc->gpio.vtable = &tcal9539_vtable;
   tc->i2c = i2c;
   tc->address = address;
+  tc->output = 0xffff;
   tc->direction = 0xffff;
   tc->pull_direction = 0xffff;
 
