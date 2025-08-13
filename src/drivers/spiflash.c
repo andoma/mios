@@ -33,23 +33,27 @@ typedef struct spiflash {
 static int
 spiflash_get_status(spiflash_t *sf)
 {
+  struct iovec tx[2] = {{sf->tx, 1}, {NULL, 1}};
+  struct iovec rx[2] = {{NULL, 0}, {sf->rx, 0}};
+
   sf->tx[0] = 5;
-  sf->tx[1] = 0;
-  error_t err = sf->spi->rw(sf->spi, sf->tx, sf->rx, 2, sf->cs, sf->spicfg);
+  error_t err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
   if(err)
     return err;
-  return sf->rx[1];
+  return sf->rx[0];
 }
 
 static int
 spiflash_id(spiflash_t *sf)
 {
-  memset(sf->tx, 0, 5);
+  struct iovec tx[2] = {{sf->tx, 1}, {NULL, 4}};
+  struct iovec rx[2] = {{NULL, 0}, {sf->rx, 0}};
+
   sf->tx[0] = 0xab;
-  error_t err = sf->spi->rw(sf->spi, sf->tx, sf->rx, 5, sf->cs, sf->spicfg);
+  error_t err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
   if(err)
     return err;
-  return sf->rx[4];
+  return sf->rx[3];
 }
 
 
@@ -241,16 +245,19 @@ spiflash_ctrl(struct block_iface *bi, block_ctrl_op_t op)
 static uint32_t
 read_sfdp(spiflash_t *sf, uint32_t addr)
 {
-  memset(sf->tx, 0, 9);
+  struct iovec tx[2] = {{sf->tx, 4}, {NULL, 5}};
+  struct iovec rx[2] = {{NULL, 0}, {sf->rx, 0}};
+
+  memset(sf->tx, 0, 4);
   sf->tx[0] = 0x5a;
   sf->tx[3] = addr;
-  error_t err = sf->spi->rw(sf->spi, sf->tx, sf->rx, 9,
-                            sf->cs, sf->spicfg);
+
+  error_t err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
   if(err)
     return 0;
 
   uint32_t r;
-  memcpy(&r, sf->rx + 5, 4);
+  memcpy(&r, sf->rx + 1, 4);
   return r;
 }
 
