@@ -42,7 +42,7 @@ typedef struct hsp_stream {
   uint8_t rx_mbox;
   uint8_t pending_clear;
 
-  FIFO_DECL(rx_fifo, 128);
+  FIFO_DECL(rx_fifo, uint8_t, 128);
 
 } hsp_stream_t;
 

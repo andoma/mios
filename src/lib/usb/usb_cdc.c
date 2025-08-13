@@ -26,10 +26,10 @@ typedef struct usb_cdc {
   uint8_t tx_on;
 
   task_waitable_t rx_waitq;
-  FIFO_DECL(rx_fifo, 32);
+  FIFO_DECL(rx_fifo, uint8_t, 32);
 
   task_waitable_t tx_waitq;
-  FIFO_DECL(tx_fifo, 16);
+  FIFO_DECL(tx_fifo, uint8_t, 16);
 
   usb_interface_t *comm_iface;
   usb_interface_t *data_iface;

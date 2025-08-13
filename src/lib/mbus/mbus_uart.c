@@ -43,7 +43,7 @@ typedef struct uart_mbus {
 
   gpio_t txe;
 
-  FIFO_DECL(rxfifo, 8);
+  FIFO_DECL(rxfifo, uint8_t, 8);
 
   uint32_t rx_fifo_full;
   uint32_t rx_framing_error;

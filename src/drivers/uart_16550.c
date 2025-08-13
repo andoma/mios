@@ -26,7 +26,7 @@ typedef struct uart_16550 {
 
   uint32_t rx_overruns;
 
-  FIFO_DECL(rx_fifo, 128);
+  FIFO_DECL(rx_fifo, uint8_t, 128);
 
 } uart_16550_t;
 
