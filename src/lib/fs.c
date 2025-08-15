@@ -7,6 +7,7 @@
 #include <mios/cli.h>
 #include <mios/mios.h>
 #include <mios/fs.h>
+#include <mios/type_macros.h>
 
 #if CACHE_LINE_SIZE
 
