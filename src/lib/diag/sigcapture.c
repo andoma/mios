@@ -86,6 +86,11 @@ sigcapture_trig(sigcapture_t *sc, size_t leading_samples)
 {
   if(leading_samples >= sc->depth)
     return;
+  if(leading_samples == 0)
+    leading_samples = sc->depth / 2;
+
+  if(sc->state == STATE_READOUT || sc->trig_countdown)
+    return;
   sc->pkt_preamble.trig_offset = leading_samples;
   sc->trig_countdown = sc->depth - leading_samples;
 }
