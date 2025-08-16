@@ -631,6 +631,7 @@ pbuf_copy_pkt(const pbuf_t *src, int wait)
 void
 pbuf_status(stream_t *st)
 {
+  stprintf(st, "pbuf size:%d\n", (int)PBUF_DATA_SIZE);
   stprintf(st, "pbuf: %d avail\n", pbufs.pp_avail);
   stprintf(st, "pbuf_data: %d avail\n", pbuf_datas.pp_avail);
 }
