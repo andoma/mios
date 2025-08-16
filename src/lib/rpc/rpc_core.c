@@ -40,10 +40,11 @@ rpc_app_version(rpc_result_t *rr)
 {
   rr->type = RPC_TYPE_CONST_BINARY;
   rr->data = (void *)mios_get_app_version();
+  rr->size = 21;
   return 0;
 }
 
-RPC_DEF("app_version()", rpc_app_version);
+RPC_DEF("appversion()", rpc_app_version);
 
 static error_t
 rpc_serialnum(rpc_result_t *rr)

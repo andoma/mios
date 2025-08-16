@@ -60,9 +60,11 @@ SRCS-${ENABLE_NET} += \
 	${SRC}/net/service/svc_echo.c \
 	${SRC}/net/service/svc_shell.c \
 	${SRC}/net/service/svc_chargen.c \
-	${SRC}/net/service/svc_rpc.c \
 	${SRC}/net/service/svc_discard.c \
 	${SRC}/net/service/svc_ota.c \
+
+SRCS-${ENABLE_RPC} += \
+	${SRC}/net/service/svc_rpc.c \
 
 SRCS-${ENABLE_NET_IPV4} += \
 	${SRC}/net/service/svc_telnet.c \

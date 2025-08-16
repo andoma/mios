@@ -1,9 +1,9 @@
-#if 0
-
 #include <mios/rpc.h>
 
 #include <mios/service.h>
-#include <mios/version.h>
+#include <mios/task.h>
+#include <mios/bytestream.h>
+#include <mios/eventlog.h>
 
 #include <assert.h>
 #include <malloc.h>
@@ -15,149 +15,198 @@
 
 
 typedef struct svc_rpc {
-  //  void *sr_opaque;
-  //  service_event_cb_t *sr_cb;
-  pbuf_t *sr_pb;
-  //  svc_pbuf_policy_t sr_pbuf_policy;
+  pushpull_t *pp;
+  pbuf_t *req;
+  pbuf_t *resp;
+  mutex_t mutex;
+  cond_t cond;
+  int stop;
 } svc_rpc_t;
-
-
-static void *
-rpc_open(void *opaque, service_event_cb_t *cb,
-         svc_pbuf_policy_t pbuf_policy,
-         service_get_flow_header_t *get_flow_hdr)
-{
-  svc_rpc_t *sr = xalloc(sizeof(svc_rpc_t), 0, MEM_MAY_FAIL);
-  if(sr == NULL)
-    return NULL;
-  sr->sr_opaque = opaque;
-  sr->sr_cb = cb;
-  sr->sr_pb = NULL;
-  sr->sr_pbuf_policy = pbuf_policy;
-  return sr;
-}
-
-
-const rpc_method_t *
-rpc_method_resovle(const uint8_t *req_name, size_t req_len)
-{
-  extern unsigned long _rpcdef_array_begin;
-  extern unsigned long _rpcdef_array_end;
-
-  const rpc_method_t *rm = (void *)&_rpcdef_array_begin;
-  for(; rm != (const void *)&_rpcdef_array_end; rm++) {
-    const size_t len = strlen(rm->name);
-    if(req_len == len && !memcmp(rm->name, req_name, len)) {
-      return rm;
-    }
-  }
-  return NULL;
-}
 
 
 static int
 rpc_may_push(void *opaque)
 {
   svc_rpc_t *sr = opaque;
-  return sr->sr_pb == NULL;
+  return sr->req == NULL;
 }
+
+static uint32_t
+rpc_push(void *opaque, struct pbuf *pb)
+{
+  svc_rpc_t *sr = opaque;
+
+  mutex_lock(&sr->mutex);
+  assert(sr->req == NULL);
+  sr->req = pb;
+  cond_signal(&sr->cond);
+  mutex_unlock(&sr->mutex);
+  return 0;
+}
+
 
 static pbuf_t *
 rpc_pull(void *opaque)
 {
   svc_rpc_t *sr = opaque;
-  pbuf_t *pb = sr->sr_pb;
-  sr->sr_pb = NULL;
+  mutex_lock(&sr->mutex);
+  pbuf_t *pb = sr->resp;
+  sr->resp = NULL;
+  cond_signal(&sr->cond);
+  mutex_unlock(&sr->mutex);
   return pb;
 }
 
-static void
-rpc_tx(svc_rpc_t *sr, pbuf_t *pb)
-{
-  assert(sr->sr_pb == NULL);
-  sr->sr_pb = pb;
-  sr->sr_cb(sr->sr_opaque, SERVICE_EVENT_WAKEUP);
-}
-
-
 
 static pbuf_t *
-rpc_error(svc_rpc_t *sr, pbuf_t *pb, uint32_t err)
+rpc_err(pbuf_t *pb, error_t err)
 {
   pbuf_reset(pb, 0, 0);
-  memcpy(pbuf_append(pb, sizeof(err)), &err, sizeof(err));
-  rpc_tx(sr, pb);
-  return NULL;
-}
-
-
-static pbuf_t *
-rpc_push(void *opaque, struct pbuf *pb)
-{
-  svc_rpc_t *sr = opaque;
-
-  if(pb->pb_pktlen < 1) {
-    return rpc_error(sr, pb, ERR_MALFORMED);
-  }
-
-  if(pbuf_pullup(pb, pb->pb_pktlen)) {
-    return rpc_error(sr, pb, ERR_MALFORMED);
-  }
-
-  const uint8_t *pkt = pbuf_cdata(pb, 0);
-  const uint8_t namelen = pkt[0];
-  if(1 + namelen > pb->pb_pktlen) {
-    return rpc_error(sr, pb, ERR_MALFORMED);
-  }
-
-  const rpc_method_t *rm = rpc_method_resovle(pkt + 1, namelen);
-  if(rm == NULL) {
-    return rpc_error(sr, pb, ERR_INVALID_RPC_ID);
-  }
-
-  const int arg_offset = (1 + namelen + 3) & ~3;
-  if(arg_offset > pb->pb_pktlen) {
-    return rpc_error(sr, pb, ERR_INVALID_RPC_ID);
-  }
-
-  pb = pbuf_drop(pb, arg_offset, 0);
-
-  size_t in_len = pb->pb_pktlen;
-  if(rm->in_size != 0xffff && rm->in_size != in_len) {
-    rpc_error(sr, pb, ERR_INVALID_RPC_ARGS);
-  }
-
-  pbuf_t *resp = pbuf_make(sr->sr_pbuf_policy.preferred_offset, 0);
-  if(resp == NULL) {
-    return rpc_error(sr, pb, ERR_NO_BUFFER);
-  }
-
-  pbuf_reset(resp, 0, 4 + rm->out_size);
-
-  uint32_t err = rm->invoke(pbuf_cdata(pb, 0), pbuf_data(resp, 4), in_len);
-
-  if(err) {
-    pbuf_free(resp);
-    return rpc_error(sr, pb, err);
-  }
-
-  memcpy(pbuf_data(resp, 0), &err, 4);
-
-  rpc_tx(sr, resp);
+  uint8_t *p = pbuf_append(pb, 5);
+  p[0] = 'e';
+  wr32_le(p + 1, err);
   return pb;
 }
 
 
-static void
-rpc_close(void *opaque)
+static pbuf_t *
+rpc_dispatch(pbuf_t *pb)
 {
-  svc_rpc_t *sr = opaque;
-  sr->sr_cb(sr->sr_opaque, SERVICE_EVENT_CLOSE);
-  pbuf_free(sr->sr_pb);
-  free(sr);
+  if(pbuf_pullup(pb, pb->pb_pktlen)) {
+    /* Request larger than what fits in a single pbuf
+       TODO: We could try to allocate memory and read into it
+    */
+    return rpc_err(pb, ERR_MTU_EXCEEDED);
+  }
+
+  uint8_t *req = pbuf_data(pb, 0);
+  size_t len = pb->pb_pktlen;
+  const uint8_t namelen = req[0];
+  if(1 + namelen > len) {
+    return rpc_err(pb, ERR_MALFORMED);
+  }
+
+  rpc_result_t rr;
+  error_t err = rpc_dispatch_cbor(&rr, (const char *)req + 1, namelen,
+                                  req + 1 + namelen, len - 1 - namelen);
+  if(err)
+    return rpc_err(pb, err);
+
+  pbuf_reset(pb, 0, 0);
+
+  uint8_t *p = pbuf_append(pb, 1);
+  p[0] = rr.type | 0x20; // make lowercase
+  const void *src;
+
+  switch(rr.type) {
+  case 'i':
+  case 'f':
+    src = &rr.i32;
+    len = 4;
+    break;
+  case 's':
+  case 'S':
+    src = rr.data;
+    len = strlen(rr.data);
+    break;
+  case 'b':
+  case 'B':
+    src = rr.data;
+    len = rr.size;
+    break;
+  default:
+    src = NULL;
+    len = 0;
+    break;
+  }
+
+  p = pbuf_append(pb, len);
+  memcpy(p, src, len);
+
+  if(rr.type == 's' || rr.type == 'b')
+    free(rr.data);
+  return pb;
 }
 
-SERVICE_DEF("rpc", 0, 1, SERVICE_TYPE_DGRAM,
-            rpc_open, rpc_push, rpc_may_push, rpc_pull, rpc_close);
 
-#endif
+#include <unistd.h>
+
+__attribute__((noreturn))
+static void *
+rpc_thread(void *arg)
+{
+  svc_rpc_t *sr = arg;
+
+  mutex_lock(&sr->mutex);
+  while(!sr->stop) {
+
+    pbuf_t *pb = sr->req;
+    if(pb == NULL) {
+      cond_wait(&sr->cond, &sr->mutex);
+      continue;
+    }
+    sr->req = NULL;
+    mutex_unlock(&sr->mutex);
+    pb = rpc_dispatch(pb);
+    mutex_lock(&sr->mutex);
+    sr->resp = pb;
+    sr->pp->net->event(sr->pp->net_opaque, PUSHPULL_EVENT_PULL);
+    while(sr->resp && !sr->stop) {
+      cond_wait(&sr->cond, &sr->mutex);
+    }
+  }
+  mutex_unlock(&sr->mutex);
+  sr->pp->net->event(sr->pp->net_opaque, PUSHPULL_EVENT_CLOSE);
+
+  if(sr->req)
+    pbuf_free(sr->req);
+  if(sr->resp)
+    pbuf_free(sr->resp);
+  free(sr);
+  thread_exit(NULL);
+}
+
+
+static void
+rpc_close(void *opaque, const char *reason)
+{
+  svc_rpc_t *sr = opaque;
+
+  mutex_lock(&sr->mutex);
+  sr->stop = 1;
+  cond_signal(&sr->cond);
+  mutex_unlock(&sr->mutex);
+}
+
+
+
+static const pushpull_app_fn_t rpc_fn = {
+  .push = rpc_push,
+  .may_push = rpc_may_push,
+  .pull = rpc_pull,
+  .close = rpc_close
+};
+
+static error_t
+rpc_open(pushpull_t *pp)
+{
+  svc_rpc_t *sr = xalloc(sizeof(svc_rpc_t), 0, MEM_MAY_FAIL | MEM_CLEAR);
+  if(sr == NULL)
+    return ERR_NO_MEMORY;
+
+  pp->app_opaque = sr;
+  pp->app = &rpc_fn;
+
+  mutex_init(&sr->mutex, "rpc");
+  cond_init(&sr->cond, "rpc");
+
+  sr->pp = pp;
+  if(!thread_create(rpc_thread, sr, 0, "rpc", TASK_DETACHED, 3)) {
+    free(sr);
+    return ERR_NO_MEMORY;
+  }
+  return 0;
+}
+
+
+SERVICE_DEF_PUSHPULL("rpc", 0, 1, rpc_open);
