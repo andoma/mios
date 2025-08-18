@@ -26,6 +26,7 @@
 #include <mios/bytestream.h>
 #include <mios/timer.h>
 #include <mios/atomic.h>
+#include <mios/type_macros.h>
 
 STAILQ_HEAD(http_connection_squeue, http_connection);
 STAILQ_HEAD(http_server_task_squeue, http_server_task);
