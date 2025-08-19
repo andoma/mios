@@ -275,7 +275,7 @@ vllp_telnetd_destroy(struct vllp_telnetd *vtd)
     close(vts->fd);
 
     if(vts->vc != NULL) {
-      vllp_channel_close(vts->vc, 0, 1);
+      vllp_channel_close(vts->vc, 0, 0);
     }
 
     free(vts);

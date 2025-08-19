@@ -84,6 +84,6 @@ vllp_logstream_create(vllp_t *v, void *opaque,
 void
 vllp_logstream_destroy(vllp_logstream_t *vl)
 {
-  vllp_channel_close(vl->vc, 0, 1);
+  vllp_channel_close(vl->vc, 0, 0);
   free(vl);
 }
