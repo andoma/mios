@@ -581,7 +581,7 @@ vllp_channel_receive(vllp_t *v, vllp_pkt_t *vp, int channel_id)
 
     if(~vllp_crc32(v->crc_IV, vc->rxbuf, msglen)) {
       vllp_log(v, LOG_ERR, "message CRC mismatch");
-      rval = VLLP_ERR_CRC_MISMATCH;
+      rval = VLLP_ERR_CHECKSUM_ERROR;
     }
 
     msglen -= 4; // Remove CRC from exposed payload
@@ -629,7 +629,7 @@ vllp_handle_rx(vllp_t *v, vllp_pkt_t *vp, int64_t now)
 
     if(~vllp_crc32(v->crc_IV, u8, len)) {
       vllp_log(v, LOG_WARNING, "ACK CRC validation failed");
-      return VLLP_ERR_CRC_MISMATCH;
+      return VLLP_ERR_CHECKSUM_ERROR;
     }
 
     if(len != 7) {
@@ -1516,25 +1516,82 @@ vllp_crc32(uint32_t crc, const void *data, size_t n_bytes)
 }
 
 
+static const char errmsg[] = {
+  "OK\0"
+  "NOT_IMPLEMENTED\0"
+  "TIMEOUT\0"
+  "OPERATION_FAILED\0"
+  "TX\0"
+  "RX\0"
+  "NOT_READY\0"
+  "NO_BUFFER\0"
+  "MTU_EXCEEDED\0"
+  "INVALID_ID\0"
+  "DMAXFER\0"
+  "BUS_ERR\0"
+  "ARBITRATION_LOST\0"
+  "BAD_STATE\0"
+  "INVALID_ADDRESS\0"
+  "NO_DEVICE\0"
+  "MISMATCH\0"
+  "NOT_FOUND\0"
+  "CHECKSUM_ERR\0"
+  "MALFORMED\0"
+  "INVALID_RPC_ID\0"
+  "INVALID_RPC_ARGS\0"
+  "NO_FLASH_SPACE\0"
+  "INVALID_ARGS\0"
+  "INVALID_LENGTH\0"
+  "NOT_IDLE\0"
+  "BAD_CONFIG\0"
+  "FLASH_HW_ERR\0"
+  "FLASH_TIMEOUT\0"
+  "NO_MEMORY\0"
+  "READ_PROT\0"
+  "WRITE_PROT\0"
+  "AGAIN\0"
+  "NOT_CONNECTED\0"
+  "BAD_PKT_SIZ\0"
+  "EXISTS\0"
+  "CORRUPT\0"
+  "NOT_DIR\0"
+  "IS_DIR\0"
+  "NOT_EMPTY\0"
+  "BADF\0"
+  "TOOBIG\0"
+  "INVALID_PARAMETER\0"
+  "NOTATTR\0"
+  "TOOLONG\0"
+  "IO\0"
+  "FS\0"
+  "DMAFIFO\0"
+  "INTERRUPTED\0"
+  "QUEUE_FULL\0"
+  "NO_ROUTE\0"
+  "\0"
+};
+
+
+static const char *
+strtbl(const char *str, size_t index)
+{
+  while(1) {
+    if(!index)
+      return str;
+    index--;
+    size_t n = strlen(str);
+    if(n == 0)
+      return "???";
+    str += n + 1;
+  }
+}
+
 const char *
 vllp_strerror(int error)
 {
-  switch(error) {
-  case VLLP_ERR_TIMEOUT:
-    return "Timeout";
-  case VLLP_ERR_BAD_STATE:
-    return "Bad state";
-  case VLLP_ERR_NOT_FOUND:
-    return "Not found";
-  case VLLP_ERR_CRC_MISMATCH:
-    return "Incorrect CRC";
-  case VLLP_ERR_MALFORMED:
-    return "Malformed data";
-  case VLLP_ERR_NO_MEMORY:
-    return "No memory";
-  }
-  return "Unmapped error code";
+  return strtbl(errmsg, -error);
 }
+
 
 
 void
