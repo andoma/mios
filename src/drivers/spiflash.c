@@ -106,6 +106,19 @@ spiflash_we(spiflash_t *sf)
 }
 
 
+static int
+wrcmd(uint8_t *dst, uint32_t addr, uint8_t cmd3, uint8_t cmd4)
+{
+  int longform = addr > 0xffffff;
+  uint8_t *ap = longform ? dst + 1 : dst;
+  ap[0] = addr >> 24;
+  ap[1] = addr >> 16;
+  ap[2] = addr >> 8;
+  ap[3] = addr;
+  dst[0] = longform ? cmd4 : cmd3;
+  return 4 + longform;
+}
+
 static error_t
 spiflash_erase(struct block_iface *bi, size_t block)
 {
@@ -117,12 +130,9 @@ spiflash_erase(struct block_iface *bi, size_t block)
   }
 
   if(!err) {
-    uint32_t addr = block * bi->block_size;
-    sf->tx[0] = 0x20;
-    sf->tx[1] = addr >> 16;
-    sf->tx[2] = addr >> 8;
-    sf->tx[3] = addr;
-    err = sf->spi->rw(sf->spi, sf->tx, NULL, 4, sf->cs, sf->spicfg);
+    const uint32_t addr = block * bi->block_size;
+    const int cmdlen = wrcmd(sf->tx, addr, 0x20, 0x21);
+    err = sf->spi->rw(sf->spi, sf->tx, NULL, cmdlen, sf->cs, sf->spicfg);
     sf->state = SPIFLASH_STATE_BUSY;
     sf->busy_until = clock_get() + 45000;
   }
@@ -156,14 +166,9 @@ spiflash_write(struct block_iface *bi, size_t block,
       to_copy = page_size - (offset & (page_size - 1));
     }
 
-    uint32_t addr = block * bi->block_size + offset;
-
-    sf->tx[0] = 0x2;
-    sf->tx[1] = addr >> 16;
-    sf->tx[2] = addr >> 8;
-    sf->tx[3] = addr;
-
-    struct iovec tx[2] = {{sf->tx, 4}, {(void *)data, to_copy}};
+    const uint32_t addr = block * bi->block_size + offset;
+    const int cmdlen = wrcmd(sf->tx, addr, 0x2, 0x12);
+    struct iovec tx[2] = {{sf->tx, cmdlen}, {(void *)data, to_copy}};
     err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
     sf->state = SPIFLASH_STATE_BUSY;
 
@@ -187,14 +192,9 @@ spiflash_read(struct block_iface *bi, size_t block,
   error_t err = spiflash_wait_ready(sf);
   if(!err) {
 
-    uint32_t addr = block * bi->block_size + offset;
-
-    sf->tx[0] = 0x3;
-    sf->tx[1] = addr >> 16;
-    sf->tx[2] = addr >> 8;
-    sf->tx[3] = addr;
-
-    struct iovec tx[2] = {{sf->tx, 4}, {NULL, length}};
+    const uint32_t addr = block * bi->block_size + offset;
+    const int cmdlen = wrcmd(sf->tx, addr, 0x3, 0x13);
+    struct iovec tx[2] = {{sf->tx, cmdlen}, {NULL, length}};
     struct iovec rx[2] = {{NULL, 4}, {data, length}};
     err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
   }
