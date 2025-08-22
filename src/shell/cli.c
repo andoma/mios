@@ -103,31 +103,38 @@ dispatch_command(cli_t *c, char *line)
   if(argc == 0)
     return;
 
+  cli_dispatch_command(c, argc, c->cl_argv);
+}
+
+error_t
+cli_dispatch_command(cli_t *c, int argc, char *argv[])
+{
   extern unsigned long _clicmd_array_begin;
   extern unsigned long _clicmd_array_end;
 
   cli_cmd_t *clicmd = (void *)&_clicmd_array_begin;
   cli_cmd_t *clicmd_array_end = (void *)&_clicmd_array_end;
 
-  if(!strcmp(c->cl_argv[0], "help")) {
+  if(!strcmp(argv[0], "help")) {
     cli_printf(c, "Available commands:\n");
     for(; clicmd != clicmd_array_end; clicmd++) {
       cli_printf(c, "\t%s\n", clicmd->cmd);
     }
-    return;
+    return ERR_OK;
   }
 
   for(; clicmd != clicmd_array_end; clicmd++) {
-    if(!strcmp(c->cl_argv[0], clicmd->cmd)) {
+    if(!strcmp(argv[0], clicmd->cmd)) {
       error_t err = clicmd->dispatch(c, argc, c->cl_argv);
 
       if(err) {
         cli_printf(c, "! Error: %s\n", error_to_string(err));
       }
-      return;
+      return err;
     }
   }
   cli_printf(c, "No such command\n");
+  return ERR_NOT_FOUND;
 }
 
 #define ESCAPE 27
