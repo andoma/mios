@@ -192,10 +192,31 @@ pl011_uart_read(struct stream *s, void *buf, size_t size, size_t minbytes)
   return size;
 }
 
+static task_waitable_t *
+pl011_uart_poll(stream_t *s, poll_type_t type)
+{
+  pl011_t *u = (pl011_t *)s;
+
+  irq_forbid(IRQ_LEVEL_CONSOLE);
+
+  if(type == POLL_STREAM_WRITE) {
+
+    if(TX_FIFO_SIZE - (u->tx_fifo_wrptr - u->tx_fifo_rdptr))
+      return NULL;
+    return &u->uart_tx;
+
+  } else {
+
+    if(u->rx_fifo_wrptr != u->rx_fifo_rdptr)
+      return NULL;
+    return &u->uart_rx;
+  }
+}
 
 static const stream_vtable_t pl011_uart_vtable = {
   .read = pl011_uart_read,
-  .write = pl011_uart_write
+  .write = pl011_uart_write,
+  .poll = pl011_uart_poll
 };
 
 struct stream *
