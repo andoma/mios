@@ -11,6 +11,8 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#include "irq.h"
+
 #include "net/pbuf.h"
 
 typedef struct pushpull_stream {
@@ -19,8 +21,10 @@ typedef struct pushpull_stream {
 
   pushpull_t *pps_pp;
 
-  mutex_t pps_mutex;
-  cond_t pps_cond;
+  mutex_t pps_tx_mutex;
+  cond_t pps_tx_cond;
+  mutex_t pps_rx_mutex;
+  cond_t pps_rx_cond;
 
   pbuf_t *pps_rxbuf;
 
@@ -40,7 +44,7 @@ pushpull_stream_read(struct stream *s, void *buf, size_t size,
   pushpull_stream_t *pps = (pushpull_stream_t *)s;
 
   int off = 0;
-  mutex_lock(&pps->pps_mutex);
+  mutex_lock(&pps->pps_rx_mutex);
 
   while(1) {
 
@@ -52,7 +56,7 @@ pushpull_stream_read(struct stream *s, void *buf, size_t size,
         break;
       pps->pps_pp->net->event(pps->pps_pp->net_opaque,
                                 PUSHPULL_EVENT_PUSH);
-      cond_wait(&pps->pps_cond, &pps->pps_mutex);
+      cond_wait(&pps->pps_rx_cond, &pps->pps_rx_mutex);
       continue;
     }
 
@@ -64,7 +68,7 @@ pushpull_stream_read(struct stream *s, void *buf, size_t size,
     if(off == size)
       break;
   }
-  mutex_unlock(&pps->pps_mutex);
+  mutex_unlock(&pps->pps_rx_mutex);
   return off;
 }
 
@@ -75,7 +79,7 @@ pushpull_stream_write(struct stream *s, const void *buf, size_t size,
 {
   pushpull_stream_t *pps = (pushpull_stream_t *)s;
   size_t written = 0;
-  mutex_lock(&pps->pps_mutex);
+  mutex_lock(&pps->pps_tx_mutex);
 
   if(buf == NULL) {
     // Flush
@@ -130,7 +134,7 @@ pushpull_stream_write(struct stream *s, const void *buf, size_t size,
       if(remain == 0) {
         pps->pps_flushed = 1;
         pps->pps_pp->net->event(pps->pps_pp->net_opaque, PUSHPULL_EVENT_PULL);
-        cond_wait(&pps->pps_cond, &pps->pps_mutex);
+        cond_wait(&pps->pps_tx_cond, &pps->pps_tx_mutex);
         continue;
       }
       pbuf_t *pb = pps->pps_txbuf_tail;
@@ -145,17 +149,42 @@ pushpull_stream_write(struct stream *s, const void *buf, size_t size,
       written += to_copy;
     }
   }
-  mutex_unlock(&pps->pps_mutex);
+  mutex_unlock(&pps->pps_tx_mutex);
   return written;
 }
+
+static task_waitable_t *
+pushpull_stream_poll(stream_t *s, poll_type_t type)
+{
+  pushpull_stream_t *pps = (pushpull_stream_t *)s;
+
+  if(type == POLL_STREAM_WRITE) {
+    mutex_lock(&pps->pps_tx_mutex);
+    cond_t *w = (pps->pps_pp->max_fragment_size -
+      pps->pps_txbuf_head->pb_pktlen) != 0 ?
+      &pps->pps_tx_cond : NULL;
+    irq_forbid(IRQ_LEVEL_SCHED);
+    mutex_unlock(&pps->pps_tx_mutex);
+    return w;
+  } else {
+    mutex_lock(&pps->pps_rx_mutex);
+    cond_t *r = pps->pps_rxbuf == NULL ?
+      &pps->pps_rx_cond : NULL;
+    irq_forbid(IRQ_LEVEL_SCHED);
+    mutex_unlock(&pps->pps_rx_mutex);
+    return r;
+  }
+
+}
+
 
 static void
 pushpull_stream_wait_shutdown(pushpull_stream_t *pps)
 {
-  mutex_lock(&pps->pps_mutex);
+  mutex_lock(&pps->pps_tx_mutex);
   while(!pps->pps_shutdown)
-    cond_wait(&pps->pps_cond, &pps->pps_mutex);
-  mutex_unlock(&pps->pps_mutex);
+    cond_wait(&pps->pps_tx_cond, &pps->pps_tx_mutex);
+  mutex_unlock(&pps->pps_tx_mutex);
 
   pbuf_free(pps->pps_rxbuf);
   pbuf_free(pps->pps_txbuf_head);
@@ -167,17 +196,17 @@ pushpull_stream_pull(void *opaque)
 {
   pushpull_stream_t *pps = opaque;
   pbuf_t *pb = NULL;
-  mutex_lock(&pps->pps_mutex);
+  mutex_lock(&pps->pps_tx_mutex);
   if(pps->pps_flushed) {
     pb = pps->pps_txbuf_head;
     if(pb != NULL) {
       pps->pps_txbuf_head = NULL;
       pps->pps_txbuf_tail = NULL;
-      cond_signal(&pps->pps_cond);
+      cond_signal(&pps->pps_tx_cond);
       pps->pps_flushed = 0;
     }
   }
-  mutex_unlock(&pps->pps_mutex);
+  mutex_unlock(&pps->pps_tx_mutex);
   return pb;
 }
 
@@ -187,11 +216,11 @@ pushpull_stream_push(void *opaque, struct pbuf *pb)
 {
   pushpull_stream_t *pps = opaque;
 
-  mutex_lock(&pps->pps_mutex);
+  mutex_lock(&pps->pps_rx_mutex);
   assert(pps->pps_rxbuf == NULL);
   pps->pps_rxbuf = pb;
-  cond_signal(&pps->pps_cond);
-  mutex_unlock(&pps->pps_mutex);
+  cond_signal(&pps->pps_rx_cond);
+  mutex_unlock(&pps->pps_rx_mutex);
   return 0;
 }
 
@@ -207,10 +236,10 @@ static void
 pushpull_stream_close_pp(void *opaque, const char *reason)
 {
   pushpull_stream_t *pps = opaque;
-  mutex_lock(&pps->pps_mutex);
+  mutex_lock(&pps->pps_tx_mutex);
   pps->pps_shutdown = 1;
-  cond_signal(&pps->pps_cond);
-  mutex_unlock(&pps->pps_mutex);
+  cond_signal(&pps->pps_tx_cond);
+  mutex_unlock(&pps->pps_tx_mutex);
 }
 
 
@@ -235,6 +264,7 @@ static const pushpull_app_fn_t pps_pushpull_vtable = {
 static const stream_vtable_t pps_stream_vtable = {
   .read = pushpull_stream_read,
   .write = pushpull_stream_write,
+  .poll = pushpull_stream_poll,
   .close = pushpull_stream_destroy,
 };
 
@@ -254,8 +284,10 @@ service_open_pushpull(const service_t *svc, pushpull_t *pp)
   if(pps == NULL)
     return ERR_NO_MEMORY;
 
-  mutex_init(&pps->pps_mutex, "socket");
-  cond_init(&pps->pps_cond, "socket");
+  mutex_init(&pps->pps_tx_mutex, "tsocket");
+  mutex_init(&pps->pps_rx_mutex, "rsocket");
+  cond_init(&pps->pps_tx_cond, "tsocket");
+  cond_init(&pps->pps_rx_cond, "rsocket");
 
   pps->pps_pp = pp;
   pps->pps_stream.vtable = &pps_stream_vtable;
