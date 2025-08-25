@@ -344,9 +344,9 @@ float_to_str(fmtcb_t *cb, void *aux,
     for(int i = 0; i > e10; i--) {
       total += cb(aux, "0", 1);
       significands--;
+      if(significands <= 0)
+        goto done;
     }
-    if(significands <= 0)
-      goto done;
   }
 
   uint64_t r = 1ULL << 59;
