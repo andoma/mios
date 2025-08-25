@@ -37,5 +37,5 @@ stm32h7_otghs_create(uint16_t vid, uint16_t pid,
 int
 stm32h7_otghs_is_connected(void)
 {
-  return !reg_rd(OTG_DSTS) & 1;
+  return !(reg_rd(OTG_DSTS) & 1);
 }
