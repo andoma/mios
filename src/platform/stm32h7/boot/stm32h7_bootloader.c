@@ -70,20 +70,7 @@ typedef enum {
 typedef uint8_t gpio_t;
 
 
-static void __attribute__((section("bltext"),noinline,unused))
-gpio_conf_input(gpio_t gpio, gpio_pull_t pull)
-{
-  const int port = gpio >> 4;
-  const int bit = gpio & 0xf;
-
-  clk_enable(CLK_GPIO(port));
-  reg_set_bits(GPIO_MODER(port), bit * 2, 2, 0);
-  reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
-}
-
-
-
-static void __attribute__((section("bltext"),noinline,unused))
+static int __attribute__((section("bltext"),noinline,unused,warn_unused_result))
 gpio_conf_output(gpio_t gpio,
                  gpio_output_type_t type,
                  gpio_output_speed_t speed,
@@ -97,10 +84,11 @@ gpio_conf_output(gpio_t gpio,
   reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 1);
+  return (1 << port);
 }
 
 
-static void __attribute__((section("bltext"),noinline,unused))
+static int __attribute__((section("bltext"),noinline,unused,warn_unused_result))
 gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
              gpio_output_speed_t speed, gpio_pull_t pull)
 {
@@ -121,6 +109,7 @@ gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
   reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
 
   reg_set_bits(GPIO_MODER(port), bit * 2, 2, 2);
+  return (1 << port);
 }
 
 
@@ -162,7 +151,8 @@ console_print(char c)
 {
 #ifdef USART_CONSOLE
   while(!(reg_rd(USART_CONSOLE + USART_SR) & (1 << 7))) {}
-  reg_wr(USART_CONSOLE + USART_TDR, c);
+  if(c)
+    reg_wr(USART_CONSOLE + USART_TDR, c);
 #endif
 }
 
@@ -517,21 +507,27 @@ extern uint32_t vectors[];
 
 void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
 {
+  uint32_t gpioblocks = 0;
   clk_enable(CLK_CRC);
 
   clk_enable(CLK_USART1);
-  gpio_conf_af(GPIO_PA(9), 7, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpioblocks |=
+    gpio_conf_af(GPIO_PA(9), 7, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
   reg_wr(RCC_D2CCIP1R,
          (0b100 << 12) | // SPI1,2,3 clocked from kernel clock
          0);
 
   clk_enable(CLK_SPI1);
-  gpio_conf_af(GPIO_PA(5), 5, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_PA(6), 5, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_UP);
-  gpio_conf_af(GPIO_PA(7), 5, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpioblocks |=
+    gpio_conf_af(GPIO_PA(5), 5, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpioblocks |=
+    gpio_conf_af(GPIO_PA(6), 5, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_UP);
+  gpioblocks |=
+    gpio_conf_af(GPIO_PA(7), 5, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
-  gpio_conf_output(SPIFLASH_CS, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpioblocks |=
+    gpio_conf_output(SPIFLASH_CS, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   spiflash_disable();
 
   spi_init();
@@ -588,9 +584,27 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
     }
   }
 
-  reset_peripheral(CLK_SPI1);
-
   console_print('\n');
+  console_print(0); // Wait for shift register
+
+  reset_peripheral(CLK_SPI1);
+  clk_disable(CLK_SPI1);
+
+  reset_peripheral(CLK_CRC);
+  clk_disable(CLK_CRC);
+
+  reset_peripheral(CLK_USART1);
+  clk_disable(CLK_USART1);
+
+  for(int i = 0; i < 32; i++) {
+    if((1 << i) & gpioblocks) {
+      reset_peripheral(CLK_GPIO(i));
+      clk_disable(CLK_GPIO(i));
+    }
+  }
+
+  reg_wr(RCC_D2CCIP1R, 0);
+
   void (*init)(void) __attribute__((noreturn))  = (void *)vectors[1];
   init();
 }
