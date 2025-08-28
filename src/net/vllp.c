@@ -135,8 +135,6 @@ vllp_append_crc(vllp_t *v, uint8_t *pkt, size_t len)
 static void
 vllp_channel_destroy(vllp_t *v, vllp_channel_t *vc)
 {
-  LIST_REMOVE(vc, link);
-
   int q = irq_forbid(IRQ_LEVEL_NET);
   pbuf_free_queue_irq_blocked(&vc->txq);
   pbuf_free_queue_irq_blocked(&vc->rxq);
@@ -226,6 +224,19 @@ vllp_channel_maybe_destroy(vllp_t *v, vllp_channel_t *vc)
   return 0;
 }
 
+static void
+vllp_channel_net_close(vllp_t *v, vllp_channel_t *vc,
+                       const char *reason)
+{
+  if(vc->net_closed)
+    return;
+
+  vc->pp.app->close(vc->pp.app_opaque, reason);
+  vc->net_closed = 1;
+  LIST_REMOVE(vc, link);
+  vllp_channel_maybe_destroy(v, vc);
+}
+
 
 static void
 vllp_disconnect(vllp_t *v, const char *reason)
@@ -244,12 +255,7 @@ vllp_disconnect(vllp_t *v, const char *reason)
     n = LIST_NEXT(vc, link);
     if(vc == v->cmc)
       continue;
-
-    if(!vc->net_closed) {
-      vc->pp.app->close(vc->pp.app_opaque, reason);
-      vc->net_closed = 1;
-    }
-    vllp_channel_maybe_destroy(v, vc);
+    vllp_channel_net_close(v, vc, reason);
   }
 
   if(v->current_tx_buf) {
@@ -356,12 +362,7 @@ handle_cmc_close(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb,
     if(vc != cmc && len == 2) {
 
       int16_t error_code = data[0] | (data[1] << 8);
-
-      if(!vc->net_closed) {
-        vc->pp.app->close(vc->pp.app_opaque, error_to_string(error_code));
-        vc->net_closed = 1;
-      }
-      vllp_channel_maybe_destroy(v, vc);
+      vllp_channel_net_close(v, vc, error_to_string(error_code));
 
     } else {
       err = ERR_MALFORMED;
