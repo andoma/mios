@@ -44,8 +44,10 @@ pushpull_stream_read(struct stream *s, void *buf, size_t size,
 
   while(1) {
 
-    if(pps->pps_shutdown)
+    if(pps->pps_shutdown) {
+      off = ERR_INTERRUPTED;
       break;
+    }
 
     if(pps->pps_rxbuf == NULL) {
       if(off >= requested)
