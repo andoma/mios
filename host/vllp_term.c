@@ -9,6 +9,7 @@
 static pthread_mutex_t g_mtx = PTHREAD_MUTEX_INITIALIZER;
 static vllp_channel_t *g_vc;
 static const char *g_name;
+static struct termios termio;
 
 static void
 vllp_term_rx(void *opaque, const void *data, size_t length)
@@ -21,7 +22,9 @@ vllp_term_rx(void *opaque, const void *data, size_t length)
 static void
 vllp_term_eof(void *opaque, int error)
 {
-  fprintf(stderr, "* EOF, error: %d\n", error);
+  fprintf(stderr, "\n\n* EOF, error: %d\n", error);
+  tcsetattr(0, TCSANOW, &termio);
+  exit(0);
 }
 
 
@@ -33,7 +36,6 @@ vllp_terminal(vllp_t *v, const char *name)
   g_vc = vllp_channel_create(v, g_name, 0, vllp_term_rx, vllp_term_eof, v);
   pthread_mutex_unlock(&g_mtx);
 
-  struct termios termio;
 
   printf("Exit with ^B\n");
 
