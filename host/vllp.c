@@ -790,9 +790,6 @@ vllp_tx(vllp_t *v, int64_t now)
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSE_SENT);
       free(vp);
 
-      if(is_client(v))
-        v->available_channel_ids |= (1 << vc->id);
-
       vllp_channel_release(vc, "close-sent");
 
       return vllp_tx(v, now);
@@ -1049,6 +1046,8 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
 
   case VLLP_CHANNEL_STATE_CLOSE_SENT:
     vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
+    if(is_client(v))
+      v->available_channel_ids |= (1 << vc->id);
     LIST_REMOVE(vc, link);
     channel_enq_rx_eof(v, vc, error_code);
     vllp_channel_release(vc, __FUNCTION__);
