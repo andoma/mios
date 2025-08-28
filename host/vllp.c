@@ -399,17 +399,17 @@ vllp_accept_syn(vllp_t *v, const uint8_t *u8, size_t len, int64_t now)
 static int
 fdcan_adapation_pad_ladder(int len)
 {
-  if(len < 11)
+  if(len < 12)
     return 12;
-  if(len < 15)
+  if(len < 16)
     return 16;
-  if(len < 19)
+  if(len < 20)
     return 20;
-  if(len < 23)
+  if(len < 24)
     return 24;
-  if(len < 31)
+  if(len < 32)
     return 32;
-  if(len < 47)
+  if(len < 48)
     return 48;
   return 64;
 }
