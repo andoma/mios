@@ -338,9 +338,9 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
   err = service_open_pushpull(s, &vc->pp);
   if(err) {
     LIST_REMOVE(vc, link);
+    evlog(LOG_DEBUG, "VLLP: failed to open service %s on channel %d -- %s",
+          s->name, vc->id, error_to_string(err));
     free(vc);
-    evlog(LOG_DEBUG, "VLLP: failed to open server %s -- %s",
-          s->name, error_to_string(err));
     return err;
   }
 
