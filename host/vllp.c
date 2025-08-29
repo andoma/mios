@@ -1373,8 +1373,11 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
 
   case VLLP_CHANNEL_STATE_PENDING_OPEN:
     TAILQ_REMOVE(&v->pending_open, vc, qlink);
+    if(is_client(v))
+      v->available_channel_ids |= (1 << vc->id);
     vllp_channel_release(vc, "close-while-pending-open");
     vllp_channel_unlink(vc);
+    vllp_channel_release(vc, "close"); // Reference held by our caller
     pthread_mutex_unlock(&v->mutex);
     return;
 
