@@ -1,8 +1,8 @@
-#include "tegra234_hsp.h"
+#include "t234_hsp.h"
 
 #include "reg.h"
 
-#include "tegra234_hsp.c"
+#include "t234_hsp.c"
 
 static void  __attribute__((constructor(105)))
 tegra234_hsp_init(void)

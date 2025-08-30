@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <mios/mios.h>
+#include <mios/type_macros.h>
 #include <stdio.h>
 
 #define NV_ADDRESS_MAP_LIC_CH2_BASE 0x03001000

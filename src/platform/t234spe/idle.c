@@ -1,6 +1,6 @@
 #include "reg.h"
 
-#include "tegra234-wdt.h"
+#include "t234spe_wdt.h"
 
 void
 cpu_idle(void)

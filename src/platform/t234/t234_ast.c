@@ -1,4 +1,4 @@
-#include "tegra234_ast.h"
+#include "t234_ast.h"
 
 #include "reg.h"
 

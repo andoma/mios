@@ -1,4 +1,4 @@
-#include "tegra234-spe_can.h"
+#include "t234spe_can.h"
 
 #include <mios/mios.h>
 
