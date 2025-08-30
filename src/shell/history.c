@@ -22,7 +22,7 @@ history_add(const char *line)
   if (history.latest == NULL) {
     history.lines[0] = strdup(line);
     history.latest = history.lines;
-  } else {
+  } else if (strcmp(line, *history.latest)) {
     history.latest++;
     if (history.latest >= &history.lines[MAX_LINES])
       history.latest = history.lines;
