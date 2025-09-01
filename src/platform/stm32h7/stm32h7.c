@@ -5,6 +5,7 @@
 
 #include <mios/sys.h>
 #include <mios/cli.h>
+#include <mios/atomic.h>
 
 #include <net/pbuf.h>
 
@@ -12,6 +13,7 @@
 #include "cache.h"
 #include "mpu.h"
 #include "irq.h"
+#include "cpu.h"
 
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1FF1E880;
 static volatile uint32_t *const LINE_ID      = (volatile uint32_t *)0x1FF1E8c0;
@@ -37,6 +39,8 @@ static const char *packages =
   "UFBGA176+25\0"
   "LQFP176\0\0";
 
+static uint8_t code_itcm;
+
 static void  __attribute__((constructor(120)))
 stm32h7_init(void)
 {
@@ -61,6 +65,7 @@ stm32h7_init(void)
   switch(line_id) {
   case 0x48373233: // STM32H723
   case 0x48373235: // STM32H725
+    heap_add_mem(0x1000, 0x10000, MEM_TYPE_CODE | MEM_TYPE_VECTOR_TABLE, 40);
 
     // This actually depends on TCM_AXI_SHARED option bits
     axi_sram_size = 320;
@@ -81,12 +86,12 @@ stm32h7_init(void)
 
   if(axi_sram_size)
     heap_add_mem(0x24000000, 0x24000000 + axi_sram_size * 1024,
-                 MEM_TYPE_VECTOR_TABLE | MEM_TYPE_DMA, 20);
+                 MEM_TYPE_DMA, 20);
 
   // DTCM
   void *DTCM_end   = (void *)0x20000000 + 128 * 1024;
   heap_add_mem(HEAP_START_EBSS, (long)DTCM_end,
-               MEM_TYPE_VECTOR_TABLE | MEM_TYPE_LOCAL, 10);
+               MEM_TYPE_LOCAL, 10);
 
   switch(line_id) {
   case 0x48373233: // STM32H723
@@ -110,8 +115,21 @@ stm32h7_init(void)
     break;
   }
 
+
+  code_itcm = mpu_add_region(NULL, 16, MPU_AP_RO);
+
+  mpu_add_region(NULL, 12, 0); // Map 0 - 4095 as no-access at all times
   *DWT_CONTROL = 1;
 
+}
+
+static atomic_t code_unprotect_counter;
+
+void
+mpu_protect_code(int on)
+{
+  int n = atomic_add_and_fetch(&code_unprotect_counter, on ? -1 : 1);
+  mpu_set_region(NULL, 16, n ? MPU_AP_RW : MPU_AP_RO, code_itcm);
 }
 
 

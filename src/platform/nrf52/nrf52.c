@@ -16,7 +16,7 @@ nrf52_init_heap(void)
   void *RAM_end = (void *)0x20000000 + ramsize * 1024;
   // SRAM1
   heap_add_mem(HEAP_START_EBSS, (long)RAM_end,
-               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 10);
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE | MEM_TYPE_CODE, 10);
 }
 
 

@@ -156,7 +156,9 @@ const char *memtypeflags =
   "LOCAL\0"
   "DMA\0"
   "NO-CACHE\0"
-  "VECTORS\0\0";
+  "VECTORS\0"
+  "CHAINLOADER\0"
+  "CODE\0\0";
 
 static error_t
 cmd_mem(cli_t *cli, int argc, char **argv)

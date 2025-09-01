@@ -6,6 +6,7 @@
 #include <mios/mios.h>
 
 #include "irq.h"
+#include "mpu.h"
 #include "cache.h"
 
 static volatile unsigned int * const ICSR    = (unsigned int *)0xe000ed04;
@@ -55,6 +56,8 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
   assert(irq < CORTEXM_IRQ_COUNT);
   int q = irq_forbid(IRQ_LEVEL_ALL);
 
+  mpu_protect_code(0);
+
   uint32_t curvecs = *VTOR;
 
   if(curvecs == (uint32_t)&vectors) {
@@ -74,6 +77,7 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
 
   dcache_op(vtable, VECTOR_COUNT * sizeof(void *), DCACHE_CLEAN);
   icache_invalidate();
+  mpu_protect_code(1);
   irq_permit(q);
 }
 
@@ -108,7 +112,8 @@ static const uint8_t irq_fpu_trampoline[] = {
 void
 irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg)
 {
-  uint32_t *p = xalloc(60, 0, MEM_TYPE_DMA);
+  mpu_protect_code(0);
+  uint32_t *p = xalloc(60, 0, MEM_TYPE_CODE);
   memcpy(p, irq_fpu_trampoline, sizeof(irq_fpu_trampoline));
   p[13] = (uint32_t)fn;
   p[14] = (uint32_t)arg;
@@ -116,12 +121,14 @@ irq_enable_fn_fpu(int irq, int level, void (*fn)(void *arg), void *arg)
   dcache_op(p, sizeof(irq_fpu_trampoline), DCACHE_CLEAN);
 
   irq_enable_fn(irq, level, (void *)p + 1);
+  mpu_protect_code(1);
 }
 
 void
 irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg)
 {
-  uint32_t *p = xalloc(16, 0, MEM_TYPE_DMA);
+  mpu_protect_code(0);
+  uint32_t *p = xalloc(16, 0, MEM_TYPE_CODE);
 
   /*
     ldr r3, [pc, #4]  // fn -> r3
@@ -143,6 +150,7 @@ irq_enable_fn_arg(int irq, int level, void (*fn)(void *arg), void *arg)
   dcache_op(p, 16, DCACHE_CLEAN);
 
   irq_enable_fn(irq, level, (void *)p + 1);
+  mpu_protect_code(1);
 }
 
 static void __attribute__((constructor(101)))

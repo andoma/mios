@@ -19,8 +19,6 @@ typedef struct cpu {
   sched_cpu_t sched;
 } cpu_t;
 
-
-
 static inline void
 cpu_fpu_enable(int on)
 {
@@ -34,7 +32,7 @@ cpu_stack_redzone(thread_t *t)
 {
 #ifdef CPU_STACK_REDZONE_SIZE
   static volatile unsigned int * const MPU_RBAR = (unsigned int *)0xe000ed9c;
-  extern uint32_t redzone_rbar_bits;
+  extern uint8_t redzone_rbar_bits;
 
   *MPU_RBAR = (intptr_t)t->t_sp_bottom | redzone_rbar_bits;
 #endif

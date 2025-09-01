@@ -41,6 +41,6 @@ stm32g0_init(void)
 
   // SRAM1
   heap_add_mem((long)SRAM1_start, (long)SRAM1_end,
-               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 10);
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE | MEM_TYPE_CODE, 10);
 
 }

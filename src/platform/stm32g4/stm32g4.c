@@ -61,7 +61,7 @@ stm32g4_init(void)
 
   void *SRAM1_end   = (void *)0x20000000 + sram1_size * 1024;
   heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end,
-               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE, 20);
+               MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE | MEM_TYPE_CODE, 20);
 
   void *SRAM2_start = SRAM1_end;
   void *SRAM2_end   = SRAM2_start + sram2_size * 1024;

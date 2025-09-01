@@ -4,7 +4,8 @@
 #include <mios/mios.h>
 #include <stdio.h>
 
-uint32_t redzone_rbar_bits;
+static uint8_t mpu_regions_used;
+uint8_t redzone_rbar_bits;
 
 static volatile uint32_t * const MPU_TYPE = (uint32_t *)0xe000ed90;
 static volatile uint32_t * const MPU_CTRL = (uint32_t *)0xe000ed94;
@@ -40,19 +41,16 @@ mpu_init(void)
   *MPU_CTRL = 5; // Enable MPU
 }
 
-int mpu_regions_used;
 
-void
-mpu_add_region(void *ptr, int size_power_of_two, uint32_t flags)
+int
+mpu_set_region(void *ptr, int size_power_of_two, uint32_t flags, int region)
 {
-  int r = mpu_regions_used++;
-
   if(size_power_of_two < 5)
     panic("mpu sizebits %d too small", size_power_of_two);
 
   size_power_of_two--;
 
-  uint32_t rbar = (intptr_t)ptr | 0x10 | r;
+  uint32_t rbar = (intptr_t)ptr | 0x10 | region;
   uint32_t rasr =
     flags |
     (size_power_of_two << 1) | // size
@@ -60,11 +58,21 @@ mpu_add_region(void *ptr, int size_power_of_two, uint32_t flags)
 
   *MPU_RBAR = rbar;
   *MPU_RASR = rasr;
+  return region;
 }
 
 
-void
-cpu_unmap_null(int size_power_of_two)
+int
+mpu_add_region(void *ptr, int size_power_of_two, uint32_t flags)
 {
-  mpu_add_region(NULL, size_power_of_two, 1 << 28);
+  int r = mpu_regions_used++;
+  return mpu_set_region(ptr, size_power_of_two, flags, r);
+}
+
+
+__attribute__((weak))
+void
+mpu_protect_code(int on)
+{
+
 }
