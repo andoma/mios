@@ -23,7 +23,7 @@ typedef struct sc_usb_pkt_preamble {
   uint8_t channels;
   uint16_t depth;
   uint32_t nominal_frequency;
-  uint16_t trig_offset;
+  int16_t trig_offset;
 } sc_usb_pkt_preamble_t;
 
 
@@ -37,7 +37,8 @@ typedef struct sc_usb_pkt_channel {
 
 struct sigcapture {
   int16_t *storage;
-  uint32_t wrptr;
+  uint16_t wrptr;
+  uint16_t depth;
   sigcapture_state_t state;
   size_t trig_countdown;
 
@@ -46,11 +47,10 @@ struct sigcapture {
   uint32_t softirq;
   struct usb_interface *usb_iface;
 
-  size_t depth;
   size_t channels;
 
   uint32_t send_index;
-
+  uint32_t xfer_rows;
   sc_usb_pkt_preamble_t pkt_preamble;
   int16_t pkt_data[32];
 
@@ -74,9 +74,12 @@ sigcapture_wrptr(sigcapture_t *sc)
     }
   }
 
+  uint16_t depth = sc->depth;
+  uint16_t mask = depth - 1;
 
-  int idx = sc->wrptr & (sc->depth - 1);
-  sc->wrptr++;
+  int idx = sc->wrptr & mask;
+  // Keep track of if we have wrapped with a single bit
+  sc->wrptr = (sc->wrptr + 1) | (depth & sc->wrptr);
   return sc->storage + idx * sc->channels;
 }
 
@@ -103,6 +106,21 @@ sigcapture_send(sigcapture_t *sc)
   const void *data;
   size_t len;
   if(unlikely(sc->send_index == 0)) {
+
+    if(sc->wrptr & sc->depth) {
+      // Wrapped
+      sc->xfer_rows = sc->depth;
+
+    } else {
+      // Not full fill
+
+      sc->pkt_preamble.trig_offset -= (sc->depth - sc->wrptr);
+
+      sc->xfer_rows = sc->wrptr;
+      sc->wrptr = 0;
+    }
+    sc->pkt_preamble.depth = sc->xfer_rows;
+
     data = &sc->pkt_preamble;
     len = sizeof(sc->pkt_preamble);
 
@@ -136,7 +154,7 @@ sigcapture_send(sigcapture_t *sc)
       column++;
     }
 
-    if(column >= sc->depth) {
+    if(column >= sc->xfer_rows) {
       sc->send_index = 1;
     } else {
       sc->send_index += sc->columns_per_xfer;
@@ -151,11 +169,19 @@ sigcapture_send(sigcapture_t *sc)
 
 
 static void
+sigcapture_reset(sigcapture_t *sc)
+{
+  sc->state = STATE_RUN;
+  sc->wrptr = 0;
+}
+
+
+static void
 sigcapture_txco(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   sigcapture_t *sc = ue->ue_iface_aux;
   if(sc->send_index == -1) {
-    sc->state = STATE_RUN;
+    sigcapture_reset(sc);
     return;
   }
   sigcapture_send(sc);
@@ -165,7 +191,7 @@ static void
 sigcapture_tx_reset(device_t *d, usb_ep_t *ue)
 {
   sigcapture_t *sc = ue->ue_iface_aux;
-  sc->state = STATE_RUN;
+  sigcapture_reset(sc);
 }
 
 
@@ -182,7 +208,7 @@ sigcapture_irq(void *arg)
     sigcapture_send(sc);
   } else {
     // USB-interface is not active, just start over
-    sc->state = STATE_RUN;
+    sigcapture_reset(sc);
   }
   irq_permit(q);
 

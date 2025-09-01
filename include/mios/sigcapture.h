@@ -13,6 +13,7 @@ typedef enum {
   SIGCAPTURE_UNIT_VOLTAGE,
   SIGCAPTURE_UNIT_CURRENT,
   SIGCAPTURE_UNIT_TEMPERATURE,
+  SIGCAPTURE_UNIT_DIGITAL,
 } sigcapture_unit_t;
 
 typedef struct sigcapture_desc {
