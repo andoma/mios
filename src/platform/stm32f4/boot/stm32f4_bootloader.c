@@ -6,18 +6,36 @@
 
 #define BLOCKSIZE 32
 
-#ifndef GPIO_MODER_PA
-#define GPIO_MODER_PA 0
+#if CONSOLE_USART_INSTANCE == 6
+
+#define CONSOLE_USART USART6_BASE
+#define CONSOLE_CLK   CLK_USART6
+#define CONSOLE_AF    8
+
+#else
+#error Bootloader: Unsupported USART instance
 #endif
-#ifndef GPIO_MODER_PB
-#define GPIO_MODER_PB 0
+
+
+#if SPIFLASH_SPI_INSTANCE == 1
+
+#define SPIFLASH_BUS  SPI1_BASE
+#define SPIFLASH_CLK  CLK_SPI1
+#define SPIFLASH_AF   5
+
+#else
+#error Bootloader: Unsupported SPI instance
 #endif
-#ifndef GPIO_MODER_PC
-#define GPIO_MODER_PC 0
-#endif
-#ifndef GPIO_MODER_PD
-#define GPIO_MODER_PD 0
-#endif
+
+
+//======================================================================
+// Watchdog
+//======================================================================
+
+#define IWDG_KR  0x40003000
+#define IWDG_PR  0x40003004
+#define IWDG_RLR 0x40003008
+#define IWDG_SR  0x4000300c
 
 //======================================================================
 // USART
@@ -50,8 +68,9 @@ __attribute__((section("bltext"),noinline))
 static void
 console_print(char c)
 {
-  while(!(reg_rd(USART_CONSOLE + USART_SR) & (1 << 7))) {}
-  reg_wr(USART_CONSOLE + USART_TDR, c);
+  while(!(reg_rd(CONSOLE_USART + USART_SR) & (1 << 7))) {}
+  if(c)
+    reg_wr(CONSOLE_USART + USART_TDR, c);
 }
 
 __attribute__((section("bltext"),noinline,unused))
@@ -106,14 +125,102 @@ console_print_string(const char *str)
 #define GPIO_AFRL(x)    (GPIO_PORT_ADDR(x) + 0x20)
 #define GPIO_AFRH(x)    (GPIO_PORT_ADDR(x) + 0x24)
 
+#define GPIO(PORT, BIT) (((PORT) << 4) | (BIT))
 
-#define GPIO_BITPAIR(idx, mode) ((mode) << (idx * 2))
-#define GPIO_BITQUAD(idx, mode) ((mode) << (idx * 4))
+#define GPIO_PA(x)  GPIO(0, x)
+#define GPIO_PB(x)  GPIO(1, x)
+#define GPIO_PC(x)  GPIO(2, x)
+#define GPIO_PD(x)  GPIO(3, x)
+#define GPIO_PE(x)  GPIO(4, x)
+#define GPIO_PF(x)  GPIO(5, x)
+#define GPIO_PG(x)  GPIO(6, x)
+#define GPIO_PH(x)  GPIO(7, x)
+#define GPIO_PI(x)  GPIO(8, x)
+#define GPIO_PJ(x)  GPIO(9, x)
+#define GPIO_PK(x)  GPIO(10, x)
 
-#define PA 0
-#define PB 1
-#define PC 2
-#define PD 3
+typedef enum {
+  GPIO_PULL_NONE = 0,
+  GPIO_PULL_UP = 1,
+  GPIO_PULL_DOWN = 2,
+} gpio_pull_t;
+
+typedef enum {
+  GPIO_PUSH_PULL = 0,
+  GPIO_OPEN_DRAIN = 1,
+} gpio_output_type_t;
+
+
+typedef enum {
+  GPIO_SPEED_LOW       = 0,
+  GPIO_SPEED_MID       = 1,
+  GPIO_SPEED_HIGH      = 2,
+  GPIO_SPEED_VERY_HIGH = 3,
+} gpio_output_speed_t;
+
+typedef enum {
+  GPIO_FALLING_EDGE    = 0x1,
+  GPIO_RISING_EDGE     = 0x2,
+  GPIO_BOTH_EDGES      = 0x3,
+} gpio_edge_t;
+
+typedef uint8_t gpio_t;
+
+
+static int __attribute__((section("bltext"),noinline,unused,warn_unused_result))
+gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
+             gpio_output_speed_t speed, gpio_pull_t pull)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  clk_enable(CLK_GPIO(port));
+
+  reg_set_bits(GPIO_OTYPER(port),  bit, 1, type);
+  reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);
+
+  if(bit < 8) {
+    reg_set_bits(GPIO_AFRL(port), bit * 4, 4, af);
+  } else {
+    reg_set_bits(GPIO_AFRH(port), (bit - 8) * 4, 4, af);
+  }
+
+  reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
+
+  reg_set_bits(GPIO_MODER(port), bit * 2, 2, 2);
+  return (1 << port);
+}
+
+
+static int __attribute__((section("bltext"),noinline,unused,warn_unused_result))
+gpio_conf_output(gpio_t gpio,
+                 gpio_output_type_t type,
+                 gpio_output_speed_t speed,
+                 gpio_pull_t pull)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  clk_enable(CLK_GPIO(port));
+
+  reg_set_bits(GPIO_OTYPER(port),  bit, 1, type);
+  reg_set_bits(GPIO_OSPEEDR(port), bit * 2, 2, speed);
+  reg_set_bits(GPIO_PUPDR(port), bit * 2, 2, pull);
+  reg_set_bits(GPIO_MODER(port), bit * 2, 2, 1);
+  return (1 << port);
+}
+
+
+static void __attribute__((section("bltext"),noinline,unused))
+gpio_set_output(gpio_t gpio, int on)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+
+  reg_set(GPIO_BSRR(port), 1 << (bit + !on * 16));
+}
+
+
 
 //======================================================================
 // SPI
@@ -126,102 +233,6 @@ console_print_string(const char *str)
 #define SPI_CR2    0x04
 #define SPI_SR     0x08
 #define SPI_DR     0x0c
-
-//======================================================================
-// REGISTER INIT
-//======================================================================
-
-__attribute__((section("bldata")))
-static const uint32_t reginit[] = {
-
-  RCC_APB1ENR,
-#if USART_CONSOLE == USART3_BASE
-  (1 << 18) |
-#endif
-  0,
-
-  RCC_APB2ENR,
-#if SPIFLASH == SPI1_BASE
-  (1 << 12) |
-#endif
-  0,
-
-  RCC_AHB1ENR,      (1 << 20) | 0xf,         // CLK_GPIO{A,B,C,D}
-
-  // -----------------------------------------------------
-  // Console
-  // -----------------------------------------------------
-
-  USART_CONSOLE + USART_BRR, 139, // 115200 BAUD
-  USART_CONSOLE + USART_CR1, (USART_CR1_UE | USART_CR1_TE), // Enable UART TX
-
-  // -----------------------------------------------------
-  // GPIO PORT A
-  // -----------------------------------------------------
-
-  GPIO_PUPDR(PA),
-#ifdef USART1_PA9_PA10
-  GPIO_BITPAIR(9, 1) | GPIO_BITPAIR(10, 1) |
-#endif
-  0x64000000,  // SWDIO SWCLK
-
-  GPIO_AFRH(PA),
-#ifdef USART1_PA9_PA10
-  GPIO_BITQUAD(1, 7) | GPIO_BITQUAD(2, 7) |
-#endif
-  0,
-
-  GPIO_MODER(PA),
-#ifdef USART1_PA9_PA10
-  GPIO_BITPAIR(9, 2) | GPIO_BITPAIR(10, 2) |
-#endif
-  0xa8000000, // SWDIO SWCLK
-
-  // -----------------------------------------------------
-  // GPIO PORT B
-  // -----------------------------------------------------
-
-  GPIO_AFRL(PB),
-#ifdef SPI1_PB3_PB4_PB5
-  GPIO_BITQUAD(3, 5) | GPIO_BITQUAD(4, 5) | GPIO_BITQUAD(5, 5) |
-#endif
-  0,
-
-  GPIO_MODER(PB),
-#ifdef SPI1_PB3_PB4_PB5
-  GPIO_BITPAIR(3, 2) | GPIO_BITPAIR(4, 2) | GPIO_BITPAIR(5, 2) |
-#endif
-  0,
-
-  // -----------------------------------------------------
-  // GPIO PORT C
-  // -----------------------------------------------------
-
-  GPIO_MODER(PC),
-#ifdef USART3_PC10_PC11
-  GPIO_BITPAIR(10, 2) | GPIO_BITPAIR(11, 2) |
-#endif
-  0,
-
-  GPIO_AFRH(PC),
-#ifdef USART3_PC10_PC11
-  GPIO_BITQUAD(2, 7) | GPIO_BITQUAD(3, 7) |
-#endif
-  0,
-
-  // -----------------------------------------------------
-  // GPIO PORT D
-  // -----------------------------------------------------
-  GPIO_MODER(PD),
-  GPIO_MODER_PD,
-
-  // -----------------------------------------------------
-  // SPI
-  // -----------------------------------------------------
-
-  SPIFLASH + SPI_CR1, (1 << 9) | (1 << 8) | (1 << 6) | (1 << 2) | (1 << 3),
-  SPIFLASH + SPI_CR2, (1 << 12),
-};
 
 // -----------------------------------------------------
 // CRC32
@@ -313,7 +324,7 @@ flash_erase_sector(int sector)
   reg_wr(FLASH_CR, 0x2 | (sector << 3));
   reg_set_bit(FLASH_CR, 16);
   while(reg_rd(FLASH_SR) & (1 << 16)) {
-    //    reg_wr(IWDG_KR, 0xAAAA);
+    reg_wr(IWDG_KR, 0xAAAA);
   }
 }
 
@@ -332,6 +343,7 @@ flash_write(uint32_t addr, const void *src)
   }
   while(reg_rd(FLASH_SR) & (1 << 16)) {
   }
+  reg_wr(IWDG_KR, 0xAAAA);
 }
 
 
@@ -343,28 +355,40 @@ __attribute__((section("bltext"),noinline))
 static uint8_t
 spi_txrx(uint8_t out)
 {
-  reg_wr8(SPIFLASH + SPI_DR, out);
+  reg_wr8(SPIFLASH_BUS + SPI_DR, out);
   while(1) {
-    uint32_t sr = reg_rd(SPIFLASH + SPI_SR);
+    uint32_t sr = reg_rd(SPIFLASH_BUS + SPI_SR);
     if((sr & 3) == 3)
       break;
+    reg_wr(IWDG_KR, 0xAAAA);
   }
-  return reg_rd(SPIFLASH + SPI_DR);
+  return reg_rd(SPIFLASH_BUS + SPI_DR);
 }
+
+
+__attribute__((section("bltext"),noinline))
+static void
+spi_init(void)
+{
+  reg_wr(SPIFLASH_BUS + SPI_CR1,
+        (1 << 9) | (1 << 8) | (1 << 6) | (1 << 2) | (1 << 3));
+  reg_wr(SPIFLASH_BUS + SPI_CR2,(1 << 12));
+}
+
 
 
 __attribute__((section("bltext"),noinline))
 static void
 spiflash_enable(void)
 {
-  reg_wr(GPIO_BSRR(SPIFLASHCS_PORT), (1 << (16 + SPIFLASHCS_BIT)));
+  gpio_set_output(SPIFLASH_CS, 0);
 }
 
 __attribute__((section("bltext"),noinline))
 static void
 spiflash_disable(void)
 {
-  reg_wr(GPIO_BSRR(SPIFLASHCS_PORT), (1 << SPIFLASHCS_BIT));
+  gpio_set_output(SPIFLASH_CS, 1);
 }
 
 
@@ -448,7 +472,6 @@ spiflash_erase0(void)
 }
 
 
-
 //======================================================================
 // Main
 //======================================================================
@@ -471,6 +494,12 @@ static const char valid_image[] = "Valid image found, flashing: ";
 __attribute__((section("bldata")))
 static const char successful[] = "Successful";
 
+__attribute__((section("bldata")))
+static const char fail[] = "Write failed, rebooting";
+
+__attribute__((section("bldata")))
+static const char bad_image_crc[] = "Image CRC verification failed: ";
+
 static void  __attribute__((section("bltext"),noinline))
 reboot(void)
 {
@@ -482,10 +511,41 @@ reboot(void)
 
 void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
 {
-  for(size_t i = 0; i < sizeof(reginit) / sizeof(reginit[0]); i += 2) {
-    reg_wr(reginit[i + 0], reginit[i + 1]);
-  }
+  uint32_t gpioblocks = 0;
+
+  reg_wr(IWDG_KR, 0x5555);
+  reg_wr(IWDG_RLR, 256); // 2 seconds
+  reg_wr(IWDG_PR, 6);
+  reg_wr(IWDG_KR, 0xAAAA);
+  reg_wr(IWDG_KR, 0xCCCC);
+
+  clk_enable(SPIFLASH_CLK);
+
+  gpioblocks |=
+    gpio_conf_af(SPIFLASH_SCK, SPIFLASH_AF,
+                 GPIO_PUSH_PULL, GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
+  gpioblocks |=
+    gpio_conf_af(SPIFLASH_MISO, SPIFLASH_AF,
+                 GPIO_OPEN_DRAIN, GPIO_SPEED_VERY_HIGH, GPIO_PULL_UP);
+  gpioblocks |=
+    gpio_conf_af(SPIFLASH_MOSI, SPIFLASH_AF,
+                 GPIO_PUSH_PULL, GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
+
+  gpioblocks |=
+    gpio_conf_output(SPIFLASH_CS,
+                     GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
   spiflash_disable();
+
+  spi_init();
+
+  clk_enable(CONSOLE_CLK);
+  gpioblocks |=
+    gpio_conf_af(CONSOLE_TX, CONSOLE_AF,
+                 GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+
+  reg_wr(CONSOLE_USART + USART_BRR, 139); // 115200
+  reg_wr(CONSOLE_USART + USART_CR1, (USART_CR1_UE | USART_CR1_TE));
 
   console_print_string(welcomestr);
 
@@ -533,16 +593,38 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
       }
 
       flash_lock();
-      crc = ~bl_crc32(0, (void*)(intptr_t)16384, hdr.size);
+      crc = ~bl_crc32(0, (void*)(intptr_t)0x8004000, hdr.size);
       if(crc == hdr.image_crc) {
         console_print_string(successful);
         spiflash_erase0();
       } else {
-        while(1) {
-          asm volatile("nop");
-        }
+        console_print_string(fail);
+        console_print(0);
         reboot();
       }
+    } else {
+      console_print_string(bad_image_crc);
+      console_print_u32(crc);
+      console_print('|');
+      console_print_u32(hdr.image_crc);
+    }
+  }
+
+  console_print('\n');
+  console_print('\n');
+  console_print(0); // Wait for shift register
+
+  // Restore peripherals before passing control to mios
+  reset_peripheral(SPIFLASH_CLK);
+  clk_disable(SPIFLASH_CLK);
+
+  reset_peripheral(CONSOLE_CLK);
+  clk_disable(CONSOLE_CLK);
+
+  for(int i = 0; i < 32; i++) {
+    if((1 << i) & gpioblocks) {
+      reset_peripheral(CLK_GPIO(i));
+      clk_disable(CLK_GPIO(i));
     }
   }
 
