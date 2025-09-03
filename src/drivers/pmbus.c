@@ -102,6 +102,17 @@ pmbus_write_8(pmbus_t *p, uint8_t reg, uint8_t value)
   return pmbus_i2c(p, wrbuf, sizeof(wrbuf), NULL, 0);
 }
 
+error_t
+pmbus_write_16(pmbus_t *p, uint8_t reg, uint16_t value)
+{
+  uint8_t wrbuf[4] = {reg, value, value >> 8};
+
+  wrbuf[3] = crc8(crc8(0, (const uint8_t[]){p->addr << 1}, 1),
+                  wrbuf, 3);
+
+  return pmbus_i2c(p, wrbuf, sizeof(wrbuf), NULL, 0);
+}
+
 
 pmbus_t *
 pmbus_create(struct i2c *bus, uint8_t address, int com_interval_us)

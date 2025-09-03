@@ -19,4 +19,6 @@ int pmbus_read_16(pmbus_t *pmbus, uint8_t reg);
 
 error_t pmbus_write_8(pmbus_t *pmbus, uint8_t reg, uint8_t value);
 
+error_t pmbus_write_16(pmbus_t *pmbus, uint8_t reg, uint16_t value);
+
 float pmbus_decode_linear11(int16_t value);
