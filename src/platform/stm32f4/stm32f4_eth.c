@@ -492,7 +492,7 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   clk_enable(CLK_ETHTX);
   clk_enable(CLK_ETHRX);
 
-  reset_peripheral(RST_ETH);
+  reset_peripheral(CLK_ETH);
 
   se->se_phyaddr = phy_addr;
 

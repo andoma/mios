@@ -105,14 +105,6 @@ stm32f4_init_pll(int hse_freq)
 #endif
 
 void
-reset_peripheral(uint16_t id)
-{
-  reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
-  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
-}
-
-
-void
 stm32f4_clk_deinit(void)
 {
   // Switch to HSI

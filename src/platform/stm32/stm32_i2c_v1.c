@@ -42,7 +42,6 @@ typedef struct stm32_i2c {
   uint32_t freq_mhz;
 
   uint16_t clkid;
-  uint16_t rstid;
   uint8_t addr;
 
 } stm32_i2c_t;
@@ -323,7 +322,7 @@ i2c_irq_er(stm32_i2c_t *i2c)
 static void
 i2c_initialize(stm32_i2c_t *i2c)
 {
-  reset_peripheral(i2c->rstid);
+  reset_peripheral(i2c->clkid);
   udelay(100);
   reg_wr(i2c->base_addr + I2C_CR1, 0);
   udelay(1000);
@@ -400,11 +399,10 @@ i2c_rwv(struct i2c *d, uint8_t addr,
 
 
 static stm32_i2c_t *
-stm32_i2c_create(uint32_t base_addr, uint16_t clkid, uint16_t rstid)
+stm32_i2c_create(uint32_t base_addr, uint16_t clkid)
 {
   stm32_i2c_t *i2c = malloc(sizeof(stm32_i2c_t));
   i2c->clkid = clkid;
-  i2c->rstid = rstid;
   i2c->base_addr = base_addr;
   i2c->freq_mhz = clk_get_freq(clkid) / 1000000;
   i2c->i2c.rwv = i2c_rwv;

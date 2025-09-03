@@ -71,12 +71,9 @@
 
 #define CLK_DAC    CLK_ID(CLK_APB1, 29)
 
-#define RST_I2C(x) CLK_ID(RST_APB1, 21 + (x))
-
 #define CLK_ETHRX CLK_ID(CLK_AHB1, 27)
 #define CLK_ETHTX CLK_ID(CLK_AHB1, 26)
 #define CLK_ETH   CLK_ID(CLK_AHB1, 25)
-#define RST_ETH   CLK_ID(RST_AHB1, 25)
 
 #define CLK_DMA1  CLK_ID(CLK_AHB1, 21)
 #define CLK_DMA2  CLK_ID(CLK_AHB1, 22)
@@ -103,23 +100,33 @@
 #define CLK_RNG          CLK_ID(CLK_AHB2, 6)
 
 #define CLK_OTG        CLK_ID(CLK_AHB2, 7)
-#define RST_OTG        CLK_ID(RST_AHB2, 7)
 
+__attribute__((always_inline))
+static inline void
+reset_peripheral(uint16_t id)
+{
+  id -= 0x2000;  // CLK and RST register are the same, just offseted
+  reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
+  asm volatile("dmb");
+  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
+  asm volatile("dmb");
+}
 
-void reset_peripheral(uint16_t id);
-
+__attribute__((always_inline))
 static inline void
 clk_enable(uint16_t id)
 {
   reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
 
+__attribute__((always_inline))
 static inline int
 clk_is_enabled(uint16_t id)
 {
   return reg_get_bit(RCC_BASE + (id >> 8), id & 0xff);
 }
 
+__attribute__((always_inline))
 static inline void
 clk_disable(uint16_t id)
 {

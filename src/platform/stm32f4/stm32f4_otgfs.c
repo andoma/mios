@@ -19,7 +19,7 @@ stm32f4_otgfs_create(uint16_t vid, uint16_t pid,
                GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
 
   clk_enable(CLK_OTG);
-  reset_peripheral(RST_OTG);
+  reset_peripheral(CLK_OTG);
 
   stm32_otg_create(vid, pid, manfacturer_string, product_string, q, 67);
 }
