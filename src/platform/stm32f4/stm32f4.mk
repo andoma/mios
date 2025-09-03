@@ -33,6 +33,7 @@ SRCS-${ENABLE_NET_MBUS} += \
 ${MOS}/platform/stm32f4/%.o : CFLAGS += ${NOFPU}
 
 SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
+	${P}/stm32f4_ota.c \
 	${P}/boot/stm32f4_bootloader.c \
 	${P}/boot/isr.s \
 
