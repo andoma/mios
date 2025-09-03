@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <malloc.h>
+#include <string.h>
 
 #include <sys/uio.h>
 #include <mios/io.h>
 #include <mios/task.h>
 
 #include "stm32_dma.h"
-
-#include <stdlib.h>
 
 #include "irq.h"
 
@@ -34,14 +35,34 @@ typedef struct stm32_spi {
 static uint32_t tx_zero;
 static uint32_t rx_void;
 
+static int
+can_dma(const void *p)
+{
+  return (intptr_t)p < 0x10000000 || (intptr_t)p >= 0x20000000;
+}
+
+
 static error_t
 spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
         uint32_t config)
 {
+  void *tx_bounce = NULL;
+  void *rx_bounce = NULL;
+
   if(tx == NULL) {
     tx = (void *)&tx_zero;
     stm32_dma_config_set_reg(spi->tx_dma, spi->tx_dma_nul_cfg);
   } else {
+
+    if(!can_dma(tx)) {
+      tx_bounce = xalloc(len, 0, MEM_TYPE_DMA | MEM_MAY_FAIL);
+      if(tx_bounce == NULL)
+        return ERR_NO_MEMORY;
+
+      memcpy(tx_bounce, tx, len);
+      tx = tx_bounce;
+    }
+
     stm32_dma_config_set_reg(spi->tx_dma, spi->tx_dma_buf_cfg);
   }
 
@@ -50,12 +71,20 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
     stm32_dma_config_set_reg(spi->rx_dma, spi->rx_dma_nul_cfg);
   } else {
     stm32_dma_config_set_reg(spi->rx_dma, spi->rx_dma_buf_cfg);
+
+    if(!can_dma(rx)) {
+      rx_bounce = xalloc(len, 0, MEM_TYPE_DMA | MEM_MAY_FAIL);
+      if(rx_bounce == NULL) {
+        free(tx_bounce);
+        return ERR_NO_MEMORY;
+      }
+    }
   }
 
   stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
   stm32_dma_set_nitems(spi->tx_dma, len);
 
-  stm32_dma_set_mem0(spi->rx_dma, rx);
+  stm32_dma_set_mem0(spi->rx_dma, rx_bounce ?: rx);
   stm32_dma_set_nitems(spi->rx_dma, len);
 
   int q = irq_forbid(IRQ_LEVEL_SCHED);
@@ -80,6 +109,11 @@ spi_dma(struct stm32_spi *spi, const uint8_t *tx, uint8_t *rx, size_t len,
 
   reg_wr(spi->base_addr + SPI_CR2, CR2_VALUE);
 
+  free(tx_bounce);
+  if(rx_bounce) {
+    memcpy(rx, rx_bounce, len);
+    free(rx_bounce);
+  }
   return err;
 }
 
