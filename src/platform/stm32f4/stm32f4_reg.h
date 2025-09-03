@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+__attribute__((always_inline))
 static inline void
 reg_wr(uint32_t addr, uint32_t value)
 {
@@ -9,6 +10,7 @@ reg_wr(uint32_t addr, uint32_t value)
   *ptr = value;
 }
 
+__attribute__((always_inline))
 static inline void
 reg_wr8(uint32_t addr, uint8_t value)
 {
@@ -16,6 +18,7 @@ reg_wr8(uint32_t addr, uint8_t value)
   *ptr = value;
 }
 
+__attribute__((always_inline))
 static inline uint32_t
 reg_rd(uint32_t addr)
 {
@@ -23,6 +26,7 @@ reg_rd(uint32_t addr)
   return *ptr;
 }
 
+__attribute__((always_inline))
 static inline void
 reg_set(uint32_t addr, uint32_t mask)
 {
@@ -30,6 +34,7 @@ reg_set(uint32_t addr, uint32_t mask)
   *ptr |= mask;
 }
 
+__attribute__((always_inline))
 static inline int
 reg_get_bit(uint32_t addr, int bit)
 {
@@ -37,6 +42,7 @@ reg_get_bit(uint32_t addr, int bit)
 }
 
 
+__attribute__((always_inline))
 static inline void
 reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
 {
@@ -47,6 +53,7 @@ reg_set_bits(uint32_t addr, uint32_t shift, uint32_t length, uint32_t bits)
   *ptr = (*ptr & ~mask) | ((bits << shift) & mask);
 }
 
+__attribute__((always_inline))
 static inline uint32_t
 pr_bb(uint32_t addr, int bit)
 {
@@ -73,6 +80,7 @@ pr_bb(uint32_t addr, int bit)
   }                                                             \
 } while(0)
 
+__attribute__((always_inline))
 static inline void
 reg_or(uint32_t addr, uint32_t bits)
 {
