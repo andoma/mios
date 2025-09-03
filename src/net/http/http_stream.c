@@ -3,7 +3,7 @@
 #include <mios/stream.h>
 #include <mios/task.h>
 #include <mios/mios.h>
-#include <mios/pushpull.h>
+#include <mios/eventlog.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -22,7 +22,6 @@ typedef struct {
 
   error_t hc_error;
   uint16_t hc_flags;
-  uint8_t hc_closed;
 
   void *hc_opaque;
   const http_header_callback_t *hc_header_callbacks;
@@ -70,6 +69,10 @@ http_client_body(http_parser *p, const char *at, size_t length)
   if(hc->hc_error < 0)
     return 0;
   ssize_t r = stream_write(hc->hc_stream, at, length, 0);
+  if(r == 0) {
+    hc->hc_error = 0;
+    return 0;
+  }
   if(r < 0)
     hc->hc_error = r;
   return 0;
