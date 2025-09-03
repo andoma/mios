@@ -71,7 +71,7 @@ http_client_body(http_parser *p, const char *at, size_t length)
   ssize_t r = stream_write(hc->hc_stream, at, length, 0);
   if(r == 0) {
     hc->hc_error = 0;
-    return 0;
+    return 1;
   }
   if(r < 0)
     hc->hc_error = r;
@@ -164,7 +164,8 @@ http_get(const char *url, stream_t *output, uint16_t flags,
 
     int r = http_parser_execute(&hp, &client_parser, buf, bytes);
     if(r < 0) {
-      hc->hc_error = ERR_BAD_STATE;
+      if(hc->hc_error == 1)
+        hc->hc_error = ERR_BAD_STATE;
       break;
     }
 
