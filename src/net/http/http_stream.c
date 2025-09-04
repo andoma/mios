@@ -135,8 +135,7 @@ http_get(const char *url, stream_t *output, uint16_t flags,
     return ERR_NO_MEMORY;
   }
 
-  int port = up.field_set & UF_PORT ? up.port : 80;
-
+  int port = up.field_set & (1 << UF_PORT) ? up.port : 80;
   uint32_t addr = inet_addr(url + up.field_data[UF_HOST].off);
   tcp_connect(sk, addr, port);
 
