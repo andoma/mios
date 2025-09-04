@@ -3,6 +3,7 @@
 #include <mios/stream.h>
 #include <mios/error.h>
 #include <mios/block.h>
+#include <mios/eventlog.h>
 
 #include <sys/param.h>
 
@@ -13,8 +14,6 @@
 #include <stdlib.h>
 
 #include "crc32.h"
-
-#include <stdio.h> // DONT COMMIT
 
 typedef struct {
   uint8_t magic[4];
@@ -44,8 +43,9 @@ bto_write(struct stream *st, const void *data, size_t len, int flags)
 
     // Flush
     bto->hdr.image_crc = ~bto->hdr.image_crc;
-    printf("Final CRC = %x\n", bto->hdr.image_crc);
-    printf("Size=%d\n", bto->hdr.size);
+
+    evlog(LOG_INFO, "OTA Done Size:%d (CRC: 0x%08x)",
+          bto->hdr.size, bto->hdr.image_crc);
 
     err = bto->output->erase(bto->output, 0);
     if(err)
@@ -56,6 +56,9 @@ bto_write(struct stream *st, const void *data, size_t len, int flags)
     err = bto->output->write(bto->output, 0, 0, &bto->hdr, sizeof(otahdr_t));
     if(err)
       return err;
+
+    bto->output->ctrl(bto->output, BLOCK_SUSPEND);
+
     return 0;
   }
 
@@ -63,6 +66,7 @@ bto_write(struct stream *st, const void *data, size_t len, int flags)
 
     if(bto->offset == 0) {
       // New block, erase
+      evlog(LOG_DEBUG, "OTA Erasing block %d", bto->block);
       err = bto->output->erase(bto->output, bto->block);
       if(err)
         return err;

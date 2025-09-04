@@ -1,11 +1,10 @@
 #pragma once
 
+#include <mios/error.h>
 #include <stdint.h>
 
 struct stream;
 struct block_iface;
-
-struct stream *bin_to_ota(struct block_iface *output, uint32_t block_offset);
 
 /*
  * Prepares a SPI flash for OTA by partitioning it into two partitions
@@ -27,4 +26,20 @@ void ota_partition_spiflash(struct block_iface *flash);
  *
  */
 struct stream *ota_get_stream(void);
+
+
+/*
+ * Optionally implemented by application to prohibit upgrades
+ * Checked just before starting. Return a reasonable error code
+ * to prohibit upgrade from starting (Can be used to avoid rebooting
+ * if BOOT0 is held high on STM32, etc)
+ */
+error_t ota_prohibit_upgrade(void);
+
+
+/*
+ * Write out a binary stream to spiflash and generate upgrade headers, etc
+ * Used by ota_get_stream()
+ */
+struct stream *bin_to_ota(struct block_iface *output, uint32_t block_offset);
 

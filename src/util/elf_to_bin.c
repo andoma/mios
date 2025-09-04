@@ -2,6 +2,7 @@
 
 #include <mios/stream.h>
 #include <mios/error.h>
+#include <mios/eventlog.h>
 
 #include <sys/param.h>
 
@@ -153,6 +154,14 @@ etb_consume_partial(elf_to_bin_t *etb, const void *data, size_t len)
   if(etb->ipos < sizeof(elf32hdr_t)) {
     const size_t chunk = MIN(len, sizeof(elf32hdr_t) - etb->ipos);
     memcpy(((void *)&etb->hdr) + etb->ipos, data, chunk);
+    if(etb->ipos + chunk == sizeof(elf32hdr_t)) {
+
+      if(etb->hdr.magic != 0x464c457f || etb->hdr.type != 2 ||
+         etb->hdr.instruction_set != 40) {
+        evlog(LOG_ERR, "Not an ARM ELF executable");
+        return ERR_MALFORMED;
+      }
+    }
     return chunk;
   }
 
