@@ -61,6 +61,7 @@ struct vllp {
   uint32_t flags;
 
   uint32_t crc_IV;
+  uint32_t channel_iv_cnt;
 
   uint16_t available_channel_ids;
   uint16_t remote_flow_status;
@@ -87,7 +88,7 @@ is_server(vllp_t *v)
   return v->open_channel != NULL;
 }
 
-#define VLLP_VERSION 1
+#define VLLP_VERSION 2
 
 #define VLLP_SYN   0x0f
 
@@ -96,8 +97,7 @@ is_server(vllp_t *v)
 #define VLLP_HDR_F 0x20
 #define VLLP_HDR_L 0x10
 
-#define VLLP_CMC_OPCODE_OPEN_WITH_CRC32   0
-#define VLLP_CMC_OPCODE_OPEN_NO_CRC32     1
+#define VLLP_CMC_OPCODE_OPEN              0
 #define VLLP_CMC_OPCODE_OPEN_RESPONSE     2
 #define VLLP_CMC_OPCODE_CLOSE             3
 
@@ -129,6 +129,9 @@ struct vllp_channel {
   void (*rx)(void *opaque, const void *data, size_t length);
   void (*eof)(void *opaque, int error_code);
   void *opaque;
+
+  uint32_t tx_crc_IV;
+  uint32_t rx_crc_IV;
 
   char *rxbuf;
   size_t rxlen;
@@ -316,15 +319,21 @@ vllp_disconnect(vllp_t *v, int error)
 
 
 static void
-vllp_generate_crc(vllp_t *v, uint8_t *pkt, size_t len)
+vllp_generate_crc(uint32_t iv, uint8_t *pkt, size_t len)
 {
-  uint32_t crc = ~vllp_crc32(v->crc_IV, pkt, len);
+  uint32_t crc = ~vllp_crc32(iv, pkt, len);
   pkt[len + 0] = crc;
   pkt[len + 1] = crc >> 8;
   pkt[len + 2] = crc >> 16;
   pkt[len + 3] = crc >> 24;
 }
 
+static uint32_t
+vllp_gen_channel_crc(vllp_t *v)
+{
+  v->channel_iv_cnt++;
+  return vllp_crc32(v->crc_IV, &v->channel_iv_cnt, sizeof(v->channel_iv_cnt));
+}
 
 
 static void
@@ -334,8 +343,14 @@ vllp_send_syn(vllp_t *v)
   if(getrandom(&v->crc_IV, sizeof(v->crc_IV), 0) != sizeof(v->crc_IV))
     return;
 #else
-  v->crc_IV = rand() ^ time(NULL);
+  v->crc_IV_ = rand() ^ time(NULL);
 #endif
+
+  v->channel_iv_cnt = 0;
+  uint32_t cmc_iv = vllp_gen_channel_crc(v);
+  v->cmc->tx_crc_IV = ~cmc_iv;
+  v->cmc->rx_crc_IV = cmc_iv;
+
   uint8_t pkt[3 + sizeof(v->crc_IV)];
   pkt[0] = VLLP_SYN;
   pkt[1] = VLLP_VERSION;
@@ -354,7 +369,7 @@ vllp_send_ack(vllp_t *v)
   pkt[0] = v->SE | 0x1f;
   pkt[1] = v->local_flow_status;
   pkt[2] = v->local_flow_status >> 8;
-  vllp_generate_crc(v, pkt, 3);
+  vllp_generate_crc(v->crc_IV, pkt, 3);
 
   pthread_mutex_unlock(&v->mutex);
   v->tx(v->opaque, pkt, sizeof(pkt));
@@ -391,6 +406,12 @@ vllp_accept_syn(vllp_t *v, const uint8_t *u8, size_t len, int64_t now)
   v->next_ack = now + VLLP_ACK_INTERVAL;
   v->next_rtx = INT64_MAX;
   v->connected = 1;
+
+  v->channel_iv_cnt = 0;
+  uint32_t cmc_iv = vllp_gen_channel_crc(v);
+  v->cmc->tx_crc_IV = cmc_iv;
+  v->cmc->rx_crc_IV = ~cmc_iv;
+
   vllp_send_ack(v);
   return 0;
 }
@@ -456,11 +477,12 @@ fragment(vllp_t *v, vllp_channel_t *vc)
 
     size_t len = m->len;
 
-    if(!(vc->flags & VLLP_CHANNEL_NO_CRC32)) {
-      // 4 extra bytes have already been allocated for CRC
-      vllp_generate_crc(v, m->data, len);
-      len += 4;
-    }
+    // 4 extra bytes have already been allocated for CRC
+    vllp_generate_crc(vc->tx_crc_IV, m->data, len);
+    vc->tx_crc_IV++;
+
+    len += 4;
+
     const void *data = m->data;
     while(1) {
       size_t fsize = MIN(len + 1, v->mtu);
@@ -575,17 +597,14 @@ vllp_channel_receive(vllp_t *v, vllp_pkt_t *vp, int channel_id)
   int rval = 0;
   size_t msglen = vc->rxlen;
 
-  if(vc->flags & VLLP_CHANNEL_NO_CRC32) {
-    rval = 0;
+  if(~vllp_crc32(vc->rx_crc_IV, vc->rxbuf, msglen)) {
+    vllp_log(v, LOG_ERR, "message CRC mismatch");
+    rval = VLLP_ERR_CHECKSUM_ERROR;
   } else {
-
-    if(~vllp_crc32(v->crc_IV, vc->rxbuf, msglen)) {
-      vllp_log(v, LOG_ERR, "message CRC mismatch");
-      rval = VLLP_ERR_CHECKSUM_ERROR;
-    }
-
-    msglen -= 4; // Remove CRC from exposed payload
+    vc->rx_crc_IV++;
   }
+
+  msglen -= 4; // Remove CRC from exposed payload
 
   vc->rxlen = 0;
 
@@ -704,10 +723,11 @@ enqueue_channel_open(vllp_t *v, vllp_channel_t *vc)
   size_t namelen = strlen(vc->name);
   uint8_t pkt[1 + namelen];
 
-  int opcode = VLLP_CMC_OPCODE_OPEN_WITH_CRC32;
+  uint32_t iv = vllp_gen_channel_crc(v);
+  vc->tx_crc_IV = ~iv;
+  vc->rx_crc_IV = iv;
 
-  if(vc->flags & VLLP_CHANNEL_NO_CRC32)
-    opcode = VLLP_CMC_OPCODE_OPEN_NO_CRC32;
+  int opcode = VLLP_CMC_OPCODE_OPEN;
 
   pkt[0] = (opcode << 4) | vc->id;
   memcpy(pkt + 1, vc->name, namelen);
@@ -929,8 +949,7 @@ channel_make(vllp_t *v, int id, int state)
 
 
 static int
-cmc_handle_open(vllp_t *v, int target_channel, const uint8_t *data, size_t len,
-                uint32_t flags)
+cmc_handle_open(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
 {
   if(len < 1) {
     vllp_log(v, LOG_ERR, "Channel_open message too short");
@@ -949,10 +968,14 @@ cmc_handle_open(vllp_t *v, int target_channel, const uint8_t *data, size_t len,
   vllp_channel_t *vc = channel_make(v, target_channel,
                                      VLLP_CHANNEL_STATE_CREATED);
 
+  uint32_t iv = vllp_gen_channel_crc(v);
+  vc->tx_crc_IV = iv;
+  vc->rx_crc_IV = ~iv;
+
   open_channel_result_t r = v->open_channel(v->opaque, name, vc);
 
   if(!r.error) {
-    vc->flags = flags;
+    vc->flags = 0;
     vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ESTABLISHED);
     vc->rx = r.rx;
     vc->eof = r.eof;
@@ -1090,12 +1113,8 @@ cmc_rx(void *opaque, const void *data, size_t len)
   } else {
 
     switch(opcode) {
-    case VLLP_CMC_OPCODE_OPEN_WITH_CRC32:
-      return cmc_handle_open(v, channel, data + 1, len - 1, 0);
-
-    case VLLP_CMC_OPCODE_OPEN_NO_CRC32:
-      return cmc_handle_open(v, channel, data + 1, len - 1,
-                             VLLP_CHANNEL_NO_CRC32);
+    case VLLP_CMC_OPCODE_OPEN:
+      return cmc_handle_open(v, channel, data + 1, len - 1);
     case VLLP_CMC_OPCODE_CLOSE:
       return cmc_handle_close(v, channel, data + 1, len - 1);
 

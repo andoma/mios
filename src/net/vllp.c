@@ -40,6 +40,7 @@ typedef struct vllp {
 
   uint32_t txid;
   uint32_t crc_IV;
+  uint32_t channel_iv_cnt;
 
   uint16_t remote_flow_status;
   uint16_t local_flow_status;
@@ -72,6 +73,9 @@ struct vllp_channel {
 
   pushpull_t pp;
 
+  uint32_t tx_crc_IV;
+  uint32_t rx_crc_IV;
+
   uint8_t flags;
   uint8_t id;
   uint8_t state;
@@ -80,7 +84,7 @@ struct vllp_channel {
 };
 
 
-#define VLLP_VERSION 1
+#define VLLP_VERSION 2
 
 #define VLLP_SYN   0x0f
 
@@ -89,8 +93,7 @@ struct vllp_channel {
 #define VLLP_HDR_F 0x20
 #define VLLP_HDR_L 0x10
 
-#define VLLP_CMC_OPCODE_OPEN_WITH_CRC32   0
-#define VLLP_CMC_OPCODE_OPEN_NO_CRC32     1
+#define VLLP_CMC_OPCODE_OPEN              0
 #define VLLP_CMC_OPCODE_OPEN_RESPONSE     2
 #define VLLP_CMC_OPCODE_CLOSE             3
 
@@ -122,13 +125,21 @@ calc_crc32(struct pbuf *pb, uint32_t crc)
 }
 
 static void
-vllp_append_crc(vllp_t *v, uint8_t *pkt, size_t len)
+vllp_append_crc(uint32_t iv, uint8_t *pkt, size_t len)
 {
-  uint32_t crc = ~crc32(v->crc_IV, pkt, len);
+  uint32_t crc = ~crc32(iv, pkt, len);
   pkt[len + 0] = crc;
   pkt[len + 1] = crc >> 8;
   pkt[len + 2] = crc >> 16;
   pkt[len + 3] = crc >> 24;
+}
+
+
+static uint32_t
+vllp_gen_channel_crc(vllp_t *v)
+{
+  v->channel_iv_cnt++;
+  return crc32(v->crc_IV, &v->channel_iv_cnt, sizeof(v->channel_iv_cnt));
 }
 
 
@@ -207,7 +218,7 @@ vllp_tx_ack(vllp_t *v)
 
   v->transmitted_local_flow_status = v->local_flow_status;
 
-  vllp_append_crc(v, pkt, 3);
+  vllp_append_crc(v->crc_IV, pkt, 3);
   dsig_emit(v->txid, pkt, sizeof(pkt));
 
   net_timer_arm(&v->ack_timer, clock_get() + 1000000);
@@ -275,6 +286,12 @@ vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len)
   if(len != 7)
     return;
 
+  if(data[1] != VLLP_VERSION) {
+    evlog(LOG_DEBUG, "VLLP: Got VLLP SYN for unsuppored version %d (expected %d)",
+          data[1], VLLP_VERSION);
+    return;
+  }
+
   if(v->connected) {
     vllp_disconnect(v, "reconnected");
   }
@@ -282,6 +299,12 @@ vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len)
   v->connected = 1;
   v->SE = VLLP_HDR_E;
   memcpy(&v->crc_IV, data + 3, sizeof(v->crc_IV));
+
+  v->channel_iv_cnt = 0;
+  uint32_t cmc_iv = vllp_gen_channel_crc(v);
+  v->cmc->tx_crc_IV = cmc_iv;
+  v->cmc->rx_crc_IV = ~cmc_iv;
+
   vllp_tx_ack(v);
 }
 
@@ -313,7 +336,7 @@ static const pushpull_net_fn_t vllp_net_fn = {
 
 static error_t
 handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
-                int opcode, int target_channel,
+                int target_channel,
                 const void *name, size_t namelen)
 {
   const service_t *s = service_find_by_namelen(name, namelen);
@@ -327,6 +350,10 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
   vllp_channel_t *vc = vllp_channel_make(v, target_channel);
   if(vc == NULL)
     return ERR_NO_MEMORY;
+
+  uint32_t iv = vllp_gen_channel_crc(v);
+  vc->tx_crc_IV = iv;
+  vc->rx_crc_IV = ~iv;
 
   vc->state = VLLP_CHANNEL_STATE_ESTABLISHED;
 
@@ -389,10 +416,8 @@ handle_cmc(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb)
   uint8_t target_channel = u8[0] & 0xf;
 
   switch(opcode) {
-  case VLLP_CMC_OPCODE_OPEN_WITH_CRC32:
-  case VLLP_CMC_OPCODE_OPEN_NO_CRC32:
-    err = handle_cmc_open(v, cmc, opcode, target_channel,
-                          u8 + 1, len - 1);
+  case VLLP_CMC_OPCODE_OPEN:
+    err = handle_cmc_open(v, cmc, target_channel, u8 + 1, len - 1);
     send_cmc_message(v, cmc, pb, VLLP_CMC_OPCODE_OPEN_RESPONSE,
                      target_channel, err);
     return 0;
@@ -478,10 +503,10 @@ vllp_channel_receive(vllp_t *v, int channel_id,
   pb->pb_flags |= PBUF_SOP;
   STAILQ_INIT(&vc->rxq);
 
-  if(calc_crc32(pb, v->crc_IV)) {
+  if(calc_crc32(pb, vc->rx_crc_IV)) {
     return ERR_CHECKSUM_ERROR;
   }
-
+  vc->rx_crc_IV++;
   pbuf_trim(pb, 4); // Remove CRC
 
   // Ownership of pb is transfered to callee
@@ -575,15 +600,14 @@ vllp_fragment(vllp_t *v)
 static void
 vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb)
 {
-  if(1) { // TODO: Make optional depending on channel type
-    uint32_t crc32 = calc_crc32(pb, v->crc_IV);
-    // Fix this for chained PBUFs, pbuf_append() will assert for now tho
-    uint8_t *crcbuf = pbuf_append(pb, 4);
-    crcbuf[0] = crc32;
-    crcbuf[1] = crc32 >> 8;
-    crcbuf[2] = crc32 >> 16;
-    crcbuf[3] = crc32 >> 24;
-  }
+  uint32_t crc32 = calc_crc32(pb, vc->tx_crc_IV);
+  vc->tx_crc_IV++;
+  // Fix this for chained PBUFs, pbuf_append() will assert for now tho
+  uint8_t *crcbuf = pbuf_append(pb, 4);
+  crcbuf[0] = crc32;
+  crcbuf[1] = crc32 >> 8;
+  crcbuf[2] = crc32 >> 16;
+  crcbuf[3] = crc32 >> 24;
 
   v->current_tx_buf = pb;
   v->current_tx_channel = vc->id;

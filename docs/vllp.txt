@@ -50,8 +50,13 @@ following packets:
 ### SYN
 
 ```
-0000_1111 [32bit cookie]
+0000_1111 [8bit version] [8bit MTU] [32bit cookie]
 ```
+
+Version is currently 2.
+
+MTU should be comapred with the expected MTU to make sure there is no
+asymmetry
 
 ### ACK
 
@@ -155,12 +160,15 @@ piggy-back on.
 The last fragment of a message will have the 'L bit set to indicate
 message boundary.
 
-CRC32 is optional for channel messages and, if enabled, it is only
-only sent together with the LAST fragment and the CRC applies to the
-entire message (and thus, does not cover the 8 bit header)
+CRC32 is appended to all channel messages and, but it is only only
+sent together with the LAST fragment and the CRC applies to the entire
+message (and thus, does not cover the 8 bit packet header)
 
-The built-in "Channel Manangement Channel" (14) is always open,
-cannot be closed and CRC32 is always enabled.
+As the SEQ and ACK is just a single bit there is no built-in protection
+for accidental replays of old messages. To rectify this the CRC IV
+is increased with 1 for every message sent and received. Also each
+channel has its own IV which is generated from the intial IV. For
+exact details, please see the code.
 
 ## Channel management
 
@@ -175,8 +183,7 @@ Channel numbers are allocated by the client.
 
 Opcodes:
 
-0   : Request to open channel with CRC32.
-1   : Request to open channel without CRC32.
+0   : Request to open channel
 2   : Open channel response
 3   : Close channel
 4-7 : Reserved
