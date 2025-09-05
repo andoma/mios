@@ -427,9 +427,14 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
 
   // Clear init and wait for propgation
   reg_clr_bit(fc->reg_base + FDCAN_CCCR, 0);
-  while(reg_rd(fc->reg_base + FDCAN_CCCR) & 1) {}
 
   fc->cni.cni_output = stm32_fdcan_output;
-  can_netif_attach(&fc->cni, name, &stm32_fdcan_device_class, dof);
-  return 0;
+
+  for(int i = 0; i < 1000; i++) {
+    if(!(reg_rd(fc->reg_base + FDCAN_CCCR) & 1)) {
+      can_netif_attach(&fc->cni, name, &stm32_fdcan_device_class, dof);
+      return 0;
+    }
+  }
+  return ERR_NOT_READY;
 }
