@@ -40,6 +40,10 @@ LDFLAGS += -Wl,--gc-sections -Wl,--build-id=sha1
 # Needed for linker script includes
 LDFLAGS += -L${SRC}
 
+#
+# Various helpers
+#
+OR = $(if $(filter yes,$1),yes,no)
 
 #
 # Set defaults for all variables

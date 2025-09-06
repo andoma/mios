@@ -8,8 +8,8 @@ ENABLE_NET := $(findstring yes,\
 	${ENABLE_NET_BLE}\
 	${ENABLE_NET_IPV4})
 
-ENABLE_NET_ETHER := $(findstring yes,${ENABLE_NET_IPV4})
-ENABLE_NET_DSIG := $(findstring yes,${ENABLE_NET_MBUS}${ENABLE_NET_CAN})
+ENABLE_NET_ETHER := $(call OR, ${ENABLE_NET_IPV4})
+ENABLE_NET_DSIG := $(call OR, ${ENABLE_NET_MBUS} ${ENABLE_NET_CAN})
 
 SRCS-${ENABLE_NET_DSIG} += \
 	${SRC}/net/dsig.c \
