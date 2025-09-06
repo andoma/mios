@@ -4,8 +4,34 @@
 
 #include "stm32h7_clk.h"
 
-#define USART_CONSOLE 0x40011000
-#define SPIFLASH_CS GPIO_PA(4)
+
+#if CONSOLE_USART_INSTANCE == 1
+
+#define CONSOLE_USART USART1_BASE
+#define CONSOLE_CLK   CLK_USART1
+#define CONSOLE_AF    7
+
+#else
+#error Bootloader: Unsupported USART instance
+#endif
+
+
+#if SPIFLASH_SPI_INSTANCE == 1
+
+#define SPIFLASH_BUS  SPI1_BASE
+#define SPIFLASH_CLK  CLK_SPI1
+#define SPIFLASH_AF   5
+
+#elif SPIFLASH_SPI_INSTANCE == 3
+
+#define SPIFLASH_BUS  SPI3_BASE
+#define SPIFLASH_CLK  CLK_SPI3
+#define SPIFLASH_AF   6
+
+#else
+#error Bootloader: Unsupported SPI instance
+#endif
+
 
 #define BLOCKSIZE 32
 
@@ -127,6 +153,7 @@ gpio_set_output(gpio_t gpio, int on)
 // CONSOLE
 //======================================================================
 
+#define USART1_BASE 0x40011000
 
 #define USART_CR1_UE     (1 << 0)
 #define USART_CR1_UESM   (1 << 1)
@@ -149,10 +176,10 @@ __attribute__((section("bltext"),noinline))
 static void
 console_print(char c)
 {
-#ifdef USART_CONSOLE
-  while(!(reg_rd(USART_CONSOLE + USART_SR) & (1 << 7))) {}
+#ifdef CONSOLE_USART
+  while(!(reg_rd(CONSOLE_USART + USART_SR) & (1 << 7))) {}
   if(c)
-    reg_wr(USART_CONSOLE + USART_TDR, c);
+    reg_wr(CONSOLE_USART + USART_TDR, c);
 #endif
 }
 
@@ -265,8 +292,6 @@ bl_crc32(uint32_t in, const void *data, size_t len)
 #define SPI2_BASE 0x40003800
 #define SPI3_BASE 0x40003c00
 
-#define SPIBUS SPI1_BASE
-
 
 __attribute__((section("bltext"),noinline))
 static void
@@ -284,15 +309,15 @@ spi_init(void)
     (0b111 << 0)          | // DSIZE (8 bit)
     0;
 
-  reg_wr(SPIBUS + SPI_CFG1, cfg1);
-  reg_wr(SPIBUS + SPI_CFG2, cfg2);
-  reg_wr(SPIBUS + SPI_CR2, 0);
+  reg_wr(SPIFLASH_BUS + SPI_CFG1, cfg1);
+  reg_wr(SPIFLASH_BUS + SPI_CFG2, cfg2);
+  reg_wr(SPIFLASH_BUS + SPI_CR2, 0);
 
-  reg_wr(SPIBUS + SPI_CR1,
+  reg_wr(SPIFLASH_BUS + SPI_CR1,
          (1 << 0) | // Enable
          0);
 
-  reg_wr(SPIBUS + SPI_CR1,
+  reg_wr(SPIFLASH_BUS + SPI_CR1,
          (1 << 9) | // master transfer enable
          (1 << 0) | // Enable
          0);
@@ -304,10 +329,10 @@ __attribute__((section("bltext"),noinline))
 static uint8_t
 spi_txrx(uint8_t out)
 {
-  reg_wr8(SPIBUS + SPI_TXDR, out);
-  while(((reg_rd(SPIBUS + SPI_SR) & 1)) == 0) {
+  reg_wr8(SPIFLASH_BUS + SPI_TXDR, out);
+  while(((reg_rd(SPIFLASH_BUS + SPI_SR) & 1)) == 0) {
   }
-  return reg_rd8(SPIBUS + SPI_RXDR);
+  return reg_rd8(SPIFLASH_BUS + SPI_RXDR);
 }
 
 
@@ -510,30 +535,35 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
   uint32_t gpioblocks = 0;
   clk_enable(CLK_CRC);
 
-  clk_enable(CLK_USART1);
+  clk_enable(CONSOLE_CLK);
   gpioblocks |=
-    gpio_conf_af(GPIO_PA(9), 7, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_conf_af(CONSOLE_TX, CONSOLE_AF,
+                 GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
   reg_wr(RCC_D2CCIP1R,
          (0b100 << 12) | // SPI1,2,3 clocked from kernel clock
          0);
 
-  clk_enable(CLK_SPI1);
+  clk_enable(SPIFLASH_CLK);
   gpioblocks |=
-    gpio_conf_af(GPIO_PA(5), 5, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_conf_af(SPIFLASH_SCK, SPIFLASH_AF,
+                 GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpioblocks |=
-    gpio_conf_af(GPIO_PA(6), 5, GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_UP);
+    gpio_conf_af(SPIFLASH_MISO, SPIFLASH_AF,
+                 GPIO_OPEN_DRAIN, GPIO_SPEED_LOW, GPIO_PULL_UP);
   gpioblocks |=
-    gpio_conf_af(GPIO_PA(7), 5, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_conf_af(SPIFLASH_MOSI, SPIFLASH_AF,
+                 GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
   gpioblocks |=
-    gpio_conf_output(SPIFLASH_CS, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_conf_output(SPIFLASH_CS,
+                     GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   spiflash_disable();
 
   spi_init();
 
-  reg_wr(USART_CONSOLE + USART_BRR, 556); // 115200
-  reg_wr(USART_CONSOLE + USART_CR1, (USART_CR1_UE | USART_CR1_TE));
+  reg_wr(CONSOLE_USART + USART_BRR, 556); // 115200
+  reg_wr(CONSOLE_USART + USART_CR1, (USART_CR1_UE | USART_CR1_TE));
 
   console_print_string(welcomestr);
   uint8_t code = spiflash_wakeup();
@@ -587,14 +617,14 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
   console_print('\n');
   console_print(0); // Wait for shift register
 
-  reset_peripheral(CLK_SPI1);
-  clk_disable(CLK_SPI1);
+  reset_peripheral(SPIFLASH_CLK);
+  clk_disable(SPIFLASH_CLK);
 
   reset_peripheral(CLK_CRC);
   clk_disable(CLK_CRC);
 
-  reset_peripheral(CLK_USART1);
-  clk_disable(CLK_USART1);
+  reset_peripheral(CONSOLE_CLK);
+  clk_disable(CONSOLE_CLK);
 
   for(int i = 0; i < 32; i++) {
     if((1 << i) & gpioblocks) {
