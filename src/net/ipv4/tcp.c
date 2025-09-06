@@ -23,7 +23,7 @@
 #define TCP_EVENT_CONNECT 0x1
 #define TCP_EVENT_CLOSE   0x2
 #define TCP_EVENT_EMIT    0x4
-
+#define TCP_EVENT_WND_OPEN 0x8
 /*
  * Based on these RFCs:
  *
@@ -72,6 +72,7 @@ typedef struct tcb {
   uint8_t tcb_pending_fin;
 
   uint8_t tcb_fin_received;
+  uint8_t rcv_window_closed;
 
   struct {
     uint32_t wrptr; // Unsent (Enqueued by stream but not yet processed by TCP)
@@ -583,6 +584,12 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     tcp_do_connect(tcb);
   }
 
+  if(signals & TCP_EVENT_WND_OPEN) {
+    if(tcb->tcb_state == TCP_STATE_ESTABLISHED) {
+      tcp_emit(tcb, NULL, tcb->tcb_snd.nxt, 1, "wnd-open");
+    }
+  }
+
   if(signals & TCP_EVENT_EMIT) {
     switch(tcb->tcb_state) {
     case TCP_STATE_ESTABLISHED:
@@ -766,6 +773,25 @@ tcb_rxfifo_user_bytes(tcb_t *tcb)
 }
 
 
+static void
+tcp_rxfifo_consume(tcb_t *tcb, int bytes)
+{
+  tcb->tcb_rcv.rdptr += bytes;
+
+  if(!tcb->rcv_window_closed)
+    return;
+
+  // If our RX buffer have opened up enough, send ACK immediatly
+
+  int thres = MAX(tcb->tcb_rxfifo_size / 2, tcb->tcb_rcv.mss * 2);
+
+  if(tcb_rxfifo_avail(tcb) < thres)
+    return;
+
+  tcb->rcv_window_closed = 0;
+  net_task_raise(&tcb->tcb_task, TCP_EVENT_WND_OPEN);
+}
+
 static ssize_t
 tcp_stream_read(stream_t *s, void *buf, size_t size, size_t require)
 {
@@ -795,7 +821,7 @@ tcp_stream_read(stream_t *s, void *buf, size_t size, size_t require)
                 to_copy, tcb->tcb_rcv.rdptr,
                 tcb->tcb_rxfifo_size);
 
-    tcb->tcb_rcv.rdptr += to_copy;
+    tcp_rxfifo_consume(tcb, to_copy);
     total += to_copy;
     size -= to_copy;
   }
@@ -955,7 +981,8 @@ tcp_stream_drop(struct stream *s, size_t bytes)
     return used;
 
   assert(bytes <= used);
-  tcb->tcb_rcv.rdptr += bytes;
+
+  tcp_rxfifo_consume(tcb, bytes);
   return bytes;
 }
 
@@ -1368,10 +1395,19 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
       task_wakeup(&tcb->tcb_rx_waitq, 1);
 
-      if(!timer_disarm(&tcb->tcb_delayed_ack_timer) &&
-         tcb->tcb_snd.wrptr == tcb->tcb_snd.nxt) {
-        // Already waited once, don't wait more, send now
-        tcp_emit(tcb, pb, tcb->tcb_snd.nxt, 1, "2nd delayed ack");
+      /*
+        Ack immediately if we have nothing to send and
+          We are waiting to send a delayed ack (which will be cancelled)
+         OR
+          Our RX buffer is fully depleted
+      */
+      int rx_avail = tcb_rxfifo_avail(tcb);
+      tcb->rcv_window_closed = rx_avail < tcb->tcb_rcv.mss;
+
+      if(tcb->tcb_snd.wrptr == tcb->tcb_snd.nxt &&
+         (!timer_disarm(&tcb->tcb_delayed_ack_timer) ||
+          tcb->rcv_window_closed)) {
+        tcp_emit(tcb, pb, tcb->tcb_snd.nxt, 1, "Instant ack");
         pb = NULL;
       } else {
         net_timer_arm(&tcb->tcb_delayed_ack_timer,
