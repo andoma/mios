@@ -3,6 +3,7 @@
 
 #include <mios/io.h>
 #include <mios/mios.h>
+#include <mios/task.h>
 
 #include <assert.h>
 #include <unistd.h>
@@ -148,9 +149,12 @@ stm32h7_adc_set_channels(uint32_t base, uint32_t channels)
 }
 
 
+static mutex_t adc_mtx = MUTEX_INITIALIZER("adc");
+
 int
 stm32h7_adc_read_channel(uint32_t base, int channel)
 {
+  mutex_lock(&adc_mtx);
   reg_wr(base + ADCX_SQR1, channel << 6);
   reg_set_bit(base + ADCX_CR, 2);
 
@@ -158,7 +162,9 @@ stm32h7_adc_read_channel(uint32_t base, int channel)
     if(reg_get_bit(base + ADCX_ISR, 2))
       break;
   }
-  return reg_rd(base + ADCX_DR);
+  int ret = reg_rd(base + ADCX_DR);
+  mutex_unlock(&adc_mtx);
+  return ret;
 }
 
 
