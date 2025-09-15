@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include "net/pbuf.h"
 #include "net/ipv4/ipv4.h"
@@ -1523,7 +1524,7 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                ntohs(tcb->tcb_local_port),
                tcb->tcb_remote_addr,
                ntohs(tcb->tcb_remote_port));
-    cli_printf(cli, "\t%s  TX:%lld RX:%lld  ReTX:%lld  Failed ReTX:%d\n",
+    cli_printf(cli, "\t%s TX:%"PRIu64" RX:%"PRIu64" ReTX:%"PRIu64"  Failed ReTX:%d\n",
                tcp_state_to_str(tcb->tcb_state),
                tcb->tcb_tx_bytes,
                tcb->tcb_rx_bytes,

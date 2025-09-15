@@ -141,7 +141,7 @@ http_connection_release(http_connection_t *hc)
 static ssize_t
 http_response_chunk_send(http_connection_t *hc, const void *data, size_t len)
 {
-  stprintf(hc->hc_socket, "%x\r\n", len);
+  stprintf(hc->hc_socket, "%zx\r\n", len);
   stream_write(hc->hc_socket, data, len, 0);
   stprintf(hc->hc_socket, "\r\n");
   return len;

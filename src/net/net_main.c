@@ -231,7 +231,7 @@ net_init(void)
   int flags = TASK_NO_FPU;
 #endif
   flags |= TASK_NO_DMA_STACK;
-  thread_create(net_thread, NULL, 768, "net", flags, 10);
+  thread_create(net_thread, NULL, 0, "net", flags, 10);
 }
 
 

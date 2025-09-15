@@ -4,6 +4,7 @@
 #include <mios/timer.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <inttypes.h>
 
 #include "irq.h"
 #include "ether.h"
@@ -287,16 +288,16 @@ ether_print(ether_netif_t *en, struct stream *st)
            en->eni_addr[4],
            en->eni_addr[5]);
 
-  stprintf(st, "\tTX  packets: %lld  bytes: %lld  drops: %lld\n",
+  stprintf(st, "\tTX  packets: %"PRIu64"  bytes: %"PRIu64"  drops: %"PRIu64"\n",
            en->eni_stats.tx_pkt,
            en->eni_stats.tx_byte,
            en->eni_stats.tx_qdrop);
 
-  stprintf(st, "\tRX  packets: %lld  bytes: %lld  CRC: %lld\n",
+  stprintf(st, "\tRX  packets: %"PRIu64"  bytes: %"PRIu64"  CRC: %"PRIu64"\n",
            en->eni_stats.rx_pkt,
            en->eni_stats.rx_byte,
            en->eni_stats.rx_crc);
-  stprintf(st, "\t    hw-drop: %lld  sw-drop: %lld  other: %lld\n",
+  stprintf(st, "\t    hw-drop: %"PRIu64"  sw-drop: %"PRIu64"  other: %"PRIu64"\n",
            en->eni_stats.rx_hw_qdrop,
            en->eni_stats.rx_sw_qdrop,
            en->eni_stats.rx_other_err);
