@@ -147,6 +147,15 @@ pmem_set(pmem_t *p, unsigned long paddr, unsigned long size, uint32_t type)
       pmem_merge(p, i + 1);
       return 0;
     }
+
+    if(paddr >= p->segments[i].paddr &&
+       paddr < p->segments[i].paddr + p->segments[i].size) {
+
+      long split = p->segments[i].paddr + p->segments[i].size;
+      if(pmem_set(p, paddr, split - paddr, type))
+        return -1;
+      return pmem_set(p, split, size - (split - paddr), type);
+    }
   }
   return -1;
 }
