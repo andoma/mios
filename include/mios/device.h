@@ -8,10 +8,6 @@
 struct stream;
 struct device;
 
-typedef error_t (devfn_t)(struct device *d, ...);
-
-
-
 typedef enum {
   DEVICE_POWER_STATE_SUSPEND,
   DEVICE_POWER_STATE_RESUME,
