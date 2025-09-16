@@ -10,11 +10,12 @@
 
 STAILQ_HEAD(pbuf_queue, pbuf);
 
-#define PBUF_SOP   0x1
-#define PBUF_EOP   0x2
-#define PBUF_SEQ   0x8
-#define PBUF_BCAST 0x10
-#define PBUF_MCAST 0x20
+#define PBUF_SOP       0x1
+#define PBUF_EOP       0x2
+#define PBUF_CKSUM_OK  0x4
+#define PBUF_SEQ       0x8
+#define PBUF_BCAST     0x10
+#define PBUF_MCAST     0x20
 
 typedef struct pbuf {
 
