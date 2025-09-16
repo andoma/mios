@@ -209,22 +209,33 @@ ipv4_input(netif_t *ni, pbuf_t *pb)
     return pb;
 
   const ipv4_header_t *ip = pbuf_data(pb, 0);
-  if(ip->ver_ihl != 0x45)
+#if 0
+  printf("\tIPV4 %Id > %Id %d (%d) %x\n",
+         ip->src_addr, ip->dst_addr,
+         ip->proto, pb->pb_pktlen, ip->cksum);
+#endif
+  if(ip->ver_ihl != 0x45) {
     return pb;
+  }
 
-  if(ipv4_cksum_pbuf(0, pb, 0, 20)) {
+  // If cksum is not verified by hardware, now is the time
+  if(!(pb->pb_flags & PBUF_CKSUM_OK) &&
+     ipv4_cksum_pbuf(0, pb, 0, 20)) {
     // IP header checksum error
+    atomic_inc(&ni->ni_ipv4_bad_cksum);
     return pb;
   }
 
   if(ntohs(ip->fragment_info) & 0x3fff) {
     // No fragment support
+    atomic_inc(&ni->ni_ipv4_fragmented);
     return pb;
   }
 
   // Make sure packet buffer length matches length in IP header
   uint16_t len = ntohs(ip->total_length);
   if(len > pb->pb_pktlen) {
+    atomic_inc(&ni->ni_ipv4_bad);
     // Header says packet is larger than it is, drop packet
     return pb;
   }
@@ -234,11 +245,6 @@ ipv4_input(netif_t *ni, pbuf_t *pb)
     pbuf_trim(pb, pb->pb_pktlen - len);
   }
 
-#if 0
-  printf("\tIPV4 %Id > %Id %d (%d)\n",
-         ip->src_addr, ip->dst_addr,
-         ip->proto, pb->pb_pktlen);
-#endif
 
   if(ip->dst_addr == 0xffffffff) {
     pb->pb_flags |= PBUF_BCAST;

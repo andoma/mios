@@ -2,6 +2,7 @@
 
 #include <mios/device.h>
 #include <mios/task.h>
+#include <mios/atomic.h>
 
 #include "pbuf.h"
 #include "net_task.h"
@@ -48,6 +49,13 @@ typedef struct netif {
   uint8_t ni_ipv4_local_prefixlen;
 
   error_t (*ni_output_ipv4)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
+
+  atomic_t ni_ipv4_bad;
+  atomic_t ni_ipv4_bad_cksum;
+  atomic_t ni_ipv4_fragmented;
+  atomic_t ni_udp_bad_cksum;
+  atomic_t ni_tcp_bad_cksum;
+
 #endif
 
 #ifdef ENABLE_NET_DSIG

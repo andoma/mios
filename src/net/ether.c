@@ -302,9 +302,15 @@ ether_print(ether_netif_t *en, struct stream *st)
            en->eni_stats.rx_sw_qdrop,
            en->eni_stats.rx_other_err);
 
+  stprintf(st,
+           "\t    bad ipv4: %u  v4 cksum: %u  TCP cksum: %u  UDP cksum: %u\n",
+           atomic_get(&en->eni_ni.ni_ipv4_bad),
+           atomic_get(&en->eni_ni.ni_ipv4_bad_cksum),
+           atomic_get(&en->eni_ni.ni_tcp_bad_cksum),
+           atomic_get(&en->eni_ni.ni_udp_bad_cksum));
+
   stprintf(st, "\tIP address: %Id/%d\n", en->eni_ni.ni_ipv4_local_addr,
            en->eni_ni.ni_ipv4_local_prefixlen);
 
   dhcpv4_print(en, st);
-
 }
