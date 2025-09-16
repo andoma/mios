@@ -749,8 +749,7 @@ relocate_runtime_services(efi_image_handle_t *h)
   memcpy(paddr, efi_runtime_begin, efi_runtime_size);
 
   size_t init_offset = (void *)&efi_init_runtime_services - efi_runtime_begin;
-  dcache_op(paddr, efi_runtime_size, DCACHE_CLEAN);
-  icache_invalidate();
+  cache_op(paddr, efi_runtime_size, ICACHE_FLUSH);
 
   void (*init)(efi_image_handle_t *h) = paddr + init_offset;
   init(h);
@@ -912,8 +911,7 @@ startlinux(void)
 
   memcpy(h->loaded_image.image_base, kbin, ksize);
 
-  dcache_op(h->loaded_image.image_base, ksize, DCACHE_CLEAN);
-  icache_invalidate();
+  cache_op(h->loaded_image.image_base, ksize, ICACHE_FLUSH);
 
   memcpy(&h->config_tables[0].guid, guid_device_tree, 16);
 
