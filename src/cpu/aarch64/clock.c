@@ -64,7 +64,7 @@ clock_init(void)
   printf("Timer frequency: %d\n", freq);
   nxt_timer = clock_get_irq_blocked();
   printf("System clock is %ld\n", nxt_timer);
-  hz = freq / 10;
+  hz = freq / 1000;
 
   irq_enable_fn_arg(27, IRQ_LEVEL_CLOCK, timer_virt, NULL);
 
