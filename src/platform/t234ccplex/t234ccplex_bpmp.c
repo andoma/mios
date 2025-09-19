@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include <mios/mios.h>
 #include <mios/task.h>
@@ -100,8 +101,7 @@ static void
 bpmp_ivc_sync(void)
 {
   int rounds = 0;
-  printf("BPMP sync ... ");
-
+  printf("Synchronizing with BPMP ... ");
 
   bpmp_tx->state = IVC_STATE_SYN;
   bpmp_notify();
@@ -134,7 +134,7 @@ bpmp_ivc_sync(void)
       break;
     }
   }
-  printf("OK\n");
+  printf("Done\n");
 }
 
 
@@ -289,7 +289,6 @@ bpmp_xfer(uint32_t mrq,
   }
 
   if(d->buf.error) {
-    printf("error=%d\n", d->buf.error);
     // Fixme: Translate BPMP errors
     err = ERR_OPERATION_FAILED;
     goto out;
@@ -309,37 +308,6 @@ bpmp_xfer(uint32_t mrq,
   mutex_unlock(&d->mutex);
   return err;
 }
-
-
-
-
-#include <stdlib.h>
-#include <unistd.h>
-
-static error_t
-cmd_ping(cli_t *cli, int argc, char **argv)
-{
-  if(argc != 2)
-    return ERR_INVALID_ARGS;
-
-  int val = atoi(argv[1]);
-
-  uint32_t resp;
-  size_t resp_size = sizeof(resp);
-  error_t err = bpmp_xfer(0, &val, sizeof(val), &resp, &resp_size);
-  if(err) {
-    cli_printf(cli, "BPMP error %d\n", err);
-    return 0;
-  }
-  if(err)
-    return err;
-
-  cli_printf(cli, "response:%d\n", resp);
-  return 0;
-}
-
-
-CLI_CMD_DEF("ping", cmd_ping);
 
 static error_t
 cmd_clocks(cli_t *cli, int argc, char **argv)
@@ -372,9 +340,9 @@ cmd_clocks(cli_t *cli, int argc, char **argv)
     if(err)
       return err;
 
-    cli_printf(cli, "%4d %-40s %d [",
+    cli_printf(cli, "%4d %-40s %d < %-3d [",
                i, resp.all_info.name,
-               enabled);
+               enabled, resp.all_info.parent);
     for(size_t j = 0; j < resp.all_info.num_parents; j++) {
       cli_printf(cli, "%s%d", j ? " " : "", resp.all_info.parents[j]);
     }
@@ -448,12 +416,40 @@ clk_enable(int id)
   return err;
 }
 
+error_t
+clk_disable(int id)
+{
+  struct bpmp_mrq_clk_req req = {id, BPMP_CMD_CLK_DISABLE};
+  error_t err = bpmp_xfer(BPMP_MRQ_CLK, &req, sizeof(req), NULL, NULL);
+  if(err)
+    printf("Failed to disable clock %d: %d\n", id, err);
+  return err;
+}
+
 
 error_t
-pg_enable(int id)
+bpmp_powergate_set(int id, int on)
 {
-  struct bpmp_mrq_pg_req req = {BPMP_CMD_PG_SET_STATE, id, 1};
-  return bpmp_xfer(BPMP_MRQ_PG, &req, sizeof(req), NULL, NULL);
+  struct bpmp_mrq_pg_req req = {BPMP_CMD_PG_SET_STATE, id, on};
+  error_t err = bpmp_xfer(BPMP_MRQ_PG, &req, sizeof(req), NULL, NULL);
+  if(err)
+    printf("Failed to change powergate(%d) to %d: %d\n", id, on, err);
+  return err;
+}
+
+error_t
+bpmp_rst_set(int id, int on)
+{
+  struct bpmp_mrq_reset_req req = {
+    on ? BPMP_CMD_RESET_ASSERT : BPMP_CMD_RESET_DEASSERT, id};
+  return bpmp_xfer(BPMP_MRQ_RESET, &req, sizeof(req), NULL, NULL);
+}
+
+error_t
+bpmp_rst_toggle(int id)
+{
+  struct bpmp_mrq_reset_req req = { BPMP_CMD_RESET_TOGGLE, id};
+  return bpmp_xfer(BPMP_MRQ_RESET, &req, sizeof(req), NULL, NULL);
 }
 
 
@@ -462,56 +458,19 @@ cmd_rst(cli_t *cli, int argc, char **argv)
 {
   if(argc != 3)
     return ERR_INVALID_ARGS;
-
-  int id = atoi(argv[1]);
-  int on = atoi(argv[2]);
-
-  struct bpmp_mrq_reset_req req = {on ? BPMP_CMD_RESET_ASSERT : BPMP_CMD_RESET_DEASSERT, id};
-  return bpmp_xfer(BPMP_MRQ_RESET, &req, sizeof(req), NULL, NULL);
+  return bpmp_rst_set(atoi(argv[1]), atoi(argv[2]));
 }
-
-CLI_CMD_DEF("rst", cmd_rst);
-
+CLI_CMD_DEF("rst", cmd_rst)
 
 
-static error_t
-cmd_clk_en(cli_t *cli, int argc, char **argv)
+
+error_t
+bpmp_pcie_set(int id, int on)
 {
-  if(argc != 2)
-    return ERR_INVALID_ARGS;
-
-  return clk_enable(atoi(argv[1]));
-}
-
-CLI_CMD_DEF("clk-en", cmd_clk_en);
-
-
-static error_t
-cmd_pg_en(cli_t *cli, int argc, char **argv)
-{
-  if(argc != 2)
-    return ERR_INVALID_ARGS;
-
-  return pg_enable(atoi(argv[1]));
-}
-
-CLI_CMD_DEF("pg-en", cmd_pg_en);
-
-
-
-
-static error_t
-cmd_pci_en(cli_t *cli, int argc, char **argv)
-{
-  if(argc != 2)
-    return ERR_INVALID_ARGS;
-
   struct bpmp_mrq_uphy_request req = {};
   req.cmd = BPMP_CMD_UPHY_PCIE_CONTROLLER_STATE;
-  req.pcie.controller = atoi(argv[1]);
-  req.pcie.enable = 1;
+  req.pcie.controller = id;
+  req.pcie.enable = on;
 
   return bpmp_xfer(BPMP_MRQ_UPHY, &req, sizeof(req), NULL, NULL);
 }
-
-CLI_CMD_DEF("pci-en", cmd_pci_en);
