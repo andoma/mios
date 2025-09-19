@@ -15,6 +15,7 @@ SRCS += ${P}/t234ccplex.c \
 	${P}/t234ccplex_ari.c \
 	${P}/t234ccplex_bpmp.c \
 	${P}/t234ccplex_qspi.c \
+	${P}/t234ccplex_pcie.c \
 	${P}/efiruntime.c \
 	${P}/asm.s \
 
