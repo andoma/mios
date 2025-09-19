@@ -22,11 +22,53 @@ static mutex_t netif_mutex = MUTEX_INITIALIZER("netifs");
 
 static task_waitable_t net_waitq = WAITABLE_INITIALIZER("net");
 
+static task_waitable_t netif_detach_waitq = WAITABLE_INITIALIZER("net");
+
 STAILQ_HEAD(net_task_queue, net_task);
 
 static struct net_task_queue net_tasks = STAILQ_HEAD_INITIALIZER(net_tasks);
 
 static struct timer_list net_timers;
+
+static void
+net_task_cancel(net_task_t *nt)
+{
+  if(nt->nt_signals) {
+    STAILQ_REMOVE(&net_tasks, nt, net_task, nt_link);
+    nt->nt_signals = 0;
+  }
+}
+
+
+static void
+netif_detach_task(netif_t *ni)
+{
+  if(ni->ni_dev.d_class->dc_disable == NULL)
+    panic("netif %s has no disable method", ni->ni_dev.d_name);
+
+  mutex_lock(&netif_mutex);
+  SLIST_REMOVE(&netifs, ni, netif, ni_global_link);
+  mutex_unlock(&netif_mutex);
+
+  ni->ni_dev.d_class->dc_disable(&ni->ni_dev);
+
+  nexthop_t *nh, *n;
+  for(nh = LIST_FIRST(&ni->ni_nexthops); nh != NULL; nh = n) {
+    n = LIST_NEXT(nh, nh_netif_link);
+    LIST_REMOVE(nh, nh_global_link);
+    free(nh);
+  }
+  LIST_INIT(&ni->ni_nexthops);
+
+
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+  net_task_cancel(&ni->ni_task);
+  pbuf_free_queue_irq_blocked(&ni->ni_rx_queue);
+  ni->ni_flags |= NETIF_F_ZOMBIE;
+  task_wakeup_sched_locked(&netif_detach_waitq, 1);
+  irq_permit(q);
+}
+
 
 static void
 netif_task_cb(net_task_t *nt, uint32_t signals)
@@ -61,6 +103,11 @@ netif_task_cb(net_task_t *nt, uint32_t signals)
       ni->ni_status_change(ni);
     ghook_invoke(GHOOK_NETIF_LINK_STATUS, ni);
   }
+
+  if(signals & NETIF_TASK_DETACH) {
+    netif_detach_task(ni);
+  }
+
   irq_permit(q);
 }
 
@@ -161,28 +208,16 @@ netif_attach(netif_t *ni, const char *name, const device_class_t *dc)
 }
 
 
-static void
-net_task_cancel(net_task_t *nt)
-{
-  if(nt->nt_signals) {
-    STAILQ_REMOVE(&net_tasks, nt, net_task, nt_link);
-    nt->nt_signals = 0;
-  }
-}
-
-
 void
 netif_detach(netif_t *ni)
 {
   int q = irq_forbid(IRQ_LEVEL_SCHED);
-  net_task_cancel(&ni->ni_task);
-  pbuf_free_queue_irq_blocked(&ni->ni_rx_queue);
+
+  net_task_raise(&ni->ni_task, NETIF_TASK_DETACH);
+  while(!(ni->ni_flags & NETIF_F_ZOMBIE)) {
+    task_sleep_sched_locked(&netif_detach_waitq);
+  }
   irq_permit(q);
-
-  mutex_lock(&netif_mutex);
-  SLIST_REMOVE(&netifs, ni, netif, ni_global_link);
-  mutex_unlock(&netif_mutex);
-
   device_unregister(&ni->ni_dev);
 }
 

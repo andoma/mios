@@ -119,3 +119,18 @@ device_power_state(device_power_state_t state)
       d->d_class->dc_power_state(d, state);
   }
 }
+
+
+error_t
+device_shutdown(device_t *parent)
+{
+  device_t *d;
+  STAILQ_FOREACH(d, &devices, d_link) {
+    if(d->d_parent == parent && d->d_class->dc_shutdown) {
+      error_t err = d->d_class->dc_shutdown(d);
+      if(err)
+        return err;
+    }
+  }
+  return 0;
+}

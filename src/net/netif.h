@@ -15,8 +15,10 @@ struct nexthop;
 #define NETIF_TASK_RX          0x1
 #define NETIF_TASK_STATUS_UP   0x2
 #define NETIF_TASK_STATUS_DOWN 0x4
+#define NETIF_TASK_DETACH      0x8
 
-#define NETIF_F_UP   0x1
+#define NETIF_F_UP     0x1
+#define NETIF_F_ZOMBIE 0x2
 
 #define NETIF_F_TX_IPV4_CKSUM_OFFLOAD 0x100
 #define NETIF_F_TX_ICMP_CKSUM_OFFLOAD 0x200

@@ -276,6 +276,14 @@ ether_netif_init(ether_netif_t *eni, const char *name,
   net_timer_arm(&eni->eni_periodic, clock_get() + 1000000);
 }
 
+void
+ether_netif_fini(ether_netif_t *eni)
+{
+  timer_disarm(&eni->eni_periodic);
+  timer_disarm(&eni->eni_dhcp_timer);
+  timer_disarm(&eni->eni_lldp_timer);
+}
+
 
 void
 ether_print(ether_netif_t *en, struct stream *st)
