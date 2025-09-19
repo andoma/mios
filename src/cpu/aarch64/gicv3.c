@@ -106,7 +106,33 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
   irq_enable_fn_arg(irq, level, (void *)fn, NULL);
 }
 
-void irq_disable(int irq);
+static void
+sgi_disable(int sgi)
+{
+  panic("sgi_disable");
+}
+
+
+void
+irq_disable(int irq)
+{
+  if(irq < 32) {
+    sgi_disable(irq);
+    return;
+  }
+
+  uint32_t reg = irq >> 5;
+  uint32_t bit = irq & 0x1f;
+
+  int q = irq_forbid(IRQ_LEVEL_ALL);
+
+  uint32_t grp = reg_rd(GICD_IGROUPR(reg));
+  grp &= ~(1 << bit);
+  reg_wr(GICD_IGROUPR(reg), grp);
+  reg_wr(GICD_ICPENDR(reg), (1 << bit));
+  reg_wr(GICD_ICENABLER(reg), (1 << bit));
+  irq_permit(q);
+}
 
 
 
