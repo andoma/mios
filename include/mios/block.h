@@ -42,6 +42,8 @@ block_iface_t *block_create_partition(block_iface_t *parent,
 
 block_iface_t *block_create_verifier(block_iface_t *parent, int flags);
 
+block_iface_t *block_create_subdivision(block_iface_t *parent, int shift);
+
 
 __attribute__((always_inline))
 static inline error_t

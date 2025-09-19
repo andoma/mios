@@ -2,6 +2,8 @@
 #include <mios/mios.h>
 #include <mios/error.h>
 
+#include <sys/param.h>
+
 #include <stdlib.h>
 #include <malloc.h>
 #include <string.h>
@@ -266,4 +268,110 @@ block_create_verifier(block_iface_t *parent, int flags)
   v->iface.ctrl = verifier_ctrl;
   v->parent = parent;
   return &v->iface;
+}
+
+
+
+typedef struct subdivision {
+  block_iface_t iface;
+  block_iface_t *parent;
+  int shift;
+} subdivision_t;
+
+static size_t
+sub_block_offset(subdivision_t *s, size_t block)
+{
+  return (((1 << s->shift) - 1) & block) * s->iface.block_size;
+}
+
+static error_t
+subdivision_erase(struct block_iface *bi, size_t block, size_t count)
+{
+  error_t err;
+  subdivision_t *s = (subdivision_t *)bi;
+  const size_t mask = (1 << s->shift) - 1;
+
+
+  while(count) {
+
+    if(!(block & mask) && count > mask) {
+      // Can do full erase downstream
+      const size_t chunk = count & ~mask;
+      err = block_erase(s->parent, block >> s->shift, count >> s->shift);
+      if(err)
+        return err;
+      count -= chunk;
+      block += chunk;
+      continue;
+    }
+
+    const size_t pbs = s->parent->block_size;
+    void *buf = xalloc(pbs, 0, MEM_MAY_FAIL);
+
+    err = block_read(s->parent, block >> s->shift, 0, buf, pbs);
+    if(!err) {
+      err = block_erase(s->parent, block >> s->shift, 1);
+
+      size_t offset = block & mask;
+      size_t chunk = MIN(count, (1 << s->shift) - offset);
+
+      memset(buf + offset * s->iface.block_size, 0xff,
+             chunk * s->iface.block_size);
+
+      if(!err) {
+        err = block_write(s->parent, block >> s->shift, 0, buf, pbs);
+      }
+
+      count -= chunk;
+      block += chunk;
+    }
+
+    free(buf);
+
+    if(err)
+      return err;
+  }
+  return 0;
+}
+
+static error_t
+subdivision_read(struct block_iface *bi, size_t block,
+                 size_t offset, void *data, size_t length)
+{
+  subdivision_t *s = (subdivision_t *)bi;
+  return block_read(s->parent, block >> s->shift,
+                    offset + sub_block_offset(s, block), data, length);
+}
+
+static error_t
+subdivision_write(struct block_iface *bi, size_t block,
+                  size_t offset, const void *data, size_t length)
+{
+  subdivision_t *s = (subdivision_t *)bi;
+  return block_write(s->parent, block >> s->shift,
+                     offset + sub_block_offset(s, block), data, length);
+}
+
+static error_t
+subdivision_ctrl(struct block_iface *bi, block_ctrl_op_t op)
+{
+  subdivision_t *s = (subdivision_t *)bi;
+  return block_ctrl(s->parent, op);
+}
+
+block_iface_t *
+block_create_subdivision(block_iface_t *parent, int shift)
+{
+  subdivision_t *s = malloc(sizeof(subdivision_t));
+  s->shift = shift;
+
+  s->iface.num_blocks = parent->num_blocks << shift;
+  s->iface.block_size = parent->block_size >> shift;
+
+  s->iface.erase = subdivision_erase;
+  s->iface.write = subdivision_write;
+  s->iface.read = subdivision_read;
+  s->iface.ctrl = subdivision_ctrl;
+  s->parent = parent;
+  return &s->iface;
 }
