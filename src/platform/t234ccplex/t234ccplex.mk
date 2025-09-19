@@ -21,5 +21,8 @@ SRCS += ${P}/t234ccplex.c \
 	${P}/asm.s \
 
 ENABLE_TASK_ACCOUNTING := no
+ENABLE_RTL8168 := yes
+ENABLE_NET_IPV4 := yes
+ENABLE_NET_HTTP := yes
 
 ${MOS}/src/platform/t234ccplex/efiruntime.o : CFLAGS += -fpic
