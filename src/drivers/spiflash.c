@@ -4,6 +4,9 @@
 #include <mios/mios.h>
 #include <mios/task.h>
 #include <mios/eventlog.h>
+#include <mios/device.h>
+#include <mios/type_macros.h>
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -13,13 +16,24 @@
 
 typedef struct spiflash {
   block_iface_t iface;
+  device_t dev;
   spi_t *spi;
   mutex_t mutex;
   int64_t busy_until;
   uint32_t sectors;
   uint32_t spicfg;
+
+  struct {
+    uint8_t size; // in 2^n
+    uint8_t cmd3; // 0xff means not supported
+    uint8_t cmd4; // 0xff means not supported
+    uint16_t delay;
+  } erase_commands[4];
+
   gpio_t cs;
   uint8_t state;
+  uint8_t block_shift;
+
   uint8_t tx[9];
   uint8_t rx[9];
 } spiflash_t;
@@ -120,26 +134,66 @@ wrcmd(uint8_t *dst, uint32_t addr, uint8_t cmd3, uint8_t cmd4)
 }
 
 static error_t
-spiflash_erase(struct block_iface *bi, size_t block)
+spiflash_erase(struct block_iface *bi, size_t block, size_t count)
 {
   spiflash_t *sf = (spiflash_t *)bi;
+  error_t err;
 
-  error_t err = spiflash_wait_ready(sf);
-  if(!err) {
-    err = spiflash_we(sf);
+  while(count) {
+
+    if((err = spiflash_wait_ready(sf)) != 0)
+      return err;
+
+    if((err = spiflash_we(sf)) != 0)
+      return err;
+
+    const uint32_t addr = block << sf->block_shift;
+
+    err = ERR_INVALID_ADDRESS;
+    for(int i = 3; i >= 0; i--) {
+      if(sf->erase_commands[i].size == 0)
+        continue;
+
+      size_t chunk = 1 << (sf->erase_commands[i].size - sf->block_shift);
+      if(chunk > count)
+        continue;
+
+      uint32_t mask = (1 << sf->erase_commands[i].size) - 1;
+      if(addr & mask) {
+        continue;
+      }
+      int cmdlen = wrcmd(sf->tx, addr, sf->erase_commands[i].cmd3,
+                         sf->erase_commands[i].cmd4);
+      if(sf->tx[0] == 0xff) {
+        continue;
+      }
+
+      err = sf->spi->rw(sf->spi, sf->tx, NULL, cmdlen, sf->cs, sf->spicfg);
+      sf->state = SPIFLASH_STATE_BUSY;
+      sf->busy_until = clock_get() + sf->erase_commands[i].delay * 1000;
+      block += chunk;
+      count -= chunk;
+
+      break;
+    }
+
+    if(err)
+      return err;
+
   }
 
-  if(!err) {
-    const uint32_t addr = block * bi->block_size;
-    const int cmdlen = wrcmd(sf->tx, addr, 0x20, 0x21);
-    err = sf->spi->rw(sf->spi, sf->tx, NULL, cmdlen, sf->cs, sf->spicfg);
-    sf->state = SPIFLASH_STATE_BUSY;
-    sf->busy_until = clock_get() + 45000;
-  }
-
-  return err;
+  return 0;
 }
 
+
+static int
+is_all_ones(const uint8_t *data, size_t len)
+{
+  for(size_t i = 0 ; i < len; i++)
+    if(data[i] != 0xff)
+      return 0;
+  return 1;
+}
 
 static error_t
 spiflash_write(struct block_iface *bi, size_t block,
@@ -151,11 +205,6 @@ spiflash_write(struct block_iface *bi, size_t block,
   error_t err = 0;
   while(length) {
 
-    if((err = spiflash_wait_ready(sf)) != 0)
-      break;
-    if((err = spiflash_we(sf)) != 0)
-      break;
-
     size_t to_copy = length;
 
     if(to_copy > page_size)
@@ -166,14 +215,22 @@ spiflash_write(struct block_iface *bi, size_t block,
       to_copy = page_size - (offset & (page_size - 1));
     }
 
-    const uint32_t addr = block * bi->block_size + offset;
-    const int cmdlen = wrcmd(sf->tx, addr, 0x2, 0x12);
-    struct iovec tx[2] = {{sf->tx, cmdlen}, {(void *)data, to_copy}};
-    err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
-    sf->state = SPIFLASH_STATE_BUSY;
+    if(!is_all_ones(data, to_copy)) {
 
-    if(err)
-      break;
+      if((err = spiflash_wait_ready(sf)) != 0)
+        break;
+      if((err = spiflash_we(sf)) != 0)
+        break;
+
+      const uint32_t addr = block * bi->block_size + offset;
+      const int cmdlen = wrcmd(sf->tx, addr, 0x2, 0x12);
+      struct iovec tx[2] = {{sf->tx, cmdlen}, {(void *)data, to_copy}};
+      err = sf->spi->rwv(sf->spi, tx, NULL, 2, sf->cs, sf->spicfg);
+      sf->state = SPIFLASH_STATE_BUSY;
+
+      if(err)
+        break;
+    }
 
     length -= to_copy;
     data += to_copy;
@@ -262,6 +319,40 @@ read_sfdp(spiflash_t *sf, uint32_t addr)
 }
 
 
+static void
+spiflash_print_info(struct device *dev, struct stream *s)
+{
+  spiflash_t *sf = container_of(dev, spiflash_t, dev);
+
+  stprintf(s, "\tSector size:%u  Total sectors:%u  Total size:%u kB\n",
+           1 << sf->block_shift,
+           sf->sectors,
+           ((1 << sf->block_shift) * sf->sectors) / 1024);
+
+  for(size_t i = 0; i < 4; i++) {
+    if(!sf->erase_commands[i].size)
+      continue;
+    stprintf(s, "\tErase size:%6d cmd3:0x%02x cmd4:0x%02x erasetime:%d ms\n",
+             1 << sf->erase_commands[i].size,
+             sf->erase_commands[i].cmd3,
+             sf->erase_commands[i].cmd4,
+             sf->erase_commands[i].delay);
+  }
+}
+
+static const device_class_t spiflash_device_class = {
+  .dc_print_info = spiflash_print_info,
+};
+
+
+static const uint16_t erase_time_multipliers[4] = {1,16,128,1000};
+
+static int
+calc_erase_time(uint32_t v)
+{
+  return (1 + (v & 0x1f)) * erase_time_multipliers[(v >> 5) & 3];
+}
+
 block_iface_t *
 spiflash_create(spi_t *spi, gpio_t cs)
 {
@@ -290,20 +381,23 @@ spiflash_create(spi_t *spi, gpio_t cs)
   uint32_t hdr2 = read_sfdp(sf, 4);
   int nph = ((hdr2 >> 16) & 0xff);
 
-  uint32_t fpaddr = 0;
+  uint32_t ptpj = 0;
+  uint32_t ptp4 = 0;
   for(int i = 0; i <= nph; i++) {
     uint32_t ph1 = read_sfdp(sf, 0x8 + i * 8);
     uint32_t ph2 = read_sfdp(sf, 0xc + i * 8);
     if((ph1 & 0xff) == 0)
-      fpaddr = ph2 & 0xffffff;
+      ptpj = ph2 & 0xffffff;
+    if((ph1 & 0xff) == 0x84)
+      ptp4 = ph2 & 0xffffff;
   }
 
-  if(fpaddr == 0) {
+  if(ptpj == 0) {
     printf("Missing Flash Parameters  ");
     goto bad;
   }
 
-  uint32_t density = read_sfdp(sf, fpaddr + 4);
+  uint32_t density = read_sfdp(sf, ptpj + 4);
   uint32_t size = 0;
   if(density & 0x80000000) {
     printf("Unsupported density %x  ", density);
@@ -311,18 +405,57 @@ spiflash_create(spi_t *spi, gpio_t cs)
   }
 
   size = (density + 1) >> 3;
-  sf->sectors = size / 4096;
+  sf->block_shift = 12;
 
-  sf->iface.num_blocks = size / 4096;
-  sf->iface.block_size = 4096;
+  sf->sectors = size >> sf->block_shift;
+  sf->iface.num_blocks = size >> sf->block_shift;
+  sf->iface.block_size = 1 << sf->block_shift;
 
   printf("%d kB (%zd sectors)  ", size >> 10, sf->iface.num_blocks);
+
+
+  uint32_t w = read_sfdp(sf, ptpj + 0x1c);
+
+  sf->erase_commands[0].size = w;
+  sf->erase_commands[0].cmd3 = w >> 8;
+  sf->erase_commands[1].size = w >> 16;
+  sf->erase_commands[1].cmd3 = w >> 24;
+
+  w = read_sfdp(sf, ptpj + 0x20);
+  sf->erase_commands[2].size = w;
+  sf->erase_commands[2].cmd3 = w >> 8;
+  sf->erase_commands[3].size = w >> 16;
+  sf->erase_commands[3].cmd3 = w >> 24;
+
+  w = read_sfdp(sf, ptpj + 0x24);
+  for(int i = 0; i < 4; i++) {
+    sf->erase_commands[i].delay = calc_erase_time(w >> (4 + i * 7));
+  }
+
+  if(ptp4) {
+    w = read_sfdp(sf, ptp4 + 0x4);
+    sf->erase_commands[0].cmd4 = w;
+    sf->erase_commands[1].cmd4 = w >> 8;
+    sf->erase_commands[2].cmd4 = w >> 16;
+    sf->erase_commands[3].cmd4 = w >> 24;
+  } else {
+    sf->erase_commands[0].cmd4 = 0xff;
+    sf->erase_commands[1].cmd4 = 0xff;
+    sf->erase_commands[2].cmd4 = 0xff;
+    sf->erase_commands[3].cmd4 = 0xff;
+  }
+
   mutex_init(&sf->mutex, "spiflash");
   sf->iface.erase = spiflash_erase;
   sf->iface.write = spiflash_write;
   sf->iface.read = spiflash_read;
   sf->iface.ctrl = spiflash_ctrl;
   printf("OK\n");
+
+  sf->dev.d_name = "spiflash";
+  sf->dev.d_class = &spiflash_device_class;
+  device_register(&sf->dev);
+
   return &sf->iface;
 
  bad:

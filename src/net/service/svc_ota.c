@@ -108,7 +108,7 @@ ota_perform(svc_ota_t *sa)
 
   uint32_t total_bytes = num_blocks * sa->sa_blocksize;
   evlog(LOG_DEBUG, "OTA: Transfer started %d bytes", total_bytes);
-  err = bi->erase(bi, 0);
+  err = bi->erase(bi, 0, 1);
   if(err)
     return err;
 
@@ -135,7 +135,7 @@ ota_perform(svc_ota_t *sa)
       uint32_t sector = byte_offset >> 12;
       uint32_t sector_offset = byte_offset & 4095;
       if(sector > erased_sector) {
-        err = bi->erase(bi, sector);
+        err = bi->erase(bi, sector, 1);
         if(err) {
           pbuf_free(pb);
           return err;

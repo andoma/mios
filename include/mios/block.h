@@ -18,7 +18,7 @@ typedef struct block_iface {
 
   size_t block_size;
 
-  error_t (*erase)(struct block_iface *bi, size_t block);
+  error_t (*erase)(struct block_iface *bi, size_t block, size_t count);
 
   error_t (*write)(struct block_iface *bi, size_t block,
                    size_t offset, const void *data, size_t length);

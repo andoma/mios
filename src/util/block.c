@@ -14,12 +14,13 @@ typedef struct {
 } partition_t;
 
 static error_t
-partition_erase(struct block_iface *bi, size_t block)
+partition_erase(struct block_iface *bi, size_t block, size_t count)
 {
   partition_t *p = (partition_t *)bi;
-  if (block >= p->iface.num_blocks)
-   return ERR_NOSPC;
-  return p->parent->erase(p->parent, block + p->offset);
+  block += p->offset;
+  if (block + count > p->iface.num_blocks)
+    return ERR_NOSPC;
+  return p->parent->erase(p->parent, block, count);
 }
 
 static error_t
@@ -53,11 +54,11 @@ partition_ctrl(struct block_iface *bi, block_ctrl_op_t op)
 
 
 static error_t
-partition_lock_erase(struct block_iface *bi, size_t block)
+partition_lock_erase(struct block_iface *bi, size_t block, size_t count)
 {
   partition_t *p = (partition_t *)bi;
   p->parent->ctrl(p->parent, BLOCK_LOCK);
-  error_t err = partition_erase(bi, block);
+  error_t err = partition_erase(bi, block, count);
   p->parent->ctrl(p->parent, BLOCK_UNLOCK);
   return err;
 }
@@ -146,10 +147,10 @@ typedef struct {
 } verifier_t;
 
 static error_t
-verifier_erase(struct block_iface *bi, size_t block)
+verifier_erase(struct block_iface *bi, size_t block, size_t count)
 {
   verifier_t *v = (verifier_t *)bi;
-  return v->parent->erase(v->parent, block);
+  return v->parent->erase(v->parent, block, count);
 }
 
 static error_t
@@ -158,8 +159,10 @@ verifier_write(struct block_iface *bi, size_t block,
 {
   verifier_t *v = (verifier_t *)bi;
 
+  const size_t addr = block * bi->block_size + offset;
+
   if(v->flags & BLOCK_VERIFIER_DUMP)
-    sthexdump(stdio, "WRITE", data, length, block * 4096 + offset);
+    sthexdump(stdio, "WRITE", data, length, addr);
 
   error_t err = v->parent->write(v->parent, block, offset, data, length);
   if(err) {
@@ -184,8 +187,8 @@ verifier_write(struct block_iface *bi, size_t block,
   }
 
   if(memcmp(copy, data, length)) {
-    sthexdump(stdio, "WRITE", data, length, block * 4096 + offset);
-    sthexdump(stdio, "READB", copy, length, block * 4096 + offset);
+    sthexdump(stdio, "WRITE", data, length, addr);
+    sthexdump(stdio, "READB", copy, length, addr);
     if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
       panic("blockverifier: write readback mismatch");
     free(copy);
@@ -202,6 +205,8 @@ verifier_read(struct block_iface *bi, size_t block,
 {
   verifier_t *v = (verifier_t *)bi;
 
+  const size_t addr = block * bi->block_size + offset;
+
   error_t err = v->parent->read(v->parent, block, offset, data, length);
   if(err) {
     if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
@@ -209,7 +214,7 @@ verifier_read(struct block_iface *bi, size_t block,
     return err;
   }
   if(v->flags & BLOCK_VERIFIER_DUMP)
-    sthexdump(stdio, "READ ", data, length, block * 4096 + offset);
+    sthexdump(stdio, "READ ", data, length, addr);
 
   void *copy = xalloc(length, CACHE_LINE_SIZE, MEM_MAY_FAIL | MEM_TYPE_DMA);
   if(copy == NULL) {
@@ -227,8 +232,8 @@ verifier_read(struct block_iface *bi, size_t block,
 
 
   if(memcmp(copy, data, length)) {
-    sthexdump(stdio, "READ1", data, length, block * 4096 + offset);
-    sthexdump(stdio, "READ2", copy, length, block * 4096 + offset);
+    sthexdump(stdio, "READ1", data, length, addr);
+    sthexdump(stdio, "READ2", copy, length, addr);
     if(v->flags & BLOCK_VERIFIER_PANIC_ON_ERR)
       panic("blockverifier: read mismatch");
     free(copy);

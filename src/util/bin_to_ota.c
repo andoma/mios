@@ -47,7 +47,7 @@ bto_write(struct stream *st, const void *data, size_t len, int flags)
     evlog(LOG_INFO, "OTA Done Size:%d (CRC: 0x%08x)",
           bto->hdr.size, bto->hdr.image_crc);
 
-    err = bto->output->erase(bto->output, 0);
+    err = bto->output->erase(bto->output, 0, 1);
     if(err)
       return err;
 
@@ -67,7 +67,7 @@ bto_write(struct stream *st, const void *data, size_t len, int flags)
     if(bto->offset == 0) {
       // New block, erase
       evlog(LOG_DEBUG, "OTA Erasing block %d", bto->block);
-      err = bto->output->erase(bto->output, bto->block);
+      err = bto->output->erase(bto->output, bto->block, 1);
       if(err)
         return err;
     }
