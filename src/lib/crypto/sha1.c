@@ -51,7 +51,7 @@ A million repetitions of "a"
 
 /* Hash a single 512-bit block. This is the core of the algorithm. */
 
-void SHA1Transform(
+static void SHA1Transform(
     uint32_t state[5],
     const unsigned char buffer[64]
 )
@@ -197,11 +197,11 @@ void SHA1Init(
 
 void SHA1Update(
     SHA1_CTX * context,
-    const unsigned char *data,
-    uint32_t len
-)
+    const void *datav,
+    size_t len)
 {
-    uint32_t i;
+  const uint8_t *data = datav;
+  size_t i;
 
     uint32_t j;
 
@@ -279,16 +279,11 @@ void SHA1Final(
     memset(&finalcount, '\0', sizeof(finalcount));
 }
 
-void SHA1(
-    char *hash_out,
-    const char *str,
-    uint32_t len)
+void SHA1(uint8_t digest[static 20], const void *data, size_t len)
 {
     SHA1_CTX ctx;
-    unsigned int ii;
 
     SHA1Init(&ctx);
-    for (ii=0; ii<len; ii+=1)
-        SHA1Update(&ctx, (const unsigned char*)str + ii, 1);
-    SHA1Final((unsigned char *)hash_out, &ctx);
+    SHA1Update(&ctx, data, len);
+    SHA1Final(digest, &ctx);
 }
