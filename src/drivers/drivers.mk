@@ -46,3 +46,6 @@ SRCS += ${SRC}/drivers/tps92682.c
 ${MOS}/drivers/tps92682.o : CFLAGS += ${NOFPU}
 
 SRCS += ${SRC}/drivers/pmbus.c
+
+SRCS-${ENABLE_RTL8168} += \
+	${SRC}/drivers/rtl8168.c
