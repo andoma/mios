@@ -11,6 +11,7 @@
 static error_t
 cmd_reset(cli_t *cli, int argc, char **argv)
 {
+  shutdown_notification("Reset");
   reboot();
   return 0;
 }
