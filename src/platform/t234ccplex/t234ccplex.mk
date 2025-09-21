@@ -4,7 +4,9 @@ GLOBALDEPS += ${P}/t234ccplex.mk
 
 CFLAGS += -mcpu=cortex-a78ae
 
-CPPFLAGS += -iquote${P} -I${SRC}/platform/t234 -include ${P}/t234ccplex.h
+T234 = ${SRC}/platform/t234
+
+CPPFLAGS += -iquote${P} -I${T234} -include ${P}/t234ccplex.h
 
 LDSCRIPT = ${P}/t234ccplex.ld
 
@@ -19,6 +21,9 @@ SRCS += ${P}/t234ccplex.c \
 	${P}/t234ccplex_xusb.c \
 	${P}/efiruntime.c \
 	${P}/asm.s \
+
+SRCS += ${T234}/t234_bootflash.c \
+
 
 ENABLE_TASK_ACCOUNTING := no
 ENABLE_RTL8168 := yes
