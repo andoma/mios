@@ -41,7 +41,6 @@ hostname_set(const char *name)
 }
 
 
-
 int  __attribute__((weak))
 main(void)
 {
@@ -50,21 +49,26 @@ main(void)
   return 0;
 }
 
-__attribute__((noreturn))
-static void *
-main_trampoline(void *opaque)
+
+static void __attribute__((constructor(4999)))
+multitasking_mark(void)
 {
-  main();
-  thread_exit(0);
+  // Without something the compiler might just remove this completetly
+  asm volatile("nop" ::: "memory");
 }
 
 
 static void
-call_array_fwd(void **p, void **end)
+call_array_fwd(void **p, void **end, int en)
 {
   while(p != end) {
     void (*fn)(void) = *p++;
-    fn();
+    if(fn == &multitasking_mark) {
+      en = !en;
+      continue;
+    }
+    if(en)
+      fn();
   }
 }
 
@@ -79,6 +83,15 @@ call_array_rev(void **p, void **start)
 }
 
 
+__attribute__((noreturn))
+static void *
+main_trampoline(void *opaque)
+{
+  call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end, 0);
+  main();
+  thread_exit(0);
+}
+
 
 void
 init(void)
@@ -91,7 +104,7 @@ init(void)
   cpu_fpu_enable(1);
 #endif
 
-  call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end);
+  call_array_fwd((void *)&_init_array_begin, (void *)&_init_array_end, 1);
 
 #ifdef HAVE_FPU
   cpu_fpu_enable(0);
