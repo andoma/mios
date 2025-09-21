@@ -3,3 +3,6 @@
 
 #define CACHE_LINE_SIZE 64
 
+#define PBUF_DATA_SIZE 1536
+
+#define EVENTLOG_SIZE 4096

@@ -114,6 +114,10 @@ static efi_status_t
 efi_exit_boot_services(efi_handle_t H,
                        unsigned long mapkey)
 {
+  efi_image_handle_t *h = H;
+  if(h->prep_exit_boot_services())
+    return EFI_DEVICE_ERROR;
+
   asm volatile ("hvc #0" ::: "memory");
   return 0;
 }

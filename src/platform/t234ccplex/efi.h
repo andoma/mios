@@ -273,6 +273,7 @@ typedef struct efi_image_handle {
   efi_runtime_services_t runtime_services;
   efi_config_table_t config_tables[1];
   efi_loaded_image_t loaded_image;
+  int (*prep_exit_boot_services)(void);
   uint16_t fw_vendor[5];
 } efi_image_handle_t;
 
@@ -280,6 +281,3 @@ typedef struct efi_image_handle {
 
 
 extern void efi_init_runtime_services(efi_image_handle_t *h);
-
-efi_status_t efi_boot_exit_boot_services_prepare(efi_handle_t H,
-                                                 unsigned long mapkey);

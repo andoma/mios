@@ -1,0 +1,9 @@
+#pragma once
+
+#define T234_PMEM_CONVENTIONAL     1
+#define T234_PMEM_CACHE_COHERENT   2
+#define T234_PMEM_BOOT_SERVICES    3
+#define T234_PMEM_RUNTIME_SERVICES 4
+#define T234_PMEM_UNUSABLE         5
+#define T234_PMEM_LOADER           6
+
