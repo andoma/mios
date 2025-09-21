@@ -172,10 +172,6 @@ board_init_console(void)
 {
   stdio = hsp_mbox_stream(NV_ADDRESS_MAP_TOP0_HSP_BASE, 0,
                           NV_ADDRESS_MAP_AON_HSP_BASE, 1);
-
-  printf("BOOT_CHAIN_REGISTER = 0x%08x\n",reg_rd(SCRATCH_BOOT_CHAIN_REGISTER));
-  printf("BOOTLOADER_REGISTER = 0x%08x\n",reg_rd(SCRATCH_BOOTLOADER_REGISTER));
-  printf("    ROOTFS_REGISTER = 0x%08x\n",reg_rd(SCRATCH_ROOTFS_REGISTER));
 }
 
 

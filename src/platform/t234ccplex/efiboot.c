@@ -453,6 +453,8 @@ prep_exit_boot_services(void)
   if((err = bpmp_rst_set(114, 1)) != 0)
     return -1;
 
+  shutdown_notification("EFI Loader");
+
   err = device_shutdown(NULL);
   if(err)
     return -1;

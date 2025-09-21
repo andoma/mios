@@ -270,7 +270,7 @@ install_gpt(block_iface_t *bi)
   return err;
 }
 static error_t
-install_bct(block_iface_t *bi, int chain)
+install_bct(block_iface_t *bi, int chain, int just_one)
 {
   char name[8];
   uint8_t *buf = xalloc(8192, 0, MEM_MAY_FAIL | MEM_CLEAR);
@@ -297,6 +297,8 @@ install_bct(block_iface_t *bi, int chain)
   for(int i = 0; i < 64 && !err; i++) {
     snprintf(name, sizeof(name), "BCT-%d", i);
     err = copy_to_qspi(bi, i * 32, buf, 8192, name);
+    if(just_one)
+      break;
   }
 
   free(buf);
@@ -322,7 +324,7 @@ t234_bootflash_install(block_iface_t *bi)
   if(err)
     return err;
 
-  err = install_bct(bi, 0);
+  err = install_bct(bi, 0, 0);
   if(err)
     return err;
 
@@ -333,4 +335,15 @@ t234_bootflash_install(block_iface_t *bi)
   int64_t t1 = clock_get();
   evlog(LOG_INFO, "install complete (%d seconds)", (int)((t1 - t0) / 1000000));
   return 0;
+}
+
+
+error_t
+t234_bootflash_set_chain(struct block_iface *bi, int chain)
+{
+  error_t err = install_bct(bi, chain, 1);
+  if(err)
+    return err;
+
+  return block_ctrl(bi, BLOCK_SYNC);
 }
