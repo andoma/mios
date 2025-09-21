@@ -43,7 +43,7 @@ fs_blk_read(const struct lfs_config *c, lfs_block_t block,
             lfs_off_t off, void *buffer, lfs_size_t size)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->read(bi, block, off, buffer, size);
+  error_t err = block_read(bi, block, off, buffer, size);
   return err ? LFS_ERR_IO : 0;
 }
 
@@ -52,7 +52,7 @@ fs_blk_prog(const struct lfs_config *c, lfs_block_t block,
             lfs_off_t off, const void *buffer, lfs_size_t size)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->write(bi, block, off, buffer, size);
+  error_t err = block_write(bi, block, off, buffer, size);
   return err ? LFS_ERR_IO : 0;
 }
 
@@ -60,7 +60,7 @@ static int
 fs_blk_erase(const struct lfs_config *c, lfs_block_t block)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->erase(bi, block);
+  error_t err = block_erase(bi, block, 1);
   return err ? LFS_ERR_IO : 0;
 }
 
@@ -68,7 +68,7 @@ static int
 fs_blk_sync(const struct lfs_config *c)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->ctrl(bi, BLOCK_SYNC);
+  error_t err = block_ctrl(bi, BLOCK_SYNC);
   return err ? LFS_ERR_IO : 0;
 }
 
@@ -76,7 +76,7 @@ static int
 fs_blk_lock(const struct lfs_config *c)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->ctrl(bi, BLOCK_LOCK);
+  error_t err = block_ctrl(bi, BLOCK_LOCK);
   return err ? LFS_ERR_IO : 0;
 }
 
@@ -84,8 +84,8 @@ static int
 fs_blk_unlock(const struct lfs_config *c)
 {
   block_iface_t *bi = c->context;
-  error_t err = bi->ctrl(bi, BLOCK_SUSPEND);
-  bi->ctrl(bi, BLOCK_UNLOCK);
+  error_t err = block_ctrl(bi, BLOCK_SUSPEND);
+  block_ctrl(bi, BLOCK_UNLOCK);
   return err ? LFS_ERR_IO : 0;
 }
 
