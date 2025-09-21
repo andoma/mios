@@ -202,12 +202,6 @@ dhcpv4_send(struct ether_netif *eni, pbuf_t *pb, uint32_t dst_addr)
   netif_t *ni = &eni->eni_ni;
   nexthop_t *nh = NULL;
 
-  const size_t autopad = PBUF_DATA_SIZE - (pb->pb_buflen + pb->pb_offset);
-  memset(pbuf_data(pb, pb->pb_buflen), 0, autopad);
-  pb->pb_pktlen += autopad;
-  pb->pb_buflen += autopad;
-
-
   if(dst_addr != 0xffffffff) {
     nh = ipv4_nexthop_resolve(dst_addr);
     if(nh == NULL) {
