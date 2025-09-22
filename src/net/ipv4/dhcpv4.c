@@ -54,6 +54,7 @@ typedef struct dhcp_hdr {
 #define DHCP_PARAMETER_REQUEST_LIST    55
 #define DHCP_VENDOR_CLASS_ID           60
 #define DHCP_CLIENT_IDENTIFIER         61
+#define DHCP_BOOT_FILE_NAME            67
 
 #define DHCPDISCOVER       1
 #define DHCPOFFER          2
@@ -129,6 +130,7 @@ append_parameter_request_list(pbuf_t *pb)
 typedef struct {
   struct netif *ni;
   pbuf_t *vsi; // vendor specific info
+  char *bootfile;
 } dhcp_update_aux_t;
 
 __attribute__((noreturn))
@@ -139,26 +141,36 @@ dhcpv4_update_thread(void *arg)
   pbuf_t *vsi = dua->vsi;
   const void *vsidata = vsi ? pbuf_data(vsi, 0) : NULL;
   size_t vsisize = vsi ? vsi->pb_buflen : 0;
-  ghook_invoke(GHOOK_DHCP_UPDATE, dua->ni, vsidata, vsisize);
+  ghook_invoke(GHOOK_DHCP_UPDATE, dua->ni, vsidata, vsisize, dua->bootfile);
   pbuf_free(vsi);
   device_release(&dua->ni->ni_dev);
+  free(dua->bootfile);
   free(dua);
   thread_exit(0);
 }
 
 static void
-dhcpv4_update(netif_t *ni, pbuf_t **vsi)
+dhcpv4_update(netif_t *ni, pbuf_t **vsi, char **bootfile)
 {
   dhcp_update_aux_t *dua = xalloc(sizeof(dhcp_update_aux_t),
                                   0, MEM_MAY_FAIL);
   if(dua == NULL)
     return;
+
   if(vsi != NULL) {
     dua->vsi = *vsi;
     *vsi = NULL;
   } else {
     dua->vsi = NULL;
   }
+
+  if(bootfile != NULL) {
+    dua->bootfile = *bootfile;
+    *bootfile = NULL;
+  } else {
+    dua->bootfile = NULL;
+  }
+
   dua->ni = ni;
   device_retain(&ni->ni_dev);
 
@@ -321,6 +333,7 @@ typedef struct parsed_opts {
   uint32_t server_identifer;
   uint32_t ntp_server;
   pbuf_t *vsi; // Vendor specific info
+  char *bootfile;
 } parsed_opts_t;
 
 
@@ -347,6 +360,7 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
 {
   po->valid = 0;
   po->vsi = NULL;
+  po->bootfile = NULL;
 
   while(pb) {
     if(pbuf_pullup(pb, 1))
@@ -379,6 +393,14 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
       po->vsi = pbuf_make(0, 0);
       if(po->vsi != NULL) {
         memcpy(pbuf_append(po->vsi, length), pbuf_data(pb, 0), length);
+      }
+    }
+
+    if(type == DHCP_BOOT_FILE_NAME && po->bootfile == NULL) {
+      po->bootfile = xalloc(length + 1, 0, MEM_MAY_FAIL);
+      if(po->bootfile != NULL) {
+        memcpy(po->bootfile, pbuf_data(pb, 0), length);
+        po->bootfile[length] = 0;
       }
     }
 
@@ -465,7 +487,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
       eni->eni_ni.ni_ipv4_local_prefixlen =
         33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
-      dhcpv4_update(&eni->eni_ni, &po.vsi);
+      dhcpv4_update(&eni->eni_ni, &po.vsi, &po.bootfile);
       net_timer_arm(&eni->eni_dhcp_timer,
                     clock_get() + 1000000ull * (ntohl(po.lease_time) / 2));
 
@@ -476,6 +498,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
     }
   }
   pbuf_free(po.vsi);
+  free(po.bootfile);
   return pb;
 }
 
@@ -513,7 +536,7 @@ dhcpv4_init(ether_netif_t *eni)
 void
 dhcpv4_status_change(ether_netif_t *eni)
 {
-  dhcpv4_update(&eni->eni_ni, NULL);
+  dhcpv4_update(&eni->eni_ni, NULL, NULL);
   if(!(eni->eni_ni.ni_flags & NETIF_F_UP))
     return; // Interface is not up, don't do anything just now
 
