@@ -20,6 +20,7 @@
 #include <mios/service.h>
 #include <mios/eventlog.h>
 #include <mios/cli.h>
+#include <mios/align.h>
 
 #define TCP_EVENT_CONNECT 0x1
 #define TCP_EVENT_CLOSE   0x2
@@ -101,8 +102,8 @@ typedef struct tcb {
 
   uint16_t tcb_max_segment_size;
 
-  uint16_t tcb_txfifo_size; // Must be power of 2
-  uint16_t tcb_rxfifo_size; // Must be power of 2
+  uint32_t tcb_txfifo_size; // Must be power of 2
+  uint32_t tcb_rxfifo_size; // Must be power of 2
 
   timer_t tcb_rtx_timer;
   timer_t tcb_delayed_ack_timer;
@@ -302,8 +303,8 @@ tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
   th->dst_port = tcb->tcb_remote_port;
   th->ack = htonl(tcb->tcb_rcv.nxt);
 
-  uint16_t rcv_wnd = tcb_rxfifo_avail(tcb);
-  th->wnd = htons(rcv_wnd);
+  uint32_t rcv_wnd = tcb_rxfifo_avail(tcb);
+  th->wnd = htons(MIN(rcv_wnd, 65535));
 
   if(th->flg & TCP_F_SYN) {
     uint8_t *opts = pbuf_append(pb, 4);
@@ -1034,7 +1035,6 @@ tcb_create(const char *name, size_t txfifo_size, size_t rxfifo_size)
   tcb->tcb_rtx_timer.t_name = "tcp";
 
   tcb->tcb_rcv.mss = 1460;
-  //  tcb->tcb_rcv.wnd = tcb->tcb_rxfifo_size;
 
   tcb->tcb_iss = rand();
   tcb->tcb_snd.nxt = tcb->tcb_iss;
@@ -1468,6 +1468,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 struct stream *
 tcp_create_socket(const char *name, size_t txfifo_size, size_t rxfifo_size)
 {
+  txfifo_size = round_down_pow2(txfifo_size);
+  rxfifo_size = round_down_pow2(rxfifo_size);
+
+  txfifo_size = MAX(txfifo_size, 2048);
+  rxfifo_size = MAX(rxfifo_size, 2048);
+
   tcb_t *tcb = tcb_create(name, txfifo_size, rxfifo_size);
   if(tcb == NULL)
     return NULL;
