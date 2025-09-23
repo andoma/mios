@@ -1,3 +1,5 @@
+#include <mios/efi.h>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <malloc.h>
@@ -10,7 +12,6 @@
 #include <mios/device.h>
 #include <mios/task.h>
 #include <mios/cli.h>
-#include <fdt/fdt.h>
 
 #include "cache.h"
 
@@ -21,10 +22,16 @@
 #include "t234ccplex_pmem.h"
 #include "t234ccplex_bpmp.h"
 
-#include "efi.h"
+#include "efi_internal.h"
+
+extern void *FDT;
+
+/**
+ * Some day it might be better to separate this from tegra specifics
+ * But it's too early of an abstraction right now
+ */
 
 extern pmem_t tegra_pmem;
-
 
 static long efi_output_string(struct efi_simple_text_output_protocol *p,
                               uint16_t *char16)
@@ -279,6 +286,7 @@ efi_init_boot_services(efi_boot_services_t *bs)
 }
 
 
+#if 0
 static void *
 kernel_from_rcmblob(size_t *sizep)
 {
@@ -296,7 +304,7 @@ kernel_from_rcmblob(size_t *sizep)
   }
   return NULL;
 }
-
+#endif
 
 
 
@@ -341,105 +349,6 @@ relocate_runtime_services(efi_image_handle_t *h)
   init(h);
 }
 
-static uint32_t cpu_phandle[12];
-
-static int
-cleanup_fdt_node(void *opaque, fdt_walkctx_t *ctx)
-{
-  if(fdt_walk_match_node_name("/cpus/cpu@10000", ctx) ||
-     fdt_walk_match_node_name("/cpus/cpu@10100", ctx) ||
-     fdt_walk_match_node_name("/cpus/cpu@20000", ctx) ||
-     fdt_walk_match_node_name("/cpus/cpu@20100", ctx) ||
-     fdt_walk_match_node_name("/cpus/cpu@20200", ctx) ||
-     fdt_walk_match_node_name("/cpus/cpu@20300", ctx))
-    return 1;
-  return 0;
-}
-
-static size_t
-replace_cpu_cooling_map(void *data, size_t len)
-{
-  uint32_t *u32 = data;
-  u32[0] = cpu_phandle[0];
-  u32[3] = cpu_phandle[2];
-  u32[6] = cpu_phandle[6];
-  return 9 * 4;
-}
-
-static size_t
-cleanup_fdt_prop(void *opaque, struct fdt_walkctx *ctx, const char *name,
-                 void *data, size_t len)
-{
-  if(!strcmp(name, "phandle")) {
-    if(fdt_walk_match_node_name("/cpus/cpu@0", ctx))
-      memcpy(&cpu_phandle[0], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@100", ctx))
-      memcpy(&cpu_phandle[1], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@200", ctx))
-      memcpy(&cpu_phandle[2], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@300", ctx))
-      memcpy(&cpu_phandle[3], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@10000", ctx))
-      memcpy(&cpu_phandle[4], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@10100", ctx))
-      memcpy(&cpu_phandle[5], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@10200", ctx))
-      memcpy(&cpu_phandle[6], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@10300", ctx))
-      memcpy(&cpu_phandle[7], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@20000", ctx))
-      memcpy(&cpu_phandle[8], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@20100", ctx))
-      memcpy(&cpu_phandle[9], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@20200", ctx))
-      memcpy(&cpu_phandle[10], data, 4);
-    if(fdt_walk_match_node_name("/cpus/cpu@20300", ctx))
-      memcpy(&cpu_phandle[11], data, 4);
-  }
-
-  if(!strcmp(name, "cooling-device")) {
-    if(fdt_walk_match_node_name("/thermal-zones/cpu-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/gpu-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/cv0-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/cv1-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/cv2-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/soc0-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/soc1-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-    if(fdt_walk_match_node_name("/thermal-zones/soc2-thermal/cooling-maps/map-cpufreq", ctx)) {
-      return replace_cpu_cooling_map(data, len);
-    }
-
-  }
-  return len;
-}
-
-
-static void
-fdt_cleanup(void *fdt_addr)
-{
-  fdt_walkctx_t ctx;
-  fdt_init_walkctx(&ctx, fdt_addr);
-
-  ctx.node_cb = cleanup_fdt_node;
-  ctx.prop_cb = cleanup_fdt_prop;
-
-  fdt_walk(&ctx);
-}
-
 
 static int
 prep_exit_boot_services(void)
@@ -459,16 +368,17 @@ prep_exit_boot_services(void)
   if(err)
     return -1;
 
-
   return 0;
 }
 
 
 
-static error_t
-startlinux2(const void *kbin, size_t ksize)
+error_t
+efi_exec(const void *bin, size_t size)
 {
-  const struct pe_header *pe = kbin;
+  const struct pe_header *pe = bin;
+
+  // TODO: Check that we have a reasonable pe_header
 
   efi_image_handle_t *h = xalloc(sizeof(efi_image_handle_t),
                                  0, MEM_TYPE_CHAINLOADER |
@@ -510,18 +420,15 @@ startlinux2(const void *kbin, size_t ksize)
   }
 
   h->loaded_image.image_base = (void *)paddr;
-  h->loaded_image.image_size = ksize;
+  h->loaded_image.image_size = size;
 
-  memcpy(h->loaded_image.image_base, kbin, ksize);
+  memcpy(h->loaded_image.image_base, bin, size);
 
-  cache_op(h->loaded_image.image_base, ksize, ICACHE_FLUSH);
+  cache_op(h->loaded_image.image_base, size, ICACHE_FLUSH);
 
   memcpy(&h->config_tables[0].guid, guid_device_tree, 16);
 
-  extern void *fdt_addr;
-  fdt_cleanup(fdt_addr);
-
-  h->config_tables[0].table = fdt_addr;
+  h->config_tables[0].table = FDT;
 
   thread_t *t = thread_create(efi_boot_thread, h, 0, "efiboot",
                               TASK_NO_FPU |
@@ -536,93 +443,3 @@ startlinux2(const void *kbin, size_t ksize)
   free(h);
   return 0;
 }
-
-
-
-static error_t __attribute__((unused))
-startlinux(void)
-{
-  size_t ksize;
-  void *kbin = kernel_from_rcmblob(&ksize);
-  if(kbin == NULL) {
-    return ERR_NOT_FOUND;
-  }
-  return startlinux2(kbin, ksize);
-}
-
-
-static error_t
-cmd_linux(cli_t *cli, int argc, char **argv)
-{
-  return startlinux();
-}
-
-CLI_CMD_DEF("linux", cmd_linux);
-
-
-
-
-
-
-#include "net/http/http_stream.h"
-
-
-static void *loaded_kbin;
-static size_t loaded_ksize;
-
-static ssize_t
-kload_write(struct stream *s, const void *buf, size_t size, int flags)
-{
-  memcpy(loaded_kbin + loaded_ksize, buf, size);
-  loaded_ksize += size;
-  return size;
-}
-
-static void
-kload_close(stream_t *s)
-{
-
-}
-
-
-static stream_vtable_t load_to_buf_vtable = {
-  .write = kload_write,
-  .close = kload_close,
-};
-
-
-static error_t
-cmd_load(cli_t *cli, int argc, char **argv)
-{
-  if(argc != 2)
-    return ERR_INVALID_ARGS;
-
-  void *buf = xalloc(64 * 1024 * 1024, 0, MEM_MAY_FAIL);
-  if(buf == NULL)
-    return ERR_NO_MEMORY;
-  loaded_kbin = buf;
-  loaded_ksize = 0;
-  cli_printf(cli, "Loading kernel to %p\n", buf);
-
-  stream_t load_to_buf = {&load_to_buf_vtable};
-
-  const char *url = argv[1];
-  int64_t t0 = clock_get();
-  error_t err = http_get(url, &load_to_buf, HTTP_FAIL_ON_ERROR, NULL, NULL, 0);
-  int64_t t1 = clock_get();
-  if(err) {
-    free(loaded_kbin);
-    return err;
-  }
-  cli_printf(cli, "Loaded %zd bytes in %d µs CRC:0x%08x\n", loaded_ksize,
-             (int)(t1 - t0), crc32(0, loaded_kbin, loaded_ksize));
-
-  err = startlinux2(loaded_kbin, loaded_ksize);
-
-  free(loaded_kbin);
-  loaded_kbin = NULL;
-  return err;
-
-}
-
-CLI_CMD_DEF("load", cmd_load);

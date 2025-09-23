@@ -3,46 +3,70 @@
 #include <string.h>
 #include <sys/queue.h>
 #include <stdint.h>
-#include <mios/error.h>
 
-#define FDT_MAGIC        0xd00dfeed
-#define FDT_BEGIN_NODE   0x1
-#define FDT_END_NODE     0x2
-#define FDT_PROP         0x3
-#define FDT_NOP          0x4
-#define FDT_END          0x9
+typedef struct {
+  void *buffer;
+  size_t capacity; // Size of allocation, may be larger than fdt.totalsize
+} fdt_t;
 
-struct fdt_header {
-    uint32_t magic;
-    uint32_t totalsize;
-    uint32_t off_dt_struct;
-    uint32_t off_dt_strings;
-    uint32_t off_mem_rsvmap;
-    uint32_t version;
-    uint32_t last_comp_version;
-    uint32_t boot_cpuid_phys;  /* since v2 */
-    uint32_t size_dt_strings;  /* since v3 */
-    uint32_t size_dt_struct;   /* since v3 */
-};
+typedef uint32_t fdt_node_ref_t;
 
-STAILQ_HEAD(fde_nodelink_queue, fdt_nodelink);
+/**
+ * Return NULL if fdt seems OK
+ * Otherwise a (compile time) constant string with the error
+ */
+const char *fdt_validate(const fdt_t *fdt);
 
-typedef struct fdt_walkctx {
-  // If callback returns 1 entire node will be removed
-  int (*node_cb)(void *opaque, struct fdt_walkctx *ctx);
+/**
+ * Given an fdt, return the next node matching @name
+ * Name may contain wildcards between slashes denoted by an asterix '*'.
+ *
+ *    /cpus/\* ->  /cpus/cpu20100         <- first match
+ *                 /cpus/cpu20200         <- second match
+ *
+ *    /cpus   ->  /cpus
+ *
+ * @prev is passed in from previous match to keep searching
+ * the tree
+ *
+ * @match (if non-NULL) will be written with the "deepst" wildcard match
+ *
+ * The return value "fdt_node_ref_t" is a byte offset from start of
+ * the tree.
+ *
+ *
+ * Return value of 0 means no (more) match.
+ *
+ */
+fdt_node_ref_t fdt_find_next_node(const fdt_t *fdt, fdt_node_ref_t prev,
+                                  const char *name, const char **match);
 
-  // Return new size of data (or same as len) for no change. 0 = erase property
-  size_t (*prop_cb)(void *opaque, struct fdt_walkctx *ctx, const char *name,
-                    void *data, size_t len);
-  void *opaque;
-  const char *strings;
-  struct fde_nodelink_queue stack;
-  uint32_t *data;
-} fdt_walkctx_t;
+
+/**
+ * Overwrite a node with FDT_NOP until its end.
+ */
+void fdt_erase_node(const fdt_t *fdt, fdt_node_ref_t key);
+
+/**
+ * Return pointer to the property payload for a given node
+ * NULL if property doesn't exist.
+
+ * @lenp is filled with the byte length of the proprty
+ */
+const void *fdt_get_property(const fdt_t *fdt, fdt_node_ref_t key,
+                             const char *name, size_t *lenp);
+
+/**
+ * Overwrite or add a property. The fdt will be expanded if necessary
+ * Possible even reallocated
+ *
+ * @data contains the new proprty value.
+ * @len is the length in bytes
+ *
+ * Returns non-zero if memory-(re)allocation failed
+ */
+int fdt_set_property(fdt_t *fdt, fdt_node_ref_t key, const char *name,
+                     const void *data, size_t len);
 
 
-uint32_t *fdt_walk(fdt_walkctx_t *ctx);
-
-int fdt_walk_match_node_name(const char *name, fdt_walkctx_t *ctx);
-
-error_t fdt_init_walkctx(fdt_walkctx_t *ctx, const void *blob);
+uint32_t fdt_get_totalsize(const fdt_t *fdt);

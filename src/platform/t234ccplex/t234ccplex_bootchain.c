@@ -46,8 +46,6 @@ bootchain_init(void)
   } else {
     // Recovery boot via USB APX interface
     printf("boot mode: Recovery\n");
-
-
   }
 }
 

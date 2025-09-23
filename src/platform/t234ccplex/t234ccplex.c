@@ -103,9 +103,9 @@ board_init_early(void)
   stdio = &tcu_early_console;
 
   extern void *load_addr;
-  extern void *fdt_addr;
+  extern void *piggybacked_fdt;
   printf("\nMIOS on Tegra234 CCPLEX, Loaded at %p, FDT at %p\n",
-         load_addr, fdt_addr);
+         load_addr, piggybacked_fdt);
 
   heap_add_mem(HEAP_START_EBSS, 0xffff000000200000ull + 2 * 1024 * 1024,
                0, 10);
@@ -198,3 +198,17 @@ cmd_pmem(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("pmem", cmd_pmem);
+
+
+
+static error_t
+cmd_cvm(cli_t *cli, int argc, char **argv)
+{
+  const cpubl_params_v2_t *cbp =
+    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+
+  hexdump("CVM", cbp->eeprom.cvm, 256);
+  return 0;
+}
+
+CLI_CMD_DEF("cvm", cmd_cvm);

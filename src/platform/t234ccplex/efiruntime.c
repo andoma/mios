@@ -1,4 +1,4 @@
-#include "efi.h"
+#include "efi_internal.h"
 #include <stddef.h>
 
 #include <stdio.h>

@@ -320,7 +320,7 @@ vstart:
         str x1, [x0]
         adr x0, load_addr
         str x16, [x0]
-        adr x0, fdt_addr
+        adr x0, piggybacked_fdt
         str x7, [x0]
 
         adr x0, vectors_el1
@@ -351,8 +351,8 @@ smc:
         .global load_addr
 load_addr:
         .xword 0
-        .global fdt_addr
-fdt_addr:
+        .global piggybacked_fdt
+piggybacked_fdt:
         .xword 0
         .global el2_trampoline
 el2_trampoline:

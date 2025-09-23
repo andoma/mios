@@ -66,6 +66,10 @@ ari_init(void)
   } else {
     panic("t234 ARI not responding: %s", error_to_string(err));
   }
+
+  uint64_t cores;
+  err = ari_cmd(TEGRA_ARI_NUM_CORES_CMD, 0, &cores);
+  printf("t234 coremask: 0x%lx\n", (long)cores);
 }
 
 
