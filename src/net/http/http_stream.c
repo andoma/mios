@@ -1,9 +1,11 @@
 #include "http_stream.h"
+
 #include <assert.h>
 #include <mios/stream.h>
 #include <mios/task.h>
 #include <mios/mios.h>
 #include <mios/eventlog.h>
+#include <mios/cli.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -55,7 +57,7 @@ static int
 http_client_headers_complete(http_parser *p)
 {
   http_client_t *hc = p->data;
-  if(hc->hc_flags & HTTP_FAIL_ON_ERROR && p->status_code >= 400) {
+  if(!(hc->hc_flags & HTTP_DONT_FAIL_ON_ERROR) && p->status_code >= 400) {
     hc->hc_error = ERR_OPERATION_FAILED;
     return 1;
   }
@@ -105,10 +107,8 @@ static const http_parser_settings client_parser = {
 
 
 error_t
-http_get(const char *url, stream_t *output, uint16_t flags,
-         void *opaque,
-         const http_header_callback_t *header_callbacks,
-         size_t num_header_callbacks)
+http_get(const char *url, stream_t *output,
+         const http_client_opts_t *opts)
 {
   struct http_parser_url up;
   if(http_parser_parse_url(url, strlen(url), 0, &up))
@@ -118,18 +118,22 @@ http_get(const char *url, stream_t *output, uint16_t flags,
      (UF_SCHEMA | UF_HOST | UF_PATH))
     return ERR_INVALID_ADDRESS;
 
-  http_client_t *hc = xalloc(sizeof(http_client_t), 0, MEM_MAY_FAIL);
+  http_client_t *hc = xalloc(sizeof(http_client_t), 0,
+                             MEM_MAY_FAIL | MEM_CLEAR);
   if(hc == NULL)
     return ERR_NO_MEMORY;
-  memset(hc, 0, sizeof(http_client_t));
 
-  hc->hc_flags = flags;
   hc->hc_stream = output;
-  hc->hc_header_callbacks = header_callbacks;
-  hc->hc_num_header_callbacks = num_header_callbacks;
-  hc->hc_opaque = opaque;
 
-  stream_t *sk = tcp_create_socket("httpclient", 2048, 4096);
+  int rxbufsize = 4096;
+
+  if(opts) {
+    hc->hc_flags = opts->flags;
+    if(opts->tcp_socket_rx_buffer_size)
+      rxbufsize = opts->tcp_socket_rx_buffer_size;
+  }
+
+  stream_t *sk = tcp_create_socket("httpclient", 2048, rxbufsize);
   if(sk == NULL) {
     free(hc);
     return ERR_NO_MEMORY;
@@ -179,16 +183,12 @@ http_get(const char *url, stream_t *output, uint16_t flags,
 }
 
 
-
-#include <mios/cli.h>
-
 static error_t
 cmd_curl(cli_t *cli, int argc, char **argv)
 {
   if(argc != 2)
     return ERR_INVALID_ARGS;
-  return http_get(argv[1], cli->cl_stream, HTTP_FAIL_ON_ERROR, NULL, NULL, 0);
+  return http_get(argv[1], cli->cl_stream, NULL);
 }
-
 
 CLI_CMD_DEF("curl", cmd_curl);

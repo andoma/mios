@@ -8,9 +8,14 @@
 
 struct stream;
 
-#define HTTP_FAIL_ON_ERROR 0x1
+
+typedef struct {
+  uint16_t flags;
+#define HTTP_DONT_FAIL_ON_ERROR 0x1   // HTTP STATUS >= 400 returns 0
+
+  uint32_t tcp_socket_rx_buffer_size; // 0 = reasonable default
+
+} http_client_opts_t;
 
 error_t http_get(const char *url, struct stream *output,
-                 uint16_t flags, void *opaque,
-                 const http_header_callback_t *header_callbacks,
-                 size_t num_header_callbacks);
+                 const http_client_opts_t *opts);
