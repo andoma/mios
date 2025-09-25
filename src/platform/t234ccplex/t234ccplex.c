@@ -63,7 +63,7 @@ tegra_init_pmem(const cpubl_params_v2_t *cbp)
 
   // First GB is mapped DMA coherent by Mios
   const uint64_t GB = 1024 * 1024 * 1024;
-  pmem_set(&tegra_pmem, cbp->sdram_base , GB, T234_PMEM_CACHE_COHERENT);
+  pmem_set(&tegra_pmem, cbp->sdram_base , GB, T234_PMEM_CACHE_COHERENT, 0);
 
   for(int i = 0; i < CARVEOUT_OEM_COUNT; i++) {
     if(cbp->carveout_info[i].size == 0)
@@ -82,7 +82,7 @@ tegra_init_pmem(const cpubl_params_v2_t *cbp)
       break;
     }
     pmem_set(&tegra_pmem, (uint64_t)cbp->carveout_info[i].base,
-             cbp->carveout_info[i].size, type);
+             cbp->carveout_info[i].size, type, 1);
 
   }
 }

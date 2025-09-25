@@ -45,6 +45,22 @@ static long efi_output_string(struct efi_simple_text_output_protocol *p,
 }
 
 
+static void
+set_cmdline(efi_loaded_image_t *li, const char *str)
+{
+  if(str == NULL)
+    return;
+
+  size_t len = strlen(str) + 1;
+  uint16_t *u16 = malloc(len * 2);
+  for(size_t i = 0; i < len; i++) {
+    u16[i] = str[i];
+  }
+  li->load_options_size = len * 2;
+  li->load_options = u16;
+}
+
+
 static efi_simple_text_output_protocol_t efi_console_output = {
   .output_string = efi_output_string,
 };
@@ -61,27 +77,74 @@ static const uint8_t guid_loaded_image[16] = {
   0x8e, 0x3f, 0x00, 0xa0, 0xc9, 0x69, 0x72, 0x3b
 };
 
+static const uint8_t guid_rng[16] = {
+  0xa5, 0xbc, 0x52, 0x31, 0xde, 0xea, 0x3d, 0x43,
+  0x86, 0x2e, 0xc0, 0x1c, 0xdc, 0x29, 0x1f, 0x44
+};
+
 
 static efi_status_t
 efi_boot_allocate_pages(int allocation_type, int memory_type,
                         unsigned long num_pages,
                         efi_physical_addr_t *out)
 {
-  if(allocation_type != 1)
-    return EFI_INVALID_PARAMETER;
+  int t234_mem = 0;
 
-  uint64_t paddr = pmem_alloc(&tegra_pmem, num_pages << 12,
-                              T234_PMEM_CONVENTIONAL, memory_type, 4096);
-  if(paddr == 0)
-    return EFI_OUT_OF_RESOURCES;
-  *out = paddr;
-  return 0;
+  switch(memory_type) {
+  case EFI_LOADER_CODE:
+  case EFI_LOADER_DATA:
+    t234_mem = T234_PMEM_LOADER;
+    break;
+
+  case EFI_BOOT_SERVICES_CODE:
+  case EFI_BOOT_SERVICES_DATA:
+    t234_mem = T234_PMEM_BOOT_SERVICES;
+    break;
+  case EFI_RUNTIME_SERVICES_CODE:
+  case EFI_RUNTIME_SERVICES_DATA:
+    t234_mem = T234_PMEM_RUNTIME_SERVICES;
+    break;
+
+  case EFI_CONVENTIONAL_MEMORY:
+    t234_mem = T234_PMEM_CONVENTIONAL;
+    break;
+
+  case EFI_UNUSABLE_MEMORY:
+  case EFI_ACPI_RECLAIM_MEMORY:
+  case EFI_ACPI_MEMORY_NVS:
+  case EFI_MEMORY_MAPPED_IO:
+  case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+  case EFI_PAL_CODE:
+  case EFI_PERSISTENT_MEMORY:
+    return EFI_INVALID_PARAMETER;
+  }
+
+  uint64_t paddr;
+  int64_t size = num_pages << 12;
+
+  switch(allocation_type) {
+  case 1: // AllocateMaxAddress
+    paddr = pmem_alloc(&tegra_pmem, size,
+                       T234_PMEM_CONVENTIONAL, t234_mem, 4096);
+    if(paddr == 0)
+      return EFI_OUT_OF_RESOURCES;
+    *out = paddr;
+    return 0;
+
+  case 2: // AllocateAddress
+    paddr = *out;
+    if(pmem_set(&tegra_pmem, *out, size, t234_mem, 0))
+      return EFI_NOT_FOUND;
+    return 0;
+  default:
+    return EFI_INVALID_PARAMETER;
+  }
 }
 
 static efi_status_t
 efi_boot_free_pages(efi_physical_addr_t paddr, unsigned long num_pages)
 {
-  pmem_set(&tegra_pmem, paddr, num_pages << 12, T234_PMEM_CONVENTIONAL);
+  pmem_set(&tegra_pmem, paddr, num_pages << 12, T234_PMEM_CONVENTIONAL, 0);
   return 0;
 }
 
@@ -207,7 +270,6 @@ efi_boot_locate_handle(int, efi_guid_t *guid,
                        void *, unsigned long *,
                        efi_handle_t *)
 {
-  //  hexdump("efi_boot_locate_handle", guid, 16);
   return EFI_UNSUPPORTED;
 }
 
@@ -224,8 +286,7 @@ static efi_status_t
 efi_boot_install_configuration_table(efi_guid_t *,
                                      void *)
 {
-  return EFI_UNSUPPORTED;
-
+  return 0;
 }
 
 
@@ -253,10 +314,45 @@ efi_boot_disconnect_controller(efi_handle_t,
 }
 
 
+
 static efi_status_t
-efi_boot_locate_protocol(efi_guid_t *guid, void *, void **)
+efi_rng_get_info(void *self, unsigned long *a, efi_guid_t *guid)
 {
-  //  hexdump("efi_boot_locate_protocol", guid, 16);
+  return EFI_UNSUPPORTED;
+}
+
+
+static efi_status_t
+efi_rng_get_rng(void *self,
+                efi_guid_t *guid, unsigned long size,
+                uint8_t *ptr)
+{
+  for(size_t i = 0; i < size; i++)
+    ptr[i] = rand();
+  return 0;
+}
+
+
+static struct {
+  efi_status_t (*get_info)(void *self, unsigned long *a, efi_guid_t *guid);
+
+  efi_status_t (*get_rng)(void *self,
+                          efi_guid_t *guid, unsigned long size,
+                          uint8_t *ptr);
+} efi_rng = {
+  .get_info = efi_rng_get_info,
+  .get_rng = efi_rng_get_rng
+};
+
+
+static efi_status_t
+efi_boot_locate_protocol(efi_guid_t *guid, void *, void **result)
+{
+  if(!memcmp(guid, guid_rng, 16)) {
+    *result = &efi_rng;
+    return 0;
+  }
+
   return EFI_UNSUPPORTED;
 }
 
@@ -374,7 +470,7 @@ prep_exit_boot_services(void)
 
 
 error_t
-efi_exec(const void *bin, size_t size)
+efi_exec(const void *bin, size_t size, const char *cmdline)
 {
   const struct pe_header *pe = bin;
 
@@ -421,6 +517,8 @@ efi_exec(const void *bin, size_t size)
 
   h->loaded_image.image_base = (void *)paddr;
   h->loaded_image.image_size = size;
+  printf("cmdline: %s\n", cmdline);
+  set_cmdline(&h->loaded_image, cmdline);
 
   memcpy(h->loaded_image.image_base, bin, size);
 
@@ -439,7 +537,9 @@ efi_exec(const void *bin, size_t size)
   // If we come back the kernel failed to launch, so clean up
   pmem_set(&tegra_pmem,
            (uint64_t)h->loaded_image.image_base,
-           memsiz, EFI_CONVENTIONAL_MEMORY);
+           memsiz, EFI_CONVENTIONAL_MEMORY, 0);
+
+  free(h->loaded_image.load_options);
   free(h);
   return 0;
 }

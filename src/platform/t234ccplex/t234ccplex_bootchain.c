@@ -1,3 +1,5 @@
+#include "t234ccplex_bootchain.h"
+
 #include <stdio.h>
 
 #include <mios/io.h>

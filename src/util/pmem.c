@@ -89,7 +89,8 @@ pmem_add(pmem_t *p, unsigned long paddr, unsigned long size, uint32_t type)
 
 
 int
-pmem_set(pmem_t *p, unsigned long paddr, unsigned long size, uint32_t type)
+pmem_set(pmem_t *p, unsigned long paddr, unsigned long size, uint32_t type,
+         int allow_split)
 {
   pmem_segment_t *ps;
 
@@ -148,13 +149,13 @@ pmem_set(pmem_t *p, unsigned long paddr, unsigned long size, uint32_t type)
       return 0;
     }
 
-    if(paddr >= p->segments[i].paddr &&
+    if(allow_split && paddr >= p->segments[i].paddr &&
        paddr < p->segments[i].paddr + p->segments[i].size) {
 
       long split = p->segments[i].paddr + p->segments[i].size;
-      if(pmem_set(p, paddr, split - paddr, type))
+      if(pmem_set(p, paddr, split - paddr, type, 0))
         return -1;
-      return pmem_set(p, split, size - (split - paddr), type);
+      return pmem_set(p, split, size - (split - paddr), type, 0);
     }
   }
   return -1;
@@ -177,7 +178,7 @@ pmem_alloc(pmem_t *p, unsigned long size, uint32_t from_type, uint32_t as_type,
 
     unsigned long paddr = (p->segments[i].paddr + (p->segments[i].size - size)) & ~align;
 
-    if(pmem_set(p, paddr, size, as_type)) {
+    if(pmem_set(p, paddr, size, as_type, 0)) {
       continue;
     }
     return paddr;
