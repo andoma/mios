@@ -179,8 +179,6 @@ static const uint8_t basic_data_partition_uuid[16] = {
   0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7,
 };
 
-#define gpt_crc32(ptr, len) crc32(0, (void *)(ptr), len)
-
 
 static error_t
 write_gpt(block_iface_t *bi, struct efi_header *hdr,
@@ -195,7 +193,7 @@ write_gpt(block_iface_t *bi, struct efi_header *hdr,
         hdr_sector, tbl_sector);
 
   hdr->crc32 = 0;
-  hdr->crc32 = gpt_crc32(hdr, sizeof(struct efi_header));
+  hdr->crc32 = crc32(0, hdr, sizeof(struct efi_header));
 
   err = copy_to_qspi(bi, hdr->entries_lba, tbl,
                      hdr->entries_count * hdr->entries_size,
@@ -231,6 +229,7 @@ install_gpt(block_iface_t *bi)
     struct efi_entry *ee = tbl + i;
 
     memcpy(ee->type_uuid, basic_data_partition_uuid, sizeof(ee->type_uuid));
+
     for(size_t j = 0; j < sizeof(ee->uniq_uuid); j++) {
       ee->uniq_uuid[j] = rand();
     }
@@ -258,7 +257,7 @@ install_gpt(block_iface_t *bi)
 
   hdr->entries_count = num_entries;
   hdr->entries_size = sizeof(struct efi_entry);
-  hdr->entries_crc32 = gpt_crc32(tbl, hdr->entries_size * num_entries);
+  hdr->entries_crc32 = crc32(0, tbl, hdr->entries_size * num_entries);
   error_t err;
 
   err = write_gpt(bi, hdr, tbl, 131071, 131039);
