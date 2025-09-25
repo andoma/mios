@@ -51,23 +51,39 @@ bootchain_init(void)
   }
 }
 
+error_t
+bootchain_install_bootflash(void)
+{
+  return t234_bootflash_install(bootflash);
+}
+
+void
+bootchain_mark_valid(void)
+{
+  uint32_t bootloader_status = reg_rd(SCRATCH_BOOTLOADER_REGISTER);
+  if((bootloader_status & 0xffff) == BOOTLOADER_MAGIC) {
+    uint32_t chain_status = reg_rd(SCRATCH_BOOT_CHAIN_REGISTER);
+    int active_chain = (chain_status >> 4) & 1;
+    if(!(chain_status & (1 << active_chain))) {
+      chain_status &= ~(1 << active_chain);
+      reg_wr(SCRATCH_BOOT_CHAIN_REGISTER, chain_status);
+      printf("Bootchain %c marked OK\n", active_chain + 'A');
+    }
+  }
+}
+
+
+
 static void
 bootchain_shutdown_hook(ghook_type_t type, const char *reason)
 {
   if(type != GHOOK_SYSTEM_SHUTDOWN)
     return;
 
-  // We are about to shutdown (either reset, or boot into Linux)
-  // Now is a good time to clear the boot chain dirty bit
-
-  uint32_t bootloader_status = reg_rd(SCRATCH_BOOTLOADER_REGISTER);
-  if((bootloader_status & 0xffff) == BOOTLOADER_MAGIC) {
-    uint32_t chain_status = reg_rd(SCRATCH_BOOT_CHAIN_REGISTER);
-    int active_chain = (chain_status >> 4) & 1;
-    chain_status &= ~(1 << active_chain);
-    reg_wr(SCRATCH_BOOT_CHAIN_REGISTER, chain_status);
-    printf("Bootchain %c marked OK\n", active_chain + 'A');
-  }
+  // We are about to shutdown (either reset, or boot into Linux). If
+  // it hasn't already been done, now is our last opportunity to clear
+  // the current chain's dirty bit
+  bootchain_mark_valid();
 }
 
 GHOOK(bootchain_shutdown_hook);
@@ -76,10 +92,21 @@ GHOOK(bootchain_shutdown_hook);
 static error_t
 cmd_bootflash_install(cli_t *cli, int argc, char **argv)
 {
-  return t234_bootflash_install(bootflash);
+  return bootchain_install_bootflash();
 }
 
 CLI_CMD_DEF("bootflash_install", cmd_bootflash_install);
+
+static error_t
+cmd_bootflash_erase(cli_t *cli, int argc, char **argv)
+{
+  error_t err = block_erase(bootflash, 0, bootflash->num_blocks);
+  if(!err)
+    err = block_ctrl(bootflash, BLOCK_SYNC);
+  return err;
+}
+
+CLI_CMD_DEF("bootflash_erase", cmd_bootflash_erase);
 
 static error_t
 cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
