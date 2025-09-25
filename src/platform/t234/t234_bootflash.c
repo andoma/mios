@@ -25,9 +25,9 @@ typedef struct {
 
 static const partition_info_t default_partition_table[] = {
   {"BCT",                        0},
-  {"A_mb1",                   2048, 0x81}, // < These three are present in the BCT
-  {"A_psc_bl1",               3072, 0x82}, // < and must be aligned to 512 sector
-  {"A_MB1_BCT",               3584, 0x83}, // < boundary
+  {"A_mb1",                   2048, 0x81}, // < These three are present in the
+  {"A_psc_bl1",               3072, 0x82}, // < br_BCT and must be aligned to
+  {"A_MB1_BCT",               3584, 0x83}, // < 512 sector boundary
   {"A_MEM_BCT",               3840, 0x84},
   {"A_tsec-fw",               4352, 0x13},
   {"A_nvdec",                 6400, 0x07},
@@ -50,9 +50,9 @@ static const partition_info_t default_partition_table[] = {
   {"A_adsp-fw",              58240, 0x21},
   {"A_pva-fw",               62336, 0x3b},
   {"A_reserved_on_boot",     62848},
-  {"B_mb1",                  65024, 0x81}, // < These three are present in the BCT
-  {"B_psc_bl1",              66048, 0x82}, // < and must be aligned to 512 sector
-  {"B_MB1_BCT",              66560, 0x83}, // < boundary
+  {"B_mb1",                  65024, 0x81}, // < These three are present in the
+  {"B_psc_bl1",              66048, 0x82}, // < br_BCT and must be aligned to
+  {"B_MB1_BCT",              66560, 0x83}, // < 512 sector boundary
   {"B_MEM_BCT",              66816, 0x84},
   {"B_tsec-fw",              67328, 0x13},
   {"B_nvdec",                69376, 0x07},
