@@ -2,7 +2,6 @@
 ENABLE_TASK_DEBUG := no
 ENABLE_MATH := no
 ENABLE_UART_16550 := yes
-ENABLE_NET_CAN := yes
 
 PLATFORM := t234spe
 
