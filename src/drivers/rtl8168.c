@@ -187,6 +187,7 @@ static error_t
 rtl8168_disable(struct device *dev)
 {
   rtl8168_t *r = (rtl8168_t *)dev;
+  irq_disable(r->irq);
   ether_netif_fini(&r->eni);
   return 0;
 }
@@ -195,7 +196,6 @@ static error_t
 rtl8168_shutdown(struct device *dev)
 {
   rtl8168_t *r = (rtl8168_t *)dev;
-  irq_disable(r->irq);
   netif_detach(&r->eni.eni_ni);
   return 0;
 }
@@ -208,8 +208,8 @@ rtl8168_dtor(struct device *dev)
 
 static const device_class_t rtl8168_device_class = {
   .dc_print_info = rtl8168_print_info,
-  .dc_shutdown = rtl8168_shutdown,
   .dc_disable = rtl8168_disable,
+  .dc_shutdown = rtl8168_shutdown,
   .dc_dtor = rtl8168_dtor,
 };
 
