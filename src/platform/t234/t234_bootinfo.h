@@ -161,7 +161,7 @@ typedef struct cpubl_params_v2 {
 
 struct rcmblob_header {
   uint8_t magic[4];
-  uint8_t zero[4];
+  uint32_t cmd;
   uint8_t hash[64];
   uint32_t random_value;
   uint32_t num_items;
