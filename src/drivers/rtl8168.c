@@ -13,7 +13,7 @@
 #include "reg.h"
 #include "irq.h"
 #include "cache.h"
-
+#include "barrier.h"
 
 // https://www.iitg.ac.in/asahu/cs421/RealTek.pdf
 
@@ -156,10 +156,10 @@ rtl8168_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
   }
 
   // Wait until the end to hand over the descriptor for the first fragment
-  asm volatile("dsb ishst" ::: "memory");
+  dmb();
   desc_t *tx = r->tx_ring + bufidx0;
   tx->cmd_status |= DESC_OWN;
-  asm volatile("dsb ishst" ::: "memory");
+  dmb();
 
   reg_wr8(r->mmio + RTK_GTXSTART, 0x40); // Start TX
   r->tx_wrptr = wrptr;
@@ -288,7 +288,7 @@ handle_rx(rtl8168_t *r)
     uint32_t cmd = DESC_OWN | PBUF_DATA_SIZE;
     if((r->next_rx & RX_RING_MASK) == RX_RING_MASK)
       cmd |= DESC_EOR;
-    asm volatile("dsb ishst" ::: "memory");
+    dmb();
     rx->cmd_status = cmd;
     r->next_rx++;
   }
