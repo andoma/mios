@@ -15,6 +15,8 @@
 
 #include "net/pbuf.h"
 
+#include "cache.h"
+
 pmem_t tegra_pmem;
 
 void
@@ -131,13 +133,13 @@ board_init_early(void)
     } else {
       ttbr0_el1[i] |= (1 << 2);
     }
-    asm volatile("dc civac, %0" :: "r"(&ttbr0_el1[i]));
   }
+
+  cache_op(ttbr0_el1, 16*8, DCACHE_CLEAN_INV);
   asm volatile("dsb ishst;isb");
   asm volatile ("tlbi vmalle1; dsb ish; isb" ::: "memory");
 
   tegra_init_pmem(cbp);
-
 
   // Generic boot-time memory we can use
   add_heap_from_pmem(&tegra_pmem, 128 * 1048576,
