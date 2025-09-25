@@ -12,4 +12,7 @@ tegra234_hsp_init(void)
 
   g_top0_hsp.irq_route = 0;
   irq_enable_fn_arg(120 + 32, IRQ_LEVEL_IO, hsp_top0_irq, &g_top0_hsp);
+
+  g_top1_hsp.irq_route = 0;
+  irq_enable_fn_arg(128 + 32, IRQ_LEVEL_NET, hsp_top1_irq, &g_top1_hsp);
 }
