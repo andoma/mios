@@ -130,6 +130,8 @@ struct usb_ctrl {
   uint32_t uc_erratic_errors;
 
   struct usb_interface_queue uc_ifaces;
+
+  uint8_t uc_serial_number[6];
 };
 
 
@@ -240,7 +242,7 @@ read_bin2hex_as_desc(void *opaque)
     } else {
       const uint8_t byte_idx = chof / 2;
       const uint8_t b = data[byte_idx] >> (chof & 1 ? 0 : 4);
-      r = "0123456789abcdef"[b & 0xf];
+      r = "0123456789ABCDEF"[b & 0xf];
     }
     break;
   }
@@ -389,10 +391,8 @@ handle_get_descriptor(usb_ctrl_t *uc)
       break;
     case 3:
       getch = read_bin2hex_as_desc;
-
-      const struct serial_number sn = sys_get_serial_number();
-      desc = sn.data;
-      desclen = sn.len * 2;
+      desc = uc->uc_serial_number;
+      desclen = sizeof(uc->uc_serial_number) * 2;
       break;
     }
     desclen = desclen * 2 + 2;
@@ -1133,6 +1133,16 @@ stm32_otg_create(uint16_t vid, uint16_t pid,
                  int irq)
 {
   usb_ctrl_t *uc = &g_usb_ctrl;
+
+  const struct serial_number sn = sys_get_serial_number();
+  const uint32_t *sn_u32 = sn.data;
+  uint32_t sum = sn_u32[0] + sn_u32[2];
+  uc->uc_serial_number[0] = sum >> 24;
+  uc->uc_serial_number[1] = sum >> 16;
+  uc->uc_serial_number[2] = sum >> 8;
+  uc->uc_serial_number[3] = sum;
+  uc->uc_serial_number[4] = sn_u32[1] >> 24;
+  uc->uc_serial_number[5] = sn_u32[1] >> 16;
 
   uc->uc_ifaces = *q;
   STAILQ_INIT(q);
