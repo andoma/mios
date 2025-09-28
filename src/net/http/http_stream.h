@@ -15,6 +15,9 @@ typedef struct {
 
   uint32_t tcp_socket_rx_buffer_size; // 0 = reasonable default
 
+  uint64_t *content_length_ptr; /* if != NULL,
+                                 * written before data flows (if known) */
+
 } http_client_opts_t;
 
 error_t http_get(const char *url, struct stream *output,

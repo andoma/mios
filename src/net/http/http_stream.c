@@ -25,38 +25,21 @@ typedef struct {
   error_t hc_error;
   uint16_t hc_flags;
 
-  void *hc_opaque;
-  const http_header_callback_t *hc_header_callbacks;
-  size_t hc_num_header_callbacks;
-
   http_header_matcher_t hc_hhm;
+  const http_client_opts_t *hc_opts;
 
 } http_client_t;
 
 
 static int
-http_client_header_field(http_parser *p, const char *at, size_t length)
-{
-  http_client_t *hc = p->data;
-  return http_match_header_field(&hc->hc_hhm, at, length,
-                                 hc->hc_header_callbacks,
-                                 hc->hc_num_header_callbacks);
-}
-
-static int
-http_client_header_value(http_parser *p, const char *at, size_t length)
-{
-  http_client_t *hc = p->data;
-  return http_match_header_value(&hc->hc_hhm, at, length,
-                                 hc->hc_header_callbacks,
-                                 hc->hc_num_header_callbacks,
-                                 hc->hc_opaque);
-}
-
-static int
 http_client_headers_complete(http_parser *p)
 {
   http_client_t *hc = p->data;
+
+  if(hc->hc_opts != NULL && hc->hc_opts->content_length_ptr != NULL) {
+    *hc->hc_opts->content_length_ptr = p->content_length;
+  }
+
   if(!(hc->hc_flags & HTTP_DONT_FAIL_ON_ERROR) && p->status_code >= 400) {
     hc->hc_error = ERR_OPERATION_FAILED;
     return 1;
@@ -96,8 +79,6 @@ http_client_message_complete(http_parser *p)
 
 __attribute__((unused))
 static const http_parser_settings client_parser = {
-  .on_header_field     = http_client_header_field,
-  .on_header_value     = http_client_header_value,
   .on_headers_complete = http_client_headers_complete,
   .on_body             = http_client_body,
   .on_message_complete = http_client_message_complete,
@@ -154,6 +135,8 @@ http_get(const char *url, stream_t *output,
   hp.data = hc;
 
   hc->hc_error = 1;
+
+  hc->hc_opts = opts;
 
   while(hc->hc_error == 1) {
 
