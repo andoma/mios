@@ -248,7 +248,20 @@ void
 power_rail_register(power_rail_t *pr, const power_rail_class_t *prc,
                     const char *name, power_rail_t *parent)
 {
-  pr->pr_name = name;
+  if(parent) {
+    if(pr->pr_parent != NULL)
+      panic("power_rail: Parent already set");
+
+    power_rail_refcount(parent, 1);
+    pr->pr_parent = parent;
+  }
+
+  if(name != NULL)
+    pr->pr_name = name;
+
+  if(prc == NULL)
+    return;
+
   pr->pr_measured_voltage = NAN;
   pr->pr_measured_current = NAN;
   pr->pr_class = prc;
@@ -256,10 +269,6 @@ power_rail_register(power_rail_t *pr, const power_rail_class_t *prc,
   pr->pr_sw_power_good = POWER_RAIL_POWER_GOOD_UNKNOWN;
   power_rail_refcount(pr, 1);
 
-  if(parent) {
-    power_rail_refcount(parent, 1);
-    pr->pr_parent = parent;
-  }
 
   mutex_lock(&power_rail_mutex);
   SLIST_INSERT_SORTED(&power_rails, pr, pr_link, power_rail_cmp);
