@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include <sys/param.h>
+#include <sys/queue.h>
 
 #include "lib/crypto/sha512.h"
 #include "util/crc32.h"
@@ -87,61 +88,160 @@ static const partition_info_t default_partition_table[] = {
   {NULL,                    130944},
 };
 
+TAILQ_HEAD(install_data_queue, install_data);
+
+typedef struct install_data {
+  TAILQ_ENTRY(install_data) link;
+  const char *name;
+  const void *src;
+  size_t len;
+  uint32_t lba;
+  uint32_t lbas_before;
+  uint8_t payload[0];
+} install_data_t;
+
+
+ __attribute__((weak))
+void
+b234_bootflash_install_progress(int percentage)
+{
+}
+
+
+install_data_t *
+alloc_install_data(const char *name, const void *src, size_t len,
+                   uint32_t lba, size_t extra)
+{
+  install_data_t *id = xalloc(sizeof(install_data_t) + extra, 0,
+                              MEM_MAY_FAIL);
+  if(id == NULL)
+    return NULL;
+
+  if(src == NULL) {
+    src = id->payload;
+  }
+  id->name = name;
+  id->src = src;
+  id->len = len;
+  id->lba = lba;
+  id->lbas_before = 0;
+  return id;
+}
 
 static error_t
-copy_to_qspi(block_iface_t *b, int block, const void *data, size_t len,
-             const char *name)
+check(struct block_iface *bi, struct install_data_queue *q)
 {
-  error_t err;
-  void *buf;
+  install_data_t *id, *n;
 
-  size_t checklen = MIN(8192, len);
+  size_t max_check_len = 8192;
 
-  buf = xalloc(checklen, 0, MEM_MAY_FAIL);
+  void *buf = xalloc(max_check_len, 0, MEM_MAY_FAIL);
   if(buf == NULL)
     return ERR_NO_MEMORY;
 
-  err = block_read(b, block, 0, buf, checklen);
-  if(err)
-    return err;
+  uint32_t num_lbas = 0;
 
-  int header_already_there = !memcmp(data, buf, checklen);
-  free(buf);
-  if(header_already_there) {
-    evlog(LOG_INFO, "%s: Already installed at %d", name, block);
-    return 0;
-  }
+  for(id = TAILQ_FIRST(q); id != NULL; id = n) {
+    n = TAILQ_NEXT(id, link);
 
-  const int blocks = (len + b->block_size - 1) / b->block_size;
+    const size_t checklen = MIN(id->len, max_check_len);
 
-  evlog(LOG_INFO, "%s: Erase block %d +%d", name, block, blocks);
-  err = block_erase(b, block, blocks);
-  if(err)
-    return err;
-
-  evlog(LOG_INFO, "%s: Writing %zd bytes to block %d +%d",
-        name, len, block, blocks);
-
-  while(len) {
-    size_t to_copy = MIN(len, b->block_size);
-    err = block_write(b, block, 0, data, to_copy);
-    if(err)
+    error_t err = block_read(bi, id->lba, 0, buf, checklen);
+    if(err) {
+      free(buf);
       return err;
+    }
+    if(!memcmp(buf, id->src, checklen)) {
+      // Data is already on flash, remove item
 
-    len -= to_copy;
-    data += to_copy;
-    block++;
+      TAILQ_REMOVE(q, id, link);
+      free(id);
+      continue;
+    }
+
+    id->lbas_before = num_lbas;
+    num_lbas += (id->len + bi->block_size) / bi->block_size;
   }
-  evlog(LOG_INFO, "%s: Done", name);
+  free(buf);
   return 0;
 }
 
 
 
 static error_t
-install_from_rcmblob(block_iface_t *bi, const struct rcmblob_header *rbh)
+install(struct block_iface *bi, struct install_data_queue *q)
 {
-  error_t err = 0;
+  install_data_t *id;
+  error_t err;
+
+  uint32_t total_blocks = 0;
+  TAILQ_FOREACH(id, q, link) {
+    const int blocks = (id->len + bi->block_size - 1) / bi->block_size;
+    total_blocks += blocks * 2;
+  }
+
+  uint32_t completed_blocks = 0;
+
+  uint64_t last_notify = 0;
+
+  TAILQ_FOREACH(id, q, link) {
+
+    const int blocks = (id->len + bi->block_size - 1) / bi->block_size;
+
+    evlog(LOG_INFO, "%s: Erase block %d +%d", id->name, id->lba, blocks);
+
+    for(int i = 0; i < blocks; i += 16) {
+      int count = MIN(16, blocks - i);
+      err = block_erase(bi, id->lba + i , count);
+      if(err)
+        return err;
+      completed_blocks += count;
+
+      int64_t now = clock_get();
+      if(now > last_notify + 25000) {
+        last_notify = now;
+        int percentage = 100 * completed_blocks / total_blocks;
+        b234_bootflash_install_progress(percentage);
+      }
+    }
+
+    evlog(LOG_INFO, "%s: Writing %zd bytes to block %d +%d",
+          id->name, id->len, id->lba, blocks);
+
+    // Write in reverse order so we writer header last to avoid
+    // any partial writes. This is not a problem for the general
+    // boot sequence but rather if the installer is aborted prematurely
+    // and we try to re-install, as we only check first 8k
+
+    for(int i = blocks - 1; i >= 0; i--) {
+
+      const uint32_t offset = i * bi->block_size;
+
+      size_t to_copy = MIN(id->len - offset, bi->block_size);
+      err = block_write(bi, id->lba + i, 0, id->src + offset, to_copy);
+      if(err)
+        return err;
+
+      completed_blocks++;
+
+      int64_t now = clock_get();
+      if(now > last_notify + 25000) {
+        last_notify = now;
+        int percentage = 100 * completed_blocks / total_blocks;
+        b234_bootflash_install_progress(percentage);
+      }
+    }
+    evlog(LOG_INFO, "%s: Done", id->name);
+  }
+  return 0;
+}
+
+
+static error_t
+install_from_rcmblob(struct install_data_queue *q,
+                     const struct rcmblob_header *rbh)
+{
+  install_data_t *id;
 
   for(size_t i = 0; i < ARRAYSIZE(default_partition_table); i++) {
     const partition_info_t *pi = &default_partition_table[i];
@@ -161,16 +261,16 @@ install_from_rcmblob(block_iface_t *bi, const struct rcmblob_header *rbh)
         continue;
       }
 
-      err = copy_to_qspi(bi, start,
-                         (void *)rbh + rbh->items[j].location,
-                         rbh->items[j].length,
-                         pi->name);
-      if(err)
-        break;
+      id = alloc_install_data(pi->name,
+                              (void *)rbh + rbh->items[j].location,
+                              rbh->items[j].length,
+                              start, 0);
+      if(id == NULL)
+        return ERR_NO_MEMORY;
+      TAILQ_INSERT_TAIL(q, id, link);
     }
   }
-
-  return err;
+  return 0;
 }
 
 
@@ -181,31 +281,35 @@ static const uint8_t basic_data_partition_uuid[16] = {
 
 
 static error_t
-write_gpt(block_iface_t *bi, struct efi_header *hdr,
+write_gpt(struct install_data_queue *q, struct efi_header *hdr,
           struct efi_entry *tbl,
           uint32_t hdr_sector, uint32_t tbl_sector)
 {
-  error_t err;
+  install_data_t *id;
 
   hdr->entries_lba = tbl_sector;
-
-  evlog(LOG_INFO, "Installing GPT at %d, entries at %d",
-        hdr_sector, tbl_sector);
 
   hdr->crc32 = 0;
   hdr->crc32 = crc32(0, hdr, sizeof(struct efi_header));
 
-  err = copy_to_qspi(bi, hdr->entries_lba, tbl,
-                     hdr->entries_count * hdr->entries_size,
-                     "GPT-entries");
-  if(err)
-    return err;
+  size_t esize = hdr->entries_count * hdr->entries_size;
 
-  return copy_to_qspi(bi, hdr_sector, hdr, 512, "GPT-header");
+  id = alloc_install_data("PartTable", NULL, esize, hdr->entries_lba, esize);
+  if(id == NULL)
+    return ERR_NO_MEMORY;
+  TAILQ_INSERT_TAIL(q, id, link);
+  memcpy(id->payload, tbl, esize);
+
+  id = alloc_install_data("GPT", NULL, 512, hdr_sector, 512);
+  if(id == NULL)
+    return ERR_NO_MEMORY;
+  TAILQ_INSERT_TAIL(q, id, link);
+  memcpy(id->payload, hdr, 512);
+  return 0;
 }
 
 static error_t
-install_gpt(block_iface_t *bi)
+install_gpt(struct install_data_queue *q)
 {
   const int num_entries = 128;
   struct efi_entry *tbl = xalloc(sizeof(struct efi_entry) * num_entries,
@@ -260,22 +364,20 @@ install_gpt(block_iface_t *bi)
   hdr->entries_crc32 = crc32(0, tbl, hdr->entries_size * num_entries);
   error_t err;
 
-  err = write_gpt(bi, hdr, tbl, 131071, 131039);
+  err = write_gpt(q, hdr, tbl, 131071, 131039);
   if(!err) {
-    err = write_gpt(bi, hdr, tbl, 130592, 130560);
+    err = write_gpt(q, hdr, tbl, 130592, 130560);
   }
   free(tbl);
   free(hdr);
   return err;
 }
-static error_t
-install_bct(block_iface_t *bi, int chain, int just_one)
-{
-  char name[8];
-  uint8_t *buf = xalloc(8192, 0, MEM_MAY_FAIL | MEM_CLEAR);
-  if(buf == NULL)
-    return ERR_NO_MEMORY;
 
+
+static void
+make_bct(uint8_t *buf, int chain)
+{
+  memset(buf, 0, 8192);
   memcpy(buf, "BCTB", 4);
   memcpy(buf + 0x1210, "BCTB", 4);
   buf[0x1248] = 0x4;   // Offset to A_mb1 / 512
@@ -291,18 +393,47 @@ install_bct(block_iface_t *bi, int chain, int just_one)
   SHA512(buf + 6848, buf + 5900, 948);
   SHA512(buf + 0x1c4, buf + 4608, 3584);
   SHA512(buf + 4, buf + 0x44, 0x1fbc);
-
-  error_t err = 0;
-  for(int i = 0; i < 64 && !err; i++) {
-    snprintf(name, sizeof(name), "BCT-%d", i);
-    err = copy_to_qspi(bi, i * 32, buf, 8192, name);
-    if(just_one)
-      break;
-  }
-
-  free(buf);
-  return err;
 }
+
+
+static error_t
+install_bct(struct install_data_queue *q)
+{
+  const void *bct = NULL;
+  install_data_t *id;
+
+  for(int i = 0; i < 64; i++) {
+
+    if(bct == NULL) {
+
+      id = alloc_install_data("BCT", NULL, 8192, i * 32, 8192);
+      if(id != NULL) {
+        make_bct(id->payload, 0);
+        bct = id->payload;
+      }
+
+    } else {
+      id = alloc_install_data("BCT", bct, 8192, i * 32, 0);
+    }
+    if(id == NULL)
+      return ERR_NO_MEMORY;
+    TAILQ_INSERT_TAIL(q, id, link);
+  }
+  return 0;
+}
+
+
+
+static void
+install_data_free(struct install_data_queue *q)
+{
+  install_data_t *id, *n;
+  for(id = TAILQ_FIRST(q); id != NULL; id = n) {
+    n = TAILQ_NEXT(id, link);
+    free(id);
+  }
+}
+
 
 error_t
 t234_bootflash_install(block_iface_t *bi)
@@ -313,36 +444,62 @@ t234_bootflash_install(block_iface_t *bi)
   if(rbh == NULL)
     return ERR_NOT_FOUND;
 
+  struct install_data_queue q;
+  TAILQ_INIT(&q);
+
   int64_t t0 = clock_get();
 
-  err = install_from_rcmblob(bi, rbh);
-  if(err)
-    return err;
+  err = install_from_rcmblob(&q, rbh);
 
-  err = install_gpt(bi);
-  if(err)
-    return err;
+  if(!err) {
+    err = install_gpt(&q);
+  }
 
-  err = install_bct(bi, 0, 0);
-  if(err)
-    return err;
+  if(!err) {
+    err = install_bct(&q);
+  }
 
-  err = block_ctrl(bi, BLOCK_SYNC);
-  if(err)
-    return err;
+  if(!err) {
+    err = check(bi, &q);
+  }
 
+  if(!err) {
+    err = install(bi, &q);
+  }
+
+  if(!err) {
+    b234_bootflash_install_progress(100);
+  }
+
+  install_data_free(&q);
   int64_t t1 = clock_get();
   evlog(LOG_INFO, "install complete (%d seconds)", (int)((t1 - t0) / 1000000));
-  return 0;
+  return err;
 }
 
 
 error_t
 t234_bootflash_set_chain(struct block_iface *bi, int chain)
 {
-  error_t err = install_bct(bi, chain, 1);
-  if(err)
-    return err;
+  size_t bct_size = 8192;
 
-  return block_ctrl(bi, BLOCK_SYNC);
+  void *buf = xalloc(bct_size, 0, MEM_MAY_FAIL);
+  if(buf == NULL)
+    return ERR_NO_MEMORY;
+
+  make_bct(buf, chain);
+
+  const int blocks = bct_size / bi->block_size;
+  error_t err = block_erase(bi, 0, blocks);
+  if(!err) {
+
+    for(int i = 0; i < blocks; i++) {
+      err = block_write(bi, i, 0, buf + i * bi->block_size, bi->block_size);
+      if(err)
+        break;
+    }
+  }
+
+  free(buf);
+  return err;
 }
