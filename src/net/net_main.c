@@ -92,12 +92,14 @@ netif_task_cb(net_task_t *nt, uint32_t signals)
   }
 
   if(signals & NETIF_TASK_STATUS_UP && !(ni->ni_flags & NETIF_F_UP)) {
+    evlog(LOG_INFO, "%s: Link status: %s", ni->ni_dev.d_name, "UP");
     ni->ni_flags |= NETIF_F_UP;
     if(ni->ni_status_change)
       ni->ni_status_change(ni);
     ghook_invoke(GHOOK_NETIF_LINK_STATUS, ni);
   }
   if(signals & NETIF_TASK_STATUS_DOWN && (ni->ni_flags & NETIF_F_UP)) {
+    evlog(LOG_INFO, "%s: Link status: %s", ni->ni_dev.d_name, "DOWN");
     ni->ni_flags &= ~NETIF_F_UP;
     if(ni->ni_status_change)
       ni->ni_status_change(ni);

@@ -228,11 +228,9 @@ stm32h7_phy_thread(void *arg)
 
     if(!current_up && up) {
       current_up = 1;
-      evlog(LOG_INFO, "eth: Link status: %s", "UP");
       net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
     } else if(current_up && !up) {
       current_up = 0;
-      evlog(LOG_INFO, "eth: Link status: %s", "DOWN");
       net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
     }
     usleep(100000);
