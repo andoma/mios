@@ -34,6 +34,7 @@ _Static_assert(PBUF_DATA_SIZE >= 1536);
 #define RTK_RXCFG	        0x0044
 #define RTK_MISSEDPKT           0x004C
 #define RTK_CFG1	        0x0052
+#define RTK_PHY_STATUS	        0x006c
 #define RTK_CPLUS_CMD		0x00E0
 #define RTK_IM			0x00E2
 #define RTK_RXRING_ADDR_LO	0x00E4
@@ -48,6 +49,7 @@ _Static_assert(PBUF_DATA_SIZE >= 1536);
 
 #define RTK_ISR_RX_OK		0x0001
 #define RTK_ISR_TX_OK		0x0004
+#define RTK_ISR_LINK_CHANGE	0x0020
 
 #define RX_RING_SIZE 64
 #define TX_RING_SIZE 64
@@ -320,6 +322,18 @@ handle_tx(rtl8168_t *r)
 
 
 static void
+handle_link_change(rtl8168_t *r)
+{
+  uint8_t phy_status = reg_rd8(r->mmio + RTK_PHY_STATUS);
+  if(phy_status & 2) {
+    net_task_raise(&r->eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
+  } else {
+    net_task_raise(&r->eni.eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
+  }
+}
+
+
+static void
 rtl8168_irq(void *arg)
 {
   rtl8168_t *r = arg;
@@ -331,6 +345,10 @@ rtl8168_irq(void *arg)
 
   if(status & RTK_ISR_TX_OK) {
     handle_tx(r);
+  }
+
+  if(status & RTK_ISR_LINK_CHANGE) {
+    handle_link_change(r);
   }
 
   reg_wr16(r->mmio + RTK_IS, status);
@@ -443,6 +461,7 @@ rtl8168_attach(device_t *d)
   reg_wr16(r->mmio + RTK_IMR,
            RTK_ISR_RX_OK |
            RTK_ISR_TX_OK |
+           RTK_ISR_LINK_CHANGE |
            0);
 
   reg_wr(r->mmio + RTK_MISSEDPKT, 0);
@@ -458,8 +477,7 @@ rtl8168_attach(device_t *d)
   ether_netif_init(&r->eni, r->name, &rtl8168_device_class);
 
   evlog(LOG_INFO, "%s: rtl8168 attached IRQ %d", r->name, r->irq);
-
-  net_task_raise(&r->eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
+  handle_link_change(r);
 
   return 0;
 }
