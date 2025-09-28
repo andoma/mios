@@ -64,7 +64,7 @@ bootchain_mark_valid(void)
   if((bootloader_status & 0xffff) == BOOTLOADER_MAGIC) {
     uint32_t chain_status = reg_rd(SCRATCH_BOOT_CHAIN_REGISTER);
     int active_chain = (chain_status >> 4) & 1;
-    if(!(chain_status & (1 << active_chain))) {
+    if(chain_status & (1 << active_chain)) {
       chain_status &= ~(1 << active_chain);
       reg_wr(SCRATCH_BOOT_CHAIN_REGISTER, chain_status);
       printf("Bootchain %c marked OK\n", active_chain + 'A');
