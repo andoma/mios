@@ -140,8 +140,9 @@ board_init_early(void)
     }
   }
 
+  asm volatile("dsb sy;isb");
   cache_op(ttbr0_el1, 16*8, DCACHE_CLEAN_INV);
-  asm volatile("dsb ishst;isb");
+  asm volatile("dsb sy;isb");
   asm volatile ("tlbi vmalle1; dsb ish; isb" ::: "memory");
 
   tegra_init_pmem(cbp);
