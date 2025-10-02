@@ -34,6 +34,7 @@ _Static_assert(PBUF_DATA_SIZE >= 1536);
 #define RTK_RXCFG	        0x0044
 #define RTK_MISSEDPKT           0x004C
 #define RTK_CFG1	        0x0052
+#define RTK_PHY_ACCESS          0x0060
 #define RTK_PHY_STATUS	        0x006c
 #define RTK_CPLUS_CMD		0x00E0
 #define RTK_IM			0x00E2
@@ -371,6 +372,36 @@ rtl8168_reset(rtl8168_t *r)
 }
 
 
+static void
+mii_write(void *arg, uint16_t reg, uint16_t value)
+{
+  rtl8168_t *r = arg;
+
+  reg_wr(r->mmio + RTK_PHY_ACCESS,
+         (1 << 31) | (reg << 16) | value);
+
+  while(reg_rd(r->mmio + RTK_PHY_ACCESS) & (1 << 31)) {
+  }
+}
+
+
+static uint16_t
+mii_read(void *arg, uint16_t reg)
+{
+  rtl8168_t *r = arg;
+
+  reg_wr(r->mmio + RTK_PHY_ACCESS, reg << 16);
+
+  while(1) {
+    uint32_t x = reg_rd(r->mmio + RTK_PHY_ACCESS);
+
+    if(x & (1 << 31)) {
+      return x & 0xffff;
+    }
+  }
+}
+
+
 static error_t
 rtl8168_attach(device_t *d)
 {
@@ -479,6 +510,17 @@ rtl8168_attach(device_t *d)
   evlog(LOG_INFO, "%s: rtl8168 attached IRQ %d", r->name, r->irq);
   handle_link_change(r);
 
+  uint16_t anar = mii_read(r, 0x4);
+  uint16_t gtcr = mii_read(r, 0x9);
+
+  // If we're not announcing all full duplex rates over autoneg, make sure we do
+  if(anar != 0x1e1 || gtcr != 0x200) {
+    mii_write(r, 0x4, 0x01e1);
+    mii_write(r, 0x9, 0x0200);
+
+    // Reset and restart autoneg
+    mii_write(r, 0, 0x9200);
+  }
   return 0;
 }
 
