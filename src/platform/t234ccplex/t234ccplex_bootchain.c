@@ -6,6 +6,7 @@
 #include <mios/block.h>
 #include <mios/cli.h>
 #include <mios/ghook.h>
+#include <mios/eventlog.h>
 
 #include <drivers/spiflash.h>
 
@@ -67,7 +68,7 @@ bootchain_mark_valid(void)
     if(chain_status & (1 << active_chain)) {
       chain_status &= ~(1 << active_chain);
       reg_wr(SCRATCH_BOOT_CHAIN_REGISTER, chain_status);
-      printf("Bootchain %c marked OK\n", active_chain + 'A');
+      evlog(LOG_INFO, "Bootchain %c marked OK", active_chain + 'A');
     }
   }
 }
@@ -130,7 +131,13 @@ cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   }
 
-  return t234_bootflash_set_chain(bootflash, chain);
+  error_t err = t234_bootflash_set_chain(bootflash, chain);
+
+  if(err)
+    return err;
+
+  reg_wr(SCRATCH_BOOT_CHAIN_REGISTER, chain << 4);
+  return 0;
 }
 
 CLI_CMD_DEF("bootflash_setchain", cmd_bootflash_setchain);
