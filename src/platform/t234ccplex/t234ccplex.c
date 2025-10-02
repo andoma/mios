@@ -10,6 +10,7 @@
 
 #include "t234_hsp.h"
 #include "t234_bootinfo.h"
+#include "t234_reset_reason.h"
 
 #include "t234ccplex_pmem.h"
 
@@ -108,6 +109,10 @@ board_init_early(void)
   extern void *piggybacked_fdt;
   printf("\nMIOS on Tegra234 CCPLEX, Loaded at %p, FDT at %p\n",
          load_addr, piggybacked_fdt);
+
+  uint32_t reset_reason = (reg_rd(PMC_RESET_REASON_REGISTER) >> 2) & 0x3f;
+  printf("Reset reason: %s\n",
+         strtbl(t234_reset_reason, reset_reason));
 
   heap_add_mem(HEAP_START_EBSS, 0xffff000000200000ull + 2 * 1024 * 1024,
                0, 10);
