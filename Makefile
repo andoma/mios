@@ -76,7 +76,6 @@ include ${SRC}/lib/libc/libc.mk
 include ${SRC}/lib/math/math.mk
 include ${SRC}/lib/fixmath.mk
 include ${SRC}/lib/littlefs.mk
-include ${SRC}/lib/usb/usb.mk
 include ${SRC}/lib/gui/gui.mk
 include ${SRC}/lib/tig/tig.mk
 include ${SRC}/lib/metric/metric.mk
@@ -86,6 +85,7 @@ include ${SRC}/lib/rpc/rpc.mk
 include ${SRC}/drivers/drivers.mk
 include ${SRC}/net/net.mk
 include ${SRC}/util/util.mk
+include ${SRC}/lib/usb/usb.mk
 
 include ${T}/support/version/gitver.mk
 

@@ -11,6 +11,7 @@
 #include <mios/task.h>
 #include <mios/timer.h>
 #include <mios/sys.h>
+#include <mios/align.h>
 
 #include "irq.h"
 
@@ -887,9 +888,10 @@ otg_init_regs(usb_ctrl_t *uc)
 
 static void
 uc_ep_read(device_t *dev, usb_ep_t *ue,
-        uint8_t *buf, size_t buf_size,
-        size_t buf_offset, size_t bytes)
+           uint8_t *buf, size_t buf_size,
+           size_t buf_offset, size_t bytes)
 {
+  assert(is_pow2(buf_size));
   const uint32_t ep = ue->ue_address & 0x7f;
 
   uint32_t w = 0;

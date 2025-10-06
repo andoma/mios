@@ -8,3 +8,9 @@ round_down_pow2(unsigned int x)
 
     return 1U << (31 - __builtin_clz(x));
 }
+
+static inline int
+is_pow2(unsigned int x)
+{
+  return (x & (x - 1)) == 0;
+}

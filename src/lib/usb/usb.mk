@@ -6,4 +6,7 @@ SRCS +=	${SRC}/lib/usb/usb_common.c \
 SRCS-${ENABLE_NET_MBUS} += \
 	${SRC}/lib/usb/usb_mbus.c \
 
+SRCS-${ENABLE_NET_DSIG} += \
+	${SRC}/lib/usb/usb_dsig.c \
+
 ${MOS}/lib/usb/%.o : CFLAGS += ${NOFPU}

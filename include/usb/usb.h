@@ -137,3 +137,6 @@ void usb_cdc_create_shell(struct usb_interface_queue *q);
 
 void usb_mbus_create(struct usb_interface_queue *q,
                      uint8_t usb_sub_class);
+
+void usb_dsig_create(struct usb_interface_queue *q,
+                     uint8_t usb_sub_class);
