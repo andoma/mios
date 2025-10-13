@@ -21,6 +21,10 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
   size_t hdrsize;
 
   result = vllp_channel_read(vc, &buf, &hdrsize, 250000);
+  if(result == VLLP_ERR_NOT_READY) {
+    vllp_logf(v, LOG_INFO, "OTA: Target not accepting upgrades right now");
+    return NULL;
+  }
   if(result)
     return vllp_strerror(result);
   if(buf == NULL)
