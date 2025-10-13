@@ -32,6 +32,7 @@ SRCS += ${T234}/t234_bootflash.c \
 
 ENABLE_TASK_ACCOUNTING := no
 ENABLE_RTL8168 := yes
+ENABLE_LAN743X := yes
 ENABLE_NET_IPV4 := yes
 ENABLE_NET_HTTP := yes
 
