@@ -52,3 +52,6 @@ SRCS-${ENABLE_RTL8168} += \
 
 SRCS-${ENABLE_ADS101X} += \
 	${SRC}/drivers/ads101x.c
+
+SRCS-${ENABLE_LAN743X} += \
+	${SRC}/drivers/lan743x.c
