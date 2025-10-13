@@ -129,7 +129,8 @@ get_shstrtab64(const void *elf)
   return elf + shdr->offset;
 }
 
-mios_image_t *
+
+static mios_image_t *
 mios_image_from_elf_mem32(const void *elf, size_t elfsize,
                           size_t skip_bytes, size_t alignment,
                           const char **errmsg)
@@ -224,7 +225,7 @@ mios_image_from_elf_mem32(const void *elf, size_t elfsize,
 }
 
 
-uint64_t
+static uint64_t
 vtop64(const void *elf, uint64_t addr)
 {
   const elf64hdr_t *elfhdr = elf;
@@ -244,7 +245,7 @@ vtop64(const void *elf, uint64_t addr)
 
 
 
-mios_image_t *
+static mios_image_t *
 mios_image_from_elf_mem64(const void *elf, size_t elfsize,
                           size_t skip_bytes, size_t alignment,
                           const char **errmsg)
