@@ -3,6 +3,20 @@
 
 #include <stdio.h>
 
+#include "t234_hsp.h"
+#include "reg.h"
+
+static inline uint64_t
+smc_call1(uint64_t val)
+{
+    register uint64_t x0 __asm__("x0") = val;
+    __asm__ volatile ("smc #0"
+                      : "+r"(x0)
+                      :
+                      : "x1","x2","x3","x4","x5","x6","x7","cc","memory");
+    return x0;
+}
+
 __attribute__((section("efi_runtime"),noinline))
 static efi_status_t
 efi_get_time(void *tm, void *tc)
@@ -78,7 +92,8 @@ static efi_status_t
 efi_reset_system(int reset_type, efi_status_t status,
                  unsigned long data_size, uint16_t *data)
 {
-  return EFI_UNSUPPORTED;
+  smc_call1(0x84000009);
+  return EFI_DEVICE_ERROR; // Should not come back really
 }
 
 __attribute__((section("efi_runtime"),noinline))

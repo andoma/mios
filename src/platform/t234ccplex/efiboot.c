@@ -23,7 +23,7 @@
 #include "t234ccplex_bpmp.h"
 
 #include "efi_internal.h"
-
+#include "smbios.h"
 extern void *FDT;
 
 /**
@@ -66,6 +66,15 @@ static efi_simple_text_output_protocol_t efi_console_output = {
 };
 
 
+static const uint8_t guid_smbios3_table[16] = {
+  0x44, 0x15, 0xfd, 0xf2, 0x94, 0x97, 0x2c, 0x4a,
+  0x99, 0x2E, 0xE5, 0xBB, 0xCF, 0x20, 0xE3, 0x94
+};
+
+static const uint8_t guid_rt_properties_table[16] = {
+  0x8a, 0x91, 0x66, 0xeb, 0xef, 0x7e, 0x2a, 0x40,
+  0x84, 0x2e, 0x93, 0x1d, 0x21, 0xc3, 0x8a, 0xe9
+};
 
 static const uint8_t guid_device_tree[16] = {
   0xd5, 0x21, 0xb6, 0xb1, 0x9c, 0xf1, 0xa5, 0x41,
@@ -166,6 +175,8 @@ efi_boot_get_memory_map(unsigned long *map_size,
   for(size_t i = 0; i < tegra_pmem.count; i++) {
 
     int efi_type = 0;
+    uint64_t attrib = EFI_MEMORY_WB;
+
 
     switch(tegra_pmem.segments[i].type) {
     case T234_PMEM_CONVENTIONAL:
@@ -177,6 +188,7 @@ efi_boot_get_memory_map(unsigned long *map_size,
       break;
     case T234_PMEM_RUNTIME_SERVICES:
       efi_type = EFI_RUNTIME_SERVICES_CODE;
+      attrib |= EFI_MEMORY_RUNTIME;
       break;
     case T234_PMEM_UNUSABLE:
       efi_type = EFI_UNUSABLE_MEMORY;
@@ -192,7 +204,7 @@ efi_boot_get_memory_map(unsigned long *map_size,
     descs[i].phys_addr = tegra_pmem.segments[i].paddr;
     descs[i].virt_addr = 0;
     descs[i].num_pages = tegra_pmem.segments[i].size >> 12;
-    descs[i].attribute = 0x100f;
+    descs[i].attribute = attrib;
   }
 
   *map_size = tegra_pmem.count * sizeof(efi_memory_desc_t);
@@ -467,8 +479,6 @@ prep_exit_boot_services(void)
   return 0;
 }
 
-
-
 error_t
 efi_exec(const void *bin, size_t size, const char *cmdline)
 {
@@ -482,6 +492,12 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   if(h == NULL) {
     return ERR_NO_MEMORY;
   }
+
+  build_and_install_smbios3(h->smbios, sizeof(h->smbios));
+
+  h->rt_proptable.version = 1;
+  h->rt_proptable.length = 8;
+  h->rt_proptable.runtime_services_supported = 0x400; // We only support reset
 
   h->prep_exit_boot_services = prep_exit_boot_services;
   h->system_table.hdr.signature = 0x5453595320494249ULL;
@@ -497,10 +513,8 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   h->system_table.con_out = &efi_console_output;
   h->system_table.boot = &h->boot_services;
   h->system_table.runtime = &h->runtime_services;
-  h->system_table.nr_tables = 1;
+  h->system_table.nr_tables = 3;
   h->system_table.tables = h->config_tables;
-
-  //  h->boot_services.exit_boot_services = efi_exit_boot_services;
 
   efi_init_boot_services(&h->boot_services);
   relocate_runtime_services(h);
@@ -525,8 +539,13 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   cache_op(h->loaded_image.image_base, size, ICACHE_FLUSH);
 
   memcpy(&h->config_tables[0].guid, guid_device_tree, 16);
-
   h->config_tables[0].table = FDT;
+
+  memcpy(&h->config_tables[1].guid, guid_rt_properties_table, 16);
+  h->config_tables[1].table = &h->rt_proptable;
+
+  memcpy(&h->config_tables[2].guid, guid_smbios3_table, 16);
+  h->config_tables[2].table = h->smbios;
 
   thread_t *t = thread_create(efi_boot_thread, h, 0, "efiboot",
                               TASK_NO_FPU |

@@ -35,6 +35,8 @@
 #define EFI_ABORTED		(21 | (1UL << 63))
 #define EFI_SECURITY_VIOLATION	(26 | (1UL << 63))
 
+#define EFI_MEMORY_WB		0x0000000000000008ULL
+#define EFI_MEMORY_RUNTIME	0x8000000000000000ULL
 
 
 
@@ -266,15 +268,23 @@ typedef struct {
 } efi_loaded_image_t;
 
 
+typedef struct {
+  uint16_t version;
+  uint16_t length;
+  uint32_t runtime_services_supported;
+} efi_rt_properties_table_t;
+
 
 typedef struct efi_image_handle {
   efi_system_table_t system_table;
   efi_boot_services_t boot_services;
   efi_runtime_services_t runtime_services;
-  efi_config_table_t config_tables[1];
+  efi_config_table_t config_tables[3];
   efi_loaded_image_t loaded_image;
   int (*prep_exit_boot_services)(void);
   uint16_t fw_vendor[5];
+  efi_rt_properties_table_t rt_proptable;
+  uint8_t smbios[2048];
 } efi_image_handle_t;
 
 
