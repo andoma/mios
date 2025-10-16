@@ -7,11 +7,14 @@
 #include <mios/version.h>
 #include <mios/sys.h>
 
+#include "irq.h"
 
 static error_t
 cmd_reset(cli_t *cli, int argc, char **argv)
 {
-  shutdown_notification("Reset");
+  if(can_sleep()) {
+    shutdown_notification("Reset");
+  }
   reboot();
   return 0;
 }
