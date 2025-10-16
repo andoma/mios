@@ -110,7 +110,11 @@ ifdef APPNAME
 	${TOOLCHAIN}objcopy --update-section .appversion=${APPVER} $@
 endif
 
-${O}/build.bin: ${O}/build.elf
+${O}/stripped-build.elf: ${O}/build.elf
+	@echo "\tSTRIP\t$@"
+	${TOOLCHAIN}strip -s -o $@ $<
+
+${O}/build.bin: ${O}/stripped-build.elf
 	@echo "\tBIN\t$@"
 	${TOOLCHAIN}objcopy -O binary $< $@
 
@@ -149,6 +153,8 @@ builtindefs:
 	${TOOLCHAIN}gcc  ${CFLAGS} -dM -E - < /dev/null
 
 include ${SRC}/platform/platforms.mk
+
+.PRECIOUS: ${O}/stripped-build.elf
 
 -include ${DEPS}
 
