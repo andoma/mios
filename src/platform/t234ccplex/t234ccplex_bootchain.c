@@ -44,7 +44,16 @@ bootchain_init(void)
     // We started from ROM bootloader via QSPI flash
     uint32_t chain_status = reg_rd(SCRATCH_BOOT_CHAIN_REGISTER);
     int active_chain = (chain_status >> 4) & 1;
-    printf("boot mode: Chain-%c\n", active_chain + 'A');
+    printf("boot mode: Chain-%c [0x%08x 0x%08x]\n", active_chain + 'A',
+           bootloader_status, chain_status);
+
+    if(bootloader_status & (1 << 26)) {
+      // Failed to boot the chain configured in flash, now we're on
+      // the backup. Reprogram flash
+      printf("Primary bootchain is corrupt, swapping to current ... ");
+      t234_bootflash_set_chain(bi, active_chain);
+      printf("Done\n");
+    }
 
   } else {
     // Recovery boot via USB APX interface
