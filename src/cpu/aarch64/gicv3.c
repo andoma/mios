@@ -136,7 +136,7 @@ irq_disable(int irq)
 
 
 
-static void  __attribute__((constructor(102)))
+static void  __attribute__((constructor(105)))
 irq_init(void)
 {
   reg_wr(GICD_CTLR, 7);

@@ -338,8 +338,10 @@ vstart:
         msr daifclr, #2
         // Enable async aborts
         msr daifclr, #4
-1:      wfi
-        b 1b
+
+        ldr x0,=cpu_idle
+        br  x0
+
         .pool
 
 

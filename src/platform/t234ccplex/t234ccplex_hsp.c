@@ -4,7 +4,7 @@
 
 #include "t234_hsp.c"
 
-static void  __attribute__((constructor(105)))
+static void  __attribute__((constructor(120)))
 tegra234_hsp_init(void)
 {
   g_aon_hsp.irq_route = 1;

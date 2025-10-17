@@ -15,6 +15,7 @@ include ${SRC}/cpu/aarch64/aarch64.mk
 SRCS += ${P}/t234ccplex.c \
 	${P}/t234ccplex_hsp.c \
 	${P}/t234ccplex_ari.c \
+	${P}/t234ccplex_wdt.c \
 	${P}/t234ccplex_bpmp.c \
 	${P}/t234ccplex_qspi.c \
 	${P}/t234ccplex_pcie.c \

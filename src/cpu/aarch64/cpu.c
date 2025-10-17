@@ -57,3 +57,13 @@ cpu_init(void)
   t->t_task.t_prio = 0;
   sched_cpu_init(&curcpu()->sched, t);
 }
+
+
+__attribute__((noreturn, weak))
+void
+cpu_idle(void)
+{
+  while(1) {
+    asm volatile("wfi");
+  }
+}

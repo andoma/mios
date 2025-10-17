@@ -100,7 +100,8 @@ add_heap_from_pmem(pmem_t *pmem, size_t size, uint32_t efi_type,
   heap_add_mem(paddr, paddr + size, mios_type, prio);
 }
 
-static void __attribute__((constructor(101)))
+
+static void __attribute__((constructor(102)))
 board_init_early(void)
 {
   stdio = &tcu_early_console;
@@ -175,7 +176,7 @@ board_init_early(void)
 }
 
 
-static void __attribute__((constructor(110)))
+static void __attribute__((constructor(150)))
 board_init_console(void)
 {
   stdio = hsp_mbox_stream(NV_ADDRESS_MAP_TOP0_HSP_BASE, 0,
