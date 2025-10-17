@@ -425,7 +425,7 @@ efi_boot_thread(void *arg)
 
   int (*entrypoint)(void *handle, const efi_system_table_t *t);
   entrypoint = h->loaded_image.image_base + pe->entry_point;
-  printf("Kernel entrypoint: %p  Let's go!\n", entrypoint);
+  printf("Transfer control to kernel\n");
   uint64_t r = entrypoint(h, &h->system_table);
   printf("Kernel failed to start, returncode: 0x%lx\n", r);
   return NULL;
