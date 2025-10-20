@@ -493,7 +493,23 @@ stm32_dfu_flasher(const struct mios_image *mi,
   uint8_t buildid[20] = {};
   struct dfu_status st;
 
-  dfu_clrstatus(h);
+  if(dfu_getstatus(h, &st)) {
+    printf("Failed to read status\n");
+    return -1;
+  }
+
+  if(st.bState != DFU_STATE_dfuIDLE) {
+
+    if(dfu_clrstatus(h)) {
+      printf("Clear status failed\n");
+      return -1;
+    }
+
+    if(dfu_getstatus(h, &st)) {
+      printf("Failed to read status\n");
+      return -1;
+    }
+  }
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
     printf("Unable to reset DFU statemachine\n");
