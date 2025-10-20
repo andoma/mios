@@ -66,6 +66,18 @@ struct dfu_status {
 
 #define INTERFACE 0
 
+#define DFU_FUNC_DESC    0x21   // DFU Functional Descriptor type
+#define DFU_FUNC_LEN_MIN 9
+
+struct dfu_functional_descriptor {
+    uint8_t  bLength;
+    uint8_t  bDescriptorType;
+    uint8_t  bmAttributes;
+    uint16_t wDetachTimeOut;
+    uint16_t wTransferSize;
+    uint16_t bcdDFU;
+} __attribute__((packed));
+
 static const char *
 dfu_state_str(uint8_t s)
 {
@@ -141,7 +153,7 @@ ctrl_out(libusb_device_handle *h, uint8_t req, uint16_t wValue, const void* buf,
 static int
 ctrl_in(libusb_device_handle *h, uint8_t req, uint16_t wValue, void* buf, uint16_t len)
 {
-  int r = libusb_control_transfer(h, CTRL_IN, req, wValue, INTERFACE, buf, len, 5000);
+  int r = libusb_control_transfer(h, CTRL_IN, req, wValue, INTERFACE, buf, len, 15000);
   if(r != len)
     return -1;
   return 0;
@@ -157,6 +169,12 @@ static int
 dfu_getstatus(libusb_device_handle *h, struct dfu_status *st)
 {
   return ctrl_in(h, DFU_GETSTATUS, 0, st, sizeof(*st));
+}
+
+static int
+dfu_clrstatus(libusb_device_handle *h)
+{
+  return ctrl_out(h, DFU_CLRSTATUS, 0, NULL, 0);
 }
 
 
@@ -217,7 +235,7 @@ read_blocks(libusb_device_handle *h, uint32_t base_addr, uint8_t* out, size_t le
   }
 
   if(set_address_pointer(h, base_addr) < 0) {
-    printf("set address pointer failed\n");
+    printf("set address pointer 0x%x failed\n", base_addr);
     return -1;
   }
 
@@ -253,13 +271,13 @@ is_ff(const uint8_t *p, size_t len)
 
 __attribute__((unused))
 static int
-write_blocks(libusb_device_handle *h, uint32_t base_addr, const uint8_t* data, size_t len)
+write_blocks(libusb_device_handle *h, uint32_t base_addr, const uint8_t* data, size_t len,
+             int xfer_size)
 {
   int block = 0;
   size_t off = 0;
 
   int need_set_address = 1;
-  const int xfer_size = 1024;
 
   while(off < len){
     int chunk = MIN(xfer_size, len - off);
@@ -328,7 +346,8 @@ erase_mass(libusb_device_handle *h)
 
 
 static int
-get_dfu_interface_string(libusb_device_handle *h, char* out, size_t outlen)
+get_dfu_interface_string(libusb_device_handle *h, char* out, size_t outlen,
+                         int *xfer_size)
 {
   struct libusb_config_descriptor *cfg = NULL;
   int r;
@@ -340,17 +359,40 @@ get_dfu_interface_string(libusb_device_handle *h, char* out, size_t outlen)
   }
 
   int idx = -1;
+  int found = 0;
   for(int ifc=0; ifc < cfg->bNumInterfaces; ifc++) {
     const struct libusb_interface* itf = &cfg->interface[ifc];
     for(int alt=0; alt<itf->num_altsetting; ++alt){
       const struct libusb_interface_descriptor* id = &itf->altsetting[alt];
+      if(id->bInterfaceClass != 254)
+        continue;
+      if(id->bInterfaceSubClass != 1)
+        continue;
+
       if(id->bInterfaceNumber == INTERFACE) {
-        idx = id->iInterface;
-        break;
+        if(idx == -1)
+          idx = id->iInterface;
+      }
+
+      const uint8_t *p   = id->extra;
+      int            rem = id->extra_length;
+      while (rem >= 2 && !found) {
+        uint8_t bLength = p[0];
+        uint8_t bType   = p[1];
+
+        if (bLength == 0 || bLength > rem) break; // malformed; stop scanning this alt
+
+        if (bType == DFU_FUNC_DESC && bLength >= DFU_FUNC_LEN_MIN) {
+          const struct dfu_functional_descriptor *dfu =
+            (const struct dfu_functional_descriptor *)p;
+
+          *xfer_size = dfu->wTransferSize;
+        }
+
+        p   += bLength;
+        rem -= bLength;
       }
     }
-    if(idx>=0)
-      break;
   }
   if(cfg)
     libusb_free_config_descriptor(cfg);
@@ -377,10 +419,12 @@ get_dfu_interface_string(libusb_device_handle *h, char* out, size_t outlen)
 
 static int
 parse_geometry(libusb_device_handle *h, uint32_t *base,
-               uint32_t *sectorsizes, int max_count)
+               uint32_t *sectorsizes, int max_count,
+               int *xfer_size)
 {
   char geometry[256];
-  if(get_dfu_interface_string(h, geometry, sizeof(geometry))) {
+  if(get_dfu_interface_string(h, geometry, sizeof(geometry),
+                              xfer_size)) {
     printf("Unable to get flash geometry\n");
     return 0;
   }
@@ -447,7 +491,9 @@ stm32_dfu_flasher(const struct mios_image *mi,
                   int force_flash)
 {
   uint8_t buildid[20] = {};
+  struct dfu_status st;
 
+  dfu_clrstatus(h);
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
     printf("Unable to reset DFU statemachine\n");
@@ -467,12 +513,16 @@ stm32_dfu_flasher(const struct mios_image *mi,
     return -1;
   }
 
+
   if(memcmp(buildid, mi->buildid, sizeof(buildid)) || force_flash) {
     int num_sector_sizes = 128;
     uint32_t flashstart;
     uint32_t sectorsizes[128];
+    int xfer_size = 2048;
+
     num_sector_sizes = parse_geometry(h, &flashstart,
-                                      sectorsizes, num_sector_sizes);
+                                      sectorsizes, num_sector_sizes,
+                                      &xfer_size);
 
     if(num_sector_sizes == 0) {
       printf("Mass erase ... ");
@@ -494,7 +544,8 @@ stm32_dfu_flasher(const struct mios_image *mi,
       }
     }
 
-    if(write_blocks(h, mi->load_addr, mi->image, mi->image_size)) {
+    if(write_blocks(h, mi->load_addr, mi->image, mi->image_size,
+                    xfer_size)) {
       printf("Write failed\n");
       return -1;
     }
@@ -519,7 +570,6 @@ stm32_dfu_flasher(const struct mios_image *mi,
     return -1;
   }
   printf("Leaving DFU, GLHF\n");
-  struct dfu_status st;
   dfu_getstatus(h, &st);
   return 0;
 }
@@ -558,6 +608,6 @@ main(int argc, char **argv)
   }
   libusb_claim_interface(h, 0);
 
-  int r = stm32_dfu_flasher(mi, h, 0);
+  int r = stm32_dfu_flasher(mi, h, 1);
   exit(!!r);
 }
