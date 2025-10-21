@@ -86,7 +86,7 @@ vllp_rpc_invoke(vllp_channel_t *vc, const char *method,
     return vllp_err(result);
 
   if(buf == NULL)
-    return NULL; // Connection closed
+    return vllp_err(VLLP_ERR_NOT_CONNECTED);
 
   if(buf_size < 1) {
     free(buf);

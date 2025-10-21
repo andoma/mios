@@ -144,6 +144,8 @@ struct vllp_channel {
   vllp_channel_state_t state;
   uint8_t id;
   uint8_t rx_thread_run;
+  uint8_t is_closed;
+  uint32_t closed_status;
 };
 
 static int cmc_rx(void *opaque, const void *data, size_t len);
@@ -1436,6 +1438,14 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
 
   pthread_mutex_lock(&v->mutex);
 
+  if(vc->is_closed) {
+    err = vc->closed_status;
+    *data = NULL;
+    *lenp = 0;
+    pthread_mutex_unlock(&v->mutex);
+    return err;
+  }
+
   if(timeout < 0) {
     while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
       pthread_cond_wait(&vc->rxq_cond, &v->mutex);
@@ -1461,12 +1471,13 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
   }
 
   TAILQ_REMOVE(&vc->rxq, vp, link);
-  pthread_mutex_unlock(&v->mutex);
 
   if(vp->is_close) {
     memcpy(&err, vp->data, sizeof(int));
     *data = NULL;
     *lenp = 0;
+    vc->is_closed = 1;
+    vc->closed_status = err;
   } else {
     void *c = malloc(vp->len);
 
@@ -1475,6 +1486,7 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
     *lenp = vp->len;
     err = 0;
   }
+  pthread_mutex_unlock(&v->mutex);
   free(vp);
   return err;
 }
