@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <sys/param.h>
 
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 
 #include "mios_image.h"
 
