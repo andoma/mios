@@ -30,15 +30,21 @@
 error_t
 ari_cmd(uint32_t cmd, uint64_t in, uint64_t *out)
 {
-  reg_wr(ARI_BASE + ARI_RESPONSE_DATA_LO, 0);
-  reg_wr(ARI_BASE + ARI_RESPONSE_DATA_HI, 0);
-  reg_wr(ARI_BASE + ARI_REQUEST_DATA_LO, in);
-  reg_wr(ARI_BASE + ARI_REQUEST_DATA_HI, in >> 32);
-  reg_wr(ARI_BASE + ARI_REQUEST_EVENT_MASK, 0);
-  reg_wr(ARI_BASE + ARI_REQUEST, cmd | ARI_REQUEST_VALID_BIT);
+  uint64_t v;
+  __asm__ volatile ("mrs %0, mpidr_el1" : "=r"(v));
+
+  int linear_core_id = ((v >> 16) & 0xff) * 4 + ((v >> 8) & 0xff);
+  uint64_t ari_base = ARI_BASE + linear_core_id * 0x10000;
+
+  reg_wr(ari_base + ARI_RESPONSE_DATA_LO, 0);
+  reg_wr(ari_base + ARI_RESPONSE_DATA_HI, 0);
+  reg_wr(ari_base + ARI_REQUEST_DATA_LO, in);
+  reg_wr(ari_base + ARI_REQUEST_DATA_HI, in >> 32);
+  reg_wr(ari_base + ARI_REQUEST_EVENT_MASK, 0);
+  reg_wr(ari_base + ARI_REQUEST, cmd | ARI_REQUEST_VALID_BIT);
 
   for(int i = 0; i < 10000; i++) {
-    uint32_t status = reg_rd(ARI_BASE + ARI_STATUS);
+    uint32_t status = reg_rd(ari_base + ARI_STATUS);
 
     if(status & 3)
       continue;
@@ -47,8 +53,8 @@ ari_cmd(uint32_t cmd, uint64_t in, uint64_t *out)
     if(err)
       return ERR_OPERATION_FAILED;
     *out =
-      reg_rd(ARI_BASE + ARI_RESPONSE_DATA_LO) |
-      (((uint64_t)reg_rd(ARI_BASE + ARI_RESPONSE_DATA_HI)) << 32);
+      reg_rd(ari_base + ARI_RESPONSE_DATA_LO) |
+      (((uint64_t)reg_rd(ari_base + ARI_RESPONSE_DATA_HI)) << 32);
     return 0;
   }
   return ERR_TIMEOUT;
