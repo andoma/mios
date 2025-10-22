@@ -474,3 +474,47 @@ bpmp_pcie_set(int id, int on)
 
   return bpmp_xfer(BPMP_MRQ_UPHY, &req, sizeof(req), NULL, NULL);
 }
+
+
+error_t
+bpmp_get_temperature(int id, int *millideg)
+{
+  struct bpmp_mrq_thermal_req req;
+  struct bpmp_mrq_thermal_resp resp;
+  size_t out_size;
+
+  req.type = BPMP_CMD_THERMAL_GET_TEMP;
+  req.i32 = id;
+  error_t err;
+  out_size = sizeof(resp);
+  err = bpmp_xfer(BPMP_MRQ_THERMAL, &req, sizeof(req),
+                  &resp, &out_size);
+  *millideg = resp.i32;
+  return err;
+}
+
+
+static error_t
+cmd_thermal(cli_t *cli, int argc, char **argv)
+{
+  struct bpmp_mrq_thermal_req req;
+  struct bpmp_mrq_thermal_resp resp;
+  size_t out_size;
+
+  for(int i = 0; i < 10; i++) {
+    req.type = BPMP_CMD_THERMAL_GET_TEMP;
+    req.i32 = i;
+    error_t err;
+    out_size = sizeof(resp);
+    err = bpmp_xfer(BPMP_MRQ_THERMAL, &req, sizeof(req),
+                    &resp, &out_size);
+    if(err) {
+      cli_printf(cli, "Zone %d N/A %d\n", i, err);
+    } else {
+      cli_printf(cli, "Zone %d %d °C\n", i, resp.i32 / 1000);
+    }
+  }
+  return 0;
+}
+
+CLI_CMD_DEF("thermal", cmd_thermal)

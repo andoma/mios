@@ -2,6 +2,7 @@
 
 #define BPMP_MRQ_RESET           20U
 #define BPMP_MRQ_CLK		 22U
+#define BPMP_MRQ_THERMAL         27U
 #define BPMP_MRQ_RINGBUF_CONSOLE 65U
 #define BPMP_MRQ_PG		 66U
 #define BPMP_MRQ_UPHY		 69U
@@ -148,3 +149,23 @@ union bpmp_mrq_ringbuf_console_bpmp_to_host_response {
     uint8_t bytes[120 - 4];
   } read;
 };
+
+// --- Thermal ---
+
+
+enum {
+  BPMP_CMD_THERMAL_QUERY_ABI = 0,
+  BPMP_CMD_THERMAL_GET_TEMP = 1,
+  BPMP_CMD_THERMAL_SET_TRIP = 2,
+  BPMP_CMD_THERMAL_GET_NUM_ZONES = 3,
+  BPMP_CMD_THERMAL_GET_THERMTRIP = 4,
+};
+
+struct bpmp_mrq_thermal_req {
+  uint32_t type;
+  int i32;
+} __attribute__((packed));
+
+struct bpmp_mrq_thermal_resp {
+  int i32;
+}  __attribute__((packed));

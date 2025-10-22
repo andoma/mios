@@ -15,3 +15,5 @@ error_t bpmp_rst_set(int id, int on);
 error_t bpmp_rst_toggle(int id);
 
 error_t bpmp_pcie_set(int id, int on);
+
+error_t bpmp_get_temperature(int id, int *millideg);
