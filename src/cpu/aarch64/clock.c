@@ -56,7 +56,7 @@ timer_virt(void *arg)
 }
 
 
-static void  __attribute__((constructor(103)))
+static void  __attribute__((constructor(140)))
 clock_init(void)
 {
   uint32_t freq;

@@ -17,8 +17,22 @@
 #include "net/pbuf.h"
 
 #include "cache.h"
+#include "gicv3.h"
 
 pmem_t tegra_pmem;
+
+
+
+long
+gicr_base(void)
+{
+  long gicr0 = 0x0f440000;
+
+  uint64_t v;
+  __asm__ volatile ("mrs %0, mpidr_el1" : "=r"(v));
+  int linear_core_id = ((v >> 16) & 0xff) * 4 + ((v >> 8) & 0xff);
+  return gicr0 + linear_core_id * 0x20000;
+}
 
 void
 reboot(void)
@@ -110,6 +124,10 @@ board_init_early(void)
   extern void *piggybacked_fdt;
   printf("\nMIOS on Tegra234 CCPLEX, Loaded at %p, FDT at %p\n",
          load_addr, piggybacked_fdt);
+
+  long id;
+  __asm__ volatile ("mrs %0, mpidr_el1" : "=r"(id));
+  printf("Core ID: 0x%lx\n", id);
 
   uint32_t reset_reason = (reg_rd(PMC_RESET_REASON_REGISTER) >> 2) & 0x3f;
   printf("Reset reason: %s\n",

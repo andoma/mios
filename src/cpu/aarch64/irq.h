@@ -61,7 +61,18 @@ irq_off(void)
 static inline void  __attribute__((always_inline))
 schedule(void)
 {
-  asm volatile ("msr icc_sgi1r_el1, %0\n\t" : : "r" (1));
+  long id;
+  __asm__ volatile ("mrs %0, mpidr_el1" : "=r"(id));
+
+  const long aff1 = (id >> 8) & 0xff;
+  const long aff2 = (id >> 16) & 0xff;
+
+  long x = 1;
+  x |= (aff1 << 16);
+  x |= (aff2 << 32);
+
+  asm volatile ("msr icc_sgi1r_el1, %0\n\t" : : "r"(x));
+
   asm volatile("" ::: "memory");
 }
 
