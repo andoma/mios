@@ -37,16 +37,14 @@ begins(const char *s1, const char *s2)
 }
 
 
-void *fdt;
-
 static void __attribute__((constructor(1000)))
 fdt_init(void)
 {
-  extern void *piggybacked_fdt;
+  extern const char builtin_fdt[];
 
   uint32_t cpu_phandle[MAX_CPUS] = {0};
 
-  fdt_t fdt = {piggybacked_fdt};
+  fdt_t fdt = {(void *)builtin_fdt};
   fdt.capacity = fdt_get_totalsize(&fdt);
 
   const char *err = fdt_validate(&fdt);
@@ -72,7 +70,7 @@ fdt_init(void)
     return;
   }
 
-  memcpy(copy, piggybacked_fdt, fdt.capacity);
+  memcpy(copy, builtin_fdt, fdt.capacity);
   fdt.buffer = copy;
   fdt.capacity = copy_size;
 

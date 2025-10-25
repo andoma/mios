@@ -121,9 +121,8 @@ board_init_early(void)
   stdio = &tcu_early_console;
 
   extern void *load_addr;
-  extern void *piggybacked_fdt;
-  printf("\nMIOS on Tegra234 CCPLEX, Loaded at %p, FDT at %p\n",
-         load_addr, piggybacked_fdt);
+  printf("\nMIOS on Tegra234 CCPLEX, Loaded at %p\n",
+         load_addr);
 
   long id;
   __asm__ volatile ("mrs %0, mpidr_el1" : "=r"(id));
