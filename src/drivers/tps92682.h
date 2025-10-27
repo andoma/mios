@@ -26,6 +26,8 @@
 #define TPS92682_FEN1  0x13
 #define TPS92682_FEN2  0x14
 
+#define TPS92682_FLATEN 0x15
+
 #define TPS92682_RESET 0x26
 
 

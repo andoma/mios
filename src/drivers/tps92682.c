@@ -13,6 +13,8 @@ typedef struct tps92682 {
   gpio_t cs;
   uint8_t tx[2];
   uint8_t rx[2];
+  uint8_t fen1;
+  uint8_t en;
 } tps92682_t;
 
 
@@ -77,10 +79,16 @@ tps92682_init(tps92682_t *t, int clear_faults)
   tps92682_write_reg(t, TPS92682_CH1ADJ, 0x00); // Max current limit to zer0
   tps92682_write_reg(t, TPS92682_CH2ADJ, 0x00); // Max current limit to zer0
 
+  tps92682_write_reg(t, TPS92682_FLATEN, 0x3); // Undervoltage are latched
+
+  t->fen1 = 0x3c;
+  tps92682_write_reg(t, TPS92682_FEN1, t->fen1);
+
   tps92682_set_duty(t, 0, 0x3ff);
   tps92682_set_duty(t, 1, 0x3ff);
 
-  tps92682_write_reg(t, TPS92682_EN, 0xbf);
+  t->en = 0xbc;
+  tps92682_write_reg(t, TPS92682_EN, t->en);
   return 0;
 }
 
@@ -98,11 +106,62 @@ tps92682_create(spi_t *spi, gpio_t cs)
 }
 
 
+static void
+tps92682_enable_uv(struct tps92682 *t, unsigned int channel, unsigned int on)
+{
+  uint8_t fen1 = t->fen1;
+
+  if(on) {
+    fen1 |= (1 << channel);
+  } else {
+    fen1 &= ~(1 << channel);
+  }
+
+  if(t->fen1 == fen1)
+    return;
+
+  t->fen1 = fen1;
+  tps92682_write_reg(t, TPS92682_FEN1, fen1);
+}
+
+
+static void
+tps92682_enable_ch(struct tps92682 *t, unsigned int channel, unsigned int on)
+{
+  uint8_t en = t->en;
+
+  if(on) {
+    en |= (1 << channel);
+  } else {
+    en &= ~(1 << channel);
+  }
+
+  if(t->en == en)
+    return;
+
+  t->en = en;
+  tps92682_write_reg(t, TPS92682_EN, en);
+}
+
+
 error_t
 tps92682_set_ilimit_raw(struct tps92682 *t, unsigned int channel,
                         unsigned int value)
 {
+  if(value)
+    tps92682_enable_ch(t, channel, 1);
+
+  if(value < 10)
+    tps92682_enable_uv(t, channel, 0);
+
   tps92682_write_reg(t, TPS92682_CHxADJ(channel), value);
+
+  if(value > 10)
+    tps92682_enable_uv(t, channel, 1);
+
+  if(!value)
+    tps92682_enable_ch(t, channel, 0);
+
   return 0;
 }
 
