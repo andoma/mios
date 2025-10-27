@@ -95,7 +95,8 @@ cmd_alerts(cli_t *cli, int argc, char **argv)
     if(!as->as_code) {
       cli_printf(cli, "No alert\n");
     } else {
-      cli_printf(cli, "%s ", alert_level_to_string(as->as_class->ac_level(as)));
+      cli_printf(cli, "%-7s ",
+                 alert_level_to_string(as->as_class->ac_level(as)));
       as->as_class->ac_message(as, cli->cl_stream);
       cli_printf(cli, "\n");
     }
