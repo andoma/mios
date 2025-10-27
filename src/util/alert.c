@@ -44,14 +44,15 @@ alert_unregister(alert_source_t *as)
   alert_source_refcount(as, -1);
 }
 
-void
+int
 alert_set(alert_source_t *as, int code)
 {
   if(as->as_code == code)
-    return;
+    return 0;
 
   as->as_code = code;
   ghook_invoke(GHOOK_ALERT_UPDATED);
+  return 1;
 }
 
 alert_source_t *

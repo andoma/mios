@@ -26,7 +26,7 @@ void alert_register(alert_source_t *as, const alert_class_t *ac,
 
 void alert_unregister(alert_source_t *as);
 
-void alert_set(alert_source_t *as, int code);
+int alert_set(alert_source_t *as, int code);
 
 alert_source_t *alert_get_next(alert_source_t *as);
 
