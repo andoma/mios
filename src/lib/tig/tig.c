@@ -406,15 +406,20 @@ tig_scroll_begin(tig_ctx_t *tc, tig_scroll_state_t *tss)
 
   const int height = tss->height - ts->ts_view.siz.height;
 
-  if(height < 0)
-    return;
-
   tig_lazy_gfx_push(tc);
   gdc->scissor(gd, &ts->ts_view);
 
   float vcoeff = 0.92f;
 
-  if(tig_tap(tc) == TTS_PRESS) {
+  if(tss->force_position) {
+    tss->position += 0.2f * (tss->force_position - tss->position);
+    tss->velocity = 0;
+    ts->ts_pos.y -= tss->position;
+    return;
+  }
+
+  if(tig_tap(tc) == TTS_PRESS && height > 0) {
+
     if(tss->grab) {
       float p = tss->origin - tc->tc_touch_pos.y;
       float v = p - tss->position;
@@ -430,7 +435,7 @@ tig_scroll_begin(tig_ctx_t *tc, tig_scroll_state_t *tss)
   if(!tss->grab) {
     if(tss->position < 0) {
       tss->position *= 0.8f;
-    } else if(tss->position > height) {
+    } else if(height > 0 && tss->position > height) {
       float p = tss->position - height;
       p = p * 0.8f;
       p += height;

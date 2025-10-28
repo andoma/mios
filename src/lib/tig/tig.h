@@ -56,6 +56,7 @@ typedef struct {
   float origin;
   float velocity;
   int height;
+  int force_position;
   uint8_t grab;
 } tig_scroll_state_t;
 
