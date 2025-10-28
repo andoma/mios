@@ -365,6 +365,7 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
           uint32_t mask = mask_from_prefixlen(dif->prefixlen) & 0x7ff;
 
           reg_wr(fc->ram_base + FDCAN_FLSSA(stdidx),
+                 (0b10 << 30) | // filter + mask
                  (0b010 << 27) | // Redirect to FIFO1
                  (dif->prefix << 16) |
                  mask |
