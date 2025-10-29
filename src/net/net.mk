@@ -62,6 +62,7 @@ SRCS-${ENABLE_NET} += \
 	${SRC}/net/service/svc_chargen.c \
 	${SRC}/net/service/svc_discard.c \
 	${SRC}/net/service/svc_ota.c \
+	${SRC}/net/service/svc_alert.c \
 
 SRCS-${ENABLE_RPC} += \
 	${SRC}/net/service/svc_rpc.c \
