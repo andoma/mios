@@ -2,8 +2,11 @@
 #include <mios/task.h>
 #include <mios/ghook.h>
 #include <mios/cli.h>
+#include <mios/atomic.h>
 
+#include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 
 SLIST_HEAD(alert_source_slist, alert_source);
 static struct alert_source_slist alerts;
@@ -84,10 +87,73 @@ alert_level_to_string(event_level_t level)
 }
 
 
+typedef struct {
+  alert_source_t as;
+  atomic_t refcount;
+  char key[0];
+} fake_alert_t;
+
+
+static void
+fake_alert_message(const struct alert_source *as, struct stream *output)
+{
+  stprintf(output, "This is a test");
+}
+
+
+static event_level_t
+fake_alert_level(const struct alert_source *as)
+{
+  return LOG_WARNING;
+}
+
+static void
+fake_alert_refcount(struct alert_source *as, int value)
+{
+  fake_alert_t *fa = (fake_alert_t *)as;
+  if(atomic_add_and_fetch(&fa->refcount, value) == 0)
+    free(fa);
+}
+
+
+static const alert_class_t fake_alert_class = {
+  .ac_message = fake_alert_message,
+  .ac_level = fake_alert_level,
+  .ac_refcount = fake_alert_refcount,
+};
+
+
 static error_t
-cmd_alerts(cli_t *cli, int argc, char **argv)
+raise_fake_alert(cli_t *cli, const char *key)
+{
+  size_t keylen = strlen(key);
+  fake_alert_t *fa = xalloc(sizeof(fake_alert_t) + keylen + 1, 0,
+                            MEM_CLEAR | MEM_MAY_FAIL);
+  if(fa == NULL)
+    return ERR_NO_MEMORY;
+
+  memcpy(fa->key, key, keylen + 1);
+  alert_register(&fa->as, &fake_alert_class, fa->key);
+
+  alert_set(&fa->as, 1);
+  cli_printf(cli, "Alert raised, press a key to clear ... ");
+  cli_flush(cli);
+  cli_getc(cli, 1);
+  cli_printf(cli, "Done\n");
+  alert_set(&fa->as, 0);
+  alert_unregister(&fa->as);
+  return 0;
+}
+
+
+static error_t
+cmd_alert(cli_t *cli, int argc, char **argv)
 {
   alert_source_t *as = NULL;
+
+  if(argc == 3 && !strcmp(argv[1], "raise")) {
+    return raise_fake_alert(cli, argv[2]);
+  }
 
   while((as = alert_get_next(as)) != NULL) {
     cli_printf(cli, "%-20s ", as->as_key);
@@ -104,4 +170,4 @@ cmd_alerts(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("alerts", cmd_alerts);
+CLI_CMD_DEF("alert", cmd_alert);
