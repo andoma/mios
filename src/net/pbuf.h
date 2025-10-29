@@ -83,7 +83,7 @@ pbuf_t *pbuf_read(pbuf_t *pb, void *ptr, size_t len);
 struct pushpull;
 __attribute__((warn_unused_result))
 pbuf_t *pbuf_write(pbuf_t *pb, const void *ptr, size_t len,
-                   const struct pushpull *p);
+                   const struct pushpull *p, int wait);
 
 __attribute__((warn_unused_result))
 int pbuf_read_at(pbuf_t *pb, void *out, size_t offset, size_t len);

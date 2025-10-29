@@ -228,7 +228,8 @@ pbuf_read(pbuf_t *pb, void *ptr, size_t len)
 
 
 pbuf_t *
-pbuf_write(pbuf_t *head, const void *data, size_t len, const pushpull_t *pp)
+pbuf_write(pbuf_t *head, const void *data, size_t len, const pushpull_t *pp,
+           int wait)
 {
   if(head == NULL)
     return NULL;
@@ -247,10 +248,10 @@ pbuf_write(pbuf_t *head, const void *data, size_t len, const pushpull_t *pp)
       pb->pb_flags &= ~PBUF_EOP;
 
       int q = irq_forbid(IRQ_LEVEL_NET);
-      pbuf_t *n = pbuf_get(0);
+      pbuf_t *n = pbuf_get(wait);
       if(n != NULL) {
         n->pb_next = NULL;
-        n->pb_data = pbuf_data_get(0);
+        n->pb_data = pbuf_data_get(wait);
         if(n->pb_data == NULL) {
           pbuf_put(n);
           n = NULL;

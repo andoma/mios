@@ -69,9 +69,9 @@ ota_get_next_pkt(svc_ota_t *sa)
 static void
 ota_send_final_status(svc_ota_t *sa, uint8_t status)
 {
-  pbuf_t *reply = pbuf_make(0,0);
+  pbuf_t *reply = pbuf_make(0, 1);
   if(reply) {
-    reply = pbuf_write(reply, &status, 1, sa->sa_sock);
+    reply = pbuf_write(reply, &status, 1, sa->sa_sock, 1);
     mutex_lock(&sa->sa_mutex);
     sa->sa_info = reply;
     mutex_unlock(&sa->sa_mutex);
@@ -323,10 +323,10 @@ ota_open_with_args(pushpull_t *pp,
   if(pb != NULL) {
     uint8_t hdr[4] = {0, 'r', sa->sa_blocksize, xfer_skip_kb};
 
-    pb = pbuf_write(pb, hdr, sizeof(hdr), pp);
-    pb = pbuf_write(pb, mios_build_id(), 20, pp);
+    pb = pbuf_write(pb, hdr, sizeof(hdr), pp, 0);
+    pb = pbuf_write(pb, mios_build_id(), 20, pp, 0);
     const char *appname = mios_get_app_name();
-    pb = pbuf_write(pb, appname, strlen(appname), pp);
+    pb = pbuf_write(pb, appname, strlen(appname), pp, 0);
   }
 
   if(pb == NULL) {

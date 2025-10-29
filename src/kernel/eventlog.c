@@ -438,18 +438,18 @@ evlog_svc_pull(void *opaque)
 
     pb = pbuf_make(esf->p->preferred_offset, 0);
     if(pb != NULL) {
-      pb = pbuf_write(pb, &hdr, 1, esf->p);
+      pb = pbuf_write(pb, &hdr, 1, esf->p, 0);
 
       if(hdr & 0x40) {
-        pb = pbuf_write(pb, &ef->seq_tail, 4, esf->p);
+        pb = pbuf_write(pb, &ef->seq_tail, 4, esf->p, 0);
       }
-      pb = pbuf_write(pb, tsbuf, tslen, esf->p);
+      pb = pbuf_write(pb, tsbuf, tslen, esf->p, 0);
 
       if(msgend >= msgstart) {
-        pb = pbuf_write(pb, ef->data + msgstart, msglen, esf->p);
+        pb = pbuf_write(pb, ef->data + msgstart, msglen, esf->p, 0);
       } else {
-        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart, esf->p);
-        pb = pbuf_write(pb, ef->data, msgend, esf->p);
+        pb = pbuf_write(pb, ef->data + msgstart, EVENTLOG_SIZE - msgstart, esf->p, 0);
+        pb = pbuf_write(pb, ef->data, msgend, esf->p, 0);
       }
     }
     if(pb != NULL) {
