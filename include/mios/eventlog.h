@@ -27,11 +27,19 @@ struct stream;
 void evlog(event_level_t level, const char *fmt, ...)
   __attribute__ ((format(printf, 2, 3)));
 
+#define evlog_once(gate, level, fmt...) do {    \
+  if(!*(gate)) {                                \
+    *gate = 1;                                  \
+    evlog(level, fmt);                          \
+  }                                             \
+} while(0)
 
 void eventlog_to_fs(size_t logfile_max_size);
 
 #else
 
 #define evlog(level, fmt...)
+
+#define evlog_once(gate, level, fmt...)
 
 #endif
