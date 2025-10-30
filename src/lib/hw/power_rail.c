@@ -277,10 +277,12 @@ power_rail_register(power_rail_t *pr, const power_rail_class_t *prc,
   alert_register(&pr->pr_alert, &power_rail_alert_class, name);
 }
 
+
 void
 power_rail_unregister(power_rail_t *pr)
 {
-  panic("power_rail_unregister() NOT IMPLEMETED");
+  panic("power_rail_unregister() not implemented, "
+        "please also fix power_rail_get_next()");
 }
 
 
@@ -327,6 +329,9 @@ power_rail_t *
 power_rail_get_next(power_rail_t *cur)
 {
   mutex_lock(&power_rail_mutex);
+  /* TODO: If we ever remove power_rails
+     this must be rewritten as how device_get_next() works
+  */
   power_rail_t *pr = cur ? SLIST_NEXT(cur, pr_link) : SLIST_FIRST(&power_rails);
   if(pr)
     power_rail_refcount(pr, 1);
