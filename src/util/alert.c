@@ -54,6 +54,17 @@ alert_set(alert_source_t *as, int code)
     return 0;
 
   as->as_code = code;
+
+  if(!code) {
+    evlog(LOG_INFO, "Alert cleared [%s]", as->as_key);
+  } else {
+    stream_t *st = evlog_stream_begin();
+    stprintf(st, "Alert raised [%s] -- ", as->as_key);
+    const alert_class_t *ac = as->as_class;
+    ac->ac_message(as, st);
+    evlog_stream_end(ac->ac_level(as));
+  }
+
   ghook_invoke(GHOOK_ALERT_UPDATED);
   return 1;
 }

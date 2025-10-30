@@ -36,6 +36,12 @@ void evlog(event_level_t level, const char *fmt, ...)
 
 void eventlog_to_fs(size_t logfile_max_size);
 
+// Special interface to stream directly into eventlog
+// Holds global mutex from begin() to end() so use with care
+struct stream *evlog_stream_begin(void);
+
+void evlog_stream_end(event_level_t level);
+
 #else
 
 #define evlog(level, fmt...)

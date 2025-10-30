@@ -136,6 +136,40 @@ evl_fmt_cb(void *aux, const char *s, size_t len)
   return to_copy;
 }
 
+static void
+evlog_msg_done(evlogfifo_t *ef, event_level_t level, int64_t now)
+{
+  int head = ef->head;
+  int msg_len = ef->data[(head + 0) & EVENTLOG_MASK];
+
+  int64_t delta_ts = now - ef->ts_head;
+  if(delta_ts < 0)
+    delta_ts = 0;
+  int64_t dts = delta_ts;
+  int ts_len = 0;
+  while(dts) {
+    ts_len++;
+    dts >>= 8;
+  }
+
+  evl_ensure(ef, msg_len + ts_len);
+  for(int i = 0; i < ts_len; i++) {
+    ef->data[(head + msg_len + i) & EVENTLOG_MASK] = delta_ts;
+    delta_ts >>= 8;
+  }
+
+  ef->ts_head = now;
+  ef->data[(head + 0) & EVENTLOG_MASK] = msg_len + ts_len;
+  ef->data[(head + 1) & EVENTLOG_MASK] = level | (ts_len << 3);
+  ef->head += msg_len + ts_len;
+
+  follower_t *f;
+  LIST_FOREACH(f, &ef->followers, link) {
+    f->cb(f);
+  }
+
+  mutex_unlock(&ef->mutex);
+}
 
 void
 evlog(event_level_t level, const char *fmt, ...)
@@ -172,35 +206,56 @@ evlog(event_level_t level, const char *fmt, ...)
   fmtv(evl_fmt_cb, ef, fmt, ap);
   va_end(ap);
 
-  int msg_len = ef->data[(head + 0) & EVENTLOG_MASK];
-  int64_t delta_ts = now - ef->ts_head;
-  if(delta_ts < 0)
-    delta_ts = 0;
-  int64_t dts = delta_ts;
-  int ts_len = 0;
-  while(dts) {
-    ts_len++;
-    dts >>= 8;
-  }
-
-  evl_ensure(ef, msg_len + ts_len);
-  for(int i = 0; i < ts_len; i++) {
-    ef->data[(head + msg_len + i) & EVENTLOG_MASK] = delta_ts;
-    delta_ts >>= 8;
-  }
-
-  ef->ts_head = now;
-  ef->data[(head + 0) & EVENTLOG_MASK] = msg_len + ts_len;
-  ef->data[(head + 1) & EVENTLOG_MASK] = level | (ts_len << 3);
-  ef->head += msg_len + ts_len;
-
-  follower_t *f;
-  LIST_FOREACH(f, &ef->followers, link) {
-    f->cb(f);
-  }
-
-  mutex_unlock(&ef->mutex);
+  evlog_msg_done(ef, level, now);
 }
+
+
+static ssize_t
+stream_to_log_write(struct stream *s, const void *buf, size_t size, int flags)
+{
+  evlogfifo_t *ef = &ef0;
+  evl_fmt_cb(ef, buf, size);
+  return size;
+}
+
+
+static stream_vtable_t stream_to_log_vtable = {
+  .write = stream_to_log_write,
+};
+
+static stream_t stream_to_log = {
+  .vtable = &stream_to_log_vtable
+};
+
+
+struct stream *
+evlog_stream_begin(void)
+{
+  evlogfifo_t *ef = &ef0;
+  int64_t now = clock_get();
+
+  mutex_lock(&ef->mutex);
+
+  evl_ensure(ef, 2);
+
+  if(ef->head == ef->tail) {
+    ef->ts_tail = now;
+    ef->ts_head = now;
+  }
+
+  int head = ef->head;
+  ef->data[(head + 0) & EVENTLOG_MASK] = 2;
+
+  return &stream_to_log;
+}
+
+void
+evlog_stream_end(event_level_t level)
+{
+  evlogfifo_t *ef = &ef0;
+  evlog_msg_done(ef, level, clock_get());
+}
+
 
 const char level2str[8][7] = {
   "EMERG ",
