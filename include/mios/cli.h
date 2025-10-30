@@ -34,7 +34,7 @@ typedef struct cli_cmd {
 #define CLI_CMD_DEF(name, fn) \
   static const cli_cmd_t CLI_JOIN(cli, __LINE__) __attribute__ ((used, section("clicmd."#name))) = { name, fn};
 
-#define cli_printf(cli, fmt...) stprintf((cli)->cl_stream, fmt);
+#define cli_printf(cli, fmt...) stprintf((cli)->cl_stream, fmt)
 
 int cli_getc(cli_t *cli, int wait);
 
