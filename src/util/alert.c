@@ -166,17 +166,21 @@ cmd_alert(cli_t *cli, int argc, char **argv)
     return raise_fake_alert(cli, argv[2]);
   }
 
+  cli_printf(cli, "Name                 Severity Details\n");
+  cli_printf(cli, "========================================================\n");
+
   while((as = alert_get_next(as)) != NULL) {
     cli_printf(cli, "%-20s ", as->as_key);
 
     if(!as->as_code) {
-      cli_printf(cli, "No alert\n");
-    } else {
-      cli_printf(cli, "%-7s ",
-                 alert_level_to_string(as->as_class->ac_level(as)));
-      as->as_class->ac_message(as, cli->cl_stream);
-      cli_printf(cli, "\n");
+      cli_printf(cli, "-\n");
+      continue;
     }
+
+    cli_printf(cli, "%-8s ",
+               alert_level_to_string(as->as_class->ac_level(as)));
+    as->as_class->ac_message(as, cli->cl_stream);
+    cli_printf(cli, "\n");
   }
   return 0;
 }
