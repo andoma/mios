@@ -135,6 +135,8 @@ typedef struct gpio_vtable {
 
   // Return 1 if port is input, 0 if output
   int (*get_mode)(struct indirect_gpio *ig, unsigned int line);
+  // Turn IRQ on for a specific pin
+  error_t (*set_irq)(struct indirect_gpio *ig, unsigned int line, int set);
 
   error_t (*refresh_shadow)(struct indirect_gpio *ig);
 
@@ -175,6 +177,12 @@ static inline int
 indirect_gpio_get_mode(indirect_gpio_t *ig, unsigned int line)
 {
   return ig->vtable->get_mode(ig, line);
+}
+
+static inline error_t
+indirect_gpio_set_irq(indirect_gpio_t *ig, unsigned int line, int set)
+{
+  return ig->vtable->set_irq(ig, line, set);
 }
 
 static inline error_t
