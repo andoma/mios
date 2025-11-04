@@ -19,12 +19,17 @@
 #define TCAL9539_PE1     0x47
 #define TCAL9539_PUD0    0x48
 #define TCAL9539_PUD1    0x49
+#define TCAL9539_IRQMSK0 0x4A
+#define TCAL9539_IRQMSK1 0x4B
+
+
 
 typedef struct {
   indirect_gpio_t gpio;
   i2c_t *i2c;
   uint8_t address;
   uint16_t output;
+  uint16_t irqs;
   uint16_t direction;  // 1 = input (default)
   uint16_t pull_enable;
   uint16_t pull_direction;
@@ -121,8 +126,20 @@ tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
   } else {
     return tcal9539_clr_bit_in_reg(tc, line, &tc->output, TCAL9539_OUTPUT0);
   }
+}
 
-  return ERR_NOT_IMPLEMENTED;
+static error_t
+tcal9539_set_irq(indirect_gpio_t *ig, unsigned int line, int set)
+{
+  tcal9539_t *tc = (tcal9539_t *)ig;
+
+  if(line >= 16)
+    return ERR_INVALID_ID;
+
+  if(set)
+    return tcal9539_clr_bit_in_reg(tc, line, &tc->irqs, TCAL9539_IRQMSK0);
+  else
+    return tcal9539_set_bit_in_reg(tc, line, &tc->irqs, TCAL9539_IRQMSK0);
 }
 
 
@@ -248,6 +265,7 @@ static const gpio_vtable_t tcal9539_vtable = {
   .get_pin = tcal9539_get_pin,
   .get_port = tcal9539_get_port,
   .get_mode = tcal9539_get_mode,
+  .set_irq = tcal9539_set_irq,
   .refresh_shadow = tcal9539_refresh_shadow,
 };
 
@@ -261,6 +279,7 @@ tcal9539_create(i2c_t *i2c, uint8_t address)
   tc->i2c = i2c;
   tc->address = address;
   tc->output = 0xffff;
+  tc->irqs = 0xffff;
   tc->direction = 0xffff;
   tc->pull_direction = 0xffff;
 
