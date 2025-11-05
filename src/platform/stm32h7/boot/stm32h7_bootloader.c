@@ -178,8 +178,17 @@ console_print(char c)
 {
 #ifdef CONSOLE_USART
   while(!(reg_rd(CONSOLE_USART + USART_SR) & (1 << 7))) {}
-  if(c)
-    reg_wr(CONSOLE_USART + USART_TDR, c);
+  reg_wr(CONSOLE_USART + USART_TDR, c);
+#endif
+}
+
+__attribute__((section("bltext"),noinline))
+static void
+console_wait()
+{
+#ifdef CONSOLE_USART
+  // Wait for Transmit Data Register Empty && Transmission Complete
+  while((reg_rd(CONSOLE_USART + USART_SR) & 0xc0) != 0xc0) {}
 #endif
 }
 
@@ -615,7 +624,7 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
   }
 
   console_print('\n');
-  console_print(0); // Wait for shift register
+  console_wait();
 
   reset_peripheral(SPIFLASH_CLK);
   clk_disable(SPIFLASH_CLK);
