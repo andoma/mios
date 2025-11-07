@@ -207,6 +207,17 @@ cli_input_char(cli_t *cl, char c, char promptchar)
   case 5: // Ctrl-e
     cli_set_cursor_pos(cl, strlen(cl->cl_buf), promptchar);
     break;
+  case 10:
+  case 13:
+    cli_printf(cl, "\r\n");
+    if(cl->cl_buf[0])
+      history_add(cl->cl_buf);
+    dispatch_command(cl, cl->cl_buf);
+    cl->cl_pos = 0;
+    memset(cl->cl_buf, 0, sizeof cl->cl_buf);
+    cli_prompt(cl, promptchar);
+    state = RAW;
+    break;
   case ESCAPE:
     state = ESCAPED;
     break;
@@ -258,21 +269,10 @@ cli_input_char(cli_t *cl, char c, char promptchar)
       cl->cl_pos--;
       if (cl->cl_pos < 0)
         cl->cl_pos = 0;
-    break;
+      break;
     }
-  case 10:
-  case 13:
-    cli_printf(cl, "\r\n");
-    if(cl->cl_buf[0])
-      history_add(cl->cl_buf);
-    dispatch_command(cl, cl->cl_buf);
-    cl->cl_pos = 0;
-    memset(cl->cl_buf, 0, sizeof cl->cl_buf);
-    cli_prompt(cl, promptchar);
-    state = RAW;
-    break;
+    // Fallthrough
   default:
-    //    printf("\n\nGot code %d\n", c);
     if(cl->cl_pos < CLI_LINE_BUF_SIZE - 1) {
       if (cl->cl_buf[cl->cl_pos]) {
         // Insert mode
