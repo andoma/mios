@@ -11,6 +11,7 @@
 #define SPI_IFCR   0x18
 #define SPI_TXDR   0x20
 #define SPI_RXDR   0x30
+#define SPI_I2SCFGR   0x50
 
 #define SPI1_BASE 0x40013000
 #define SPI2_BASE 0x40003800
