@@ -42,6 +42,7 @@ typedef struct stm32_uart_stream {
   uint32_t rx_overrun;
   uint32_t rx_noise;
   uint32_t rx_framing_error;
+  uint32_t rx_fifo_overrun;
 
 } stm32_uart_stream_t;
 

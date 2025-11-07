@@ -177,8 +177,13 @@ uart_irq(void *arg)
     if(u->flags & UART_CTRLD_IS_PANIC && c == 4) {
       panic("Halted from console");
     }
-    u->rx_fifo[u->rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
-    u->rx_fifo_wrptr++;
+    uint8_t space = RX_FIFO_SIZE - (u->rx_fifo_wrptr - u->rx_fifo_rdptr);
+    if(space == 0) {
+      u->rx_fifo_overrun++;
+    } else {
+      u->rx_fifo[u->rx_fifo_wrptr & (RX_FIFO_SIZE - 1)] = c;
+      u->rx_fifo_wrptr++;
+    }
 
     task_wakeup(&u->wait_rx, 1);
 
@@ -232,10 +237,11 @@ static void
 stm32_uart_print_info(struct device *dev, struct stream *st)
 {
   stm32_uart_stream_t *u = (void *)dev - offsetof(stm32_uart_stream_t, device);
-  stprintf(st, "\tOverrun:%d Noise:%d Framing:%d\n",
+  stprintf(st, "\tHW-Overrun:%d Noise:%d Framing:%d SW-Overrun:%d\n",
            u->rx_overrun,
            u->rx_noise,
-           u->rx_framing_error);
+           u->rx_framing_error,
+           u->rx_fifo_overrun);
 }
 
 void
