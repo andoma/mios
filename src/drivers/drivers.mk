@@ -49,3 +49,6 @@ SRCS += ${SRC}/drivers/pmbus.c
 
 SRCS-${ENABLE_RTL8168} += \
 	${SRC}/drivers/rtl8168.c
+
+SRCS-${ENABLE_ADS101X} += \
+	${SRC}/drivers/ads101x.c
