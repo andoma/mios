@@ -1,6 +1,6 @@
 GLOBALDEPS += ${SRC}/cpu/cortexm/cortexm7.mk
 
-CFLAGS += -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16
+CFLAGS += -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -mfp16-format=ieee
 
 CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm7.h
 
