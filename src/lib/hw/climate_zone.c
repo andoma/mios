@@ -89,6 +89,22 @@ climate_zone_alert_message(const struct alert_source *as, struct stream *output)
     del = ", ";
   }
 
+  if(as->as_code & CLIMATE_ZONE_TEMP_SENSE_ERROR) {
+    stprintf(output, "%sTemperature-sensor fault",
+             del);
+    del = ", ";
+  }
+  if(as->as_code & CLIMATE_ZONE_RH_SENSE_ERROR) {
+    stprintf(output, "%sHumidity-sensor fault",
+             del);
+    del = ", ";
+  }
+
+  if(as->as_code & CLIMATE_ZONE_FAN_SENSE_ERROR) {
+    stprintf(output, "%sFan-sensor fault",
+             del);
+    del = ", ";
+  }
 }
 
 
@@ -100,7 +116,10 @@ climate_zone_alert_level(const struct alert_source *as)
                     CLIMATE_ZONE_ORH_ERROR |
                     CLIMATE_ZONE_URH_ERROR |
                     CLIMATE_ZONE_OF_ERROR |
-                    CLIMATE_ZONE_UF_ERROR))
+                    CLIMATE_ZONE_UF_ERROR |
+                    CLIMATE_ZONE_TEMP_SENSE_ERROR |
+                    CLIMATE_ZONE_RH_SENSE_ERROR |
+                    CLIMATE_ZONE_FAN_SENSE_ERROR))
     return LOG_ERR;
   return LOG_WARNING;
 }
@@ -136,12 +155,9 @@ setclr(uint32_t *set, uint32_t *clr, int shift,
 
 
 void
-climate_zone_refresh_alert(climate_zone_t *cz)
+climate_zone_refresh_alert(climate_zone_t *cz, uint32_t set, uint32_t clr)
 {
   const climate_zone_class_t *czc = cz->cz_class;
-
-  uint32_t set = 0;
-  uint32_t clr = 0;
 
   setclr(&set, &clr, 0, cz->cz_measured_temperature,
          czc->czc_over_temp_error,

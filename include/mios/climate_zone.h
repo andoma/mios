@@ -24,6 +24,12 @@
 #define CLIMATE_ZONE_UF_WARNING  0x00000400
 #define CLIMATE_ZONE_UF_ERROR    0x00000800
 
+// Alert bits for indicating that the sensor itself has a problem
+// Those needs to be passed in to climate_zone_refresh_alert()
+#define CLIMATE_ZONE_TEMP_SENSE_ERROR 0x00010000
+#define CLIMATE_ZONE_RH_SENSE_ERROR   0x00020000
+#define CLIMATE_ZONE_FAN_SENSE_ERROR  0x00040000
+
 typedef struct climate_zone {
   SLIST_ENTRY(climate_zone) cz_link;
   const struct climate_zone_class *cz_class;
@@ -71,4 +77,9 @@ void climate_zone_set_measured_rh(climate_zone_t *cz, float rh);
 
 void climate_zone_set_measured_fan_rpm(climate_zone_t *cz, float fan_rpm);
 
-void climate_zone_refresh_alert(climate_zone_t *cz);
+/*
+ Pass CLIMATE_ZONE_*_SENSE_ERROR bits to sense_set and sense_clr
+ to signal problems with the sensor itself
+*/
+void climate_zone_refresh_alert(climate_zone_t *cz, uint32_t sense_set,
+                                uint32_t sense_clr);
