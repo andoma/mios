@@ -7,9 +7,13 @@
 #include <mios/driver.h>
 #include <mios/eventlog.h>
 #include <mios/task.h>
+#include <mios/type_macros.h>
+
+#include <fdt/fdt.h>
 
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <malloc.h>
 
@@ -75,7 +79,6 @@ typedef struct ctrl_conf {
 
 } ctrl_conf_t;
 
-__attribute__((unused))
 static const ctrl_conf_t pcie_c4  = {
   .appl_base = 0x14160000,
   .rp_base   = 0x36080000,
@@ -97,7 +100,6 @@ static const ctrl_conf_t pcie_c4  = {
   .name = "pcie_c4",
 };
 
-__attribute__((unused))
 static const ctrl_conf_t pcie_c5  = {
   .appl_base = 0x141a0000,
   .rp_base   = 0x3a000000,
@@ -123,7 +125,6 @@ static const ctrl_conf_t pcie_c5  = {
   .name = "pcie_c5",
 };
 
-__attribute__((unused))
 static const ctrl_conf_t pcie_c7  = {
   .appl_base = 0x141e0000,
   .rp_base = 0x3e000000,
@@ -145,7 +146,6 @@ static const ctrl_conf_t pcie_c7  = {
   .name = "pcie_c7",
 };
 
-__attribute__((unused))
 static const ctrl_conf_t pcie_c8  = {
   .appl_base = 0x140a0000,
   .rp_base = 0x2a000000,
@@ -164,6 +164,25 @@ static const ctrl_conf_t pcie_c8  = {
   },
   .name = "pcie_c8",
 };
+
+static const ctrl_conf_t pcie_c1  = {
+  .appl_base = 0x14100000,
+  .rp_base = 0x30000000,
+  .atu_dma_base = 0x30040000,
+  .pcie_controller = 1,
+  .powergate = 9,
+  .core_reset = 117,
+  .apb_reset = 122,
+  .clock = 221,
+  .sys0_irq = 32 + 45,
+  .intx_irq_base = 32 + 516,
+  .num_phys = 1,
+  .phys = {
+    0x3e30000, // p2u_hsio_3
+  },
+  .name = "pcie_c1",
+};
+
 
 
 typedef struct t234_pci_ctrl_t {
@@ -452,9 +471,18 @@ t234_pci_rp_print(struct device *dev, struct stream *st)
            reg_rd(rp_base + 0x134));
 }
 
+static void
+t234pcie_dtor(device_t *d)
+{
+  t234_pci_ctrl_t *tpc = (t234_pci_ctrl_t *)d;
+  free(tpc);
+}
+
+
 
 static const device_class_t t234pcie_class = {
   .dc_shutdown = t234pcie_shutdown,
+  .dc_dtor = t234pcie_dtor,
   .dc_print_info = t234_pci_rp_print,
 };
 
@@ -506,6 +534,8 @@ pcie_start(const ctrl_conf_t *cfg)
   // Release PCIE core
   if((err = bpmp_rst_set(cfg->core_reset, 0)) != 0)
     return err;
+
+  reg_set_bit(dbi_base + APPL_CTRL, 2); // turn on Bus Master Enable
 
   reg_wr(dbi_base + PORT_LOGIC_AUX_CLK_FREQ, 19);
 
@@ -566,6 +596,8 @@ pcie_start(const ctrl_conf_t *cfg)
     usleep(1000);
   }
   evlog(LOG_ERR, "%s: Link not up", cfg->name);
+  reg_clr_bit(cfg->appl_base + APPL_PINMUX, 0);
+  device_unregister(&tpc->tpc_dev);
   pcie_stop(cfg);
   return ERR_NOT_READY;
 }
@@ -583,10 +615,51 @@ pcie_init(const ctrl_conf_t *cfg)
   thread_create(pcie_init_thread, (void *)cfg, 0, cfg->name, TASK_DETACHED, 3);
 }
 
+// Check if s1 begins with s2
+static const char *
+begins(const char *s1, const char *s2)
+{
+  while(*s2)
+    if(*s1++ != *s2++)
+      return NULL;
+  return s1;
+}
+
 
 static void __attribute__((constructor(1200)))
 t234ccplex_pcie_init(void)
 {
-  pcie_init(&pcie_c8);
-  pcie_init(&pcie_c4);
+  const ctrl_conf_t *pcie_slots[] = {
+    &pcie_c8,
+    &pcie_c7,
+    &pcie_c5,
+    &pcie_c4,
+    &pcie_c1,
+  };
+
+  extern const char builtin_fdt[];
+  fdt_t fdt = {(void *)builtin_fdt};
+  fdt.capacity = fdt_get_totalsize(&fdt);
+
+  fdt_node_ref_t key = 0;
+  const char *match;
+  while((key = fdt_find_next_node(&fdt, key, "/bus@0/*", &match)) != 0) {
+    const char *busid = begins(match, "pcie@");
+    if(busid == NULL)
+      continue;
+
+    const uint32_t base = xtoi(busid);
+    for(int i = 0; i < ARRAYSIZE(pcie_slots); i++) {
+      if (pcie_slots[i]->appl_base != base)
+	continue;
+
+      size_t slen;
+      const char *okay = fdt_get_property(&fdt, key, "status", &slen);
+      if (slen != sizeof("okay") || strcmp(okay, "okay"))
+	break;
+
+      pcie_init(pcie_slots[i]);
+      break;
+    }
+  }
 }
