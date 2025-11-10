@@ -7,9 +7,13 @@
 #include <mios/driver.h>
 #include <mios/eventlog.h>
 #include <mios/task.h>
+#include <mios/type_macros.h>
+
+#include <fdt/fdt.h>
 
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <malloc.h>
 
@@ -75,7 +79,6 @@ typedef struct ctrl_conf {
 
 } ctrl_conf_t;
 
-__attribute__((unused))
 static const ctrl_conf_t pcie_c4  = {
   .appl_base = 0x14160000,
   .rp_base   = 0x36080000,
@@ -97,7 +100,6 @@ static const ctrl_conf_t pcie_c4  = {
   .name = "pcie_c4",
 };
 
-__attribute__((unused))
 static const ctrl_conf_t pcie_c8  = {
   .appl_base = 0x140a0000,
   .rp_base = 0x2a000000,
@@ -116,6 +118,25 @@ static const ctrl_conf_t pcie_c8  = {
   },
   .name = "pcie_c8",
 };
+
+static const ctrl_conf_t pcie_c1  = {
+  .appl_base = 0x14100000,
+  .rp_base = 0x30000000,
+  .atu_dma_base = 0x30040000,
+  .pcie_controller = 1,
+  .powergate = 9,
+  .core_reset = 117,
+  .apb_reset = 122,
+  .clock = 221,
+  .sys0_irq = 32 + 45,
+  .intx_irq_base = 32 + 516,
+  .num_phys = 1,
+  .phys = {
+    0x3e30000, // p2u_hsio_3
+  },
+  .name = "pcie_c1",
+};
+
 
 
 typedef struct t234_pci_ctrl_t {
@@ -501,10 +522,49 @@ pcie_init(const ctrl_conf_t *cfg)
   thread_create(pcie_init_thread, (void *)cfg, 0, cfg->name, TASK_DETACHED, 3);
 }
 
+// Check if s1 begins with s2
+static const char *
+begins(const char *s1, const char *s2)
+{
+  while(*s2)
+    if(*s1++ != *s2++)
+      return NULL;
+  return s1;
+}
+
 
 static void __attribute__((constructor(1200)))
 t234ccplex_pcie_init(void)
 {
-  pcie_init(&pcie_c8);
-  pcie_init(&pcie_c4);
+  const ctrl_conf_t *pcie_slots[] = {
+    &pcie_c8,
+    &pcie_c4,
+    &pcie_c1,
+  };
+
+  extern const char builtin_fdt[];
+  fdt_t fdt = {(void *)builtin_fdt};
+  fdt.capacity = fdt_get_totalsize(&fdt);
+
+  fdt_node_ref_t key = 0;
+  const char *match;
+  while((key = fdt_find_next_node(&fdt, key, "/bus@0/*", &match)) != 0) {
+    const char *busid = begins(match, "pcie@");
+    if(busid == NULL)
+      continue;
+
+    const uint32_t base = xtoi(busid);
+    for(int i = 0; i < ARRAYSIZE(pcie_slots); i++) {
+      if (pcie_slots[i]->appl_base != base)
+	continue;
+
+      size_t slen;
+      const char *okay = fdt_get_property(&fdt, key, "status", &slen);
+      if (slen != sizeof("okay") || strcmp(okay, "okay"))
+	break;
+
+      pcie_init(pcie_slots[i]);
+      break;
+    }
+  }
 }
