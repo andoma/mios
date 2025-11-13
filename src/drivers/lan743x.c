@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <malloc.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 #include "reg.h"
 #include "irq.h"
@@ -136,7 +137,8 @@
 #define MAC_MII_ACC_MII_BUSY_		BIT(0)
 
 #define MAC_MII_DATA			(0x124)
-
+#define INT_STS_R2C                     (0x790)
+#define INT_SET			(0x784)
 #define INT_EN_SET			(0x788)
 #define INT_EN_CLR			(0x78C)
 
@@ -180,6 +182,10 @@
 #define MAC_CR (0x100)
 #define MAC_CR_ADD_ (0x00001000)
 #define MAC_CR_ASD_ (0x00000800)
+
+#define PMT_CTL (0x0014)
+#define PMT_CTL_ETH_PHY_RST_ (0x00000010)
+#define PMT_CTL_READY_ (0x00000080)
 
 typedef struct desc {
   uint32_t     cmd_status;
@@ -374,21 +380,52 @@ handle_tx(lan743x_t *l)
   }
 }
 
+bool test_irq_flag = false;
+
+static void
+handle_test_irq(lan743x_t *l)
+{
+  evlog(LOG_DEBUG, "test irq");    
+  test_irq_flag = true;
+  /* clear interrupt status */
+  reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
+
+}
+
+bool
+test_irq(lan743x_t *l)
+{
+  test_irq_flag = false;
+  /* clear status */
+  reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
+  /* activate software interrupt */
+  reg_wr(l->mmio + INT_SET, INT_BIT_SW_GP_);
+  bool success = false;
+  for(int i = 0; i < 10 && !success; i++) {
+    usleep(1000);
+    if (test_irq_flag)
+      success = true;
+  }
+  /* assuming the previous WAIT includes a timeout in case the test failed. */
+     /* disable software interrupt */
+  reg_wr(l->mmio + INT_EN_CLR, INT_BIT_SW_GP_);
+  /* clear status */
+  reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
+  return success;
+}
 
 static void
 lan743x_irq(void *arg)
 {
   lan743x_t *l = arg;
   l->irq_counter++;
-  uint32_t status = reg_rd(l->mmio + INT_STS) & reg_rd(l->mmio + INT_EN_SET);
+  uint32_t status = reg_rd(l->mmio + INT_STS_R2C) & reg_rd(l->mmio + INT_EN_SET);
 
   if (!(status & INT_BIT_MAS_))
     /* master bit not set, can't be ours */
     return;
   // disable interrupts
   reg_wr(l->mmio + INT_EN_CLR, status);
-  // Clear handled bits
-  reg_wr(l->mmio + INT_STS, status);
 
   if(status & INT_BIT_DMA_RX_(0)) {
     handle_rx(l);
@@ -399,10 +436,10 @@ lan743x_irq(void *arg)
   }
 
   if(status & INT_BIT_ALL_OTHER_) {
-    //handle_link_change();
+    handle_test_irq(l);
   }
   // enable interrupts
-  reg_wr16(l->mmio + INT_EN_SET, status);
+  reg_wr(l->mmio + INT_EN_SET, status);
 }
 
 
@@ -429,8 +466,10 @@ mii_write(void *arg, uint16_t reg, uint16_t value)
   lan743x_t *l = arg;
 
   reg_wr(l->mmio + MAC_MII_DATA, value);
-  uint32_t acc =  ((reg << MAC_MII_ACC_MIIRINDA_SHIFT_) &
-		   MAC_MII_ACC_MIIRINDA_MASK_ )
+  uint32_t acc =
+    1 << 11
+    | ((reg << MAC_MII_ACC_MIIRINDA_SHIFT_) &
+       MAC_MII_ACC_MIIRINDA_MASK_ )
     | MAC_MII_ACC_MII_WRITE_
     | MAC_MII_ACC_MII_BUSY_;
 
@@ -446,8 +485,10 @@ mii_read(void *arg, uint16_t reg)
 {
   lan743x_t *l = arg;
 
-  uint32_t acc =  ((reg << MAC_MII_ACC_MIIRINDA_SHIFT_) &
-		   MAC_MII_ACC_MIIRINDA_MASK_ )
+  uint32_t acc =
+    1ul << 11 |
+    ((reg << MAC_MII_ACC_MIIRINDA_SHIFT_) &
+     MAC_MII_ACC_MIIRINDA_MASK_ )
     | MAC_MII_ACC_MII_READ_
     | MAC_MII_ACC_MII_BUSY_;
   reg_wr(l->mmio +  MAC_MII_ACC, acc);
@@ -548,6 +589,12 @@ lan743x_attach(device_t *d)
   l->mmio = mmio;
 
 
+  uint32_t lo = 0x18283848;
+  uint32_t hi = 0x58687888;
+  
+  
+  reg_wr(l->mmio + MAC_RX_ADDRL, lo);
+  reg_wr(l->mmio + MAC_RX_ADDRH, hi);
 
   const uint32_t mac_addr_lo = reg_rd(l->mmio + MAC_RX_ADDRL);
   const uint32_t mac_addr_hi = reg_rd(l->mmio + MAC_RX_ADDRH);
@@ -644,7 +691,7 @@ lan743x_attach(device_t *d)
 
   /* enable interrupts */
 
-  reg_wr(l->mmio + INT_EN_SET, INT_BIT_DMA_RX_(0) | INT_BIT_DMA_TX_(0) | INT_BIT_MAS_);
+  reg_wr(l->mmio + INT_EN_SET, INT_BIT_DMA_RX_(0) | INT_BIT_DMA_TX_(0) | INT_BIT_MAS_ | INT_BIT_SW_GP_);
   reg_wr(l->mmio + DMAC_INT_EN_SET, DMAC_INT_BIT_RXFRM_(0) | DMAC_INT_BIT_TX_IOC_(0));
 
   reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_T_(0));
@@ -665,12 +712,17 @@ lan743x_attach(device_t *d)
   device_retain(d);
   ether_netif_init(&l->eni, l->name, &lan743x_device_class);
 
+  uint32_t ctl = reg_rd(l->mmio + PMT_CTL);
+  reg_wr(l->mmio + PMT_CTL, ctl |  PMT_CTL_ETH_PHY_RST_ );
+  while ((reg_rd(l->mmio + PMT_CTL) & PMT_CTL_ETH_PHY_RST_ )) {}
+
+  while (!(reg_rd(l->mmio + PMT_CTL) & PMT_CTL_READY_ )) {}
+
   uint16_t phyid_low  = mii_read(l, 0x2);
   uint16_t phyid_high = mii_read(l, 0x3);
 
-  evlog(LOG_INFO, "%s: lan743x attached IRQ %d: phy %04x:%04x", l->name, l->irq, phyid_high, phyid_low);
-
-
+  evlog(LOG_INFO, "%s: lan743x attached IRQ %d phy %04x:%04x", l->name, l->irq,
+	phyid_high, phyid_low);
 
   uint16_t anar = mii_read(l, 0x4);
   uint16_t gtcr = mii_read(l, 0x9);
@@ -686,6 +738,10 @@ lan743x_attach(device_t *d)
 
   uint32_t mac_cr = reg_rd(l->mmio + MAC_CR);
   reg_wr(l->mmio + MAC_CR, mac_cr | MAC_CR_ADD_ | MAC_CR_ASD_);
+
+  bool test = test_irq(l);
+  evlog(LOG_DEBUG, "test irq was a ... %s", test ? "success" : "failure");
+  
   l->phy_run = 1;
   l->phy_thread = thread_create(lan743x_phy_thread, l, 0, "phy",
 				TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
