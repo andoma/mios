@@ -7,6 +7,7 @@
 #include <mios/pmem.h>
 #include <mios/error.h>
 #include <mios/cli.h>
+#include <mios/sys.h>
 
 #include "t234_hsp.h"
 #include "t234_bootinfo.h"
@@ -201,6 +202,25 @@ board_init_console(void)
 }
 
 
+const struct serial_number
+sys_get_serial_number(void)
+{
+  static uint8_t sn[16] = {0,};
+  struct serial_number serial  = {
+    .data = sn,
+    .len = 16
+  };
+  if (sn[0] != 0) {
+    return serial;
+  }
+
+  const cpubl_params_v2_t *cbp =
+    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+
+  memcpy(sn, cbp->eeprom.cvm + 74, 15);
+  sn[15] = 0;
+  return serial;
+}
 
 static const char pmemtypestr[] =
   "???\0"
