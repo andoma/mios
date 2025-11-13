@@ -2,6 +2,7 @@
 
 #include <mios/eventlog.h>
 #include <mios/cli.h>
+#include <mios/sys.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -137,17 +138,11 @@ fdt_init(void)
                      cooling_device_size);
   }
   free(cooling_device);
-
-  const cpubl_params_v2_t *cbp =
-    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
-  char sn[16];
-  memcpy(sn, cbp->eeprom.cvm + 74, 15);
-  sn[15] = 0;
-
+  const struct serial_number sn = sys_get_serial_number();
   // Update serial-number in FDT
   key = fdt_find_next_node(&fdt, 0, "", NULL);
   if(key) {
-    fdt_set_property(&fdt, key, "serial-number", sn, strlen(sn) + 1);
+    fdt_set_property(&fdt, key, "serial-number", sn.data, sn.len);
   }
 
   FDT = fdt.buffer;
