@@ -298,6 +298,7 @@ lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
 static void
 handle_rx(lan743x_t *l)
 {
+  evlog(LOG_DEBUG, "rx irq");  
   while(1) {
     desc_t *rx = l->rx_ring + (l->next_rx & RX_RING_MASK);
     const uint32_t status = rx->cmd_status;
@@ -365,6 +366,7 @@ handle_rx(lan743x_t *l)
 static void
 handle_tx(lan743x_t *l)
 {
+  evlog(LOG_DEBUG, "tx irq");
   while(l->tx_rdptr != *l->tx_wr_back_ptr) {
 
     int bufidx = l->tx_rdptr & TX_RING_MASK;
@@ -385,11 +387,11 @@ bool test_irq_flag = false;
 static void
 handle_test_irq(lan743x_t *l)
 {
-  evlog(LOG_DEBUG, "test irq");    
   test_irq_flag = true;
   /* clear interrupt status */
+  reg_wr(l->mmio + INT_EN_CLR, INT_BIT_SW_GP_);
   reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
-
+  //evlog(LOG_DEBUG, "test irq");    
 }
 
 bool
@@ -421,22 +423,35 @@ lan743x_irq(void *arg)
   l->irq_counter++;
   uint32_t status = reg_rd(l->mmio + INT_STS_R2C) & reg_rd(l->mmio + INT_EN_SET);
 
-  if (!(status & INT_BIT_MAS_))
+  if (!(status & INT_BIT_MAS_)) {
+    static int once = 0;
+    if (!once)
+      evlog(LOG_DEBUG, "tut %08x", status);
+    once = 1;
     /* master bit not set, can't be ours */
     return;
+  }
   // disable interrupts
   reg_wr(l->mmio + INT_EN_CLR, status);
 
+  uint32_t dmac_status = 0;
   if(status & INT_BIT_DMA_RX_(0)) {
+    dmac_status |= DMAC_INT_BIT_RXFRM_(0);
     handle_rx(l);
   }
 
   if(status & INT_BIT_DMA_TX_(0)) {
+    dmac_status |= DMAC_INT_BIT_TX_IOC_(0);
     handle_tx(l);
   }
 
   if(status & INT_BIT_ALL_OTHER_) {
     handle_test_irq(l);
+  }
+
+  // Clear DMAC interrupt status bits
+  if(dmac_status) {
+    reg_wr(l->mmio + DMAC_INT_STS, dmac_status);
   }
   // enable interrupts
   reg_wr(l->mmio + INT_EN_SET, status);
@@ -549,7 +564,6 @@ static void *__attribute__((noreturn))
     mii_read(l, 1);
     int n = mii_read(l, 1);
     int up = !!(n & 4);
-
     if(!current_up && up) {
 
       // FIXME: Configure correct speed and duplex in MAC
@@ -690,6 +704,10 @@ lan743x_attach(device_t *d)
   reg_wr(l->mmio + TX_TAIL(0), l->tx_rdptr);
 
   /* enable interrupts */
+  reg_wr(l->mmio + INT_EN_CLR, ~0);
+  reg_wr(l->mmio + INT_STS, ~0);
+  
+  l->irq = pci_irq_attach_intx(pd, PCI_INTA, IRQ_LEVEL_NET, lan743x_irq, l);
 
   reg_wr(l->mmio + INT_EN_SET, INT_BIT_DMA_RX_(0) | INT_BIT_DMA_TX_(0) | INT_BIT_MAS_ | INT_BIT_SW_GP_);
   reg_wr(l->mmio + DMAC_INT_EN_SET, DMAC_INT_BIT_RXFRM_(0) | DMAC_INT_BIT_TX_IOC_(0));
@@ -703,9 +721,7 @@ lan743x_attach(device_t *d)
   }
   reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_T_(0));
 
-
   l->eni.eni_output = lan743x_eth_output;
-  l->irq = pci_irq_attach_intx(pd, PCI_INTA, IRQ_LEVEL_NET, lan743x_irq, l);
 
   snprintf(l->name, sizeof(l->name), "eth_%s", d->d_name);
   l->eni.eni_ni.ni_dev.d_parent = d;
@@ -738,6 +754,10 @@ lan743x_attach(device_t *d)
 
   uint32_t mac_cr = reg_rd(l->mmio + MAC_CR);
   reg_wr(l->mmio + MAC_CR, mac_cr | MAC_CR_ADD_ | MAC_CR_ASD_);
+  uint32_t  dmac_status =
+    DMAC_INT_BIT_RXFRM_(0)
+    | DMAC_INT_BIT_TX_IOC_(0);
+  reg_wr(l->mmio + DMAC_INT_STS, dmac_status);
 
   bool test = test_irq(l);
   evlog(LOG_DEBUG, "test irq was a ... %s", test ? "success" : "failure");
