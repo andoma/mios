@@ -42,8 +42,13 @@ power_rail_alert_message(const struct alert_source *as, struct stream *output)
     del = ", ";
   }
 
-  if(as->as_code & POWER_RAIL_FAN) {
-    stprintf(output, "%sFan problem", del);
+  if(as->as_code & POWER_RAIL_FAN_WARN) {
+    stprintf(output, "%sFan warning", del);
+    del = ", ";
+  }
+
+  if(as->as_code & POWER_RAIL_FAN_CRIT) {
+    stprintf(output, "%sFan critical", del);
     del = ", ";
   }
 
@@ -106,7 +111,7 @@ static event_level_t
 power_rail_alert_level(const struct alert_source *as)
 {
   if(as->as_code & (POWER_RAIL_TEMP_CRIT |
-                    POWER_RAIL_FAN |
+                    POWER_RAIL_FAN_CRIT |
                     POWER_RAIL_OV_ALERT |
                     POWER_RAIL_UV_ALERT |
                     POWER_RAIL_OC_ALERT |
