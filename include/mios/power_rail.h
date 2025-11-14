@@ -23,8 +23,9 @@
 
 #define POWER_RAIL_FAULT      0x00000100
 #define POWER_RAIL_OFF        0x00000200  // Can be set to generate a warning
-#define POWER_RAIL_TEMP       0x00000400
-#define POWER_RAIL_FAN        0x00000800
+#define POWER_RAIL_TEMP_WARN  0x00000400
+#define POWER_RAIL_TEMP_CRIT  0x00000800
+#define POWER_RAIL_FAN        0x00001000
 
 typedef struct power_rail {
   SLIST_ENTRY(power_rail) pr_link;

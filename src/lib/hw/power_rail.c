@@ -32,8 +32,13 @@ power_rail_alert_message(const struct alert_source *as, struct stream *output)
     del = ", ";
   }
 
-  if(as->as_code & POWER_RAIL_TEMP) {
-    stprintf(output, "%sOver-temperature", del);
+  if(as->as_code & POWER_RAIL_TEMP_WARN) {
+    stprintf(output, "%sOver-temperature warning", del);
+    del = ", ";
+  }
+
+  if(as->as_code & POWER_RAIL_TEMP_CRIT) {
+    stprintf(output, "%sOver-temperature critical", del);
     del = ", ";
   }
 
@@ -100,7 +105,7 @@ power_rail_alert_message(const struct alert_source *as, struct stream *output)
 static event_level_t
 power_rail_alert_level(const struct alert_source *as)
 {
-  if(as->as_code & (POWER_RAIL_TEMP |
+  if(as->as_code & (POWER_RAIL_TEMP_CRIT |
                     POWER_RAIL_FAN |
                     POWER_RAIL_OV_ALERT |
                     POWER_RAIL_UV_ALERT |
