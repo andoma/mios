@@ -43,7 +43,7 @@ power_rail_alert_message(const struct alert_source *as, struct stream *output)
   }
 
   if(as->as_code & POWER_RAIL_FAN) {
-    stprintf(output, "%sOver-temperature", del);
+    stprintf(output, "%sFan problem", del);
     del = ", ";
   }
 
