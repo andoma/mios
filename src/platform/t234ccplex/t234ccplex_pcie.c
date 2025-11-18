@@ -121,7 +121,7 @@ static const ctrl_conf_t pcie_c8  = {
 
 static const ctrl_conf_t pcie_c1  = {
   .appl_base = 0x14100000,
-  .rp_base = 0x30000000,
+  .rp_base = 0x30080000,
   .atu_dma_base = 0x30040000,
   .pcie_controller = 1,
   .powergate = 9,

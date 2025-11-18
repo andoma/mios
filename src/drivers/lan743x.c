@@ -2,8 +2,11 @@
 
 #include <mios/pci.h>
 #include <mios/mios.h>
+#include <mios/sys.h>
 #include <mios/driver.h>
 #include <mios/eventlog.h>
+
+#include <util/crc32.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -17,7 +20,9 @@
 #include "cache.h"
 #include "barrier.h"
 
-#define RX_RING_SIZE 64
+_Static_assert(PBUF_DATA_SIZE >= 1536);
+
+#define RX_RING_SIZE 4
 #define TX_RING_SIZE 64
 #define RX_RING_MASK (RX_RING_SIZE - 1)
 #define TX_RING_MASK (TX_RING_SIZE - 1)
@@ -39,6 +44,9 @@
 #define TX_DESC_DATA0_EXT_PAY_LENGTH_MASK_	(0x000FFFFF)
 #define TX_DESC_DATA3_FRAME_LENGTH_MSS_MASK_	(0x3FFF0000)
 
+#define MAC_RX			        (0x104)
+#define MAC_TX			        (0x108)
+
 #define MAC_RX_ADDRH			(0x118)
 #define MAC_RX_ADDRL			(0x11C)
 
@@ -48,6 +56,18 @@
 #define RX_HEAD_WB_ADDRL(channel)	(0xC54 + ((channel) << 6))
 #define RX_HEAD(channel)			(0xC58 + ((channel) << 6))
 #define RX_TAIL(channel)			(0xC5C + ((channel) << 6))
+
+#define RX_CFG_A(channel)			(0xC40 + ((channel) << 6))
+#define RX_CFG_A_RX_HP_WB_EN_ (0x00000020)
+
+#define RX_CFG_B(channel)			(0xC44 + ((channel) << 6))
+#define RX_CFG_B_TS_ALL_RX_			BIT(29)
+#define RX_CFG_B_RX_PAD_MASK_			(0x03000000)
+#define RX_CFG_B_RX_PAD_0_			(0x00000000)
+#define RX_CFG_B_RX_PAD_2_			(0x02000000)
+#define RX_CFG_B_RDMABL_512_			(0x00040000)
+#define RX_CFG_B_RX_RING_LEN_MASK_		(0x0000FFFF)
+
 
 #define TX_BASE_ADDRH(channel) (0xD48 + ((channel) << 6))
 #define TX_BASE_ADDRL(channel) (0xD4C + ((channel) << 6))
@@ -109,16 +129,6 @@
 #define HW_CFG_EE_OTP_RELOAD_			BIT(4)
 #define HW_CFG_LRST_				BIT(1)
 
-#define RX_CFG_A(channel)			(0xC40 + ((channel) << 6))
-#define RX_CFG_A_RX_HP_WB_EN_ (0x00000020)
-
-#define RX_CFG_B(channel)			(0xC44 + ((channel) << 6))
-#define RX_CFG_B_TS_ALL_RX_			BIT(29)
-#define RX_CFG_B_RX_PAD_MASK_			(0x03000000)
-#define RX_CFG_B_RX_PAD_0_			(0x00000000)
-#define RX_CFG_B_RX_PAD_2_			(0x02000000)
-#define RX_CFG_B_RDMABL_512_			(0x00040000)
-#define RX_CFG_B_RX_RING_LEN_MASK_		(0x0000FFFF)
 
 #define MAC_MII_ACC			(0x120)
 #define MAC_MII_ACC_MDC_CYCLE_SHIFT_	(16)
@@ -207,6 +217,7 @@ typedef struct lan743x {
 
   desc_t *rx_ring;
   desc_t *tx_ring;
+  int *rx_wr_back_ptr;  
 
   thread_t *phy_thread;
   int phy_run;
@@ -224,6 +235,7 @@ typedef struct lan743x {
   uint16_t tx_size[TX_RING_SIZE];
 
   uint32_t irq_counter;
+  uint32_t irq_other;  
   uint32_t irq;
   char name[16];
 
@@ -275,6 +287,7 @@ lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
     if(pb->pb_flags & PBUF_EOP) {
       cmd |= TX_DESC_DATA0_IOC_ | TX_DESC_DATA0_LS_;
     }
+    tx->data3 = pb->pb_buflen << 16;
     tx->cmd_status = cmd;
     wrptr++;
   }
@@ -304,7 +317,7 @@ handle_rx(lan743x_t *l)
     const uint32_t status = rx->cmd_status;
     if(status & RX_DESC_DATA0_OWN_)
       break; // Buffer is owned by NIC
-
+    evlog(LOG_DEBUG, "there is a packet...");  
     const int len = RX_DESC_DATA0_FRAME_LENGTH_GET_(status);
     int discard = 0;
 
@@ -333,7 +346,7 @@ handle_rx(lan743x_t *l)
 
           pb->pb_data = buf;
           pb->pb_flags = flags;
-          pb->pb_offset = 2; // 2 byte padding for IP header alignment
+          pb->pb_offset = 0; //2; // 2 byte padding for IP header alignment
 
           pb->pb_buflen = len;
           pb->pb_pktlen = len;
@@ -424,10 +437,7 @@ lan743x_irq(void *arg)
   uint32_t status = reg_rd(l->mmio + INT_STS_R2C) & reg_rd(l->mmio + INT_EN_SET);
 
   if (!(status & INT_BIT_MAS_)) {
-    static int once = 0;
-    if (!once)
-      evlog(LOG_DEBUG, "tut %08x", status);
-    once = 1;
+    l->irq_other++;
     /* master bit not set, can't be ours */
     return;
   }
@@ -453,8 +463,6 @@ lan743x_irq(void *arg)
   if(dmac_status) {
     reg_wr(l->mmio + DMAC_INT_STS, dmac_status);
   }
-  // enable interrupts
-  reg_wr(l->mmio + INT_EN_SET, status);
 }
 
 
@@ -469,9 +477,21 @@ lan743x_reset(lan743x_t *l)
   while(1) {
     if((reg_rd(l->mmio + HW_CFG) & HW_CFG_LRST_) == 0)
       break;
-    if(clock_get() > deadline)
+    if(clock_get() > deadline) {
+      evlog(LOG_ERR, "failed to reset");
       return ERR_TIMEOUT;
+    }
   }
+  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_TX_SWR_(0));
+  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_T_(0)| DMAC_CMD_STOP_T_(0)))
+	== (DMAC_CMD_START_T_(0) | DMAC_CMD_STOP_T_(0))) {
+  }
+  const uint32_t rx_reset_bit = DMAC_CMD_RX_SWR_(0);
+  reg_wr(l->mmio + DMAC_CMD, rx_reset_bit);
+  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_R_(0)| DMAC_CMD_STOP_R_(0)))
+	== (DMAC_CMD_START_R_(0) | DMAC_CMD_STOP_R_(0))) {
+  }
+  
   return 0;
 }
 
@@ -517,7 +537,7 @@ lan7431_print_info(struct device *dev, struct stream *st)
 {
   lan743x_t *l = (lan743x_t *)dev;
   ether_print((ether_netif_t *)dev, st);
-  stprintf(st, "\t%u IRQ\n", l->irq_counter);
+  stprintf(st, "\t%u IRQ %u \n", l->irq_counter, l->irq_other);
 }
 
 
@@ -565,9 +585,6 @@ static void *__attribute__((noreturn))
     int n = mii_read(l, 1);
     int up = !!(n & 4);
     if(!current_up && up) {
-
-      // FIXME: Configure correct speed and duplex in MAC
-
       current_up = 1;
       net_task_raise(&l->eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
     } else if(current_up && !up) {
@@ -575,6 +592,9 @@ static void *__attribute__((noreturn))
       net_task_raise(&l->eni.eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
     }
     usleep(1000000);
+    evlog(LOG_DEBUG, "mac status %u %08x %08x", reg_rd(l->mmio + 0x1254), pci_cfg_rd16(l->pd, 0x6), reg_rd(l->mmio + 0xc60));
+    
+    //    handle_rx(l);
   }
   thread_exit(NULL);
 }
@@ -593,19 +613,23 @@ lan743x_attach(device_t *d)
   if(mmio == 0)
     return ERR_INVALID_ADDRESS;
 
-  uint32_t rev = reg_rd(mmio + ID_REV) & ID_REV_ID_MASK_;
-  if(rev != ID_REV_ID_LAN7430_)
+  uint32_t rev = reg_rd(mmio + ID_REV);
+  if((ID_REV_ID_MASK_ & rev) != ID_REV_ID_LAN7430_)
     return ERR_MISMATCH;
-  evlog(LOG_INFO, "lan7430 found");
 
   lan743x_t *l = xalloc(sizeof(lan743x_t), 0, MEM_CLEAR);
   l->pd = pd;
   l->mmio = mmio;
+  evlog(LOG_DEBUG, "mmio %016lx", mmio);
 
+  lan743x_reset(l);
+  usleep(10000);
 
-  uint32_t lo = 0x18283848;
-  uint32_t hi = 0x58687888;
+  const struct serial_number sn = sys_get_serial_number();
+  uint32_t uuidcrc = crc32(0, sn.data, sn.len);
   
+  uint32_t lo = (uuidcrc & 0xffff0000) | ((uint8_t *)sn.data)[3] << 8 | 0x0006;
+  uint32_t hi = uuidcrc & 0xffff;
   
   reg_wr(l->mmio + MAC_RX_ADDRL, lo);
   reg_wr(l->mmio + MAC_RX_ADDRH, hi);
@@ -624,47 +648,48 @@ lan743x_attach(device_t *d)
 
   l->tx_ring = xalloc(TX_RING_SIZE * sizeof(desc_t), 0x100,
                       MEM_TYPE_NO_CACHE | MEM_CLEAR);
-  l->tx_wr_back_ptr= xalloc(sizeof(l->tx_wr_back_ptr), 0x100,
+  l->tx_wr_back_ptr= xalloc(sizeof(*l->tx_wr_back_ptr), 0x100,
 			    MEM_TYPE_NO_CACHE | MEM_CLEAR);
-
+  
   for(int i = 0; i < RX_RING_SIZE; i++) {
     desc_t *d = l->rx_ring + i;
 
-    pbuf_t *pb = pbuf_data_get(0);
+    void *pb = pbuf_data_get(0);
     cache_op(pb, PBUF_DATA_SIZE, DCACHE_INVALIDATE);
+    
     d->buf = pb;
     l->rx_pbuf_data[i] = pb;
-    d->cmd_status = RX_DESC_DATA0_OWN_ | PBUF_DATA_SIZE;
     d->data3 = 0;
-    if(i == RX_RING_SIZE - 1)
-      reg_wr(mmio + RX_TAIL(0), i);
+    d->cmd_status = RX_DESC_DATA0_OWN_ | PBUF_DATA_SIZE;
   }
 
-  lan743x_reset(l);
-
-  usleep(10000);
 
   // init rings
 
   reg_wr(l->mmio + RX_BASE_ADDRH(0), (intptr_t)l->rx_ring >> 32);
   reg_wr(l->mmio + RX_BASE_ADDRL(0), (intptr_t)l->rx_ring);
 
+  evlog(LOG_DEBUG, "rx ring ptr %08x:%08x", reg_rd(l->mmio + RX_BASE_ADDRH(0)),
+	reg_rd(l->mmio + RX_BASE_ADDRL(0)));
+
+  
+
   uint32_t temp = reg_rd(l->mmio + RX_CFG_B(0));
   temp &= ~RX_CFG_B_RX_PAD_MASK_;
-  temp |= RX_CFG_B_RX_PAD_2_;
+  temp |= RX_CFG_B_RX_PAD_0_;
   /* NOTE: use RX_CFG_B_RX_PAD_2_ instead if you want each packet to have
    * a 2 byte padding at the beginning of the buffer. This allows the
    * IP header to have better alignment.
    */
   temp &= ~RX_CFG_B_RX_RING_LEN_MASK_;
-  temp |= (RX_RING_SIZE & RX_CFG_B_RX_RING_LEN_MASK_);
+  temp |= ((RX_RING_SIZE ) & RX_CFG_B_RX_RING_LEN_MASK_);
   reg_wr(l->mmio + RX_CFG_B(0), temp);
 
+  evlog(LOG_DEBUG, "rx ring cfg %08x", temp);
 
   /* set head write back address */
   /* set tail and head so all descriptors belong to the LAN743x */
   l->rx_last_head = reg_rd(l->mmio + RX_HEAD(0));
-  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_R_(0));
 
   // fct rx rst
   reg_wr(l->mmio + FCT_RX_CTL, FCT_RX_CTL_RESET_(0));
@@ -672,14 +697,11 @@ lan743x_attach(device_t *d)
   }
 
 
-  reg_wr(l->mmio + FCT_RX_CTL, FCT_RX_CTL_EN_(0));
-
   /* setup tx */
   reg_wr(l->mmio + FCT_TX_CTL, FCT_TX_CTL_RESET_(0));
   while ((reg_rd(l->mmio + FCT_TX_CTL) & FCT_TX_CTL_RESET_(0))){
   }
-  reg_wr(l->mmio + FCT_TX_CTL, FCT_TX_CTL_EN_(0));
-  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_TX_SWR_(0));
+
 
   reg_wr(l->mmio + TX_BASE_ADDRH(0), (intptr_t)l->tx_ring >> 32);
   reg_wr(l->mmio + TX_BASE_ADDRL(0), (intptr_t)l->tx_ring);
@@ -711,21 +733,29 @@ lan743x_attach(device_t *d)
 
   reg_wr(l->mmio + INT_EN_SET, INT_BIT_DMA_RX_(0) | INT_BIT_DMA_TX_(0) | INT_BIT_MAS_ | INT_BIT_SW_GP_);
   reg_wr(l->mmio + DMAC_INT_EN_SET, DMAC_INT_BIT_RXFRM_(0) | DMAC_INT_BIT_TX_IOC_(0));
+  reg_wr(l->mmio + DMAC_INT_STS, DMAC_INT_BIT_RXFRM_(0) | DMAC_INT_BIT_TX_IOC_(0));
 
-  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_T_(0));
-  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_R_(0));
   // Start RX and TX
+  reg_wr(l->mmio + FCT_RX_CTL, FCT_RX_CTL_EN_(0));
+  reg_wr(l->mmio + FCT_TX_CTL, FCT_TX_CTL_EN_(0));
 
-  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_T_(0)| DMAC_CMD_STOP_T_(0)))
-	== (DMAC_CMD_START_T_(0) | DMAC_CMD_STOP_T_(0))) {
-  }
-  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_T_(0));
+  evlog(LOG_DEBUG, "mac4 status %08x %04x", reg_rd(l->mmio + 0xc60), pci_cfg_rd16(l->pd, 0x6));  
+  reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_T_(0) | DMAC_CMD_START_R_(0) );
+
+  udelay(1000);
+  evlog(LOG_DEBUG, "mac4 status %08x %04x", reg_rd(l->mmio + 0xc60), pci_cfg_rd16(l->pd, 0x6));  
+  
+  reg_wr(mmio + RX_TAIL(0), RX_RING_SIZE - 1);
+
+  udelay(1000);
+  evlog(LOG_DEBUG, "mac4 status %08x %04x %08x", reg_rd(l->mmio + 0xc60), pci_cfg_rd16(l->pd, 0x6), pci_cfg_rd16(l->pd, 0x98));  
 
   l->eni.eni_output = lan743x_eth_output;
 
   snprintf(l->name, sizeof(l->name), "eth_%s", d->d_name);
   l->eni.eni_ni.ni_dev.d_parent = d;
   device_retain(d);
+
   ether_netif_init(&l->eni, l->name, &lan743x_device_class);
 
   uint32_t ctl = reg_rd(l->mmio + PMT_CTL);
@@ -737,9 +767,8 @@ lan743x_attach(device_t *d)
   uint16_t phyid_low  = mii_read(l, 0x2);
   uint16_t phyid_high = mii_read(l, 0x3);
 
-  evlog(LOG_INFO, "%s: lan743x attached IRQ %d phy %04x:%04x", l->name, l->irq,
+  evlog(LOG_INFO, "%s: lan743x rev %d attached IRQ %d phy %04x:%04x", l->name, rev & 0xffff, l->irq,
 	phyid_high, phyid_low);
-
   uint16_t anar = mii_read(l, 0x4);
   uint16_t gtcr = mii_read(l, 0x9);
 
@@ -752,16 +781,26 @@ lan743x_attach(device_t *d)
     mii_write(l, 0, 0x9200);
   }
 
-  uint32_t mac_cr = reg_rd(l->mmio + MAC_CR);
+  const uint32_t mac_cr = reg_rd(l->mmio + MAC_CR);
   reg_wr(l->mmio + MAC_CR, mac_cr | MAC_CR_ADD_ | MAC_CR_ASD_);
+
+  uint32_t mac_rx = reg_rd(l->mmio + MAC_RX);
+  reg_wr(l->mmio + MAC_RX, mac_rx | 1);
+  //uint32_t mac_tx = reg_rd(l->mmio + MAC_TX);
+  //reg_wr(l->mmio + MAC_TX, mac_tx | 1);
+
+  
   uint32_t  dmac_status =
     DMAC_INT_BIT_RXFRM_(0)
     | DMAC_INT_BIT_TX_IOC_(0);
   reg_wr(l->mmio + DMAC_INT_STS, dmac_status);
 
+
   bool test = test_irq(l);
   evlog(LOG_DEBUG, "test irq was a ... %s", test ? "success" : "failure");
-  
+
+  reg_wr(l->mmio + 0x508, 1 << 10 | 1 << 9 | 1 << 8 );
+
   l->phy_run = 1;
   l->phy_thread = thread_create(lan743x_phy_thread, l, 0, "phy",
 				TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
