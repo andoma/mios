@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <mios/io.h>
 #include <mios/task.h>
+#include <mios/type_macros.h>
 
 #include "stm32h7_clk.h"
 #include "stm32h7_usb.h"
@@ -70,5 +71,9 @@ platform_init_late(void)
 
   stm32h7_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32h7-nucleo144", &q);
 
-  stm32h7_eth_init();
+  stm32h7_eth_init(GPIO_UNUSED,
+                   nucleo144_eth_gpios,
+                   ARRAYSIZE(nucleo144_eth_gpios),
+                   NULL, 0,
+                   ETHPHY_MODE_RMII);
 }
