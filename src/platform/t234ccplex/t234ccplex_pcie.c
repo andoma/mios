@@ -322,6 +322,9 @@ probe_ctrl(t234_pci_ctrl_t *tpc)
   d->d_parent = &tpc->tpc_dev;
   device_retain(d->d_parent);
 
+  reg_wr(tpc->tpc_conf->rp_base + 0x108, 0);
+  reg_wr(tpc->tpc_conf->rp_base + 0x114, 0);
+
   device_register(d);
   return pci_device_probe(&tpd->tpd_dev, tpc->tpc_conf->rp_base + 0x200000);
 }
@@ -371,9 +374,39 @@ t234pcie_shutdown(device_t *d)
   return pcie_stop(cfg);
 }
 
+static void
+t234_pci_rp_print(struct device *dev, struct stream *st)
+{
+  t234_pci_ctrl_t *tpc = (t234_pci_ctrl_t *)dev;
+  uint32_t rp_base = tpc->tpc_conf->rp_base;
+
+  stprintf(st, "\tVendor:0x%04x Product:0x%04x @ 0x%x\n",
+           reg_rd16(rp_base), reg_rd16(rp_base + 2), rp_base);
+
+
+  // Print AER. For Tegra we know it starts at 0x100...
+  // Once moved to common PCI code, this needs to be enumerated
+  stprintf(st, "\tUncorrectable errors:0x%08x\n",
+           reg_rd(rp_base + 0x104));
+  stprintf(st, "\tCorrectable errors:  0x%08x\n",
+           reg_rd(rp_base + 0x110));
+  stprintf(st, "\tRoot port errors:    0x%08x\n",
+           reg_rd(rp_base + 0x130));
+  stprintf(st, "\tCapture Ctrl:        0x%08x\n",
+           reg_rd(rp_base + 0x118));
+  stprintf(st, "\tCaptured TLP:        0x%08x:0x%08x:0x%08x:0x%08x\n",
+           reg_rd(rp_base + 0x11c),
+           reg_rd(rp_base + 0x120),
+           reg_rd(rp_base + 0x124),
+           reg_rd(rp_base + 0x128));
+  stprintf(st, "\tError source:        0x%08x\n",
+           reg_rd(rp_base + 0x134));
+}
+
 
 static const device_class_t t234pcie_class = {
   .dc_shutdown = t234pcie_shutdown,
+  .dc_print_info = t234_pci_rp_print,
 };
 
 static error_t
