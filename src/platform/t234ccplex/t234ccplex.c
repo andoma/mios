@@ -142,14 +142,14 @@ board_init_early(void)
   printf("SDRAM from 0x%lx to 0x%lx\n", cbp->sdram_base, sdram_end);
 
   // Map SDRAM as follows
-  // First GB - Non-cached
-  // Reset of SDRAM - Cached
+  // First GB - Non-cached        (0x80000000 - 0xbfffffff)
+  // Reset of SDRAM - Cached      (0xc0000000 - 0x..........)
   // After end of SDRAM, make invalid
 
   uint64_t *ttbr0_el1;
   asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0_el1));
 
-  for(int i = 3; i < 16; i++) {
+  for(int i = 3; i < 512; i++) {
     uint64_t paddr = (1ULL << 30) * i;
     if(paddr >= sdram_end) {
       ttbr0_el1[i] = 0;
@@ -159,7 +159,7 @@ board_init_early(void)
   }
 
   asm volatile("dsb sy;isb");
-  cache_op(ttbr0_el1, 16*8, DCACHE_CLEAN_INV);
+  cache_op(ttbr0_el1, 512*8, DCACHE_CLEAN_INV);
   asm volatile("dsb sy;isb");
   asm volatile ("tlbi vmalle1; dsb ish; isb" ::: "memory");
 
