@@ -69,7 +69,7 @@ typedef struct ctrl_conf {
   uint16_t intx_irq_base;
 
   uint8_t num_phys;
-  uint32_t phys[4];
+  uint32_t phys[8];
 
   const char *name;
 
@@ -95,6 +95,54 @@ static const ctrl_conf_t pcie_c4  = {
     0x3e70000,
   },
   .name = "pcie_c4",
+};
+
+__attribute__((unused))
+static const ctrl_conf_t pcie_c5  = {
+  .appl_base = 0x141a0000,
+  .rp_base   = 0x3a000000,
+  .atu_dma_base  = 0x3a040000,
+  .pcie_controller = 5,
+  .powergate = 5,
+  .core_reset = 129,
+  .apb_reset = 130,
+  .clock = 225,
+  .sys0_irq = 32 + 53,
+  .intx_irq_base = 32 + 532,
+  .num_phys = 8,
+  .phys = {
+    0x3e90000, // p2u_nvhs_0
+    0x3ea0000, // p2u_nvhs_1
+    0x3eb0000, // p2u_nvhs_2
+    0x3ec0000, // p2u_nvhs_3
+    0x3ed0000, // p2u_nvhs_4
+    0x3ee0000, // p2u_nvhs_5
+    0x3ef0000, // p2u_nvhs_6
+    0x3f00000, // p2u_nvhs_7
+  },
+  .name = "pcie_c5",
+};
+
+__attribute__((unused))
+static const ctrl_conf_t pcie_c7  = {
+  .appl_base = 0x141e0000,
+  .rp_base = 0x3e000000,
+  .atu_dma_base = 0x3e040000,
+  .pcie_controller = 7,
+  .powergate = 16,
+  .core_reset = 14,
+  .apb_reset = 15,
+  .clock = 171,
+
+  .sys0_irq = 32 + 354,
+  .intx_irq_base = 32 + 540,
+
+  .num_phys = 2,
+  .phys = {
+    0x3f20000, // p2u_gbe_0
+    0x3f30000, // p2u_gbe_1
+  },
+  .name = "pcie_c7",
 };
 
 __attribute__((unused))
