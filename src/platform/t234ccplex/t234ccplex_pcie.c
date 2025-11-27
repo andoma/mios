@@ -221,6 +221,7 @@ pci_device_probe(pci_dev_t *pd, uint64_t mem_base)
 {
   pd->pd_vid = pci_cfg_rd16(pd, 0);
   pd->pd_pid = pci_cfg_rd16(pd, 2);
+  pd->pd_classcode = pci_cfg_rd32(pd, 8);
 
   if(pd->pd_vid == 0xffff || pd->pd_vid == 0)
     return ERR_NOT_FOUND;
@@ -279,8 +280,8 @@ t234_pci_dev_print(struct device *dev, struct stream *st)
   t234_pci_dev_t *tpd = (t234_pci_dev_t *)dev;
   pci_dev_t *pd = &tpd->tpd_dev;
 
-  stprintf(st, "\tVendor:0x%04x Product:0x%04x\n",
-           pd->pd_vid, pd->pd_pid);
+  stprintf(st, "\tVendor:0x%04x Product:0x%04x ClassCode:0x%08x\n",
+           pd->pd_vid, pd->pd_pid, pd->pd_classcode);
   for(int i = 0; i < 6; i++) {
     if(pd->pd_bar[i])
       stprintf(st, "\tBAR[%d] = 0x%lx\n", i, pd->pd_bar[i]);

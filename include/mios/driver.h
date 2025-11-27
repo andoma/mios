@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mios/error.h>
+#include <mios/mios.h>
 
 struct device;
 

@@ -37,6 +37,8 @@ typedef struct pci_dev {
   uint16_t pd_vid;
   uint16_t pd_pid;
 
+  uint32_t pd_classcode;
+
   long pd_bar[6];
 
 } pci_dev_t;
