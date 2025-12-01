@@ -107,7 +107,7 @@ smux_rx_thread(void *arg)
 {
   smux_t *smux = arg;
 
-  stream_t *channel = NULL;
+  stream_t *channel = smux->ps[0].obj;
   int esc = 0;
   uint8_t buf[32];
 

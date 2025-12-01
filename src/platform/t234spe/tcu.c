@@ -76,14 +76,15 @@ tcu_init_early(void)
 static void  __attribute__((constructor(5000)))
 tcu_init_late(void)
 {
+
   stream_t *svec[6];
 
-  // SPE (this is us)
-  pipe(&svec[0], &spe_tcu_console);
-
   // CCPLEX
-  svec[1] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 1,
+  svec[0] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 1,
                             NV_ADDRESS_MAP_TOP0_HSP_BASE, 0);
+
+  // SPE (this is us)
+  pipe(&svec[1], &spe_tcu_console);
 
   // BPMP
   svec[2] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 6, 0, 0);
@@ -98,8 +99,8 @@ tcu_init_late(void)
   svec[5] = hsp_mbox_stream(NV_ADDRESS_MAP_AON_HSP_BASE, 5, 0, 0);
 
   static const uint8_t tcuids[6] = {
-    TCU_CHANNEL_SPE,
     TCU_CHANNEL_CCPLEX,
+    TCU_CHANNEL_SPE,
     TCU_CHANNEL_BPMP,
     TCU_CHANNEL_SCE,
     TCU_CHANNEL_TZ,
