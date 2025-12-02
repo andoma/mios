@@ -339,10 +339,15 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
                 int target_channel,
                 const void *name, size_t namelen)
 {
+  const uint32_t iv = vllp_gen_channel_crc(v);
+
   const service_t *s = service_find_by_namelen(name, namelen);
   error_t err = 0;
-  if(s == NULL)
+  if(s == NULL) {
+    evlog(LOG_WARNING, "VLLP: Service %.*s does not exist",
+          (int)namelen, (const char *)name);
     return ERR_NOT_FOUND;
+  }
 
   if(vllp_channel_find(v, target_channel))
     return ERR_EXIST; // Peer is confused, channel already open
@@ -351,7 +356,6 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
   if(vc == NULL)
     return ERR_NO_MEMORY;
 
-  uint32_t iv = vllp_gen_channel_crc(v);
   vc->tx_crc_IV = iv;
   vc->rx_crc_IV = ~iv;
 
