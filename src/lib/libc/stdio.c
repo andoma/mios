@@ -48,7 +48,7 @@ emit_str(fmtcb_t *cb, void *aux, const char *str,
   if(str == NULL)
     return cb(aux, "(null)", 6);
 
-  size_t sl = strlen(str);
+  size_t sl = fp->decimals != INT16_MIN ? fp->decimals : strlen(str);
   size_t total = 0;
   const int pad = fp->width - sl;
 
