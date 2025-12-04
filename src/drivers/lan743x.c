@@ -396,37 +396,6 @@ handle_tx(lan743x_t *l)
   }
 }
 
-static bool test_irq_flag = false;
-
-static void
-handle_test_irq(lan743x_t *l)
-{
-  test_irq_flag = true;
-  // clear interrupt status
-  reg_wr(l->mmio + INT_EN_CLR, INT_BIT_SW_GP_);
-  reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
-}
-
-bool
-test_irq(lan743x_t *l)
-{
-  test_irq_flag = false;
-  // clear status
-  reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
-  // activate software interrupt
-  reg_wr(l->mmio + INT_SET, INT_BIT_SW_GP_);
-  bool success = false;
-  for(int i = 0; i < 10 && !success; i++) {
-    usleep(1000);
-    if (test_irq_flag)
-      success = true;
-  }
-  // assuming the previous WAIT includes a timeout in case the test failed.
-  // disable software interrupt
-  reg_wr(l->mmio + INT_EN_CLR, INT_BIT_SW_GP_);
-  reg_wr(l->mmio + INT_STS, INT_BIT_SW_GP_);
-  return success;
-}
 
 static void
 lan743x_irq(void *arg)
@@ -453,9 +422,6 @@ lan743x_irq(void *arg)
     handle_tx(l);
   }
 
-  if(status & INT_BIT_ALL_OTHER_) {
-    handle_test_irq(l);
-  }
   reg_wr(l->mmio + INT_EN_SET, status);
 
   // Clear DMAC interrupt status bits
@@ -697,7 +663,7 @@ lan743x_attach(device_t *d)
 
   l->irq = pci_irq_attach_intx(pd, PCI_INTA, IRQ_LEVEL_NET, lan743x_irq, l);
 
-  reg_wr(l->mmio + INT_EN_SET, INT_BIT_DMA_RX_(0) | INT_BIT_DMA_TX_(0) | INT_BIT_MAS_ | INT_BIT_SW_GP_);
+  reg_wr(l->mmio + INT_EN_SET, INT_BIT_DMA_RX_(0) | INT_BIT_DMA_TX_(0) | INT_BIT_MAS_ );
   reg_wr(l->mmio + DMAC_INT_EN_SET, DMAC_INT_BIT_RXFRM_(0) | DMAC_INT_BIT_TX_IOC_(0));
   reg_wr(l->mmio + DMAC_INT_STS, DMAC_INT_BIT_RXFRM_(0) | DMAC_INT_BIT_TX_IOC_(0));
 
@@ -751,8 +717,6 @@ lan743x_attach(device_t *d)
     | DMAC_INT_BIT_TX_IOC_(0);
   reg_wr(l->mmio + DMAC_INT_STS, dmac_status);
 
-  bool test = test_irq(l);
-  evlog(LOG_DEBUG, "%s: test irq: %s", l->name, test ? "success" : "failure");
 
   // accept unicast, broadcast and multicast
   reg_wr(l->mmio + 0x508, 1 << 10 | 1 << 9 | 1 << 8 );
