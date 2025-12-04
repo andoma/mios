@@ -1,3 +1,5 @@
+#include "stm32g4_i2c.h"
+
 #include <unistd.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -11,6 +13,7 @@
 #include "stm32g4_clk.h"
 
 #include "platform/stm32/stm32_i2c_v2.c"
+#include "platform/stm32/stm32_i2c_v2_timings.h"
 
 static stm32_i2c_t *g_i2c[4];
 
@@ -81,7 +84,7 @@ static const struct i2c_config {
 
 i2c_t *
 stm32g4_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
-                   gpio_pull_t pull)
+                   gpio_pull_t pull, int scl_freq)
 {
   instance--;
   if(instance > ARRAYSIZE(i2c_configs))
@@ -91,6 +94,13 @@ stm32g4_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
     return NULL;
 
   const struct i2c_config *c = &i2c_configs[instance];
+
+  int timingr = stm32_i2c_calc_timingr(clk_get_freq(c->clk_id),
+                                       scl_freq, 1, 0);
+
+  if(timingr == -1) {
+    panic("i2c-%d: Unsupported timing", instance + 1);
+  }
 
   gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
   gpio_conf_af(sda, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
@@ -102,21 +112,6 @@ stm32g4_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
 
   g_i2c[instance] = d;
 
-  // NOT TRUE 16MHz input clock -> 100kHz i2c
-  int presc = 5;
-  int scll = 0x13;
-  int sclh = 0xf;
-  int sdadel = 0x2;
-  int scldel = 0x4;
-
-  printf("i2cclk: %d\n", clk_get_freq(c->clk_id));
-
-  reg_wr(d->base_addr + I2C_TIMINGR,
-         (presc << 28) |
-         (scldel << 20) |
-         (sdadel << 16) |
-         (sclh << 8) |
-         (scll));
-
+  reg_wr(d->base_addr + I2C_TIMINGR, timingr);
   return &d->i2c;
 }
