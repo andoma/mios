@@ -5,12 +5,15 @@
 #include <mios/io.h>
 #include <mios/type_macros.h>
 #include <mios/task.h>
+#include <mios/eventlog.h>
 
 #include "irq.h"
 #include "stm32h7_clk.h"
+#include "stm32h7_i2c.h"
 
 
 #include "platform/stm32/stm32_i2c_v2.c"
+#include "platform/stm32/stm32_i2c_v2_timings.h"
 
 
 
@@ -53,7 +56,7 @@ void irq_96(void) { i2c_irq(g_i2c[3]); }
 
 i2c_t *
 stm32h7_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
-                   gpio_pull_t pull)
+                   gpio_pull_t pull, int scl_freq)
 {
   instance--;
   if(instance > ARRAYSIZE(i2c_configs))
@@ -63,6 +66,13 @@ stm32h7_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
     return NULL;
 
   const struct i2c_config *c = &i2c_configs[instance];
+
+  int timingr = stm32_i2c_calc_timingr(clk_get_freq(c->clk_id),
+                                       scl_freq, 1, 0);
+
+  if(timingr == -1) {
+    panic("i2c-%d: Unsupported timing", instance + 1);
+  }
 
   gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
   gpio_conf_af(sda, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
@@ -75,20 +85,6 @@ stm32h7_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
 
   g_i2c[instance] = d;
 
-  // 64MHz input clock -> 100kHz i2c
-
-  int presc = 0xf;
-  int scll = 0x13;
-  int sclh = 0xf;
-  int sdadel = 0x2;
-  int scldel = 0x4;
-
-  reg_wr(d->base_addr + I2C_TIMINGR,
-         (presc << 28) |
-         (scldel << 20) |
-         (sdadel << 16) |
-         (sclh << 8) |
-         (scll));
-
+  reg_wr(d->base_addr + I2C_TIMINGR, timingr);
   return &d->i2c;
 }
