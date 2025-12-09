@@ -19,9 +19,10 @@ static error_t
 partition_erase(struct block_iface *bi, size_t block, size_t count)
 {
   partition_t *p = (partition_t *)bi;
-  block += p->offset;
-  if (block + count > p->iface.num_blocks)
+  if (block + count > p->iface.num_blocks) {
     return ERR_NOSPC;
+  }
+  block += p->offset;
   return p->parent->erase(p->parent, block, count);
 }
 
