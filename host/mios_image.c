@@ -322,7 +322,9 @@ mios_image_from_elf_mem64(const void *elf, size_t elfsize,
     const char *nam = shstrtab + shdr->name;
     if(!strcmp(nam, ".build_id")) {
       memcpy(mi->buildid, elf + shdr->offset + 16, 20);
-      mi->buildid_paddr = shdr->addr + 16;
+      uint64_t paddr = vtop64(elf, shdr->addr);
+      if(paddr != 0)
+        mi->buildid_paddr = paddr + 16;
     }
 
     if(!strcmp(nam, ".miosversion")) {
