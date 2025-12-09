@@ -405,6 +405,7 @@ display_file(stream_t *st, const char *path, int hex)
     return err;
   }
   size_t offset = 0;
+  int need_lf = 0;
   while(1) {
     ssize_t r = fs_read(fp, buf, sizeof(buf));
     if(r < 0) {
@@ -419,9 +420,12 @@ display_file(stream_t *st, const char *path, int hex)
       offset += r;
     } else {
       stream_write(st, buf, r, 0);
+      need_lf = buf[r - 1] != '\n';
     }
   }
   fs_close(fp);
+  if(need_lf)
+    printf("\n");
   return err;
 }
 
