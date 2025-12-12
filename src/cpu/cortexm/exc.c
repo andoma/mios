@@ -5,6 +5,7 @@
 #include <mios/mios.h>
 
 #include "cpu.h"
+#include "mpu.h"
 
 //static volatile unsigned int * const UART0DR = (unsigned int *)0x4000c000;
 //static volatile unsigned int * const CPUID   = (unsigned int *)0xe000ed00;
@@ -20,72 +21,63 @@ static volatile unsigned char * const BFSR    = (unsigned char *)0xe000ed29;
 static volatile unsigned int * const MMFAR    = (unsigned int *)0xe000ed34;
 static volatile unsigned int * const BFAR    = (unsigned int *)0xe000ed38;
 
-static volatile unsigned int * const MPU_CTRL = (unsigned int *)0xe000ed94;
-
+__attribute__((noreturn))
 void
-exc_nmi(void)
+exc_nmi(void *frame)
 {
-  panic("NMI");
+  panic_frame(frame, "NMI");
 }
 
+__attribute__((noreturn))
 void
-exc_hard_fault(void)
+exc_hard_fault(void *frame)
 {
-  panic("HARD FAULT, HFSR:0x%x CFSR:0x%x\n",
-        *HFSR, *CFSR);
+  mpu_disable();
+
+  panic_frame(frame, "Hard fault: HFSR:0x%08x CFSR:0x%08x\n",
+              *HFSR, *CFSR);
 }
 
-void
-exc_mm_fault(void)
-{
-  *MPU_CTRL = 0;
-  asm volatile ("dsb");
-  asm volatile ("isb");
 
-  uint32_t *psp;
-  asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
+__attribute__((noreturn))
+void
+exc_mm_fault(void *frame)
+{
+  mpu_disable();
 
   uint32_t addr = *MMFAR;
 #ifdef CPU_STACK_REDZONE_SIZE
   thread_t *const t = thread_current();
   if(t && ((addr & ~(CPU_STACK_REDZONE_SIZE - 1)) == (intptr_t)t->t_sp_bottom)) {
-    panic("REDZONE HIT task:\"%s\" MFSR:0x%x address:0x%x PC:0x%x",
-          t->t_name, *MMFSR, addr, psp[6]);
+    panic_frame(frame,
+                "REDZONE HIT task:\"%s\" MFSR:0x%08x address:0x%08x",
+                t->t_name, *MMFSR, addr);
   }
 #endif
-  panic("MM fault: 0x%x address:0x%x by 0x%x", *MMFSR, addr, psp[6]);
+  panic_frame(frame, "MM fault at address:0x%08x MMFSR:0x%02x", addr, *MMFSR);
 }
 
+__attribute__((noreturn))
 void
-exc_bus_fault(void)
+exc_bus_fault(void *frame)
 {
-  *MPU_CTRL = 0;
-  asm volatile ("dsb");
-  asm volatile ("isb");
-
-  uint32_t *psp;
-  asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
-
-  panic("Bus fault: 0x%x at 0x%x by 0x%x", *BFSR, *BFAR, psp[6]);
+  mpu_disable();
+  panic_frame(frame, "Bus fault: 0x%08x at 0x%08x", *BFSR, *BFAR);
 }
 
 
 
-void
-exc_usage_fault(void)
+int
+exc_handle_usage_fault(void)
 {
-  uint32_t *psp;
-  asm volatile ("mrs %0, psp\n\t" : "=r" (psp));
-  uint16_t ufsr = *UFSR;
 #ifdef __ARM_FP
+  uint16_t ufsr = *UFSR;
   if(ufsr == 0x8) {
     // NOCP (ie, tried to use FPU)
 
     thread_t *const t = thread_current();
-
     if(t == NULL || t->t_fpuctx == NULL) {
-      panic("Task %s tries to use FPU but is not allowed. pc:0x%x",
-            t ? t->t_name : "<none>", psp[6]);
+      return -1;
     }
 
     cpu_t *cpu = curcpu();
@@ -105,20 +97,30 @@ exc_usage_fault(void)
     asm volatile("vldm %0, {s0-s15}" :: "r"(ctx));
     asm volatile("vldm %0, {s16-s31}" :: "r"(ctx + 16));
     asm volatile("vmsr fpscr, %0" :: "r"(ctx[32]));
-    return;
+    return 0;
   }
 #endif
-  if(ufsr & 0x2) {
-    // Most likely an attempt to return to non-thumb code, etc
-    panic("Invalid use of EPSR, PC:0x%x ", psp[6]);
-  }
-  if(ufsr & 0x100) {
-    panic("Unaligned access, PC:0x%x ", psp[6]);
-  }
-
-  panic("Usage fault: 0x%x sp=%p", ufsr, __builtin_frame_address(0));
+  return -1;
 }
 
+
+__attribute__((noreturn))
+void
+exc_usage_fault(void *frame)
+{
+  uint16_t ufsr = *UFSR;
+
+  if(ufsr & 0x2) {
+    // Most likely an attempt to return to non-thumb code, etc
+    panic_frame(frame, "Invalid use of EPSR");
+  }
+  if(ufsr & 0x100) {
+    panic_frame(frame, "Unaligned access");
+  }
+  panic_frame(frame, "Usage fault: 0x%x", ufsr);
+}
+
+__attribute__((noreturn))
 void
 exc_reserved(void)
 {
@@ -126,6 +128,7 @@ exc_reserved(void)
 }
 
 
+__attribute__((noreturn))
 void
 exc_svc(void)
 {

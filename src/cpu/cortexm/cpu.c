@@ -35,6 +35,27 @@ cpu_init(void)
 }
 
 
+/**
+ * Register layout on stack when task is not running
+ *
+ *   [15] xPSR   ---+  8x32 bytes saved by the CPU on exception entry
+ *   [14] PC        |
+ *   [13] LR        |
+ *   [12] R12       |
+ *   [11] R3        |
+ *   [10] R2        |
+ *    [9] R1        |
+ *    [8] R0     ---+
+ *    [7] R11    ---+  8x32 bytes stored by Mios exception handlers
+ *    [6] R10       |  - Pushed/poped by pendsv (task-switching)
+ *    [5] R9        |  - Regular ISRs do not store these as they are
+ *    [4] R8        |    callee saved (the C ISR code will push if needed)
+ *    [3] R7        |
+ *    [2] R6        |
+ *    [1] R5        |
+ *    [0] R4     ---+ <- Thus, for a non-running task SP points here
+ */
+
 void *
 cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
                void (*thread_exit)(void *))

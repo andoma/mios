@@ -13,3 +13,8 @@ __sync_add_and_fetch_4:
         mov r0, r2
         bx lr
 
+
+        .global mpu_disable
+mpu_disable:
+        bx lr
+

@@ -16,6 +16,7 @@
 #include <mios/cli.h>
 #include <mios/timer.h>
 #include <mios/poll.h>
+#include <mios/unwind.h>
 
 #include "irq.h"
 #include "cpu.h"
@@ -867,7 +868,7 @@ accounting_run(task_t *t_)
   thread_t *t;
 
   uint32_t cc = cpu_cycle_counter();
-  uint32_t cc_delta = (cc - prev_cc) / 10000;
+  uint32_t cc_delta = (cc - prev_cc) / 1000;
   prev_cc = cc;
 
   SLIST_FOREACH(t, &allthreads, t_global_link) {
@@ -913,36 +914,51 @@ task_init_accounting(void)
 static error_t
 cmd_ps(cli_t *cli, int argc, char **argv)
 {
-  cli_printf(cli, " Name           Stack      "
-#ifdef ENABLE_TASK_ACCOUNTING
-             " Size "
+  if(argc > 1 && !strcmp(argv[1], "x")) {
+
+    thread_t *t = NULL;
+    while((t = thread_get_next(t)) != NULL) {
+      cli_printf(cli, "Name:\t\t\t%s\n", t->t_name);
+      cli_printf(cli, "Thread:\t\t\t%p\n", t);
+      cli_printf(cli, "Stack pointer:\t\t%p (Bottom:%p)\n", t->t_sp, t->t_sp_bottom);
+#ifdef ENABLE_TASK_WCHAN
+      cli_printf(cli, "WaitOn:\t\t\t%s\n", t->t_wchan);
 #endif
-             "Sp         Pri Sta "
 #ifdef ENABLE_TASK_ACCOUNTING
-             "CtxSwch Load "
+      cli_printf(cli, "Context switch rate:\t%u / s\n", t->t_ctx_switches);
+      cli_printf(cli, "Load:\t\t\t%d.%d%%\n", t->t_load / 10, t->t_load % 10);
 #endif
-             "WaitOn\n");
+#ifdef ENABLE_FPU
+      cli_printf(cli, "FPU Context:\t\t\t%p\n", t->t_fpuctx);
+#endif
+      cli_printf(cli, "Backtrace:\n");
+      backtrace_print_thread(cli->cl_stream, t);
+      cli_printf(cli, "\n");
+    }
+
+    return 0;
+  }
+
+  cli_printf(cli, " Name           Pri Sta "
+#ifdef ENABLE_TASK_ACCOUNTING
+             "CtxSwch  Load"
+#endif
+#ifdef ENABLE_TASK_WCHAN
+             " WaitOn"
+#endif
+             "\n");
 
   thread_t *t = NULL;
   while((t = thread_get_next(t)) != NULL) {
-    cli_printf(cli, " %-14s %p "
+    cli_printf(cli, " %-14s %-3d %c%c%c "
 #ifdef ENABLE_TASK_ACCOUNTING
-               "%5d "
-#endif
-               "%p %3d %c%c%c "
-#ifdef ENABLE_TASK_ACCOUNTING
-               "%-6d %3d.%-2d "
+               "%-7d %3d.%1d "
 #endif
 #ifdef ENABLE_TASK_WCHAN
                "%s"
 #endif
                "\n",
-               t->t_name, t->t_sp_bottom,
-#ifdef ENABLE_TASK_ACCOUNTING
-               t->t_stacksize,
-#endif
-               t->t_sp,
-               t->t_task.t_prio,
+               t->t_name, t->t_task.t_prio,
                "_RrSZ"[t->t_task.t_state],
 #ifdef HAVE_FPU
                t->t_fpuctx ? 'F' : ' ',
@@ -952,8 +968,8 @@ cmd_ps(cli_t *cli, int argc, char **argv)
                (t->t_task.t_flags & TASK_DETACHED) ? 'd' : ' '
 #ifdef ENABLE_TASK_ACCOUNTING
                ,t->t_ctx_switches,
-               t->t_load / 100,
-               t->t_load % 100
+               t->t_load / 10,
+               t->t_load % 10
 #endif
 #ifdef ENABLE_TASK_WCHAN
                ,t->t_task.t_state == TASK_STATE_SLEEPING ? t->t_wchan : ""

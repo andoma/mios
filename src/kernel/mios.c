@@ -116,13 +116,6 @@ init(void)
 }
 
 
-void  __attribute__((weak, noreturn))
-halt(const char *msg)
-{
-  printf("%s\n", msg);
-  while(1) {}
-}
-
 void
 fini(void)
 {
@@ -131,39 +124,6 @@ fini(void)
 
 
 
-__attribute__((weak))
-stream_t *
-get_panic_stream(void)
-{
-  return stdio;
-}
-
-void
-panic(const char *fmt, ...)
-{
-  irq_off();
-  fini();
-
-  thread_t *t = thread_current();
-
-  stream_t *st = get_panic_stream();
-  stprintf(st, "\n\nPANIC in %s: ", t ? t->t_name : "<nothread>");
-  va_list ap;
-  va_start(ap, fmt);
-  vstprintf(st, fmt, ap);
-  va_end(ap);
-  stprintf(st, "\n");
-  stream_write(st, NULL, 0, 0); // Stream flush
-  cli_console('#');
-  halt(fmt);
-}
-
-
-void
-__assert_func(const char *expr, const char *file, int line)
-{
-  panic("ASSERT: %s at %s:%d\n", expr, file, line);
-}
 
 
 const struct flash_iface *   __attribute__((weak))

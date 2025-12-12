@@ -17,6 +17,8 @@ void
 mpu_disable(void)
 {
   *MPU_CTRL = 0;
+  asm volatile ("dsb");
+  asm volatile ("isb");
 }
 
 static void __attribute__((constructor(151)))

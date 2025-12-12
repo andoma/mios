@@ -7,5 +7,6 @@ SRCS += ${SRC}/kernel/mios.c \
 	${SRC}/kernel/driver.c \
 	${SRC}/kernel/timer.c \
 	${SRC}/kernel/eventlog.c \
+	${SRC}/kernel/panic.c \
 
 ${MOS}/kernel/%.o : CFLAGS += ${NOFPU}

@@ -11,6 +11,7 @@ SECTIONS {
                 . = ALIGN(8);
                 *(.text)
                 *(.text.*)
+                _text_end = .;
                 *(.rodata)
                 *(.rodata.*)
                 . = ALIGN(4);
@@ -19,10 +20,18 @@ SECTIONS {
                 _ota_flasher_end = .;
         } >FLASH
 
+        .ARM.extab : {
+                . = ALIGN(4);
+                *(.ARM.extab*)
+                *(.gnu.linkonce.armextab.*)
+        } > FLASH
+
         .ARM.exidx : {
                 . = ALIGN(4);
+                 __exidx_start = .;
                  *(.ARM.exidx*)
                  *(.gnu.linkonce.armexidx.*)
+                  __exidx_end = .;
         } >FLASH
 
         .inits : {

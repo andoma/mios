@@ -9,4 +9,6 @@ CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm0plus.h
 
 SRCS += ${C}/cortexm0plus.s \
 
+${MOS}/cpu/cortexm/unwind.o : CFLAGS += -fno-lto
+
 include ${SRC}/cpu/cortexm/cortexm.mk

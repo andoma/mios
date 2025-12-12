@@ -2,6 +2,8 @@
 
 void panic(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 
+void panic_frame(void *frame, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
+
 void fini(void);
 
 void reboot(void);

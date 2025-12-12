@@ -15,16 +15,23 @@
 #include "irq.h"
 #include "cpu.h"
 
+#define CRASHLOG_SIZE  512
+#define CRASHLOG_ADDR  (0x38004000 - CRASHLOG_SIZE)
+
+static void
+get_crashlog_stream_prep(void)
+{
+}
+
+#include "lib/sys/crashlog.c"
+
+
 static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1FF1E880;
 static volatile uint32_t *const LINE_ID      = (volatile uint32_t *)0x1FF1E8c0;
 static volatile uint32_t *const SYSCFG_PKGR  = (volatile uint32_t *)0x58000524;
 static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
 
-static void __attribute__((constructor(101)))
-enter_dfu(void)
-{
 
-}
 
 static const char *packages =
   "VFQFPN68\0"
@@ -60,12 +67,15 @@ stm32h7_init(void)
          pkgstr ?: "???", flash_size);
 
 
+  crashlog_recover();
+
   long axi_sram_size = 0;
 
   switch(line_id) {
   case 0x48373233: // STM32H723
   case 0x48373235: // STM32H725
-    heap_add_mem(0x1000, 0x10000, MEM_TYPE_CODE | MEM_TYPE_VECTOR_TABLE, 40);
+    heap_add_mem(0x1000, 0x00010000,
+                 MEM_TYPE_CODE | MEM_TYPE_VECTOR_TABLE, 40);
 
     // This actually depends on TCM_AXI_SHARED option bits
     axi_sram_size = 320;
@@ -110,7 +120,7 @@ stm32h7_init(void)
     // SRAM4
     mpu_add_region((void *)0x38000000, 14,
                    MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
-    heap_add_mem(0x38000000, 0x38004000,
+    heap_add_mem(0x38000000, CRASHLOG_ADDR,
                  MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
     break;
   }

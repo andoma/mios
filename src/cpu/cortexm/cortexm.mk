@@ -6,6 +6,8 @@ CPPFLAGS += -iquote${C}
 
 CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm.h
 
+CFLAGS += -funwind-tables
+
 TOOLCHAIN := arm-none-eabi-
 
 GDB ?= ${TOOLCHAIN}gdb
@@ -20,6 +22,7 @@ SRCS += ${C}/isr.s \
 	${C}/exc.c \
 	${C}/cpu.c \
 	${C}/rnd.c \
+	${C}/unwind.c \
 
 ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}
 
