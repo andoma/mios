@@ -128,7 +128,7 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
 const char *
 vllp_ota(struct vllp *v, const char *elfpath)
 {
-  vllp_channel_t *vc = vllp_channel_create(v, "ota", 0, NULL, NULL, NULL);
+  vllp_channel_t *vc = vllp_channel_create(v, "ota", 0, NULL, NULL, NULL, NULL);
 
   const char *errstr = vllp_do_ota(v, elfpath, vc);
 

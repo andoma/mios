@@ -27,10 +27,13 @@ TAILQ_HEAD(vllp_pkt_queue, vllp_pkt);
 typedef struct vllp_pkt {
   TAILQ_ENTRY(vllp_pkt) link;
   size_t len;
-  int is_close;
+  uint8_t type;
   uint8_t data[0];
 } vllp_pkt_t;
 
+#define VLLP_PKT_MSG 0
+#define VLLP_PKT_EOF 1
+#define VLLP_PKT_RDY 2
 
 struct vllp {
 
@@ -128,6 +131,7 @@ struct vllp_channel {
   pthread_t rx_thread;
   void (*rx)(void *opaque, const void *data, size_t length);
   void (*eof)(void *opaque, int error_code);
+  void (*rdy)(void *opaque);
   void *opaque;
 
   uint32_t tx_crc_IV;
@@ -210,6 +214,17 @@ vllp_channel_retain(vllp_channel_t *vc, const char *whom)
 }
 
 static void
+channel_enq_rx_meta(vllp_channel_t *vc, int error_code, int type)
+{
+  vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + sizeof(int));
+  memcpy(vp->data, &error_code, sizeof(int));
+  vp->len = sizeof(int);
+  vp->type = type;
+  TAILQ_INSERT_TAIL(&vc->rxq, vp, link);
+  pthread_cond_signal(&vc->rxq_cond);
+}
+
+static void
 vllp_channel_release(vllp_channel_t *vc, const char *whom)
 {
   int r = __sync_add_and_fetch(&vc->refcount, -1);
@@ -279,6 +294,7 @@ vllp_disconnect(vllp_t *v, int error)
       // FALLTHRU
     case VLLP_CHANNEL_STATE_ESTABLISHED:
       if(vc->flags & VLLP_CHANNEL_RECONNECT) {
+        channel_enq_rx_meta(vc, 0, VLLP_PKT_EOF);
         vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_PENDING_OPEN);
         TAILQ_INSERT_TAIL(&v->pending_open, vc, qlink);
         vllp_channel_retain(vc, "disconnect-need-reconnect");
@@ -472,7 +488,7 @@ fragment(vllp_t *v, vllp_channel_t *vc)
   while((m = TAILQ_FIRST(&vc->mtxq)) != NULL) {
 
     TAILQ_REMOVE(&vc->mtxq, m, link);
-    if(m->is_close) {
+    if(m->type) {
       TAILQ_INSERT_TAIL(&vc->txq, m, link);
       continue;
     }
@@ -494,7 +510,7 @@ fragment(vllp_t *v, vllp_channel_t *vc)
       memcpy(f->data + 1, data, fsize - 1);
       f->data[0] = vc->id;
       f->len = fsize;
-      f->is_close = 0;
+      f->type = 0;
 
       len -= fsize - 1;
       data += fsize - 1;
@@ -521,18 +537,6 @@ channel_find(vllp_t *v, int channel_id)
 }
 
 
-static void
-channel_enq_rx_eof(vllp_t *v, vllp_channel_t *vc, int error_code)
-{
-  vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + sizeof(int));
-  memcpy(vp->data, &error_code, sizeof(int));
-  vp->len = sizeof(int);
-  vp->is_close = 1;
-  TAILQ_INSERT_TAIL(&vc->rxq, vp, link);
-  pthread_cond_signal(&vc->rxq_cond);
-}
-
-
 // This can be called on any thread
 static void
 channel_send_vp(vllp_t *v, vllp_channel_t *vc, vllp_pkt_t *vp)
@@ -555,7 +559,7 @@ channel_send_message(vllp_t *v, vllp_channel_t *vc,
   // We always make place for CRC
   vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + len + 4);
 
-  vp->is_close = 0;
+  vp->type = VLLP_PKT_MSG;
   vp->len = len;
   memcpy(vp->data, data, len);
   channel_send_vp(v, vc, vp);
@@ -571,7 +575,7 @@ channel_send_close(vllp_t *v, vllp_channel_t *vc, int error_code)
   // We always make place for CRC
   vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + sizeof(int));
   memcpy(vp->data, &error_code, sizeof(int));
-  vp->is_close = 1;
+  vp->type = VLLP_PKT_EOF;
   vp->len = sizeof(int);
   channel_send_vp(v, vc, vp);
 }
@@ -619,7 +623,7 @@ vllp_channel_receive(vllp_t *v, vllp_pkt_t *vp, int channel_id)
       vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + msglen);
       memcpy(vp->data, vc->rxbuf, msglen);
       vp->len = msglen;
-      vp->is_close = 0;
+      vp->type = VLLP_PKT_MSG;
       TAILQ_INSERT_TAIL(&vc->rxq, vp, link);
       pthread_cond_signal(&vc->rxq_cond);
     }
@@ -794,7 +798,7 @@ vllp_tx(vllp_t *v, int64_t now)
     vllp_pkt_t *vp = TAILQ_FIRST(&vc->txq);
     assert(vp != NULL);
 
-    if(vp->is_close) {
+    if(vp->type == VLLP_PKT_EOF) {
       uint8_t pkt[3];
       int error_code = 0;
 
@@ -1020,6 +1024,7 @@ cmc_handle_open_response(vllp_t *v, int target_channel,
   int16_t err = u8[0] | (u8[1] << 8);
 
   if(!err) {
+    channel_enq_rx_meta(vc, 0, VLLP_PKT_RDY);
     if(TAILQ_FIRST(&vc->mtxq) != NULL) {
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ACTIVE);
       TAILQ_INSERT_TAIL(&v->active_channels, vc, qlink);
@@ -1032,7 +1037,7 @@ cmc_handle_open_response(vllp_t *v, int target_channel,
 
     v->available_channel_ids |= (1 << vc->id);
     LIST_REMOVE(vc, link);
-    channel_enq_rx_eof(v, vc, err);
+    channel_enq_rx_meta(vc, err, VLLP_PKT_EOF);
     vllp_channel_release(vc, "remote-open-failed");
   }
 
@@ -1066,7 +1071,7 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
   case VLLP_CHANNEL_STATE_ACTIVE:
   case VLLP_CHANNEL_STATE_ESTABLISHED:
     channel_send_close(v, vc, error_code);
-    channel_enq_rx_eof(v, vc, error_code);
+    channel_enq_rx_meta(vc, error_code, VLLP_PKT_EOF);
     return 0;
 
   case VLLP_CHANNEL_STATE_CLOSE_SENT:
@@ -1074,7 +1079,7 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
     if(is_client(v))
       v->available_channel_ids |= (1 << vc->id);
     LIST_REMOVE(vc, link);
-    channel_enq_rx_eof(v, vc, error_code);
+    channel_enq_rx_meta(vc, error_code, VLLP_PKT_EOF);
     vllp_channel_release(vc, __FUNCTION__);
     return 0;
 
@@ -1224,7 +1229,7 @@ vllp_input(vllp_t *v, const void *data, size_t len)
   vllp_pkt_t *vp = malloc(sizeof(vllp_pkt_t) + len);
   memcpy(vp->data, data, len);
   vp->len = len;
-  vp->is_close = 0;
+  vp->type = 0;
   pthread_mutex_lock(&v->mutex);
   TAILQ_INSERT_TAIL(&v->rxq, vp, link);
   pthread_cond_signal(&v->cond);
@@ -1252,7 +1257,7 @@ vllp_channel_rx_thread(void *arg)
 
     if(vc->eof != NULL) {
 
-      if(vp->is_close) {
+      if(vp->type == VLLP_PKT_EOF) {
         int error_code;
         memcpy(&error_code, vp->data, sizeof(int));
 
@@ -1260,7 +1265,16 @@ vllp_channel_rx_thread(void *arg)
         vc->eof(vc->opaque, error_code);
         pthread_mutex_lock(&v->mutex);
 
-        vc->eof = NULL;
+        if(!(vc->flags & VLLP_CHANNEL_RECONNECT)) {
+          vc->eof = NULL;
+        }
+
+      } else if(vp->type == VLLP_PKT_RDY) {
+
+        pthread_mutex_unlock(&v->mutex);
+        if(vc->rdy != NULL)
+          vc->rdy(vc->opaque);
+        pthread_mutex_lock(&v->mutex);
 
       } else {
         pthread_mutex_unlock(&v->mutex);
@@ -1318,6 +1332,7 @@ vllp_channel_t *
 vllp_channel_create(vllp_t *v, const char *name, uint32_t flags,
                     void (*rx)(void *opaque, const void *data, size_t length),
                     void (*eof)(void *opaque, int error_code),
+                    void (*rdy)(void *opaque),
                     void *opaque)
 {
   vllp_channel_t *vc = NULL;
@@ -1335,6 +1350,7 @@ vllp_channel_create(vllp_t *v, const char *name, uint32_t flags,
                       VLLP_CHANNEL_STATE_PENDING_OPEN);
     vc->rx = rx;
     vc->eof = eof;
+    vc->rdy = rdy;
     vc->opaque = opaque;
     vc->name = strdup(name);
     vc->flags = flags;
@@ -1446,45 +1462,53 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
     return err;
   }
 
-  if(timeout < 0) {
-    while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
-      pthread_cond_wait(&vc->rxq_cond, &v->mutex);
-      continue;
-    }
-  } else {
+  int64_t deadline = timeout >= 0 ? get_ts() + timeout : 0;
 
-    int64_t deadline = get_ts() + timeout;
+  while(1) {
 
-    struct timespec ts;
-    ts.tv_sec  =  deadline / 1000000;
-    ts.tv_nsec = (deadline % 1000000) * 1000;
-
-    while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
-      if(pthread_cond_timedwait(&vc->rxq_cond, &v->mutex, &ts) == ETIMEDOUT) {
-        pthread_mutex_unlock(&v->mutex);
-        *data = NULL;
-        *lenp = 0;
-        return VLLP_ERR_TIMEOUT;
+    if(deadline == 0) {
+      while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
+        pthread_cond_wait(&vc->rxq_cond, &v->mutex);
+        continue;
       }
-      continue;
+    } else {
+
+      int64_t deadline = get_ts() + timeout;
+
+      struct timespec ts;
+      ts.tv_sec  =  deadline / 1000000;
+      ts.tv_nsec = (deadline % 1000000) * 1000;
+
+      while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
+        if(pthread_cond_timedwait(&vc->rxq_cond, &v->mutex, &ts) == ETIMEDOUT) {
+          pthread_mutex_unlock(&v->mutex);
+          *data = NULL;
+          *lenp = 0;
+          return VLLP_ERR_TIMEOUT;
+        }
+        continue;
+      }
     }
-  }
 
-  TAILQ_REMOVE(&vc->rxq, vp, link);
+    TAILQ_REMOVE(&vc->rxq, vp, link);
 
-  if(vp->is_close) {
-    memcpy(&err, vp->data, sizeof(int));
-    *data = NULL;
-    *lenp = 0;
-    vc->is_closed = 1;
-    vc->closed_status = err;
-  } else {
-    void *c = malloc(vp->len);
-
-    memcpy(c, vp->data, vp->len);
-    *data = c;
-    *lenp = vp->len;
-    err = 0;
+    if(vp->type == VLLP_PKT_EOF) {
+      memcpy(&err, vp->data, sizeof(int));
+      *data = NULL;
+      *lenp = 0;
+      vc->is_closed = 1;
+      vc->closed_status = err;
+    } else if(vp->type == VLLP_PKT_RDY) {
+      free(vp);
+      continue;
+    } else {
+      void *c = malloc(vp->len);
+      memcpy(c, vp->data, vp->len);
+      *data = c;
+      *lenp = vp->len;
+      err = 0;
+    }
+    break;
   }
   pthread_mutex_unlock(&v->mutex);
   free(vp);

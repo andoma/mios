@@ -101,6 +101,7 @@ vllp_channel_t *vllp_channel_create(vllp_t *v, const char *name,
                                                size_t length),
                                     void (*eof)(void *opaque,
                                                int error_code),
+                                    void (*rdy)(void *opaque),
                                     void *opaque);
 
 void vllp_channel_start(vllp_channel_t *vc);

@@ -188,7 +188,8 @@ vtd_thread(void *arg)
         safewrite(fd, telnet_init, sizeof(telnet_init));
 
         vts = vtd_add_fd(vtd, fd);
-        vts->vc = vllp_channel_create(vtd->v, vtd->service, 0, vtd_rx, vtd_eof, vts);
+        vts->vc = vllp_channel_create(vtd->v, vtd->service, 0, vtd_rx,
+                                      vtd_eof, NULL, vts);
 
       } else {
 

@@ -94,7 +94,7 @@ vllp_alertstream_create(vllp_t *v, void *opaque,
   va->raise = raise;
   va->sweep = sweep;
   va->vc = vllp_channel_create(v, "alert", VLLP_CHANNEL_RECONNECT,
-                               vllp_alert_rx, vllp_alert_eof, va);
+                               vllp_alert_rx, vllp_alert_eof, NULL, va);
   return va;
 }
 

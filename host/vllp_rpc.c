@@ -31,7 +31,7 @@ typedef struct rpc_result {
 vllp_channel_t *
 vllp_rpc_create(struct vllp *v)
 {
-  return vllp_channel_create(v, "rpc", 0, NULL, NULL, NULL);
+  return vllp_channel_create(v, "rpc", 0, NULL, NULL, NULL, NULL);
 }
 
 static vllp_rpc_result_t *

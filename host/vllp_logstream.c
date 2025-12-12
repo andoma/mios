@@ -75,7 +75,7 @@ vllp_logstream_create(vllp_t *v, void *opaque,
   vl->opaque = opaque;
   vl->cb = cb;
   vl->vc = vllp_channel_create(v, "log", VLLP_CHANNEL_RECONNECT, vllp_log_rx,
-                               vllp_log_eof, vl);
+                               vllp_log_eof, NULL, vl);
 
   return vl;
 }
