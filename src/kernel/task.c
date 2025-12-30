@@ -248,7 +248,9 @@ thread_exit2(task_t *ta)
   thread_t *t = (thread_t *)ta;
   if(free_try(t->t_sp_bottom)) {
     // Failed to free (malloc mutex held, keep trying)
+    int q = irq_forbid(IRQ_LEVEL_SCHED);
     readyqueue_insert(curcpu(), ta, "zombie");
+    irq_permit(q);
   }
 }
 
@@ -263,7 +265,9 @@ thread_release(thread_t *t)
   t->t_task.t_flags &= ~TASK_THREAD;
   t->t_task.t_run = thread_exit2;
   t->t_task.t_prio = 1;
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
   readyqueue_insert(cpu, &t->t_task, "zombie");
+  irq_permit(q);
 }
 
 void
