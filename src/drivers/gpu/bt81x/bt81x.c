@@ -812,9 +812,14 @@ scissor(gfx_display_t *gd, const gfx_rect_t *r)
 
   if(!ensure_display_list(b, 2))
     return;
-  b->dl[b->dlptr++] = EVE_ENC_SCISSOR_XY(r->pos.x, r->pos.y);
-  b->dl[b->dlptr++] = EVE_ENC_SCISSOR_SIZE(r->siz.width, r->siz.height);
 
+  int x = MAX(r->pos.x, 0);
+  int y = MAX(r->pos.y, 0);
+  b->dl[b->dlptr++] = EVE_ENC_SCISSOR_XY(x, y);
+
+  int w = MIN(r->siz.width, b->display_size.siz.width);
+  int h = MIN(r->siz.height, b->display_size.siz.height);
+  b->dl[b->dlptr++] = EVE_ENC_SCISSOR_SIZE(w, h);
 }
 
 
@@ -1025,6 +1030,59 @@ get_bitmap_size(gfx_display_t *gd, int bitmap)
   return (gfx_size_t){bh->width, bh->height};
 }
 
+static void
+draw_begin(gfx_display_t *gd, gfx_primitive_t type, float size)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+
+  if(!ensure_display_list(b, 2))
+    return;
+
+  if(size > 511)
+    size = 511;
+  int sizeq4 = (int)(size * 16.0f + 0.5f);
+
+  switch(type) {
+  case GFX_PRIMITIVE_LINES:
+    b->dl[b->dlptr++] = EVE_ENC_BEGIN(EVE_BEGIN_LINES);
+    b->dl[b->dlptr++] = EVE_ENC_LINE_WIDTH(sizeq4);
+    break;
+  case GFX_PRIMITIVE_RECTANGLES:
+    b->dl[b->dlptr++] = EVE_ENC_BEGIN(EVE_BEGIN_RECTS);
+    b->dl[b->dlptr++] = EVE_ENC_LINE_WIDTH(sizeq4);
+    break;
+  case GFX_PRIMITIVE_POINTS:
+    b->dl[b->dlptr++] = EVE_ENC_BEGIN(EVE_BEGIN_POINTS);
+    b->dl[b->dlptr++] = EVE_ENC_POINT_SIZE(sizeq4);
+    break;
+  }
+}
+
+static void
+draw_vertex(gfx_display_t *gd, float x, float y)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+
+  if(!ensure_display_list(b, 1))
+    return;
+
+  int xi = x * 16.0f + 0.5f;
+  int yi = y * 16.0f + 0.5f;
+
+  b->dl[b->dlptr++] = EVE_ENC_VERTEX2F(xi, yi);
+}
+
+static void
+draw_end(gfx_display_t *gd)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+
+  if(!ensure_display_list(b, 1))
+    return;
+
+  b->dl[b->dlptr++] = EVE_ENC_END();
+}
+
 
 static const gfx_display_class_t bt81x_ops = {
   .push_state = push_state,
@@ -1040,6 +1098,9 @@ static const gfx_display_class_t bt81x_ops = {
   .get_text_size = get_text_size,
   .get_font_baseline = get_font_baseline,
   .get_bitmap_size = get_bitmap_size,
+  .begin = draw_begin,
+  .vertex = draw_vertex,
+  .end = draw_end,
 };
 
 #if 1

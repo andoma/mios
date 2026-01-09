@@ -23,6 +23,11 @@ typedef struct {
   gfx_size_t siz;
 } gfx_rect_t;
 
+typedef enum {
+  GFX_PRIMITIVE_LINES,
+  GFX_PRIMITIVE_RECTANGLES,
+  GFX_PRIMITIVE_POINTS,
+} gfx_primitive_t;
 
 #define GFX_DISPLAY_PALETTE_SIZE 16
 #define GFX_COLOR_PALETTE(x) (0x80000000 | (x))
@@ -69,6 +74,13 @@ typedef struct gfx_display_class {
   int (*get_font_baseline)(gfx_display_t *gd, gfx_font_id_t font);
 
   gfx_size_t (*get_bitmap_size)(gfx_display_t *gd, int bitmap);
+
+  void (*begin)(gfx_display_t *gd, gfx_primitive_t primitive, float attribute);
+
+  void (*vertex)(gfx_display_t *gd, float x, float y);
+
+  void (*end)(gfx_display_t *gd);
+
 
 } gfx_display_class_t;
 
