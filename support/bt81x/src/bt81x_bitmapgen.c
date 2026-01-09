@@ -102,8 +102,8 @@ output_to_l4(const char *output_filename,
 
   for(int y = 0; y < height; y++) {
     for(int x = 0; x < width; x += 2) {
-      int a = s[3];
-      int b = s[7];
+      int a = s[3] >> 4;
+      int b = s[7] >> 4;
       *d = (a << 4) | b;
       s += 8;
       d++;
