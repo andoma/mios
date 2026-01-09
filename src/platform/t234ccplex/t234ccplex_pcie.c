@@ -188,6 +188,8 @@ static const ctrl_conf_t pcie_c1  = {
 typedef struct t234_pci_ctrl_t {
   struct device tpc_dev;
   const ctrl_conf_t *tpc_conf;
+  thread_t *tpc_thread;
+  int tpc_running;
 } t234_pci_ctrl_t;
 
 
@@ -433,12 +435,21 @@ static error_t
 t234pcie_shutdown(device_t *d)
 {
   t234_pci_ctrl_t *tpc = (t234_pci_ctrl_t *)d;
+
+  // Make sure the init thread has completed before we attempt anything
+  thread_join(tpc->tpc_thread);
+
   device_shutdown(d);
 
   const ctrl_conf_t *cfg = tpc->tpc_conf;
-  // Assert PEX_RESET
-  reg_clr_bit(cfg->appl_base + APPL_PINMUX, 0);
-  usleep(10);
+
+  if(tpc->tpc_running) {
+    // Only touch MMIO if PCIe block is running
+
+    // Assert PEX_RESET
+    reg_clr_bit(cfg->appl_base + APPL_PINMUX, 0);
+    usleep(10);
+  }
   return pcie_stop(cfg);
 }
 
@@ -487,9 +498,11 @@ static const device_class_t t234pcie_class = {
 };
 
 static error_t
-pcie_start(const ctrl_conf_t *cfg)
+pcie_start(t234_pci_ctrl_t *tpc)
 {
   error_t err;
+
+  const ctrl_conf_t *cfg = tpc->tpc_conf;
 
   evlog(LOG_INFO, "%s: Initializing", cfg->name);
 
@@ -513,6 +526,8 @@ pcie_start(const ctrl_conf_t *cfg)
 
   uint32_t appl_base = cfg->appl_base;
   uint32_t dbi_base = cfg->rp_base;
+
+  tpc->tpc_running = 1;
 
   reg_wr(appl_base + APPL_CFG_BASE_ADDR, cfg->rp_base);
   reg_wr(appl_base + APPL_CFG_IATU_DMA_BASE_ADDR, cfg->atu_dma_base);
@@ -561,12 +576,6 @@ pcie_start(const ctrl_conf_t *cfg)
                      * Route INTA,B,C,D to separate irq vectors */
          0);
 
-  t234_pci_ctrl_t *tpc = xalloc(sizeof(t234_pci_ctrl_t), 0, MEM_CLEAR);
-  tpc->tpc_conf = cfg;
-
-  tpc->tpc_dev.d_name = cfg->name;
-  tpc->tpc_dev.d_class = &t234pcie_class;
-  device_register(&tpc->tpc_dev);
 
   // Toggle PEX reset
   reg_clr_bit(appl_base + APPL_PINMUX, 0);
@@ -596,23 +605,34 @@ pcie_start(const ctrl_conf_t *cfg)
     usleep(1000);
   }
   evlog(LOG_ERR, "%s: Link not up", cfg->name);
+
+  // Assert PEX reset
   reg_clr_bit(cfg->appl_base + APPL_PINMUX, 0);
-  device_unregister(&tpc->tpc_dev);
-  pcie_stop(cfg);
   return ERR_NOT_READY;
 }
 
 static void *
 pcie_init_thread(void *arg)
 {
-  pcie_start(arg);
+  t234_pci_ctrl_t *tpc = arg;
+  error_t err = pcie_start(tpc);
+  if(err)
+    evlog(LOG_ERR, "%s: Failed to initialize -- %s",
+          tpc->tpc_conf->name, error_to_string(err));
   return NULL;
 }
 
 static void
 pcie_init(const ctrl_conf_t *cfg)
 {
-  thread_create(pcie_init_thread, (void *)cfg, 0, cfg->name, TASK_DETACHED, 3);
+  t234_pci_ctrl_t *tpc = xalloc(sizeof(t234_pci_ctrl_t), 0, MEM_CLEAR);
+  tpc->tpc_conf = cfg;
+
+  tpc->tpc_dev.d_name = cfg->name;
+  tpc->tpc_dev.d_class = &t234pcie_class;
+  device_register(&tpc->tpc_dev);
+
+  tpc->tpc_thread = thread_create(pcie_init_thread, tpc, 0, cfg->name, 0, 3);
 }
 
 // Check if s1 begins with s2
