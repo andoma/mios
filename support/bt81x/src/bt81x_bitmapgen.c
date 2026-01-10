@@ -1,4 +1,5 @@
 #include <sys/param.h>
+#include <sys/stat.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
@@ -9,7 +10,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#define EVE_FORMAT_L4 2
+#define EVE_FORMAT_L4     2
+#define EVE_FORMAT_RGB565 7
 
 static int g_fd;
 static z_stream zs;
@@ -38,16 +40,41 @@ output_bytes_bin2c(const void *data, size_t len)
   }
 }
 
+
+static void
+setup_output(const char *dst, const char *name)
+{
+  if(!strcmp(dst, "-")) {
+    g_fd = 1;
+  } else {
+    g_fd = open(dst, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if(g_fd == -1) {
+      fprintf(stderr, "Open %s -- %m\n", dst);
+      exit(1);
+    }
+  }
+
+  if(name) {
+    dprintf(g_fd, "static const unsigned char %s[] = {\n  ", name);
+    output = output_bytes_bin2c;
+  } else {
+    output = output_bytes_raw;
+  }
+}
+
+
 typedef struct bitmap_header {
-  uint16_t format;
+  uint8_t data_format;
+  uint8_t pixel_format;
   uint16_t width;
   uint16_t height;
 } bitmap_header_t;
 
 static void
-write_header(uint16_t format, uint16_t width, uint16_t height)
+write_header(uint8_t data_format, uint8_t pixel_format,
+             uint16_t width, uint16_t height)
 {
-  bitmap_header_t bh = {format, width, height};
+  bitmap_header_t bh = {data_format, pixel_format, width, height};
   output(&bh, sizeof(bh));
 }
 
@@ -84,8 +111,7 @@ write_payload(const void *data, size_t len)
 
 
 static void
-output_to_l4(const char *output_filename,
-             int width, int height,
+output_to_l4(int width, int height,
              const uint8_t *rgba)
 {
   if(width & 1) {
@@ -93,7 +119,7 @@ output_to_l4(const char *output_filename,
     exit(1);
   }
 
-  write_header(EVE_FORMAT_L4, width, height);
+  write_header('z', EVE_FORMAT_L4, width, height);
 
   size_t outsize = width / 2 * height;
   uint8_t l4[outsize];
@@ -117,12 +143,21 @@ output_to_l4(const char *output_filename,
 
 
 
+static void
+emit_png(const char *src, const char *dst, const char *name)
+{
+
+  setup_output(dst, name);
+
+
+}
+
 
 int
 main(int argc, char **argv)
 {
   int width, height, channels;
-  int format;
+  uint8_t data_format;
 
   if(argc < 4) {
     fprintf(stderr, "Usage %s <INFILE> <FMT> <OUTFILE>\n", argv[0]);
@@ -130,46 +165,51 @@ main(int argc, char **argv)
   }
 
   const char *fmt = argv[2];
-
+  int desired_channels;
   if(!strcmp(fmt, "l4")) {
-    format = EVE_FORMAT_L4;
+    data_format = 'z';
+  } else if(!strcmp(fmt, "png")) {
+    // Direct PNG encode
+    data_format = 'p';
+  } else if(!strcmp(fmt, "jpeg")) {
+    // Direct JEPG encode
+    data_format = 'j';
   } else {
     fprintf(stderr, "Unknown format %s\n", fmt);
-  }
-
-  uint8_t* img = stbi_load(argv[1], &width, &height, &channels, 4);
-  if(img == NULL) {
-    fprintf(stderr, "Failed to load %s\n", argv[1]);
     exit(1);
   }
 
-  if(!strcmp(argv[3], "-")) {
-    g_fd = 1;
-  } else {
-    g_fd = open(argv[3], O_RDWR | O_CREAT | O_TRUNC, 0666);
-    if(g_fd == -1) {
-      fprintf(stderr, "Open %s -- %m\n", argv[3]);
-      exit(1);
-    }
+  int fd = open(argv[1], O_RDONLY);
+  if(fd == -1) {
+    fprintf(stderr, "Unable to open %s -- %m\n", argv[1]);
+    exit(1);
   }
 
-  if(argc == 5) {
-    dprintf(g_fd, "static const unsigned char %s[] = {\n  ",
-            argv[4]);
-    output = output_bytes_bin2c;
-  } else {
-    output = output_bytes_raw;
+  struct stat st;
+  fstat(fd, &st);
+
+  void *buf = malloc(st.st_size);
+  if(read(fd, buf, st.st_size) != st.st_size) {
+    fprintf(stderr, "Read failed\n");
+    exit(1);
   }
+  close(fd);
 
-  deflateInit(&zs, 9);
+  char *img =
+    stbi_load_from_memory(buf, st.st_size, &width, &height, &channels, 4);
 
+  setup_output(argv[3], argc == 5 ? argv[4] : NULL);
 
-  if(format == EVE_FORMAT_L4) {
-    output_to_l4(argv[3], width, height, img);
+  if(data_format != 'z') {
+    write_header(data_format, EVE_FORMAT_RGB565, width, height);
+    output(buf, st.st_size);
   } else {
-    abort();
+
+    deflateInit(&zs, 9);
+
+    output_to_l4(width, height, img);
+    while(do_deflate(Z_FINISH) != Z_STREAM_END) {};
   }
-  while(do_deflate(Z_FINISH) != Z_STREAM_END) {};
 
   if(argc == 5) {
     dprintf(g_fd, "\n};\n");

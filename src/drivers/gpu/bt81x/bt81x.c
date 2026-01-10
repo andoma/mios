@@ -20,7 +20,8 @@ static const gfx_display_class_t bt81x_ops;
 
 
 typedef struct bitmap_header {
-  uint16_t format;
+  uint8_t data_format;
+  uint8_t pixel_format;
   uint16_t width;
   uint16_t height;
   uint8_t data[0];
@@ -336,19 +337,26 @@ bt81x_cop_writev(bt81x_t *b, const void *data, size_t len)
 
   while(len) {
     const uint16_t cmd_read = bt81x_rd32(b, EVE_REG_CMD_READ);
+    if(cmd_read == 0xfff) {
+      evlog(LOG_ERR, "bt81x coprocessor error");
+      return ERR_BAD_STATE;
+    }
     const uint16_t fullness = (b->cmd_write - cmd_read) & 0xfff;
-    const uint16_t free_space = (4096 - 4) - fullness;
+    uint16_t free_space = ((4000) - fullness);
 
-    const size_t to_send = MIN(free_space, len);
+    size_t to_send = MIN(free_space, len);
+    size_t rem = 4096 - b->cmd_write;
+    to_send = MIN(to_send, rem);
 
     if(to_send == 0) {
-      panic("fifo full");
+      usleep(1000); // Fifo is full, wait a while, is there an IRQ for this?
+      continue;
     }
 
     int pad = (to_send & 3) ? (4 - (to_send & 3)) : 0;
 
     iov[1].iov_base = (void *)data;
-    iov[1].iov_len = len;
+    iov[1].iov_len = to_send;
     iov[2].iov_len = pad;
     hdr[1] = 0x80 | (b->cmd_write >> 8);
     hdr[2] = b->cmd_write;
@@ -357,7 +365,7 @@ bt81x_cop_writev(bt81x_t *b, const void *data, size_t len)
                               2 + !!pad, b->gpio_ncs, b->spi_cfg);
     if(err)
       return err;
-    b->cmd_write = (b->cmd_write + len + pad) & 0xfff;
+    b->cmd_write = (b->cmd_write + to_send + pad) & 0xfff;
     bt81x_wr32(b, EVE_REG_CMD_WRITE, (b->cmd_write - 4) & 0xfff);
     len -= to_send;
     data += to_send;
@@ -369,20 +377,16 @@ bt81x_cop_writev(bt81x_t *b, const void *data, size_t len)
 static uint32_t
 bt81x_bitmap_linesize(const bitmap_header_t *bh)
 {
-  switch(bh->format) {
+  switch(bh->pixel_format) {
+  case EVE_FORMAT_RGB565:
+    return bh->width * 2;
   case EVE_FORMAT_L4:
-    return bh->width >> 1;
+    return bh->width / 2;
   default:
-    panic("%s: Unsupported format %d\n", __FUNCTION__, bh->format);
+    panic("%s: Unsupported format %d\n", __FUNCTION__, bh->pixel_format);
   }
 }
 
-
-static uint32_t
-bitmap_uncompressed_size(const bitmap_header_t *bh)
-{
-  return bt81x_bitmap_linesize(bh) * bh->height;
-}
 
 
 static error_t
@@ -393,21 +397,37 @@ bt81x_upload_images(bt81x_t *b)
 
   const bt81x_bitmap_t *bb = b->bitmaps;
   for(size_t i = 0; i < b->num_bitmaps; i++) {
-    const uint32_t inflate_cmd[2] = {EVE_ENC_CMD_INFLATE, addr};
+
+    const bitmap_header_t *bh = bb->data;
+
+    uint32_t cmd[3] = {0, addr, 0};
+    switch(bh->data_format) {
+    case 'p':
+    case 'j':
+      cmd[0] = EVE_ENC_CMD_LOADIMAGE;
+      break;
+    case 'z':
+      cmd[0] = EVE_ENC_CMD_INFLATE2;
+      break;
+    default:
+      panic("%s: Unsupported format %d\n", __FUNCTION__, bh->data_format);
+    }
+
     b->bitmap_addr[i] = addr;
 
-    err = bt81x_cop_writev(b, inflate_cmd, sizeof(inflate_cmd));
+    err = bt81x_cop_writev(b, cmd, sizeof(cmd));
     if(err)
       return err;
 
-    const bitmap_header_t *bh = bb->data;
+    evlog(LOG_DEBUG, "Bitmap %d (%d x %d) (datafmt:%c pixfmt:%d) size:%d",
+          i, bh->width, bh->height, bh->data_format, bh->pixel_format,
+          bb->size - sizeof(bitmap_header_t));
 
     err = bt81x_cop_writev(b, bh->data, bb->size - sizeof(bitmap_header_t));
     if(err)
       return err;
 
-    uint32_t ainc = bitmap_uncompressed_size(bh);
-    addr += ainc;
+    addr += bh->height * bt81x_bitmap_linesize(bh);
     bb++;
   }
 
@@ -956,7 +976,8 @@ draw_bitmap(gfx_display_t *gd,
 
   int linesize = bt81x_bitmap_linesize(bh);
 
-  b->dl[b->dlptr++] = EVE_ENC_BITMAP_LAYOUT(2, linesize, bh->height);
+  b->dl[b->dlptr++] = EVE_ENC_BITMAP_LAYOUT(bh->pixel_format,
+                                            linesize, bh->height);
   b->dl[b->dlptr++] = EVE_ENC_BITMAP_SIZE(0, 0, 0, bh->width, bh->height);
   b->dl[b->dlptr++] = EVE_ENC_BITMAP_SOURCE(b->bitmap_addr[bitmap]);
 
