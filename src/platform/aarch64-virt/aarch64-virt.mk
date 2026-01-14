@@ -12,6 +12,7 @@ include ${SRC}/cpu/aarch64/aarch64.mk
 
 SRCS += \
 	${P}/aarch64-virt.c \
+	${P}/asm.s \
 
 ENABLE_TASK_ACCOUNTING := no
 

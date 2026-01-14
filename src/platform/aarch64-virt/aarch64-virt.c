@@ -3,6 +3,13 @@
 
 #include "drivers/pl011.h"
 
+long
+gicr_base(void)
+{
+  return GIC_GICR_BASE;
+}
+
+
 static void __attribute__((constructor(101)))
 board_init_early(void)
 {
@@ -15,15 +22,12 @@ board_init_early(void)
   printf("ID_AA64MMFR0_EL1 = %lx\n", wut);
 }
 
-
-#include <mios/cli.h>
-
-static error_t
-cmd_el2(cli_t *cli, int argc, char **argv)
+void
+reboot(void)
 {
-  extern void (*el2_trampoline)(void);
-  el2_trampoline();
-  return 0;
-}
+  printf("Reboot not implemented, stalling forever\n");
 
-CLI_CMD_DEF("el2", cmd_el2);
+  while(1) {
+    asm volatile("wfi");
+  }
+}
