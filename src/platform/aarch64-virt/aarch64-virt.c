@@ -3,6 +3,11 @@
 
 #include "drivers/pl011.h"
 
+// Semihosting definitions
+#define SEMIHOSTING_SYS_EXIT            0x18
+#define ADP_STOPPED_APPLICATION_EXIT 0x20026
+extern uintptr_t semihosting_call(uint32_t reason, uintptr_t arg);
+
 long
 gicr_base(void)
 {
@@ -22,9 +27,20 @@ board_init_early(void)
   printf("ID_AA64MMFR0_EL1 = %lx\n", wut);
 }
 
+void 
+semihosting_exit(uint32_t reason, uint32_t subcode)
+{
+  uint64_t parameters[] = {reason, subcode};
+
+  (void)semihosting_call(SEMIHOSTING_SYS_EXIT, (uintptr_t)&parameters);
+}
+
 void
 reboot(void)
 {
+  semihosting_exit(ADP_STOPPED_APPLICATION_EXIT, 0);
+  // should not reach here
+
   printf("Reboot not implemented, stalling forever\n");
 
   while(1) {

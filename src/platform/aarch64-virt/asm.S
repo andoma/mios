@@ -6,3 +6,8 @@ putc:
         tbnz    w2, #5, 1b
         str     x0, [x1]
         ret
+
+	.globl	semihosting_call
+semihosting_call:
+	hlt	#0xf000
+	ret
