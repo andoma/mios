@@ -76,6 +76,8 @@ typedef struct tcb {
   uint8_t tcb_fin_received;
   uint8_t rcv_window_closed;
 
+  uint8_t fast_reject_limiter;
+
   struct {
     uint32_t wrptr; // Unsent (Enqueued by stream but not yet processed by TCP)
     uint32_t nxt;   // Next to send
@@ -1262,9 +1264,17 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   if(!acceptance) {
     if(flag & TCP_F_RST)
       return pb;
+
+    // We don't want to send too many rejects back-to-back. Sender
+    // only needs to see a few to enter fast-retransmit
+    if(tcb->fast_reject_limiter == 5)
+      return pb;
+
+    tcb->fast_reject_limiter++;
     return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
                      tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
   }
+  tcb->fast_reject_limiter = 0;
 
   //
   // Step 2: RST
