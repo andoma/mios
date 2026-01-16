@@ -638,7 +638,7 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
 
 static pbuf_t *
 tcp_reply(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
-          uint32_t seq, uint32_t ack, uint8_t flag, uint16_t wnd)
+          uint32_t seq, uint32_t ack, uint8_t flag, uint32_t rcv_wnd)
 {
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
@@ -652,7 +652,7 @@ tcp_reply(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
   th->seq = htonl(seq);
   th->ack = htonl(ack);
   th->flg = flag;
-  th->wnd = htons(wnd);
+  th->wnd = htons(MIN(rcv_wnd, 65535));
   th->off = (sizeof(tcp_hdr_t) >> 2) << 4;
 
   tcp_output(pb, ni->ni_ipv4_local_addr, remote_addr);
