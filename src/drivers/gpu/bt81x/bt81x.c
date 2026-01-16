@@ -5,6 +5,7 @@
 #include <mios/task.h>
 #include <mios/gfx.h>
 #include <mios/eventlog.h>
+#include <mios/type_macros.h>
 #include <sys/uio.h>
 #include <sys/param.h>
 #include <stdlib.h>
@@ -911,6 +912,21 @@ draw_rect(gfx_display_t *gd,
   b->dl[b->dlptr++] = EVE_ENC_END();
 }
 
+static const struct {
+  uint8_t b0;  // utf8 byte 0
+  uint8_t b1;  // utf8 byte 1
+  char c0;     // base glyph (ascii)
+  char d;      // diacritic type
+  char y;      // fractional ypos
+} diacritics[] = {
+  { 0xc3, 0xa5, 'a', 1, 3},
+  { 0xc3, 0xa4, 'a', 2, 3},
+  { 0xc3, 0xb6, 'o', 2, 3},
+  { 0xc3, 0x85, 'A', 1, 4},
+  { 0xc3, 0x84, 'A', 2, 4},
+  { 0xc3, 0x96, 'O', 2, 3},
+};
+
 static int
 draw_text(gfx_display_t *gd,
           const gfx_position_t *pos,
@@ -938,15 +954,45 @@ draw_text(gfx_display_t *gd,
     uint8_t c = str[i];
     if(c == '\t' && ti < gd->gd_tab_offsets_size) {
       x = gd->gd_tab_offsets[ti++] - absx;
-    } else if(c >= 32 && c < 128) {
-      if(x >= 512) {
-        b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X((x + pos->x) << 4);
-        absx = x;
-        x = 0;
-      }
+      continue;
+    }
+    if(x >= 512) {
+      b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_X((x + pos->x) << 4);
+      absx = x;
+      x = 0;
+    }
 
+    if(c >= 32 && c < 128) {
       b->dl[b->dlptr++] = EVE_ENC_VERTEX2II(x, 0, handle, c);
       x += f->width[c - 32];
+    } else {
+      for(size_t j = 0; j < ARRAYSIZE(diacritics); j++) {
+        if(diacritics[j].b0 == c && diacritics[j].b1 == str[i + 1]) {
+
+          c = diacritics[j].c0;
+          int w = f->width[c - 32];
+          b->dl[b->dlptr++] = EVE_ENC_VERTEX2II(x, 0, handle, c);
+          int fy = diacritics[j].y;
+          b->dl[b->dlptr++] =
+            EVE_ENC_VERTEX_TRANSLATE_Y((pos->y - f->height * fy / 5) << 4);
+
+          switch(diacritics[j].d) {
+          case 1:
+            b->dl[b->dlptr++] = EVE_ENC_VERTEX2II(x + w / 3, 0, handle, '.');
+            break;
+          case 2:
+            b->dl[b->dlptr++] = EVE_ENC_VERTEX2II(x, 0, handle, '.');
+            b->dl[b->dlptr++] = EVE_ENC_VERTEX2II(x + w / 2, 0, handle, '.');
+            break;
+          }
+
+          b->dl[b->dlptr++] = EVE_ENC_VERTEX_TRANSLATE_Y(pos->y << 4);
+
+          x += w;
+          i++;
+          break;
+        }
+      }
     }
   }
   b->dl[b->dlptr++] = EVE_ENC_END();
@@ -1028,6 +1074,15 @@ get_text_size(gfx_display_t *gd,
       x = gd->gd_tab_offsets[ti++];
     } else if(c >= 32 && c < 128) {
       x += f->width[c - 32];
+    } else {
+      for(size_t j = 0; j < ARRAYSIZE(diacritics); j++) {
+        if(diacritics[j].b0 == c && diacritics[j].b1 == str[i + 1]) {
+          c = diacritics[j].c0;
+          x += f->width[c - 32];
+          i++;
+          break;
+        }
+      }
     }
   }
   return (gfx_size_t){x, f->height};
