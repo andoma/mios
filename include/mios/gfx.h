@@ -73,6 +73,8 @@ typedef struct gfx_display_class {
 
   int (*get_font_baseline)(gfx_display_t *gd, gfx_font_id_t font);
 
+  int (*get_font_height)(gfx_display_t *gd, gfx_font_id_t font);
+
   gfx_size_t (*get_bitmap_size)(gfx_display_t *gd, int bitmap);
 
   void (*begin)(gfx_display_t *gd, gfx_primitive_t primitive, float attribute);

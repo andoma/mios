@@ -1096,6 +1096,13 @@ get_font_baseline(gfx_display_t *gd, gfx_font_id_t font)
   return f->height - f->baseline;
 }
 
+static int
+get_font_height(gfx_display_t *gd, gfx_font_id_t font)
+{
+  const struct bt81x_font *f = &fonts[font];
+  return f->height;
+}
+
 static gfx_size_t
 get_bitmap_size(gfx_display_t *gd, int bitmap)
 {
@@ -1173,6 +1180,7 @@ static const gfx_display_class_t bt81x_ops = {
   .set_alpha = set_alpha,
   .get_text_size = get_text_size,
   .get_font_baseline = get_font_baseline,
+  .get_font_height = get_font_height,
   .get_bitmap_size = get_bitmap_size,
   .begin = draw_begin,
   .vertex = draw_vertex,
