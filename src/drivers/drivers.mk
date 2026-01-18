@@ -55,3 +55,6 @@ SRCS-${ENABLE_ADS101X} += \
 
 SRCS-${ENABLE_LAN743X} += \
 	${SRC}/drivers/lan743x.c
+
+SRCS-${ENABLE_HDC302x} += \
+	${SRC}/drivers/hdc302x.c
