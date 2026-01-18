@@ -76,20 +76,19 @@ iov_inc(stm32_i2c_t *i2c, const struct iovec *iov)
 }
 
 
-
 static void
 i2c_irq(void *arg)
 {
   stm32_i2c_t *i2c = arg;
 
   uint32_t isr = reg_rd(i2c->base_addr + I2C_ISR);
+  reg_wr(i2c->base_addr + I2C_ICR, isr);
 
   if(isr & 0x2 && i2c->txiov) {
     // Output next TX byte
     const uint8_t *base = i2c->txiov[i2c->iov_off].iov_base;
     reg_wr(i2c->base_addr + I2C_TXDR, base ? base[i2c->data_off] : 0);
     i2c->txiov = iov_inc(i2c, i2c->txiov);
-    reg_wr(i2c->base_addr + I2C_ICR, 2);
     return;
   }
 
@@ -98,13 +97,11 @@ i2c_irq(void *arg)
     uint8_t *base = i2c->rxiov[i2c->iov_off].iov_base;
     base[i2c->data_off] = reg_rd(i2c->base_addr + I2C_RXDR);
     i2c->rxiov = iov_inc(i2c, i2c->rxiov);
-    reg_wr(i2c->base_addr + I2C_ICR, 4);
     return;
   }
 
   if(i2c->result != 1) {
-    // Thread is no longer waiting, cancel everything
-    reg_wr(i2c->base_addr + I2C_ICR, isr);
+    // Thread is no longer waiting
     return;
   }
 
