@@ -20,6 +20,7 @@
 #define FDCAN_ILE    0x05c
 
 #define FDCAN_SIDFC  0x084
+#define FDCAN_XIDFC  0x088
 
 #define FDCAN_RXF0C  0x0a0
 #define FDCAN_RXF0S  0x0a4
@@ -89,6 +90,9 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   reg_wr(fc->reg_base + FDCAN_SIDFC,
          (ram_offset + FDCAN_FLSSA(0)) |
          (fc->num_std_filters << 16));
+
+    reg_wr(fc->reg_base + FDCAN_XIDFC,
+         (ram_offset + FDCAN_FLESA));
 
   reg_wr(fc->reg_base + FDCAN_TXBC,
          (ram_offset + FDCAN_TXBUF(0, 0)) |
