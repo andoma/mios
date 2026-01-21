@@ -132,13 +132,15 @@ struct usb_ctrl {
 
   struct usb_interface_queue uc_ifaces;
 
-  uint8_t uc_serial_number[6];
+  uint8_t uc_serial_number[12];
+  size_t uc_serial_number_bytes;
 };
-
 
 
 typedef struct usb_ctrl usb_ctrl_t;
 
+static inline void otg_platform_init_regs(usb_ctrl_t *uc)
+  __attribute__((always_inline));
 
 
 static void
@@ -393,7 +395,7 @@ handle_get_descriptor(usb_ctrl_t *uc)
     case 3:
       getch = read_bin2hex_as_desc;
       desc = uc->uc_serial_number;
-      desclen = sizeof(uc->uc_serial_number) * 2;
+      desclen = uc->uc_serial_number_bytes * 2;
       break;
     }
     desclen = desclen * 2 + 2;
@@ -822,19 +824,10 @@ otg_init_regs(usb_ctrl_t *uc)
   reg_wr(OTG_DOEPMSK, 0);
   reg_wr(OTG_GINTSTS, 0xffffffff); // Clear interrupts
 
-  reg_wr(OTG_GAHBCFG, 1); // Enable global interrupts
+  reg_wr(OTG_GAHBCFG, 1);          // Enable global interrupts
+  reg_set_bit(OTG_GUSBCFG, 30);    // Force device mode
 
-  reg_wr(OTG_GUSBCFG,
-         (1 << 30) | // Force device mode
-         (6 << 10) | // USB turnaroundtime = 6 (AHB > 32MHz)
-         (1 << 6)  | // PHYSEL = 1 (full-speed)
-         0);
-
-  reg_wr(OTG_GCCFG,
-         (1 << 21) | // Disable VBUS sense
-         0);
-
-  reg_set_bits(OTG_GOTGCTL, 6, 2, 3);
+  reg_set_bits(OTG_GOTGCTL, 6, 2, 3); // VBUS override enable
 
   reg_wr(OTG_PCGCCTL, 0);   // Make sure clocks are not gated
 
@@ -842,10 +835,7 @@ otg_init_regs(usb_ctrl_t *uc)
          (1 << 1) | // Soft disconnect
          0);
 
-  reg_wr(OTG_DCFG,
-         (reg_rd(OTG_DCFG) & 0xffff0000) |
-         (3 << 0) | // Device speed = 0b11 (Full speed)
-         0);
+  otg_platform_init_regs(uc);
 
   int fifo_words = 64;
   int fifo_addr = 0;
@@ -875,9 +865,6 @@ otg_init_regs(usb_ctrl_t *uc)
          OTG_GINT_OEPINT |
          OTG_GINT_ESUSP |
          0);
-
-  // Power up
-  reg_set_bits(OTG_GCCFG, 16, 1, 1);
 
   // Disconnect for 5ms
   int q = irq_forbid(IRQ_LEVEL_CLOCK);
@@ -944,7 +931,7 @@ static const usb_ctrl_vtable_t otg_vtable =
 };
 
 
-void
+static void
 init_interfaces(usb_ctrl_t *uc)
 {
   size_t total_desc_size = sizeof(struct usb_config_descriptor);
@@ -1128,7 +1115,8 @@ reconnect(void *opaque, uint64_t expire)
 }
 
 
-void
+__attribute__((warn_unused_result, always_inline))
+static inline usb_ctrl_t *
 stm32_otg_create(uint16_t vid, uint16_t pid,
                  const char *manfacturer_string,
                  const char *product_string,
@@ -1136,17 +1124,6 @@ stm32_otg_create(uint16_t vid, uint16_t pid,
                  int irq)
 {
   usb_ctrl_t *uc = &g_usb_ctrl;
-
-  const struct serial_number sn = sys_get_serial_number();
-  const uint32_t *sn_u32 = sn.data;
-  uint32_t sum = sn_u32[0] + sn_u32[2];
-  uc->uc_serial_number[0] = sum >> 24;
-  uc->uc_serial_number[1] = sum >> 16;
-  uc->uc_serial_number[2] = sum >> 8;
-  uc->uc_serial_number[3] = sum;
-  uc->uc_serial_number[4] = sn_u32[1] >> 24;
-  uc->uc_serial_number[5] = sn_u32[1] >> 16;
-
   uc->uc_ifaces = *q;
   STAILQ_INIT(q);
 
@@ -1162,6 +1139,7 @@ stm32_otg_create(uint16_t vid, uint16_t pid,
   init_interfaces(uc);
 
   probe_endpoints(uc);
+
   otg_init_regs(uc);
 
   uc->uc_reconnect.t_cb = reconnect;
@@ -1169,6 +1147,7 @@ stm32_otg_create(uint16_t vid, uint16_t pid,
   uc->uc_softirq.t_run = disconnect;
 
   irq_enable_fn_arg(irq, IRQ_LEVEL_NET, stm32_otg_irq, uc);
+  return uc;
 }
 
 
