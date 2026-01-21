@@ -15,6 +15,10 @@
 #define GPIO_PI(x)  GPIO(8, x)
 #define GPIO_PJ(x)  GPIO(9, x)
 #define GPIO_PK(x)  GPIO(10, x)
+#define GPIO_PL(x)  GPIO(11, x)
+#define GPIO_PM(x)  GPIO(12, x)
+#define GPIO_PN(x)  GPIO(13, x)
+#define GPIO_PO(x)  GPIO(14, x)
 
 #define GPIO_UNUSED 0xff
 
