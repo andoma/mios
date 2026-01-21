@@ -14,7 +14,7 @@ static volatile unsigned int * const ICSR    = (unsigned int *)0xe000ed04;
 void
 irq(void)
 {
-  panic("Unexpected IRQ %d", *ICSR & 0xff);
+  panic("Unexpected IRQ %d", (*ICSR & 0x1ff) - 16);
 }
 
 #include "irq_alias.h"
