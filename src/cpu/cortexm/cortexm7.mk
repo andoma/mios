@@ -5,6 +5,7 @@ CFLAGS += -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -mfp16-format=
 CPPFLAGS += -include ${SRC}/cpu/cortexm/cortexm7.h
 
 SRCS += ${C}/cortexm7.c \
+	${C}/cache.c \
 	${C}/mpu.c \
 
 include ${SRC}/cpu/cortexm/cortexm.mk
