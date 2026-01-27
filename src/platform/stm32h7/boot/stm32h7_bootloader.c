@@ -28,6 +28,12 @@
 #define SPIFLASH_CLK  CLK_SPI3
 #define SPIFLASH_AF   6
 
+#elif SPIFLASH_SPI_INSTANCE == 4
+
+#define SPIFLASH_BUS  SPI4_BASE
+#define SPIFLASH_CLK  CLK_SPI4
+#define SPIFLASH_AF   5
+
 #else
 #error Bootloader: Unsupported SPI instance
 #endif
@@ -300,6 +306,7 @@ bl_crc32(uint32_t in, const void *data, size_t len)
 #define SPI1_BASE 0x40013000
 #define SPI2_BASE 0x40003800
 #define SPI3_BASE 0x40003c00
+#define SPI4_BASE 0x40013400
 
 
 __attribute__((section("bltext"),noinline))
