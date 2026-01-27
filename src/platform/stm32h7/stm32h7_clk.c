@@ -1,6 +1,6 @@
 #include <mios/mios.h>
 #include <stddef.h>
-
+#include <stdio.h>
 #include "stm32h7_clk.h"
 #include "stm32h7_pwr.h"
 #include "stm32h7_flash.h"
@@ -14,7 +14,9 @@
 #define VOS_LEVEL_2 2
 #define VOS_LEVEL_3 1
 
-#ifndef CPU_SYSTICK_RVR
+#ifdef CPU_SYSTICK_RVR
+#error Compile-time core frequency is not supported
+#endif
 
 // Dynamic core clock frequency
 
@@ -46,7 +48,6 @@ clock_get_irq_blocked(void)
   }
 }
 
-#endif
 
 static uint32_t sysclk_freq;
 
@@ -121,50 +122,12 @@ static uint32_t pll2p_freq;
 const char *
 stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
 {
-  int pll2_freq = 400 * MHZ;
-
   reg_clr_bit(PWR_CR3, 2); // Disable SMPS
   while(reg_get_bit(PWR_CSR1, 13) == 0) {}
 
-#ifdef CPU_SYSTICK_RVR
-  // Compile-time core clock frequency
-  const int sysclk_freq_mhz = CPU_SYSCLK_MHZ;
-  sysclk_freq = sysclk_freq_mhz * MHZ;
-#else
-
-  // Dynamic core clock frequency
-
-  int sysclk_freq_mhz = 520;
-
+  sysclk_freq = 520 * MHZ;
   if(reg_get_bit(FLASH_OPTSR2_CUR, 2)) {
-    sysclk_freq_mhz = 550; // CPUFREQ_BOOST
-  }
-
-  sysclk_freq = sysclk_freq_mhz * MHZ;
-
-  ticks_per_us =  (sysclk_freq + 999999) / 1000000;
-  ticks_per_hz =  (sysclk_freq + HZ - 1) / HZ;
-
-  // We also need to configure systick
-  *SYST_RVR = ticks_per_hz;
-  *SYST_VAL = 0;
-  *SYST_CSR = 7;
-#endif
-
-  const int axi_freq = sysclk_freq / 2;
-
-  ahb_freq = sysclk_freq / 2;
-  apb_freq = sysclk_freq / 4;
-
-  int vos;
-  if(sysclk_freq_mhz > 400) {
-    vos = VOS_LEVEL_0;
-  } else if(sysclk_freq_mhz > 300) {
-    vos = VOS_LEVEL_1;
-  } else if(sysclk_freq_mhz > 170) {
-    vos = VOS_LEVEL_2;
-  } else {
-    vos = VOS_LEVEL_3;
+    sysclk_freq = 550 * MHZ; // CPUFREQ_BOOST
   }
 
   int pllscr;
@@ -221,7 +184,10 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   const uint32_t pll1p = 0;
   const uint32_t pll1q = 0;
   const uint32_t pll1r = 0;
+  sysclk_freq = hse_freq * (pll1n + 1);
 
+  // Target, will be refined
+  int pll2_freq = 400 * MHZ;
   pll2q_freq = 100 * MHZ;
   pll2p_freq = 100 * MHZ;
 
@@ -230,6 +196,9 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   const uint32_t pll2q = (pll2_freq / pll2q_freq) - 1;
   const uint32_t pll2r = 0;
 
+  pll2_freq   = hse_freq  * (pll2n + 1);
+  pll2p_freq  = pll2_freq / (pll2p + 1);
+  pll2q_freq  = pll2_freq / (pll2q + 1);
 
   // Set prescalers for PLLx
   reg_wr(RCC_PLLCKSELR,
@@ -252,9 +221,35 @@ stm32h7_init_pll(unsigned int hse_freq, uint32_t flags)
   reg_wr(RCC_PLL1DIVR, (pll1r << 24) | (pll1q << 16) | (pll1p << 9) | pll1n);
   reg_wr(RCC_PLL2DIVR, (pll2r << 24) | (pll2q << 16) | (pll2p << 9) | pll2n);
 
-  set_flash_latency(axi_freq, vos);
 
+  const int axi_freq = sysclk_freq / 2;
+  ahb_freq = sysclk_freq / 2;
+  apb_freq = sysclk_freq / 4;
+
+
+
+  const int sysclk_freq_mhz = sysclk_freq / 1000000;
+  int vos;
+  if(sysclk_freq_mhz > 400) {
+    vos = VOS_LEVEL_0;
+  } else if(sysclk_freq_mhz > 300) {
+    vos = VOS_LEVEL_1;
+  } else if(sysclk_freq_mhz > 170) {
+    vos = VOS_LEVEL_2;
+  } else {
+    vos = VOS_LEVEL_3;
+  }
+
+  set_flash_latency(axi_freq, vos);
   voltage_scaling(vos);
+
+  ticks_per_us =  (sysclk_freq + 999999) / 1000000;
+  ticks_per_hz =  (sysclk_freq + HZ - 1) / HZ;
+
+  // We also need to configure systick
+  *SYST_RVR = ticks_per_hz;
+  *SYST_VAL = 0;
+  *SYST_CSR = 7;
 
   // Start PLL1
   reg_set_bit(RCC_CR, 24);
@@ -367,4 +362,16 @@ stm32h7_clk_deinit(void)
   reg_wr(RCC_APB1HRSTR, 0);
   reg_wr(RCC_APB2RSTR, 0);
   reg_wr(RCC_APB3RSTR, 0);
+}
+
+void
+stm32h7_print_clocks(struct stream *st)
+{
+  stprintf(st, "Clocks (kHz): SYS:%u AHB:%u APB:%u PLL2Q:%u PLL2P:%u ECC:%s\n",
+           sysclk_freq / 1000,
+           ahb_freq / 1000,
+           apb_freq / 1000,
+           pll2q_freq / 1000,
+           pll2p_freq / 1000,
+           reg_get_bit(FLASH_OPTSR2_CUR, 2) ? "Off" : "On");
 }
