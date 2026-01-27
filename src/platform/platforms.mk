@@ -7,6 +7,7 @@ ALLPLATFORMS := \
 	stm32f439-nucleo144 \
 	stm32g4-usb \
 	vexpress-a9 \
+	stm32h7-nucleo144 \
 
 ${ALLPLATFORMS}:
 	$(MAKE) PLATFORM=$@

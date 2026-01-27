@@ -1,9 +1,5 @@
 #pragma once
 
-#define CPU_SYSCLK_MHZ  520
-
-#define CPU_SYSTICK_RVR (CPU_SYSCLK_MHZ * 1000000)
-
 #define PBUF_DEFAULT_COUNT 32
 
 #define EVENTLOG_SIZE 4096
