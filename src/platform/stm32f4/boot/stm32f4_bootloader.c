@@ -321,6 +321,7 @@ flash_lock(void)
 static void __attribute__((section("bltext"),noinline,unused))
 flash_erase_sector(int sector)
 {
+  reg_wr(IWDG_KR, 0xAAAA);
   reg_wr(FLASH_CR, 0x2 | (sector << 3));
   reg_set_bit(FLASH_CR, 16);
   while(reg_rd(FLASH_SR) & (1 << 16)) {
@@ -514,7 +515,7 @@ void __attribute__((section("bltext"),noinline,noreturn)) bl_start(void)
   uint32_t gpioblocks = 0;
 
   reg_wr(IWDG_KR, 0x5555);
-  reg_wr(IWDG_RLR, 256); // 2 seconds
+  reg_wr(IWDG_RLR, 1024); // 8 seconds (erasing large sectors take a few seconds)
   reg_wr(IWDG_PR, 6);
   reg_wr(IWDG_KR, 0xAAAA);
   reg_wr(IWDG_KR, 0xCCCC);
