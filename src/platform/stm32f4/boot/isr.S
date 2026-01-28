@@ -17,6 +17,8 @@ bootloader_vectors:
         .long bl_mm_fault
         .long bl_bus_fault
         .long bl_usage_fault
+        .long 0xb00710ad  // Magic version cookie
+        .long 1           // Version
 
         .size bootloader_vectors, . - bootloader_vectors
 

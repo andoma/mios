@@ -506,7 +506,7 @@ __attribute__((section("bldata")))
 static const char successful[] = "Successful";
 
 __attribute__((section("bldata")))
-static const char hfstr[] = "\nHard fault\n";
+static const char fault_str[] = "\nFault\n";
 
 
 static void  __attribute__((section("bltext"),noinline))
@@ -589,8 +589,8 @@ bl_nmi(void)
 
 
 void __attribute__((section("bltext"),noinline))
-bl_hard_fault(void)
+bl_fault(void)
 {
-  console_print_string(hfstr);
+  console_print_string(fault_str);
   while(1) {}
 }
