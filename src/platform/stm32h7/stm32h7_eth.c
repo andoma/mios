@@ -155,7 +155,6 @@ rx_desc_give(desc_t *rx, void *buf)
 {
   rx->p0 = buf + DMA_BUFFER_PAD;
   rx->w3 = ETH_RDES3_OWN | ETH_RDES3_IOC | ETH_RDES3_BUF1V;
-  // TODO: invalidate cache for buffer
   asm volatile ("dsb");
   reg_wr(ETH_DMACRXDTPR, (uint32_t)rx);
 }
