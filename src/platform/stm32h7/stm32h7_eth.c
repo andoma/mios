@@ -345,6 +345,8 @@ stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
 
     uint32_t w3 = ETH_TDES3_OWN | pb->pb_pktlen;
 
+    w3 |= (0b11 << 16); // Calculate and insert checksums
+
     if(pb->pb_flags & PBUF_SOP)
       w3 |= ETH_TDES3_FD;
     if(pb->pb_flags & PBUF_EOP) {
@@ -518,6 +520,13 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   reg_set_bit(ETH_DMACTXCR, 0);
 
   se->se_eni.eni_output = stm32h7_eth_output;
+
+  se->se_eni.eni_ni.ni_flags |=
+    NETIF_F_TX_IPV4_CKSUM_OFFLOAD |
+    NETIF_F_TX_ICMP_CKSUM_OFFLOAD |
+    NETIF_F_TX_UDP_CKSUM_OFFLOAD |
+    NETIF_F_TX_TCP_CKSUM_OFFLOAD;
+
   ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
 
   irq_enable_fn_arg(61, IRQ_LEVEL_NET, stm32h7_eth_irq, se);
