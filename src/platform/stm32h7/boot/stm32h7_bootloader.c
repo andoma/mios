@@ -11,6 +11,12 @@
 #define CONSOLE_CLK   CLK_USART1
 #define CONSOLE_AF    7
 
+#elif CONSOLE_USART_INSTANCE == 3
+
+#define CONSOLE_USART USART3_BASE
+#define CONSOLE_CLK   CLK_USART3
+#define CONSOLE_AF    7
+
 #else
 #error Bootloader: Unsupported USART instance
 #endif
@@ -160,6 +166,7 @@ gpio_set_output(gpio_t gpio, int on)
 //======================================================================
 
 #define USART1_BASE 0x40011000
+#define USART3_BASE 0x40004800
 
 #define USART_CR1_UE     (1 << 0)
 #define USART_CR1_UESM   (1 << 1)
