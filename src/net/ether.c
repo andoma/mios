@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <mios/task.h>
 #include <mios/timer.h>
+#include <mios/eventlog.h>
+#include <mios/mios.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <inttypes.h>
@@ -9,6 +11,8 @@
 #include "irq.h"
 #include "ether.h"
 #include "lldp.h"
+#include "ptp.h"
+
 #include "net.h"
 #include "ipv4/ipv4.h"
 #include "ipv4/dhcpv4.h"
@@ -16,13 +20,6 @@
 struct ether_netif_list ether_netifs;
 
 static const uint8_t ether_bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-
-typedef struct ether_hdr {
-  uint8_t dst_addr[6];
-  uint8_t src_addr[6];
-  uint16_t type;
-} ether_hdr_t;
-
 
 
 struct arp_pkt {
@@ -51,7 +48,7 @@ ether_output(ether_netif_t *eni, pbuf_t *pb,
 
   eh[12] = ether_type >> 8;
   eh[13] = ether_type;
-  return eni->eni_output(eni, pb, 0);
+  return eni->eni_output(eni, pb, NULL, 0);
 }
 
 
@@ -119,33 +116,73 @@ arp_input(ether_netif_t *eni, pbuf_t *pb)
   return pb;
 }
 
-
 static pbuf_t *
 ether_input(netif_t *ni, pbuf_t *pb)
 {
   ether_netif_t *eni = (ether_netif_t *)ni;
+  pbuf_timestamp_t *pt = NULL;
+
+  if(unlikely(pb->pb_flags & PBUF_TIMESTAMP)) {
+
+    pt = pb->pb_data;
+
+    if(pt->pt_cb != NULL) {
+      // If the timestamp has a callback, just call it and return
+      // This is used to get back timestamps for transmitted packets
+      pt->pt_cb(ni, pt);
+      return pb;
+    }
+
+    // Otherwise, the timestamp is associated with a received packet.
+    // Remove the timestamp pbuf, but keep the actual payload (pbuf_timestamp)
+    // around til the end of this function. It's passed on to the
+    // protocol decoders (Only PTPv2 right now)
+
+    pbuf_t *next = pb->pb_next;
+    int q = irq_forbid(IRQ_LEVEL_NET);
+    pbuf_put(pb);
+    irq_permit(q);
+
+    pb = next;
+    pb->pb_flags |= PBUF_SOP;
+  }
 
   if(pbuf_pullup(pb, sizeof(ether_hdr_t)))
-    return pb;
+    goto out;
 
   const ether_hdr_t *eh = pbuf_data(pb, 0);
 
   if(memcmp(&eh->dst_addr, eni->eni_addr, 6)) {
     if((eh->dst_addr[0] & 1) == 0) {
       // Not broadcast and not to us, drop
-      return pb;
+      goto out;
     }
   }
 
   const uint16_t etype = ntohs(eh->type);
+#ifdef ENABLE_NET_PTP
+  if(unlikely(etype == ETHERTYPE_PTPv2)) {
+    pb = ptpv2_input(eni, pb, pt, sizeof(ether_hdr_t));
+    goto out;
+  }
+#endif
 
   pb = pbuf_drop(pb, 14, 0);
 
   switch(etype) {
   case ETHERTYPE_IPV4:
-    return ipv4_input(&eni->eni_ni, pb);
+    pb = ipv4_input(&eni->eni_ni, pb);
+    break;
   case ETHERTYPE_ARP:
-    return arp_input(eni, pb);
+    pb = arp_input(eni, pb);
+    break;
+  }
+
+ out:
+  if(unlikely(pt != NULL)) {
+    int q = irq_forbid(IRQ_LEVEL_NET);
+    pbuf_data_put(pt);
+    irq_permit(q);
   }
   return pb;
 }
@@ -209,7 +246,7 @@ ether_ipv4_output_mcast(ether_netif_t *eni, pbuf_t *pb, uint32_t ipv4_addr)
 
   eh[12] = 8;
   eh[13] = 0;
-  return eni->eni_output(eni, pb, 0);
+  return eni->eni_output(eni, pb, NULL, 0);
 }
 
 static error_t

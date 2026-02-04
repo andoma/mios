@@ -102,7 +102,8 @@ typedef struct rtl8168 {
 
 
 static error_t
-rtl8168_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
+rtl8168_eth_output(struct ether_netif *eni, pbuf_t *pkt,
+                   pbuf_tx_cb_t *txcb, uint32_t id)
 {
   rtl8168_t *r = (rtl8168_t *)eni;
 

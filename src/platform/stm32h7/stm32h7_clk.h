@@ -15,6 +15,7 @@
 #define RCC_PLLCKSELR     (RCC_BASE + 0x28)
 #define RCC_PLLCFGR       (RCC_BASE + 0x2c)
 #define RCC_PLL1DIVR      (RCC_BASE + 0x30)
+#define RCC_PLL1FRACR     (RCC_BASE + 0x34)
 #define RCC_PLL2DIVR      (RCC_BASE + 0x38)
 #define RCC_PLL3DIVR      (RCC_BASE + 0x40)
 #define RCC_D2CCIP1R      (RCC_BASE + 0x50)

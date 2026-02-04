@@ -36,6 +36,8 @@ typedef struct {
 #define ETH_RDES3_BUF2V         0x02000000
 #define ETH_RDES3_BUF1V         0x01000000
 
+#define ETH_RDES3_CTX           0x40000000
+
 #define ETH_TDES3_OWN           0x80000000
 #define ETH_TDES3_FD            0x20000000
 #define ETH_TDES3_LD            0x10000000
@@ -84,6 +86,35 @@ typedef struct {
 #define ETH_MMC_RX_INTR_MASK  (ETH_BASE + 0x70c)
 #define ETH_MMC_TX_INTR_MASK  (ETH_BASE + 0x710)
 
+#define ETH_MACTSCR      (ETH_BASE + 0xb00)
+#define ETH_MACSSIR      (ETH_BASE + 0xb04)
+#define ETH_MACSTSR      (ETH_BASE + 0xb08)
+#define ETH_MACSTNR      (ETH_BASE + 0xb0c)
+#define ETH_MACSTSUR     (ETH_BASE + 0xb10)
+#define ETH_MACSTNUR     (ETH_BASE + 0xb14)
+#define ETH_MACTSAR      (ETH_BASE + 0xb18)
+#define ETH_MACTSSR      (ETH_BASE + 0xb20)
+#define ETH_MACTXTSSNR   (ETH_BASE + 0xb30)
+#define ETH_MACTXTSSSR   (ETH_BASE + 0xb34)
+#define ETH_MACACR       (ETH_BASE + 0xb40)
+#define ETH_MACATSNR     (ETH_BASE + 0xb48)
+#define ETH_MACATSSR     (ETH_BASE + 0xb4c)
+#define ETH_MACTSIACR    (ETH_BASE + 0xb50)
+#define ETH_MACTSEACR    (ETH_BASE + 0xb54)
+#define ETH_MACTSICNR    (ETH_BASE + 0xb58)
+#define ETH_MACTSECNR    (ETH_BASE + 0xb5c)
+#define ETH_MACPPSCR     (ETH_BASE + 0xb70)
+#define ETH_MACPPSTTSR   (ETH_BASE + 0xb80)
+#define ETH_MACPPSTTNR   (ETH_BASE + 0xb84)
+#define ETH_MACPPSIR     (ETH_BASE + 0xb88)
+#define ETH_MACPPSWR     (ETH_BASE + 0xb8c)
+#define ETH_MACPOCR      (ETH_BASE + 0xbc0)
+#define ETH_MACSPI0R     (ETH_BASE + 0xbc4)
+#define ETH_MACSPI1R     (ETH_BASE + 0xbc8)
+#define ETH_MACSPI2R     (ETH_BASE + 0xbcc)
+#define ETH_MACLMIR      (ETH_BASE + 0xbd0)
+
+
 #define ETH_MTLOMR       (ETH_BASE + 0xc00)
 #define ETH_MTLISR       (ETH_BASE + 0xc20)
 #define ETH_MTLTXQOMR    (ETH_BASE + 0xd00)
@@ -118,10 +149,10 @@ typedef struct {
 
 
 
-#define ETH_TX_RING_SIZE 16
+#define ETH_TX_RING_SIZE 8
 #define ETH_TX_RING_MASK (ETH_TX_RING_SIZE - 1)
 
-#define ETH_RX_RING_SIZE 8
+#define ETH_RX_RING_SIZE 16
 #define ETH_RX_RING_MASK (ETH_RX_RING_SIZE - 1)
 
 typedef struct stm32h7_eth {
@@ -134,6 +165,8 @@ typedef struct stm32h7_eth {
   desc_t *se_rxring;
 
   void *se_tx_pbuf_data[ETH_TX_RING_SIZE];
+  void *se_tx_pbuf[ETH_TX_RING_SIZE];
+  void *se_rx_pbuf_data[ETH_RX_RING_SIZE];
 
   uint8_t se_next_rx; // rename
 
@@ -143,6 +176,12 @@ typedef struct stm32h7_eth {
 
   uint8_t se_phyaddr;
 
+#ifdef ENABLE_NET_PTP
+  int64_t se_accumulated_drift_ppb;
+  uint32_t se_addend;
+  int32_t se_ppb_scale_mult;
+  int32_t se_ppb_scale_div;
+#endif
 } stm32h7_eth_t;
 
 
@@ -151,8 +190,13 @@ static stm32h7_eth_t stm32h7_eth;
 
 
 static void
-rx_desc_give(desc_t *rx, void *buf)
+rx_desc_give(stm32h7_eth_t *se, size_t index, void *buf)
 {
+  assert(buf != NULL);
+  se->se_rx_pbuf_data[index] = buf;
+
+  desc_t *rx = se->se_rxring + index;
+
   rx->p0 = buf + DMA_BUFFER_PAD;
   rx->w3 = ETH_RDES3_OWN | ETH_RDES3_IOC | ETH_RDES3_BUF1V;
   asm volatile ("dsb");
@@ -163,7 +207,16 @@ rx_desc_give(desc_t *rx, void *buf)
 static void
 stm32h7_eth_print_info(struct device *dev, struct stream *st)
 {
+  stm32h7_eth_t *se = (stm32h7_eth_t *)dev;
+
   ether_print((ether_netif_t *)dev, st);
+#ifdef ENABLE_NET_PTP
+  stprintf(st, "\tMAC time: %u.%u\n",
+           reg_rd(ETH_MACSTSR),
+           reg_rd(ETH_MACSTNR));
+
+  ptp_print_info(st, &se->se_eni);
+#endif
 }
 
 
@@ -240,70 +293,116 @@ stm32h7_phy_thread(void *arg)
 static void
 handle_irq_rx(stm32h7_eth_t *se)
 {
+
   while(1) {
-    desc_t *rx = se->se_rxring + (se->se_next_rx & ETH_RX_RING_MASK);
+    size_t rx_idx = se->se_next_rx & ETH_RX_RING_MASK;
+    desc_t *rx = se->se_rxring + rx_idx;
     const uint32_t w3 = rx->w3;
     if(w3 & ETH_RDES3_OWN)
       break;
     const int len = w3 & 0x7fff;
 
-    if(w3 & ETH_RDES3_FD) {
+    if((w3 & (ETH_RDES3_FD | ETH_RDES3_CTX)) == ETH_RDES3_FD)  {
       pbuf_t *pb = STAILQ_FIRST(&se->se_rx_scatter_queue);
-      if(pb != NULL)
+      if(pb != NULL) {
         pbuf_free_irq_blocked(pb);
+        STAILQ_INIT(&se->se_rx_scatter_queue);
+      }
       se->se_rx_scatter_length = 0;
     }
 
-    void *buf = rx->p0;
+    void *buf = se->se_rx_pbuf_data[rx_idx];
+    assert(buf != NULL);
     pbuf_t *pb = pbuf_get(0);
     if(pb != NULL) {
-      int flags = 0;
+      void *nextbuf = pbuf_data_get(0);
+      if(nextbuf != NULL) {
 
-      if(w3 & ETH_RDES3_FD) {
-        flags |= PBUF_SOP;
-        pb->pb_offset = 2;
-      } else {
-        pb->pb_offset = 0;
-      }
-      if(w3 & ETH_RDES3_LD)
-        flags |= PBUF_EOP;
+        if(unlikely(w3 & ETH_RDES3_CTX)) {
 
-      pb->pb_data = buf - DMA_BUFFER_PAD;
-      pb->pb_flags = flags;
+          pbuf_t *pb2 = STAILQ_FIRST(&se->se_rx_scatter_queue);
+          if(likely(pb2 != NULL)) {
 
-      if(flags == (PBUF_SOP | PBUF_EOP)) {
-        pb->pb_buflen = len;
-        pb->pb_pktlen = len;
-        STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
-        netif_wakeup(&se->se_eni.eni_ni);
-      } else {
+            pb->pb_flags = PBUF_TIMESTAMP | PBUF_SOP;
+            pb->pb_pktlen = pb2->pb_pktlen + sizeof(pbuf_timestamp_t);
+            pb->pb_offset = 0;
+            pb->pb_buflen = sizeof(pbuf_timestamp_t);
 
-        STAILQ_INSERT_TAIL(&se->se_rx_scatter_queue, pb, pb_link);
+            pb->pb_data = buf;
+            pbuf_timestamp_t *pt = buf;
+            pt->pt_cb = NULL; // Callbacks are used with TX
+            pt->pt_seconds = rx->w1;
+            pt->pt_nanoseconds = rx->w0;
 
-        pb->pb_buflen = len - se->se_rx_scatter_length;
+            pb2->pb_flags &= ~PBUF_SOP;
 
-        if(flags & PBUF_EOP) {
-          pbuf_t *first = STAILQ_FIRST(&se->se_rx_scatter_queue);
-          first->pb_pktlen = len;
-
-          STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
-                        &se->se_rx_scatter_queue);
-          netif_wakeup(&se->se_eni.eni_ni);
-
+            STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
+            STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
+                          &se->se_rx_scatter_queue);
+            netif_wakeup(&se->se_eni.eni_ni);
+          } else {
+            pbuf_put(pb);
+            pbuf_data_put(buf);
+          }
         } else {
-          se->se_rx_scatter_length = len;
+          int flags = 0;
+          int tsa = 0;
+
+          if(w3 & ETH_RDES3_FD) {
+            flags |= PBUF_SOP;
+            pb->pb_offset = 2;
+          } else {
+            pb->pb_offset = 0;
+          }
+          if(w3 & ETH_RDES3_LD) {
+            flags |= PBUF_EOP;
+            if(w3 & (1 << 26)) {
+              // RDES1 is valid
+              if(rx->w1 & (1 << 14)) {
+                // Time stamp available
+                tsa = 1;
+              }
+            }
+          }
+
+          pb->pb_data = buf;
+          pb->pb_flags = flags;
+
+          if((flags == (PBUF_SOP | PBUF_EOP)) && likely(!tsa)) {
+            pb->pb_buflen = len;
+            pb->pb_pktlen = len;
+            STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
+            netif_wakeup(&se->se_eni.eni_ni);
+          } else {
+
+            assert(pb->pb_data != NULL);
+            STAILQ_INSERT_TAIL(&se->se_rx_scatter_queue, pb, pb_link);
+
+            pb->pb_buflen = len - se->se_rx_scatter_length;
+
+            if(flags & PBUF_EOP) {
+              pbuf_t *first = STAILQ_FIRST(&se->se_rx_scatter_queue);
+              first->pb_pktlen = len;
+
+              if(likely(!tsa)) {
+                STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
+                              &se->se_rx_scatter_queue);
+                netif_wakeup(&se->se_eni.eni_ni);
+              }
+
+            } else {
+              se->se_rx_scatter_length = len;
+            }
+          }
         }
+        buf = nextbuf;
+      } else {
+        se->se_eni.eni_stats.rx_sw_qdrop++;
+        pbuf_put(pb);
       }
-
-      // Get new buffer for DMA RX
-      buf = pbuf_data_get(0);
-      if(buf == NULL) {
-        panic("Out of buffers");
-        break;
-      }
+    } else {
     }
-
-    rx_desc_give(rx, buf);
+    rx_desc_give(se, se->se_next_rx & ETH_RX_RING_MASK, buf);
     se->se_next_rx++;
   }
 }
@@ -313,47 +412,107 @@ static void
 handle_irq_tx(stm32h7_eth_t *se)
 {
   while(se->se_tx_rdptr != se->se_tx_wrptr) {
-    desc_t *tx = se->se_txring + (se->se_tx_rdptr & ETH_TX_RING_MASK);
+    const size_t rdptr = se->se_tx_rdptr & ETH_TX_RING_MASK;
+    desc_t *tx = se->se_txring + rdptr;
 
     const uint32_t w3 = tx->w3;
     if(w3 & ETH_TDES3_OWN)
       break;
-    pbuf_data_put(se->se_tx_pbuf_data[se->se_tx_rdptr & ETH_TX_RING_MASK]);
+
+    pbuf_t *pb = se->se_tx_pbuf[rdptr];
+    if(pb != NULL) {
+      // tx-callback is now in (reused) pbuf_t
+      // Reuse pbuf_t for queue-link and fill out pbuf_timestamp_t
+      // in data, and enqueue back to network stack
+
+      pbuf_timestamp_t *s = se->se_tx_pbuf[rdptr];
+      pbuf_timestamp_t *pt = se->se_tx_pbuf_data[rdptr];
+      pt->pt_cb = s->pt_cb;
+      pt->pt_id = s->pt_id;
+      pt->pt_seconds = tx->w1;
+      pt->pt_nanoseconds = tx->w0;
+
+      pbuf_t *pb = (pbuf_t *)s;
+      pb->pb_flags = PBUF_SOP | PBUF_EOP | PBUF_TIMESTAMP;
+      pb->pb_offset = 0;
+      pb->pb_buflen = sizeof(pbuf_timestamp_t);
+      pb->pb_pktlen = pb->pb_buflen;
+      pb->pb_data = pt;
+
+      STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
+      netif_wakeup(&se->se_eni.eni_ni);
+
+    } else {
+      pbuf_data_put(se->se_tx_pbuf_data[rdptr]);
+    }
+
     se->se_tx_rdptr++;
   }
 }
 
 
-
 static error_t
-stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
+stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pb,
+                   pbuf_tx_cb_t *txcb, uint32_t id)
 {
   stm32h7_eth_t *se = (stm32h7_eth_t *)eni;
+  pbuf_t *n;
+  size_t count = 0;
 
-  pbuf_t *pb;
+  for(n = pb; n != NULL; n = n->pb_next) {
+    count++;
+  }
+
   int q = irq_forbid(IRQ_LEVEL_NET);
-
   int wrptr = se->se_tx_wrptr;
-  for(pb = pkt; pb != NULL; pb = pb->pb_next) {
+  const uint8_t qlen = (wrptr - se->se_tx_rdptr) & 0xff;
+
+  if(qlen + count >= ETH_TX_RING_SIZE) {
+    pbuf_free_irq_blocked(pb);
+    eni->eni_stats.tx_qdrop++;
+    irq_permit(q);
+    return ERR_QUEUE_FULL;
+  }
+
+  for(; pb != NULL; pb = n) {
+    n = STAILQ_NEXT(pb, pb_link);
 
     desc_t *tx = se->se_txring + (wrptr & ETH_TX_RING_MASK);
     se->se_tx_pbuf_data[wrptr & ETH_TX_RING_MASK] = pb->pb_data;
 
     tx->p0 = pb->pb_data + pb->pb_offset;
     tx->w1 = 0;
-    tx->w2 = (1 << 31) | pb->pb_buflen;
 
     uint32_t w3 = ETH_TDES3_OWN | pb->pb_pktlen;
+    uint32_t w2 = (1 << 31) | pb->pb_buflen;
 
     w3 |= (0b11 << 16); // Calculate and insert checksums
 
-    if(pb->pb_flags & PBUF_SOP)
+    if(pb->pb_flags & PBUF_SOP) {
       w3 |= ETH_TDES3_FD;
+      if(unlikely(txcb != NULL)) {
+        w2 |= (1 << 30); // Enable timestamping
+      }
+    }
+
+    tx->w2 = w2;
+
     if(pb->pb_flags & PBUF_EOP) {
       w3 |= ETH_TDES3_LD;
+      if(unlikely(txcb != NULL)) {
+        // Reuse pbuf_t for tx callback and id
+        pbuf_timestamp_t *pt = (pbuf_timestamp_t *)pb;
+        pt->pt_cb = txcb;
+        pt->pt_id = id;
+        se->se_tx_pbuf[wrptr & ETH_TX_RING_MASK] = pb;
+        pb = NULL;
+      }
+    }
+    if(pb != NULL) {
+      pbuf_put(pb);
+      se->se_tx_pbuf[wrptr & ETH_TX_RING_MASK] = NULL;
     }
     tx->w3 = w3;
-
     wrptr++;
   }
 
@@ -362,11 +521,6 @@ stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
   reg_wr(ETH_DMACTXDTPR, (uint32_t)tx);
 
   se->se_tx_wrptr = wrptr;
-  for(; pkt != NULL; pkt = pb) {
-    pb = STAILQ_NEXT(pkt, pb_link);
-    pbuf_put(pkt); // Free header, data will be free'd after TX is done
-  }
-
   irq_permit(q);
   return 0;
 }
@@ -381,20 +535,27 @@ stm32h7_eth_irq(void *arg)
   stm32h7_eth_t *se = arg;
 
   const uint32_t dmacsr = reg_rd(ETH_DMACSR);
-  const uint32_t mtlisr = reg_rd(ETH_MTLISR);
+  //  const uint32_t mtlisr = reg_rd(ETH_MTLISR);
   const uint32_t macisr = reg_rd(ETH_MACISR);
 
-  if(dmacsr & ~0x8c45) {
-    panic("%s: Unhandled dmairq 0x%x", __FUNCTION__, dmacsr & ~0x8c45);
+  if(dmacsr & ~0x8cc5) {
+    panic("%s: Unhandled dmairq 0x%x", __FUNCTION__, dmacsr & ~0x8cc5);
   }
-  assert(mtlisr == 0);
-  assert(macisr == 0);
 
   if(dmacsr & 0x5)
     handle_irq_tx(se);
 
   if(dmacsr & 0x40)
     handle_irq_rx(se);
+
+  if(dmacsr & 0x80) {
+    panic("RX underflow, game over 0x%x\n", macisr);
+  } else {
+
+    //    assert(mtlisr == 0);
+    if(macisr)
+      panic("macisr:0x%x", macisr);
+  }
 
   reg_wr(ETH_DMACSR, dmacsr);
 }
@@ -404,11 +565,87 @@ static const ethphy_reg_io_t stm32h7_eth_mdio = {
   .write = mii_write
 };
 
+#ifdef ENABLE_NET_PTP
+
+
+#define PTP_STEP_THRESHOLD_NS  100000000LL // 10 ms
+#define MAX_ADJ_PPB            100000
+#define SERVO_KP_SHIFT         2
+#define SERVO_KI_SHIFT         7
+
+void
+ptp_clock_slew(stm32h7_eth_t *se, int64_t offset_ns)
+{
+  int64_t adj_p = offset_ns >> SERVO_KP_SHIFT;
+  se->se_accumulated_drift_ppb += (offset_ns >> SERVO_KI_SHIFT);
+
+  // Anti-windup clamping
+  if(se->se_accumulated_drift_ppb > MAX_ADJ_PPB)
+    se->se_accumulated_drift_ppb = MAX_ADJ_PPB;
+  else if(se->se_accumulated_drift_ppb < -MAX_ADJ_PPB)
+    se->se_accumulated_drift_ppb = -MAX_ADJ_PPB;
+
+  int64_t total_ppb = adj_p + se->se_accumulated_drift_ppb;
+  int32_t addend_adjustment =
+    (total_ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
+
+  uint32_t final_addend = se->se_addend + addend_adjustment;
+
+  reg_wr(ETH_MACTSAR, final_addend);
+  reg_set_bit(ETH_MACTSCR, 5);
+}
+
+
+static int64_t
+get_current_mac_time(void)
+{
+  while(1) {
+    const uint32_t cur_s = reg_rd(ETH_MACSTSR);
+    const uint32_t cur_ns = reg_rd(ETH_MACSTNR);
+    if(cur_s == reg_rd(ETH_MACSTSR)) {
+      return (int64_t)cur_s * 1000000000 + cur_ns;
+    }
+  }
+}
+
+
+static void
+ptp_clock_step(stm32h7_eth_t *se, int64_t offset_ns)
+{
+  int64_t cur_t = get_current_mac_time();
+  int64_t ch = cur_t + offset_ns;
+
+  reg_wr(ETH_MACSTSUR, ch / 1000000000);
+  reg_wr(ETH_MACSTNUR, ch % 1000000000);
+  reg_set_bit(ETH_MACTSCR, 2);
+  while(reg_get_bit(ETH_MACTSCR, 2));
+
+  se->se_accumulated_drift_ppb = 0; // Reset clock servo integrator
+
+  evlog(LOG_DEBUG, "%s: Step adjust %lld", se->se_eni.eni_ni.ni_dev.d_name,
+        offset_ns);
+}
+
+
+static void
+stm32h7_eth_set_clock(struct ether_netif *eni, int64_t offset_ns)
+{
+  stm32h7_eth_t *se = (stm32h7_eth_t *)eni;
+  int64_t abs_offset = (offset_ns < 0) ? -offset_ns : offset_ns;
+
+  if(abs_offset > PTP_STEP_THRESHOLD_NS) {
+    ptp_clock_step(se, offset_ns);
+  } else {
+    ptp_clock_slew(se, offset_ns);
+  }
+}
+
+#endif
 
 void
 stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
                  const ethphy_driver_t *ethphy, int phy_addr,
-                 ethphy_mode_t mode)
+                 ethphy_mode_t mode, int flags)
 {
   stm32h7_eth_t *se = &stm32h7_eth;
 
@@ -476,6 +713,49 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   }
   udelay(10);
 
+#ifdef ENABLE_NET_PTP
+  if(flags & STM32H7_ETH_ENABLE_PTP_TIMESTAMPING) {
+
+    const unsigned int ahb_freq = clk_get_freq(CLK_ETH1MACEN);
+
+    uint32_t ssinc = (1000000000 / ahb_freq) + 1;
+
+    uint64_t numerator = 1000000000ULL;
+    uint64_t denominator = ahb_freq * ssinc;
+    se->se_addend = (numerator << 32) / denominator;
+
+    se->se_ppb_scale_mult = se->se_addend / 1000;
+    se->se_ppb_scale_div = 1000000;
+    printf("AHB: %d\n", ahb_freq);
+    printf("ssinc:%d addend:0x%x  scale_mult:%d scale_div:%d\n",
+           ssinc, se->se_addend, se->se_ppb_scale_mult, se->se_ppb_scale_div);
+
+    reg_wr(ETH_MACTSCR,
+           (1 << 11) | // PTPv2 ethernet
+           (1 << 10) | // Enable timestamping for PTPv2
+           (1 << 9)  | // Rollover ns at 999999999
+           (1 << 1)  | // Fine mode
+           (1 << 0)  | // Enable
+           0);
+
+    reg_set_bits(ETH_MACSSIR, 16, 8, ssinc);
+
+    reg_wr(ETH_MACSTSUR, 0);
+    reg_wr(ETH_MACSTNUR, 0);
+    reg_set_bit(ETH_MACTSCR, 2);
+
+    reg_wr(ETH_MACTSAR, se->se_addend);
+    reg_set_bit(ETH_MACTSCR, 5);
+    while(reg_get_bit(ETH_MACTSCR, 5));
+
+    se->se_eni.eni_adjust_mac_clock = stm32h7_eth_set_clock;
+
+    reg_wr(ETH_MACPPSCR, 1);
+  }
+#endif
+
+  // DMA config
+
   reg_wr(ETH_MACPFR, 1 << 31);  // Receive ALL
 
   reg_set_bit(ETH_MTLTXQOMR, 1);
@@ -499,9 +779,8 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   for(int i = 0; i < ETH_RX_RING_SIZE; i++) {
     void *buf = pbuf_data_get(0);
     if(buf == NULL)
-      break;
-    desc_t *rx = se->se_rxring + i;
-    rx_desc_give(rx, buf);
+      panic("no pbufs");
+    rx_desc_give(se, i, buf);
   }
 
   reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
@@ -532,3 +811,4 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   irq_enable_fn_arg(61, IRQ_LEVEL_NET, stm32h7_eth_irq, se);
   thread_create(stm32h7_phy_thread, se, 512, "phy", 0, 4);
 }
+

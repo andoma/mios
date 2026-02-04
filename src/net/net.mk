@@ -70,6 +70,8 @@ SRCS-${ENABLE_RPC} += \
 SRCS-${ENABLE_NET_IPV4} += \
 	${SRC}/net/service/svc_telnet.c \
 
+SRCS-${ENABLE_NET_PTP} += \
+	${SRC}/net/ptp.c \
 
 ${MOS}/net/%.o : CFLAGS += ${NOFPU}
 ${MOS}/net/mbus/%.o : CFLAGS += ${NOFPU}

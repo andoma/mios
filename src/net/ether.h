@@ -3,10 +3,18 @@
 #include <mios/timer.h>
 
 #include "netif.h"
+#include "ptp.h"
 
-#define ETHERTYPE_IPV4 0x0800
-#define ETHERTYPE_ARP  0x0806
+#define ETHERTYPE_IPV4  0x0800
+#define ETHERTYPE_ARP   0x0806
+#define ETHERTYPE_PTPv2 0x88f7
 
+
+typedef struct ether_hdr {
+  uint8_t dst_addr[6];
+  uint8_t src_addr[6];
+  uint16_t type;
+} ether_hdr_t;
 
 typedef struct ether_stats {
   uint64_t tx_pkt;
@@ -28,7 +36,8 @@ typedef struct ether_netif {
 
   SLIST_ENTRY(ether_netif) eni_global_link;
 
-  error_t (*eni_output)(struct ether_netif *eni, pbuf_t *pb, int flags);
+  error_t (*eni_output)(struct ether_netif *eni, pbuf_t *pb,
+                        pbuf_tx_cb_t *txcb, uint32_t id);
 
   uint8_t eni_addr[6];    // Our address
 
@@ -44,6 +53,13 @@ typedef struct ether_netif {
   ether_stats_t eni_stats;
 
   timer_t eni_lldp_timer;
+
+#ifdef ENABLE_NET_PTP
+  ptp_ether_state_t eni_ptp;
+
+  void (*eni_adjust_mac_clock)(struct ether_netif *eni, int64_t offset);
+
+#endif
 
 } ether_netif_t;
 

@@ -16,6 +16,7 @@ STAILQ_HEAD(pbuf_queue, pbuf);
 #define PBUF_SEQ       0x8
 #define PBUF_BCAST     0x10
 #define PBUF_MCAST     0x20
+#define PBUF_TIMESTAMP 0x40 // Packet data starts with pbuf_timestamp
 
 typedef struct pbuf {
 
@@ -30,11 +31,25 @@ typedef struct pbuf {
 
   void *pb_data;
 
-#ifdef ENABLE_NET_TIMESTAMPING
-  uint64_t pb_timestamp;
-#endif
-
 } pbuf_t;
+
+struct netif;
+struct pbuf_timestamp;
+
+typedef void (pbuf_tx_cb_t)(struct netif *ni,
+                            const struct pbuf_timestamp *pt);
+
+typedef struct pbuf_timestamp {
+
+  pbuf_tx_cb_t *pt_cb;
+  uint32_t pt_id;
+
+  uint32_t pt_seconds;
+  int32_t pt_nanoseconds;
+
+} pbuf_timestamp_t;
+
+
 
 void pbuf_reset(pbuf_t *pb, size_t header_size, size_t len);
 

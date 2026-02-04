@@ -103,7 +103,7 @@ lldp_send(ether_netif_t *eni)
       memcpy(eh + 6, eni->eni_addr, 6);
       eh[12] = 0x88;
       eh[13] = 0xcc;
-      eni->eni_output(eni, pb, 0);
+      eni->eni_output(eni, pb, NULL, 0);
     }
   }
 

@@ -644,16 +644,17 @@ pbuf_dump_stream(const char *prefix, const pbuf_t *pb, int full, stream_t *st)
 {
   for(; pb != NULL; pb = pb->pb_next) {
 
-    stprintf(st, "%s: %p %5d %c%c%c %d %p+%-4d [%4d]: ",
-           prefix, pb,
-           pb->pb_pktlen,
-           pb->pb_flags & PBUF_SOP ? 'S' : ' ',
-           pb->pb_flags & PBUF_EOP ? 'E' : ' ',
-           pb->pb_next ? '+' : ' ',
-           pb->pb_credits,
-           pb->pb_data,
-           pb->pb_offset,
-           pb->pb_buflen);
+    stprintf(st, "%s: %p %5d %c%c%c%c %d %p+%-4d [%4d]: ",
+             prefix, pb,
+             pb->pb_pktlen,
+             pb->pb_flags & PBUF_SOP ? 'S' : ' ',
+             pb->pb_flags & PBUF_EOP ? 'E' : ' ',
+             pb->pb_flags & PBUF_TIMESTAMP ? 'T' : ' ',
+             pb->pb_next ? '+' : ' ',
+             pb->pb_credits,
+             pb->pb_data,
+             pb->pb_offset,
+             pb->pb_buflen);
 
     const uint8_t *data = pb->pb_data + pb->pb_offset;
     int tail;

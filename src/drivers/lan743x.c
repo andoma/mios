@@ -243,7 +243,8 @@ typedef struct lan743x {
 
 
 static error_t
-lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt, int flags)
+lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt,
+                   pbuf_tx_cb_t *txcb, uint32_t id)
 {
   lan743x_t *l = (lan743x_t *)eni;
   pbuf_t *pb;
