@@ -13,6 +13,7 @@
 
 #include <mios/cli.h>
 #include <mios/datetime.h>
+#include <mios/eventlog.h>
 
 typedef struct {
   uint32_t seconds;
@@ -35,15 +36,21 @@ typedef struct {
 
 } ntp_pkt_t;
 
+typedef struct {
 
-static uint32_t ntp_server;
-static int64_t ntp_xmit_time;
-static void ntp_timer_cb(void *opaque, uint64_t expire);
+  uint32_t ntp_server;
+  int64_t ntp_xmit_time;
+  timer_t timer;
 
-static timer_t ntp_timer = {
-  .t_cb = ntp_timer_cb,
-  .t_name = "NTP"
-};
+  // 32.32 NTP timestamp of the above which we send in the packet
+  // We keep this to verify that the response is related to our trasmission
+  // Thus tx_ns can be refined (from the kernel) while this needs to
+  // stay as is for bitwise matching
+  ntp_ts_t user_tx;
+
+} ntp_state_t;
+
+static ntp_state_t g_ntp_state;
 
 static uint64_t
 usec_from_ntp_ts(const ntp_ts_t *ts)
@@ -69,27 +76,44 @@ ntp_ts_from_usec(ntp_ts_t *nt, uint64_t usec)
 static pbuf_t *
 ntp_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 {
-  int64_t now = clock_get();
+  ntp_state_t *ns = &g_ntp_state;
+  int64_t wnow = clock_get() + wallclock.utc_offset;
 
   const ipv4_header_t *ip = pbuf_data(pb, 0);
   const uint32_t from = ip->src_addr;
 
-  if(from != ntp_server)
+  if(from != ns->ntp_server)
     return pb;
 
   pb = pbuf_drop(pb, udp_offset + 8, 0);
 
   const ntp_pkt_t *np = pbuf_cdata(pb, 0);
+  const int version = (np->flags >> 3) & 7;
+  const int mode = np->flags & 7;
+
+  if(version != 4) {
+    return pb; // We only support version 4
+  }
+
+  if(mode != 4) {
+    return pb; // Not a server response
+  }
+
+  if(memcmp(&np->origin_ts, &ns->user_tx, sizeof(ntp_ts_t))) {
+    return pb;
+  }
+
   int64_t server_rx = usec_from_ntp_ts(&np->rx_ts);
   int64_t server_tx = usec_from_ntp_ts(&np->tx_ts);
-  int64_t theta = ((server_rx - ntp_xmit_time) + (server_tx - now)) / 2;
-  datetime_set_utc_offset(theta, "NTP");
+  int64_t offset = ((server_rx - ns->ntp_xmit_time) + (server_tx - wnow)) / 2;
+
+  datetime_set_utc_offset(offset, "NTP");
   return pb;
 }
 
 
 static void
-ntp_send(void)
+ntp_send(ntp_state_t *ns)
 {
   pbuf_t *pb = pbuf_make(16 + 20 + 8, 0); // Make space for ether + ip + udp
   if(pb == NULL)
@@ -100,21 +124,20 @@ ntp_send(void)
   np->precision = -18; // 1µS
 
   uint64_t now = clock_get();
-
-  if(wallclock.utc_offset) {
-    ntp_ts_from_usec(&np->origin_ts, wallclock.utc_offset + now);
-  }
-
-  ntp_xmit_time = now;
-  net_timer_arm(&ntp_timer, now + 15000000);
-  udp_send(NULL, pb, ntp_server, NULL, 123, 123);
+  uint64_t wnow = now + wallclock.utc_offset;
+  ntp_ts_from_usec(&np->tx_ts, wnow);
+  ns->user_tx = np->tx_ts;
+  udp_send(NULL, pb, ns->ntp_server, NULL, 123, 123);
+  ns->ntp_xmit_time = wnow;
+  net_timer_arm(&ns->timer, now + 15000000);
 }
 
 
 static void
 ntp_timer_cb(void *opaque, uint64_t expire)
 {
-  ntp_send();
+  ntp_state_t *ns = opaque;
+  ntp_send(ns);
 }
 
 UDP_INPUT(ntp_input, 123);
@@ -122,7 +145,7 @@ UDP_INPUT(ntp_input, 123);
 static void
 ntp_cb(struct net_task *nt, uint32_t signals)
 {
-  ntp_send();
+  ntp_send(&g_ntp_state);
 }
 
 static net_task_t ntp_task = { ntp_cb };
@@ -130,10 +153,14 @@ static net_task_t ntp_task = { ntp_cb };
 void
 ntp_set_server(uint32_t server_addr)
 {
-  if(ntp_server == server_addr)
+  ntp_state_t *ns = &g_ntp_state;
+
+  if(ns->ntp_server == server_addr)
     return;
 
-  ntp_server = server_addr;
+  ns->ntp_server = server_addr;
+  ns->timer.t_cb = ntp_timer_cb;
+  ns->timer.t_opaque = ns;
   net_task_raise(&ntp_task, 1);
 }
 

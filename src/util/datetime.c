@@ -95,12 +95,10 @@ datetime_adj(datetime_adj_hand_t which, int delta)
 int
 datetime_set_utc_offset(int64_t offset, const char *source)
 {
-  int64_t delta = wallclock.utc_offset - offset;
-
-  int significant_change = delta > 1000000 || delta < -1000000;
+  int significant_change = offset > 1000000 || offset < -1000000;
 
   wallclock.source = source;
-  wallclock.utc_offset = offset;
+  wallclock.utc_offset += offset;
   if(significant_change)
     evlog(LOG_INFO, "Clock updated via %s (uptime:%"PRId64" µs)",
           source, clock_get());
