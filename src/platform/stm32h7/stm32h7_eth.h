@@ -17,3 +17,5 @@ static const uint8_t stm32h7_eth_rmii_100pin[] =
   { GPIO_PA(1), GPIO_PA(2), GPIO_PA(7), GPIO_PB(11), GPIO_PB(12),
     GPIO_PB(13), GPIO_PC(1), GPIO_PC(4), GPIO_PC(5)
   };
+
+int64_t stm32h7_get_current_mac_time(void);

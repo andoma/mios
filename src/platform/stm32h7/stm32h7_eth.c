@@ -596,8 +596,8 @@ ptp_clock_slew(stm32h7_eth_t *se, int64_t offset_ns)
 }
 
 
-static int64_t
-get_current_mac_time(void)
+int64_t
+stm32h7_get_current_mac_time(void)
 {
   while(1) {
     const uint32_t cur_s = reg_rd(ETH_MACSTSR);
@@ -612,7 +612,7 @@ get_current_mac_time(void)
 static void
 ptp_clock_step(stm32h7_eth_t *se, int64_t offset_ns)
 {
-  int64_t cur_t = get_current_mac_time();
+  int64_t cur_t = stm32h7_get_current_mac_time();
   int64_t ch = cur_t + offset_ns;
 
   reg_wr(ETH_MACSTSUR, ch / 1000000000);
