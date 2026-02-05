@@ -48,6 +48,7 @@ static const struct {
   { SPI3_BASE, 62, 61, CLK_SPI3, 6, 51, 16 },
   { SPI4_BASE, 84, 83, CLK_SPI4, 5, 84, 8 },
   { SPI5_BASE, 86, 85, CLK_SPI5, 5, 85, 8 },
+  { SPI6_BASE, 12, 11, CLK_SPI6, 8, 86, 8 },
 };
 
 
