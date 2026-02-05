@@ -12,6 +12,12 @@
 #define CONSOLE_CLK   CLK_USART6
 #define CONSOLE_AF    8
 
+#elif CONSOLE_USART_INSTANCE == 2
+
+#define CONSOLE_USART USART2_BASE
+#define CONSOLE_CLK   CLK_USART2
+#define CONSOLE_AF    7
+
 #else
 #error Bootloader: Unsupported USART instance
 #endif
