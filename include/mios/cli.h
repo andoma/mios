@@ -40,6 +40,8 @@ int cli_getc(cli_t *cli, int wait);
 
 int cli_on_stream(struct stream *s, char promptchar);
 
+error_t cli_dispatch_command(cli_t *c, int argc, char *argv[]);
+
 void cli_console(char promptchar);
 
 #define cli_flush(cli) stream_write((cli)->cl_stream, NULL, 0, 0)
