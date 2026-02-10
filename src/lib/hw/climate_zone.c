@@ -166,6 +166,20 @@ climate_zone_refresh_alert(climate_zone_t *cz, uint32_t set, uint32_t clr)
          czc->czc_under_temp_error,
          czc->czc_temp_hysteresis);
 
+  setclr(&set, &clr, 4, cz->cz_measured_rh,
+         czc->czc_over_rh_error,
+         czc->czc_over_rh_warning,
+         czc->czc_under_rh_warning,
+         czc->czc_under_rh_error,
+         czc->czc_rh_hysteresis);
+
+  setclr(&set, &clr, 8, cz->cz_measured_fan_rpm,
+         czc->czc_over_fan_rpm_error,
+         czc->czc_over_fan_rpm_warning,
+         czc->czc_under_fan_rpm_warning,
+         czc->czc_under_fan_rpm_error,
+         czc->czc_fan_rpm_hysteresis);
+
   uint32_t code = (cz->cz_alert.as_code | set) &~ clr;
   alert_set(&cz->cz_alert, code);
 }
@@ -177,7 +191,6 @@ climate_zone_alert_refcount(struct alert_source *as, int value)
   if(cz->cz_class->czc_refcount)
     cz->cz_class->czc_refcount(cz, value);
 }
-
 
 static const alert_class_t climate_zone_alert_class = {
   .ac_message = climate_zone_alert_message,
