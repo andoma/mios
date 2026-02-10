@@ -178,6 +178,20 @@ climate_zone_alert_refcount(struct alert_source *as, int value)
     cz->cz_class->czc_refcount(cz, value);
 }
 
+  setclr(&set, &clr, 4, cz->cz_measured_rh,
+         czc->czc_over_rh_error,
+         czc->czc_over_rh_warning,
+         czc->czc_under_rh_warning,
+         czc->czc_under_rh_error,
+         czc->czc_rh_hysteresis);
+
+  setclr(&set, &clr, 8, cz->cz_measured_fan_rpm,
+         czc->czc_over_fan_rpm_error,
+         czc->czc_over_fan_rpm_warning,
+         czc->czc_under_fan_rpm_warning,
+         czc->czc_under_fan_rpm_error,
+         czc->czc_fan_rpm_hysteresis);
+
 
 static const alert_class_t climate_zone_alert_class = {
   .ac_message = climate_zone_alert_message,
