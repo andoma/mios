@@ -153,6 +153,8 @@ cmd_bad_args(cli_t *c, int argc, char **argv)
   return ERR_INVALID_ARGS;
 }
 
+static error_t cmd_help(cli_t *c, int argc, char **argv);
+
 static const cli_cmd_t test_commands[] = {
   {"arp",                cmd_dummy,    NULL, NULL},
   {"bootflash_erase",    cmd_dummy,    NULL, NULL},
@@ -161,6 +163,7 @@ static const cli_cmd_t test_commands[] = {
   {"cat",                cmd_dummy,    NULL, NULL},
   {"date",               cmd_dummy,    NULL, NULL},
   {"dev",                cmd_dummy,    NULL, NULL},
+  {"help",               cmd_help,     NULL, "Show shell usage guide"},
   {"i2c_scan",           cmd_bad_args, "<bus>", "Scan i2c bus"},
   {"ls",                 cmd_dummy,    NULL, NULL},
   {"mem",                cmd_dummy,    NULL, NULL},
@@ -342,6 +345,9 @@ cli_prompt(cli_t *cl, char promptchar)
   return len;
 }
 
+static error_t cmd_help(cli_t *c, int argc, char **argv);
+CLI_CMD_DEF_EXT("help", cmd_help, NULL, "Show shell usage guide")
+
 #endif // CLI_STANDALONE
 
 
@@ -411,8 +417,6 @@ prefix_match(const char *cmd, const char *buf, int len)
 }
 
 
-static void show_help(cli_t *c, int argc, char **argv);
-
 #ifdef ENABLE_CLI_EXTENDED_HELP
 static void
 print_cmd_name(cli_t *c, const char *cmd)
@@ -429,12 +433,6 @@ dispatch_command(cli_t *c, char *line)
   int argc = tokenize(line, argv, CLI_MAX_ARGC);
   if(argc == 0)
     return;
-
-  // Handle "help" command
-  if(!strcmp(argv[0], "help")) {
-    show_help(c, argc, argv);
-    return;
-  }
 
   const cli_cmd_t *begin = CMD_ARRAY_BEGIN;
   const cli_cmd_t *end = CMD_ARRAY_END;
@@ -470,7 +468,7 @@ dispatch_command(cli_t *c, char *line)
   for(const cli_cmd_t *p = begin; p != end; p++) {
     const char *r = match_argv(p->cmd, argv, argc);
     if(r && *r == '_') {
-      cli_printf(c, "Incomplete command. Try 'help %s'.\n", argv[0]);
+      cli_printf(c, "Incomplete command. Press ? for options.\n");
       return;
     }
   }
@@ -479,65 +477,17 @@ dispatch_command(cli_t *c, char *line)
 }
 
 
-// ====================================================================
-// Help system
-// ====================================================================
-
-static void
-show_help(cli_t *c, int argc, char **argv)
+static error_t
+cmd_help(cli_t *c, int argc, char **argv)
 {
-  const cli_cmd_t *begin = CMD_ARRAY_BEGIN;
-  const cli_cmd_t *end = CMD_ARRAY_END;
-
-  int plen = 0;
-  const cli_cmd_t *first = begin;
-
-  if(argc > 1) {
-    // Find first command matching the group prefix (sorted array)
-    for(const cli_cmd_t *p = begin; p != end; p++) {
-      const char *r = match_argv(p->cmd, argv + 1, argc - 1);
-      if(r && *r == '_') {
-        first = p;
-        plen = r - p->cmd + 1; // include trailing underscore
-        break;
-      }
-    }
-    if(plen == 0)
-      return; // No matching group
-  }
-
-  const char *prev_seg = NULL;
-  int prev_len = 0;
-
-  for(const cli_cmd_t *p = first; p != end; p++) {
-    if(strncmp(p->cmd, first->cmd, plen))
-      break; // sorted array — no more matches
-
-    const char *suffix = p->cmd + plen;
-
-    // Extract next segment (up to underscore or end)
-    const char *seg_end = suffix;
-    while(*seg_end && *seg_end != '_')
-      seg_end++;
-
-    int seg_len = seg_end - suffix;
-    if(seg_len == 0)
-      continue;
-
-    // Deduplicate using pointer into command strings (no stack buffer)
-    if(seg_len == prev_len && prev_seg &&
-       !strncmp(suffix, prev_seg, seg_len))
-      continue;
-    prev_seg = suffix;
-    prev_len = seg_len;
-
-#ifdef ENABLE_CLI_EXTENDED_HELP
-    if(*seg_end == '\0' && p->brief)
-      cli_printf(c, "  %-16.*s %s\n", seg_len, suffix, p->brief);
-    else
-#endif
-      cli_printf(c, "  %.*s\n", seg_len, suffix);
-  }
+  (void)argc;
+  (void)argv;
+  cli_printf(c,
+    "  ?     List commands (context-sensitive)\n"
+    "  TAB   Complete command\n"
+    "  Emacs-style line editing (Ctrl-A, Ctrl-E, Ctrl-W, ...)\n"
+  );
+  return 0;
 }
 
 
@@ -551,8 +501,6 @@ do_completion(cli_t *c, cli_ed_t *ed, int list_only)
   const cli_cmd_t *begin = CMD_ARRAY_BEGIN;
   const cli_cmd_t *end = CMD_ARRAY_END;
   int plen = ed->len;
-
-  int help_match = (plen <= 4) && !strncmp("help", ed->buf, plen);
 
   // Pass 1: count matches and compute longest common prefix.
   const cli_cmd_t *first = NULL;
@@ -596,34 +544,18 @@ do_completion(cli_t *c, cli_ed_t *ed, int list_only)
   }
 #endif
 
-  if(nmatch == 0 && !help_match)
+  if(nmatch == 0)
     return;
 
   if(!list_only) {
-    // Also constrain common prefix against "help" if it matches
-    if(help_match) {
-      if(nmatch == 0) {
-        common = 4;
-      } else {
-        int i = plen;
-        while(i < common && i < 4 && first->cmd[i] == "help"[i])
-          i++;
-        common = i;
-      }
-    }
-
     if(common > plen) {
-      const char *src = nmatch > 0 ? first->cmd : "help";
-
       for(int i = plen; i < common; i++) {
-        char ch = (src[i] == '_') ? ' ' : src[i];
+        char ch = (first->cmd[i] == '_') ? ' ' : first->cmd[i];
         cli_ed_insert(ed, &ch, 1);
       }
 
       // Add trailing space if we completed to a full command or group boundary
       if(nmatch == 1 && first->cmd[common] == '\0') {
-        cli_ed_insert(ed, " ", 1);
-      } else if(nmatch == 0 && common == 4) {
         cli_ed_insert(ed, " ", 1);
       } else if(nmatch > 0 && first->cmd[common] == '_') {
         cli_ed_insert(ed, " ", 1);
@@ -655,9 +587,6 @@ do_completion(cli_t *c, cli_ed_t *ed, int list_only)
 
   const char *prev_seg = NULL;
   int prev_len = 0;
-
-  if(help_match && plen <= 4)
-    cli_printf(c, "  help\n");
 
   for(const cli_cmd_t *p = begin; p != end; p++) {
     if(!prefix_match(p->cmd, ed->buf, plen))
@@ -749,15 +678,7 @@ cli_loop(cli_t *c, char promptchar,
       break;
 
     case CLI_ED_HELP:
-      // Show context-sensitive help for current input
-      // Use current buffer as help prefix
-      if(ed.len > 0) {
-        do_completion(c, &ed, 1);
-      } else {
-        cli_printf(c, "\n");
-        char *help_argv[] = { "help" };
-        show_help(c, 1, help_argv);
-      }
+      do_completion(c, &ed, 1);
       redraw_line(c, &ed, promptchar);
       break;
 
@@ -1344,70 +1265,6 @@ test_complete_help_word(void)
 
 
 // ====================================================================
-// Help tests
-// ====================================================================
-
-static void
-test_help_toplevel(void)
-{
-  cli_t c = {};
-  char *argv[] = { "help" };
-
-  test_output_reset();
-  show_help(&c, 1, argv);
-  // Should show groups and standalone commands
-  CHECK(test_output_contains("bootflash"));
-  CHECK(test_output_contains("reset"));
-  CHECK(test_output_contains("show"));
-  CHECK(test_output_contains("net"));
-  // Should NOT show individual subcommands at top level
-  CHECK(!test_output_contains("erase"));
-  CHECK(!test_output_contains("devices"));
-  CHECK(!test_output_contains("ipv4"));
-}
-
-static void
-test_help_group(void)
-{
-  cli_t c = {};
-  char *argv[] = { "help", "bootflash" };
-
-  test_output_reset();
-  show_help(&c, 2, argv);
-  CHECK(test_output_contains("erase"));
-  CHECK(test_output_contains("install"));
-  CHECK(test_output_contains("setchain"));
-}
-
-static void
-test_help_multilevel(void)
-{
-  cli_t c = {};
-  char *argv[] = { "help", "net" };
-
-  test_output_reset();
-  show_help(&c, 2, argv);
-  CHECK(test_output_contains("ipv4"));
-  CHECK(test_output_contains("ble"));
-  // Should NOT show the leaf commands
-  CHECK(!test_output_contains("show"));
-  CHECK(!test_output_contains("scan"));
-}
-
-static void
-test_help_deep(void)
-{
-  cli_t c = {};
-  char *argv[] = { "help", "net", "ipv4" };
-
-  test_output_reset();
-  show_help(&c, 3, argv);
-  CHECK(test_output_contains("show"));
-  CHECK(test_output_contains("status"));
-}
-
-
-// ====================================================================
 // Dispatch tests
 // ====================================================================
 
@@ -1517,21 +1374,8 @@ test_integration_help_via_enter(void)
   test_reset(&c, &ed);
 
   feed_input(&c, &ed, "help\r");
-  CHECK(test_output_contains("bootflash"));
-  CHECK(test_output_contains("show"));
-  CHECK(test_output_contains("net"));
-}
-
-static void
-test_integration_help_group_via_enter(void)
-{
-  cli_t c;
-  cli_ed_t ed;
-  test_reset(&c, &ed);
-
-  feed_input(&c, &ed, "help bootflash\r");
-  CHECK(test_output_contains("erase"));
-  CHECK(test_output_contains("install"));
+  CHECK(test_output_contains("?"));
+  CHECK(test_output_contains("TAB"));
 }
 
 static void
@@ -1798,11 +1642,14 @@ test_dispatch_invalid_args_without_synopsis(void)
 static void
 test_help_brief_column(void)
 {
-  // help should show brief text in right column for leaf commands
+  // ? listing should show brief text for leaf commands
   cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
   test_output_reset();
-  char *argv[] = { "help" };
-  show_help(&c, 1, argv);
+
+  cli_ed_set(&ed, "");
+  do_completion(&c, &ed, 1);
   CHECK(test_output_contains("Reset the system"));
   CHECK(test_output_contains("Show system uptime"));
 }
@@ -1810,11 +1657,14 @@ test_help_brief_column(void)
 static void
 test_help_brief_not_for_groups(void)
 {
-  // Groups should not show brief text (only leaf commands do)
+  // ? listing: groups should not show brief text (only leaf commands do)
   cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
   test_output_reset();
-  char *argv[] = { "help" };
-  show_help(&c, 1, argv);
+
+  cli_ed_set(&ed, "");
+  do_completion(&c, &ed, 1);
   // "i2c" is a group prefix at top level, should not show "Scan i2c bus"
   CHECK(!test_output_contains("Scan i2c bus"));
 }
@@ -1874,12 +1724,6 @@ static const struct {
   {"complete: no match",            test_complete_no_match},
   {"complete: help word",           test_complete_help_word},
 
-  // Help tests
-  {"help: top level",               test_help_toplevel},
-  {"help: group",                   test_help_group},
-  {"help: multi-level",             test_help_multilevel},
-  {"help: deep",                    test_help_deep},
-
   // Dispatch tests
   {"dispatch: simple command",       test_dispatch_simple},
   {"dispatch: grouped command",      test_dispatch_grouped},
@@ -1912,7 +1756,6 @@ static const struct {
   // Integration tests
   {"integ: tab complete and execute",  test_integration_tab_then_execute},
   {"integ: help via enter",            test_integration_help_via_enter},
-  {"integ: help group via enter",      test_integration_help_group_via_enter},
   {"integ: history recall",            test_integration_history},
   {"integ: ctrl-c cancel",            test_integration_ctrl_c_cancel},
   {"integ: edit and execute",          test_integration_edit_and_execute},
