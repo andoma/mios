@@ -140,7 +140,7 @@ ${CONFIG_H}: ${GLOBALDEPS}
 	@echo >>$@ "#define APPNAME \"${APPNAME}\""
 
 clean::
-	rm -rf "${O}"
+	rm -rf "${O}" build.host
 
 bin: ${O}/build.bin
 
@@ -151,6 +151,17 @@ toolchain:
 
 builtindefs:
 	${TOOLCHAIN}gcc  ${CFLAGS} -dM -E - < /dev/null
+
+build.host/cli_test: ${SRC}/shell/cli.c ${SRC}/shell/cli_edit.c ${SRC}/shell/cli_edit.h
+	@mkdir -p $(dir $@)
+	@echo "\tHOSTCC\t$@"
+	cc -DCLI_STANDALONE -O2 -Wall -Wextra -o $@ ${SRC}/shell/cli.c ${SRC}/shell/cli_edit.c
+
+cli_test: build.host/cli_test
+	build.host/cli_test
+
+cli_run: build.host/cli_test
+	build.host/cli_test -i
 
 include ${SRC}/platform/platforms.mk
 

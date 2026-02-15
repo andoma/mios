@@ -4,19 +4,9 @@
 #include <stdio.h>
 #include <mios/error.h>
 
-#define CLI_LINE_BUF_SIZE 48
-#define CLI_MAX_ARGC 10
-
 typedef struct cli {
 
   struct stream *cl_stream;
-
-  char *cl_argv[CLI_MAX_ARGC];
-
-  int16_t cl_pos;
-
-  // This includes a terminating 0 at all times
-  char cl_buf[CLI_LINE_BUF_SIZE];
 
 } cli_t;
 

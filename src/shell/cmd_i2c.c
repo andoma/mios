@@ -7,7 +7,7 @@ static error_t
 cmd_i2c_scan(cli_t *cli, int argc, char **argv)
 {
   if(argc != 2) {
-    cli_printf(cli, "i2c-scan <bus>\n");
+    cli_printf(cli, "%s <bus>\n", argv[0]);
     return ERR_INVALID_ARGS;
   }
   int bus_id = atoi(argv[1]);
@@ -31,7 +31,7 @@ cmd_i2c_scan(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("i2c-scan", cmd_i2c_scan);
+CLI_CMD_DEF("i2c_scan", cmd_i2c_scan);
 
 
 
@@ -70,7 +70,7 @@ cmd_i2c_read(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("i2c-read", cmd_i2c_read);
+CLI_CMD_DEF("i2c_read", cmd_i2c_read);
 
 
 static error_t
@@ -105,4 +105,4 @@ cmd_i2c_write(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("i2c-write", cmd_i2c_write);
+CLI_CMD_DEF("i2c_write", cmd_i2c_write);
