@@ -484,6 +484,6 @@ cmd_stress(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("fs_stress", cmd_stress);
+CLI_CMD_DEF("fs-stress", cmd_stress);
 
 #endif

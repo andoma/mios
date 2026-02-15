@@ -1556,7 +1556,7 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("tcp", cmd_tcp);
+CLI_CMD_DEF_EXT("show_tcp", cmd_tcp, NULL, "Show active TCP connections");
 
 
 
@@ -1575,5 +1575,5 @@ cmd_killtcp(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("killtcp", cmd_killtcp);
+CLI_CMD_DEF("tcp_kill", cmd_killtcp);
 

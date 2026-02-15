@@ -197,7 +197,7 @@ bpmp_init(void)
 #include <mios/cli.h>
 
 static error_t
-cmd_bpmp(cli_t *cli, int argc, char **argv)
+cmd_bpmp_ipc(cli_t *cli, int argc, char **argv)
 {
   struct bpmp_msg_dispatch *d = &g_bpmp_msg_dispatch;
 
@@ -213,7 +213,7 @@ cmd_bpmp(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("bpmp", cmd_bpmp);
+CLI_CMD_DEF("show_bpmp_ipc", cmd_bpmp_ipc);
 
 #define BPMP_EPERM	1
 #define BPMP_ENOENT	2
@@ -352,7 +352,7 @@ cmd_clocks(cli_t *cli, int argc, char **argv)
 
 }
 
-CLI_CMD_DEF("clocks", cmd_clocks);
+CLI_CMD_DEF("show_bpmp_clocks", cmd_clocks);
 
 
 
@@ -395,7 +395,7 @@ cmd_powergates(cli_t *cli, int argc, char **argv)
 
 }
 
-CLI_CMD_DEF("powergates", cmd_powergates);
+CLI_CMD_DEF("show_bpmp_powergates", cmd_powergates);
 
 
 
@@ -460,7 +460,7 @@ cmd_rst(cli_t *cli, int argc, char **argv)
     return ERR_INVALID_ARGS;
   return bpmp_rst_set(atoi(argv[1]), atoi(argv[2]));
 }
-CLI_CMD_DEF("rst", cmd_rst)
+CLI_CMD_DEF("show_bpmp_rst", cmd_rst)
 
 
 
@@ -517,4 +517,4 @@ cmd_thermal(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("thermal", cmd_thermal)
+CLI_CMD_DEF("show_bpmp_thermal", cmd_thermal)

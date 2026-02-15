@@ -10,7 +10,6 @@ static error_t
 cmd_gpio_read(cli_t *cli, int argc, char **argv)
 {
   if(argc != 3) {
-    cli_printf(cli, "gpio-read <block> <pin>\n");
     return ERR_INVALID_ARGS;
   }
   int port = (argv[1][0] | 32) - 'a';
@@ -25,7 +24,6 @@ static error_t
 cmd_gpio_write(cli_t *cli, int argc, char **argv)
 {
   if(argc != 4) {
-    cli_printf(cli, "gpio-write <block> <pin> <value>\n");
     return ERR_INVALID_ARGS;
   }
   int port = (argv[1][0] | 32) - 'a';
@@ -43,7 +41,6 @@ static error_t
 cmd_gpio_conf(cli_t *cli, int argc, char **argv)
 {
   if(argc != 4) {
-    cli_printf(cli, "gpio-conf <block> <pin> <in/out>\n");
     return ERR_INVALID_ARGS;
   }
   int port = (argv[1][0] | 32) - 'a';
@@ -55,15 +52,20 @@ cmd_gpio_conf(cli_t *cli, int argc, char **argv)
     gpio_conf_output(GPIO(port, pin), GPIO_PUSH_PULL,
 			  GPIO_SPEED_LOW, GPIO_PULL_NONE);
   } else {
-    cli_printf(cli, "gpio-conf: in or out\n");
     return ERR_INVALID_ARGS;
   }
 
   return 0;
 }
 
-CLI_CMD_DEF("gpio-get", cmd_gpio_read);
-CLI_CMD_DEF("gpio-set", cmd_gpio_write);
-CLI_CMD_DEF("gpio-conf", cmd_gpio_conf);
+CLI_CMD_DEF_EXT("gpio_get", cmd_gpio_read,
+                "<block> <pin>", "Read GPIO input");
+
+CLI_CMD_DEF_EXT("gpio_set", cmd_gpio_write,
+                "<block> <pin> <value>", "Write GPIO output");
+
+CLI_CMD_DEF_EXT("gpio_conf", cmd_gpio_conf,
+                "<block> <pin> <in/out>",
+                "Configure GPIO direction");
 
 #endif

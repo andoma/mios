@@ -35,4 +35,4 @@ cmd_arp(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("arp", cmd_arp);
+CLI_CMD_DEF_EXT("show_arp", cmd_arp, NULL, "Show ARP table");

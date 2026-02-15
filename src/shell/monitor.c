@@ -19,16 +19,14 @@ cmd_reset(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("reset", cmd_reset);
+CLI_CMD_DEF_EXT("reset", cmd_reset, NULL, "Reboot system");
 
 
 static error_t
 cmd_md(cli_t *cli, int argc, char **argv)
 {
-  if(argc < 3) {
-    cli_printf(cli, "md <start> <length>\n");
+  if(argc < 3)
     return ERR_INVALID_ARGS;
-  }
 
   const long start = atolx(argv[1]);
   const long len   = atolx(argv[2]);
@@ -36,18 +34,14 @@ cmd_md(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-
-
-CLI_CMD_DEF("md", cmd_md);
+CLI_CMD_DEF_EXT("mem_dump", cmd_md, "<start> <length>", "Dump system memory");
 
 
 static error_t
 cmd_wr32(cli_t *cli, int argc, char **argv)
 {
-  if(argc < 3) {
-    cli_printf(cli, "wr32 <addr> <value>\n");
+  if(argc < 3)
     return ERR_INVALID_ARGS;
-  }
 
   const long addr = atolx(argv[1]);
   const int value = atoix(argv[2]);
@@ -57,9 +51,8 @@ cmd_wr32(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-
-
-CLI_CMD_DEF("wr32", cmd_wr32);
+CLI_CMD_DEF_EXT("mem_wr32", cmd_wr32, "<addr> <value",
+                "Write 32bit value to system memory");
 
 
 
@@ -67,7 +60,6 @@ static error_t
 cmd_rd32(cli_t *cli, int argc, char **argv)
 {
   if(argc < 2) {
-    cli_printf(cli, "rd32 <start> [count]\n");
     return ERR_INVALID_ARGS;
   }
 
@@ -92,11 +84,8 @@ cmd_rd32(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-
-
-CLI_CMD_DEF("rd32", cmd_rd32);
-
-
+CLI_CMD_DEF_EXT("mem_rd32", cmd_rd32,
+                "<start> [count]", "Read 32bit values from system memory");
 
 static error_t
 cmd_uptime(cli_t *cli, int argc, char **argv)

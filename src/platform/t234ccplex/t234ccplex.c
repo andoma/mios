@@ -243,7 +243,7 @@ cmd_pmem(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("pmem", cmd_pmem);
+CLI_CMD_DEF_EXT("show_pmem", cmd_pmem, NULL, "Show physical memory map");
 
 
 
@@ -257,4 +257,4 @@ cmd_cvm(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("cvm", cmd_cvm);
+CLI_CMD_DEF_EXT("show_cvm", cmd_cvm, NULL, "Show Tegra module EEPROM contents");

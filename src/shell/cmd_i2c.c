@@ -6,10 +6,9 @@
 static error_t
 cmd_i2c_scan(cli_t *cli, int argc, char **argv)
 {
-  if(argc != 2) {
-    cli_printf(cli, "%s <bus>\n", argv[0]);
+  if(argc != 2)
     return ERR_INVALID_ARGS;
-  }
+
   int bus_id = atoi(argv[1]);
   i2c_t *bus = i2c_get_bus(bus_id);
   if(bus == NULL) {
@@ -31,17 +30,14 @@ cmd_i2c_scan(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("i2c_scan", cmd_i2c_scan);
-
-
+CLI_CMD_DEF_EXT("i2c_scan", cmd_i2c_scan,
+                "<bus>", "Scan for active devices");
 
 static error_t
 cmd_i2c_read(cli_t *cli, int argc, char **argv)
 {
-  if(argc != 5) {
-    cli_printf(cli, "i2c-read <bus> <addr> <reg> <length>\n");
+  if(argc != 5)
     return ERR_INVALID_ARGS;
-  }
 
   const int bus_id = atoi(argv[1]);
   const int addr = atoix(argv[2]);
@@ -70,16 +66,15 @@ cmd_i2c_read(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("i2c_read", cmd_i2c_read);
-
+CLI_CMD_DEF_EXT("i2c_read", cmd_i2c_read,
+                "<bus> <addr> <reg> <length>",
+                "Read bytes from device");
 
 static error_t
 cmd_i2c_write(cli_t *cli, int argc, char **argv)
 {
-  if(argc < 5) {
-    cli_printf(cli, "i2c-read <bus> <addr> <reg> <value> ... \n");
+  if(argc < 5)
     return ERR_INVALID_ARGS;
-  }
 
   const int bus_id = atoi(argv[1]);
   const int addr = atoix(argv[2]);
@@ -105,4 +100,7 @@ cmd_i2c_write(cli_t *cli, int argc, char **argv)
 }
 
 
-CLI_CMD_DEF("i2c_write", cmd_i2c_write);
+CLI_CMD_DEF_EXT("i2c_write", cmd_i2c_write,
+                "<bus> <addr> <reg> <value> ...",
+                "Write bytes to device");
+

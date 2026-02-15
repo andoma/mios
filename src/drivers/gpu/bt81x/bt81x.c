@@ -1229,7 +1229,7 @@ cmd_eve_rd32(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("eve_rd32", cmd_eve_rd32);
+CLI_CMD_DEF("gpu_rd32", cmd_eve_rd32);
 
 
 static error_t
@@ -1244,7 +1244,7 @@ cmd_font_table(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("font-table", cmd_font_table);
+CLI_CMD_DEF("gpu_font-table", cmd_font_table);
 
 
 
@@ -1262,7 +1262,7 @@ cmd_cop(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("cop", cmd_cop);
+CLI_CMD_DEF("gpu_cop", cmd_cop);
 
 
 
@@ -1283,5 +1283,5 @@ cmd_gpu_info(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("gpu-info", cmd_gpu_info);
+CLI_CMD_DEF("gpu_info", cmd_gpu_info);
 #endif

@@ -983,7 +983,7 @@ cmd_ps(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("ps", cmd_ps);
+CLI_CMD_DEF_EXT("ps", cmd_ps, "<x>", "Show process status");
 
 
 error_t

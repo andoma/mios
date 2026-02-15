@@ -130,4 +130,4 @@ cmd_dfu(cli_t *cli, int argc, char **argv)
   softreset(0);
 }
 
-CLI_CMD_DEF("dfu", cmd_dfu);
+CLI_CMD_DEF_EXT("dfu", cmd_dfu, NULL, "Enter Device Firmware Upgrade");

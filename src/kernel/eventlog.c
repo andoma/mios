@@ -397,7 +397,7 @@ cmd_log(cli_t *cli, int argc, char **argv)
   return stream_log(&ef0, cli->cl_stream, argc > 1);
 }
 
-CLI_CMD_DEF("log", cmd_log);
+CLI_CMD_DEF_EXT("log", cmd_log, "<follow>", "Show system log");
 
 static error_t
 cmd_mark(cli_t *cli, int argc, char **argv)
@@ -413,7 +413,7 @@ cmd_mark(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("mark", cmd_mark);
+CLI_CMD_DEF_EXT("mark", cmd_mark, "...", "Write to system log");
 
 
 

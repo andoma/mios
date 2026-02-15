@@ -329,4 +329,5 @@ cmd_dsigtx(cli_t *cli, int argc, char **argv)
 
 
 
-CLI_CMD_DEF("dsig-tx", cmd_dsigtx);
+CLI_CMD_DEF_EXT("dsig_tx", cmd_dsigtx, "<id> <data...>",
+                "Transmit DSIG/CAN packet");

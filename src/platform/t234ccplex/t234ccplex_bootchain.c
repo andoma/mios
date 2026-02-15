@@ -105,7 +105,8 @@ cmd_bootflash_install(cli_t *cli, int argc, char **argv)
   return bootchain_install_bootflash();
 }
 
-CLI_CMD_DEF("bootflash_install", cmd_bootflash_install);
+CLI_CMD_DEF_EXT("bootflash_install", cmd_bootflash_install,
+                NULL, "Install bootflash (qspi) from RCMBoot (APX) contents");
 
 static error_t
 cmd_bootflash_erase(cli_t *cli, int argc, char **argv)
@@ -116,7 +117,8 @@ cmd_bootflash_erase(cli_t *cli, int argc, char **argv)
   return err;
 }
 
-CLI_CMD_DEF("bootflash_erase", cmd_bootflash_erase);
+CLI_CMD_DEF_EXT("bootflash_erase", cmd_bootflash_erase,
+                NULL, "Erase bootflash (qspi)");
 
 static error_t
 cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
@@ -124,7 +126,6 @@ cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
   if(argc != 2)
     return ERR_INVALID_ARGS;
 
-  const char *str = argv[1];
   int chain;
   switch(argv[1][0]) {
   case 'a':
@@ -136,7 +137,6 @@ cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
     chain = 1;
     break;
   default:
-    cli_printf(cli, "Invalid chain (%s) given, expected 'a' or 'b'", str);
     return ERR_INVALID_ARGS;
   }
 
@@ -149,4 +149,5 @@ cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("bootflash_setchain", cmd_bootflash_setchain);
+CLI_CMD_DEF_EXT("bootflash_setchain", cmd_bootflash_setchain,
+                "a|b", "Select active bootchain");

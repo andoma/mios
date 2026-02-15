@@ -161,7 +161,7 @@ const char *memtypeflags =
   "CODE\0\0";
 
 static error_t
-cmd_mem(cli_t *cli, int argc, char **argv)
+cmd_show_malloc(cli_t *cli, int argc, char **argv)
 {
   mutex_lock(&heap_mutex);
 
@@ -191,10 +191,7 @@ cmd_mem(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("mem", cmd_mem);
-
-
-
+CLI_CMD_DEF_EXT("show_malloc", cmd_show_malloc, NULL, "Memory allocator info");
 
 
 

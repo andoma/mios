@@ -465,7 +465,8 @@ cmd_rail(cli_t *cli, int argc, char **argv)
   return 0;
 }
 
-CLI_CMD_DEF("rail", cmd_rail);
+CLI_CMD_DEF_EXT("rail", cmd_rail, "[name <on|off|1|0>]",
+                "Show / Control power rails");
 
 
 static error_t
