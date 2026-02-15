@@ -191,8 +191,8 @@ error_to_string(error_t e)
 // Simple history for standalone mode
 #define HIST_MAX 8
 static char *hist_lines[HIST_MAX];
+static int hist_wpos;
 static int hist_count;
-static int hist_pos;
 
 static void
 history_reset(void)
@@ -201,43 +201,32 @@ history_reset(void)
     free(hist_lines[i]);
     hist_lines[i] = NULL;
   }
+  hist_wpos = 0;
   hist_count = 0;
-  hist_pos = 0;
 }
 
 static void
 history_add(const char *line)
 {
-  if(hist_count > 0 &&
-     !strcmp(hist_lines[(hist_count - 1) % HIST_MAX], line))
-    return;
-  int idx = hist_count % HIST_MAX;
-  free(hist_lines[idx]);
-  hist_lines[idx] = strdup(line);
+  if(hist_count > 0) {
+    int last = (hist_wpos - 1 + HIST_MAX) % HIST_MAX;
+    if(!strcmp(line, hist_lines[last]))
+      return;
+  }
+  free(hist_lines[hist_wpos]);
+  hist_lines[hist_wpos] = strdup(line);
+  hist_wpos = (hist_wpos + 1) % HIST_MAX;
   hist_count++;
-  hist_pos = hist_count;
-}
-
-static void
-history_up(void)
-{
-  if(hist_pos > 0 && hist_pos > hist_count - HIST_MAX)
-    hist_pos--;
-}
-
-static void
-history_down(void)
-{
-  if(hist_pos < hist_count)
-    hist_pos++;
 }
 
 static char *
-history_get_current_line(void)
+history_get(int offset)
 {
-  if(hist_pos >= hist_count)
+  int avail = hist_count < HIST_MAX ? hist_count : HIST_MAX;
+  if(offset < 0 || offset >= avail)
     return NULL;
-  return strdup(hist_lines[hist_pos % HIST_MAX]);
+  int idx = (hist_wpos - 1 - offset + HIST_MAX) % HIST_MAX;
+  return strdup(hist_lines[idx]);
 }
 
 static size_t
@@ -725,6 +714,8 @@ cli_loop(cli_t *c, char promptchar,
 {
   cli_ed_t ed;
   cli_ed_init(&ed);
+  int hist_offset = -1;
+  char *saved_line = NULL;
 
   redraw_line(c, &ed, promptchar);
 
@@ -746,6 +737,9 @@ cli_loop(cli_t *c, char promptchar,
         dispatch_command(c, ed.buf); // tokenizes ed.buf in-place
       }
       cli_ed_clear(&ed);
+      hist_offset = -1;
+      free(saved_line);
+      saved_line = NULL;
       redraw_line(c, &ed, promptchar);
       break;
 
@@ -768,19 +762,31 @@ cli_loop(cli_t *c, char promptchar,
       break;
 
     case CLI_ED_HIST_UP: {
-      history_up();
-      char *str = history_get_current_line();
-      cli_ed_set(&ed, str);
-      free(str);
+      int next = hist_offset + 1;
+      char *str = history_get(next);
+      if(str) {
+        if(hist_offset == -1)
+          saved_line = strdup(ed.buf);
+        hist_offset = next;
+        cli_ed_set(&ed, str);
+        free(str);
+      }
       redraw_line(c, &ed, promptchar);
       break;
     }
 
     case CLI_ED_HIST_DOWN: {
-      history_down();
-      char *str = history_get_current_line();
-      cli_ed_set(&ed, str);
-      free(str);
+      if(hist_offset > 0) {
+        hist_offset--;
+        char *str = history_get(hist_offset);
+        cli_ed_set(&ed, str);
+        free(str);
+      } else if(hist_offset == 0) {
+        hist_offset = -1;
+        cli_ed_set(&ed, saved_line);
+        free(saved_line);
+        saved_line = NULL;
+      }
       redraw_line(c, &ed, promptchar);
       break;
     }
@@ -794,6 +800,9 @@ cli_loop(cli_t *c, char promptchar,
     case CLI_ED_CANCEL:
       cli_printf(c, "\r\n");
       cli_ed_clear(&ed);
+      hist_offset = -1;
+      free(saved_line);
+      saved_line = NULL;
       redraw_line(c, &ed, promptchar);
       break;
 
@@ -842,6 +851,9 @@ static int test_fail;
 
 // Feed a string of characters into the editor, handling events
 // the same way cli_loop does (completion, help, history).
+static int feed_hist_offset = -1;
+static char *feed_saved_line;
+
 static void
 feed_input(cli_t *c, cli_ed_t *ed, const char *input)
 {
@@ -860,23 +872,41 @@ feed_input(cli_t *c, cli_ed_t *ed, const char *input)
         dispatch_command(c, ed->buf);
       }
       cli_ed_clear(ed);
+      feed_hist_offset = -1;
+      free(feed_saved_line);
+      feed_saved_line = NULL;
       break;
     case CLI_ED_HIST_UP: {
-      history_up();
-      char *str = history_get_current_line();
-      cli_ed_set(ed, str);
-      free(str);
+      int next = feed_hist_offset + 1;
+      char *str = history_get(next);
+      if(str) {
+        if(feed_hist_offset == -1)
+          feed_saved_line = strdup(ed->buf);
+        feed_hist_offset = next;
+        cli_ed_set(ed, str);
+        free(str);
+      }
       break;
     }
     case CLI_ED_HIST_DOWN: {
-      history_down();
-      char *str = history_get_current_line();
-      cli_ed_set(ed, str);
-      free(str);
+      if(feed_hist_offset > 0) {
+        feed_hist_offset--;
+        char *str = history_get(feed_hist_offset);
+        cli_ed_set(ed, str);
+        free(str);
+      } else if(feed_hist_offset == 0) {
+        feed_hist_offset = -1;
+        cli_ed_set(ed, feed_saved_line);
+        free(feed_saved_line);
+        feed_saved_line = NULL;
+      }
       break;
     }
     case CLI_ED_CANCEL:
       cli_ed_clear(ed);
+      feed_hist_offset = -1;
+      free(feed_saved_line);
+      feed_saved_line = NULL;
       break;
     default:
       break;
@@ -893,6 +923,9 @@ test_reset(cli_t *c, cli_ed_t *ed)
   test_output_reset();
   dispatch_tracking_reset();
   history_reset();
+  feed_hist_offset = -1;
+  free(feed_saved_line);
+  feed_saved_line = NULL;
 }
 
 
@@ -1553,6 +1586,126 @@ test_integration_edit_and_execute(void)
 
 
 // ====================================================================
+// History tests
+// ====================================================================
+
+static void
+test_history_up_most_recent(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  feed_input(&c, &ed, "arp\r");
+  feed_input(&c, &ed, "date\r");
+  feed_input(&c, &ed, "mem\r");
+  // UP should recall most recent
+  feed_input(&c, &ed, "\x1b[A");
+  CHECK(!strcmp(ed.buf, "mem"));
+}
+
+static void
+test_history_up_up_older(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  feed_input(&c, &ed, "arp\r");
+  feed_input(&c, &ed, "date\r");
+  feed_input(&c, &ed, "mem\r");
+  // UP UP should recall second most recent
+  feed_input(&c, &ed, "\x1b[A\x1b[A");
+  CHECK(!strcmp(ed.buf, "date"));
+}
+
+static void
+test_history_up_down_restore(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  feed_input(&c, &ed, "arp\r");
+  feed_input(&c, &ed, "date\r");
+  feed_input(&c, &ed, "mem\r");
+  // Type partial, UP, then DOWN should restore partial
+  feed_input(&c, &ed, "part");
+  feed_input(&c, &ed, "\x1b[A");
+  CHECK(!strcmp(ed.buf, "mem"));
+  feed_input(&c, &ed, "\x1b[B");
+  CHECK(!strcmp(ed.buf, "part"));
+}
+
+static void
+test_history_down_from_fresh(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  feed_input(&c, &ed, "arp\r");
+  // DOWN from fresh prompt — no crash, buffer empty
+  feed_input(&c, &ed, "\x1b[B");
+  CHECK(!strcmp(ed.buf, ""));
+}
+
+static void
+test_history_up_at_oldest(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  feed_input(&c, &ed, "arp\r");
+  feed_input(&c, &ed, "date\r");
+  // UP UP UP — third UP stays at oldest
+  feed_input(&c, &ed, "\x1b[A\x1b[A\x1b[A");
+  CHECK(!strcmp(ed.buf, "arp"));
+}
+
+static void
+test_history_duplicate_suppression(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  feed_input(&c, &ed, "arp\r");
+  feed_input(&c, &ed, "arp\r");
+  // UP should give "arp", second UP should have nothing
+  feed_input(&c, &ed, "\x1b[A");
+  CHECK(!strcmp(ed.buf, "arp"));
+  feed_input(&c, &ed, "\x1b[A");
+  CHECK(!strcmp(ed.buf, "arp")); // stays at oldest
+}
+
+static void
+test_history_overflow(void)
+{
+  cli_t c;
+  cli_ed_t ed;
+  test_reset(&c, &ed);
+
+  // Add 10 entries, only last 8 should be accessible
+  char buf[8];
+  for(int i = 0; i < 10; i++) {
+    snprintf(buf, sizeof(buf), "cmd%d", i);
+    history_add(buf);
+  }
+  // Most recent is cmd9, oldest accessible is cmd2
+  char *str = history_get(0);
+  CHECK(str && !strcmp(str, "cmd9"));
+  free(str);
+  str = history_get(7);
+  CHECK(str && !strcmp(str, "cmd2"));
+  free(str);
+  str = history_get(8);
+  CHECK(str == NULL);
+}
+
+
+// ====================================================================
 // Extended help tests
 // ====================================================================
 
@@ -1746,6 +1899,15 @@ static const struct {
   {"exthelp: help brief column",       test_help_brief_column},
   {"exthelp: brief not for groups",    test_help_brief_not_for_groups},
   {"exthelp: completion listing brief", test_completion_listing_brief},
+
+  // History tests
+  {"history: UP recalls most recent",   test_history_up_most_recent},
+  {"history: UP UP recalls older",      test_history_up_up_older},
+  {"history: UP then DOWN restores",    test_history_up_down_restore},
+  {"history: DOWN from fresh prompt",   test_history_down_from_fresh},
+  {"history: UP at oldest stays",       test_history_up_at_oldest},
+  {"history: duplicate suppression",    test_history_duplicate_suppression},
+  {"history: overflow",                 test_history_overflow},
 
   // Integration tests
   {"integ: tab complete and execute",  test_integration_tab_then_execute},
