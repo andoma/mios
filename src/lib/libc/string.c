@@ -5,7 +5,8 @@
 static void
 bcopy(const void *src, void *dest, size_t len)
 {
-
+  if(len == 0)
+    return;
   if(dest < src) {
     const char *s = src;
     const char *e = src + len;
