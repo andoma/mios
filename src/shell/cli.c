@@ -23,9 +23,13 @@ typedef int error_t;
 typedef struct cli {
 } cli_t;
 
+#define ENABLE_CLI_EXTENDED_HELP
+
 typedef struct cli_cmd {
   const char *cmd;
   error_t (*dispatch)(cli_t *cli, int argc, char **argv);
+  const char *synopsis;
+  const char *brief;
 } cli_cmd_t;
 
 
@@ -140,27 +144,37 @@ cmd_dummy(cli_t *c, int argc, char **argv)
   return 0;
 }
 
+static error_t
+cmd_bad_args(cli_t *c, int argc, char **argv)
+{
+  (void)c;
+  snprintf(last_dispatched_cmd, sizeof(last_dispatched_cmd), "%s", argv[0]);
+  last_dispatched_argc = argc;
+  return ERR_INVALID_ARGS;
+}
+
 static const cli_cmd_t test_commands[] = {
-  {"arp",                cmd_dummy},
-  {"bootflash_erase",    cmd_dummy},
-  {"bootflash_install",  cmd_dummy},
-  {"bootflash_setchain", cmd_dummy},
-  {"cat",                cmd_dummy},
-  {"date",               cmd_dummy},
-  {"dev",                cmd_dummy},
-  {"ls",                 cmd_dummy},
-  {"mem",                cmd_dummy},
-  {"metric",             cmd_dummy},
-  {"net_ipv4_show",      cmd_dummy},
-  {"net_ipv4_status",    cmd_dummy},
-  {"net_ble_scan",       cmd_dummy},
-  {"ps",                 cmd_dummy},
-  {"reset",              cmd_dummy},
-  {"show_devices",       cmd_dummy},
-  {"show_gpio",          cmd_dummy},
-  {"show_tasks",         cmd_dummy},
-  {"sysinfo",            cmd_dummy},
-  {"uptime",             cmd_dummy},
+  {"arp",                cmd_dummy,    NULL, NULL},
+  {"bootflash_erase",    cmd_dummy,    NULL, NULL},
+  {"bootflash_install",  cmd_dummy,    NULL, NULL},
+  {"bootflash_setchain", cmd_dummy,    NULL, NULL},
+  {"cat",                cmd_dummy,    NULL, NULL},
+  {"date",               cmd_dummy,    NULL, NULL},
+  {"dev",                cmd_dummy,    NULL, NULL},
+  {"i2c_scan",           cmd_bad_args, "<bus>", "Scan i2c bus"},
+  {"ls",                 cmd_dummy,    NULL, NULL},
+  {"mem",                cmd_dummy,    NULL, NULL},
+  {"metric",             cmd_dummy,    NULL, NULL},
+  {"net_ipv4_show",      cmd_dummy,    NULL, NULL},
+  {"net_ipv4_status",    cmd_dummy,    NULL, NULL},
+  {"net_ble_scan",       cmd_dummy,    NULL, NULL},
+  {"ps",                 cmd_dummy,    NULL, "Show running tasks"},
+  {"reset",              cmd_bad_args, NULL, "Reset the system"},
+  {"show_devices",       cmd_dummy,    NULL, NULL},
+  {"show_gpio",          cmd_dummy,    NULL, NULL},
+  {"show_tasks",         cmd_dummy,    NULL, NULL},
+  {"sysinfo",            cmd_dummy,    NULL, NULL},
+  {"uptime",             cmd_dummy,    NULL, "Show system uptime"},
 };
 
 #define CMD_ARRAY_BEGIN test_commands
@@ -410,6 +424,15 @@ prefix_match(const char *cmd, const char *buf, int len)
 
 static void show_help(cli_t *c, int argc, char **argv);
 
+#ifdef ENABLE_CLI_EXTENDED_HELP
+static void
+print_cmd_name(cli_t *c, const char *cmd)
+{
+  for(const char *p = cmd; *p; p++)
+    cli_printf(c, "%c", *p == '_' ? ' ' : *p);
+}
+#endif
+
 static void
 dispatch_command(cli_t *c, char *line)
 {
@@ -439,8 +462,16 @@ dispatch_command(cli_t *c, char *line)
           argv[i] = argv[join + i - 1];
 
         error_t err = p->dispatch(c, new_argc, argv);
-        if(err)
-          cli_printf(c, "! Error: %s\n", error_to_string(err));
+        if(err) {
+#ifdef ENABLE_CLI_EXTENDED_HELP
+          if(err == ERR_INVALID_ARGS && p->synopsis) {
+            cli_printf(c, "Usage: ");
+            print_cmd_name(c, p->cmd);
+            cli_printf(c, " %s\n", p->synopsis);
+          } else
+#endif
+            cli_printf(c, "! Error: %s\n", error_to_string(err));
+        }
         return;
       }
     }
@@ -511,7 +542,12 @@ show_help(cli_t *c, int argc, char **argv)
     prev_seg = suffix;
     prev_len = seg_len;
 
-    cli_printf(c, "  %.*s\n", seg_len, suffix);
+#ifdef ENABLE_CLI_EXTENDED_HELP
+    if(*seg_end == '\0' && p->brief)
+      cli_printf(c, "  %-16.*s %s\n", seg_len, suffix, p->brief);
+    else
+#endif
+      cli_printf(c, "  %.*s\n", seg_len, suffix);
   }
 }
 
@@ -548,6 +584,28 @@ do_completion(cli_t *c, cli_ed_t *ed, int list_only)
     }
     nmatch++;
   }
+
+#ifdef ENABLE_CLI_EXTENDED_HELP
+  // "i2c scan ?" — trailing space means plen overshoots the command name.
+  // Strip it and check for an exact match with extended help.
+  if(list_only && nmatch == 0 && plen > 0 && ed->buf[plen - 1] == ' ') {
+    int trimmed = plen - 1;
+    for(const cli_cmd_t *p = begin; p != end; p++) {
+      if((int)strlen(p->cmd) == trimmed &&
+         prefix_match(p->cmd, ed->buf, trimmed)) {
+        cli_printf(c, "\n");
+        if(p->synopsis) {
+          print_cmd_name(c, p->cmd);
+          cli_printf(c, " %s\n", p->synopsis);
+        } else if(p->brief) {
+          print_cmd_name(c, p->cmd);
+          cli_printf(c, " - %s\n", p->brief);
+        }
+        return;
+      }
+    }
+  }
+#endif
 
   if(nmatch == 0 && !help_match)
     return;
@@ -588,6 +646,19 @@ do_completion(cli_t *c, cli_ed_t *ed, int list_only)
   // Can't extend further — list alternatives (pass 2)
   cli_printf(c, "\n");
 
+#ifdef ENABLE_CLI_EXTENDED_HELP
+  if(list_only && nmatch == 1 && (int)strlen(first->cmd) == plen) {
+    if(first->synopsis) {
+      print_cmd_name(c, first->cmd);
+      cli_printf(c, " %s\n", first->synopsis);
+    } else if(first->brief) {
+      print_cmd_name(c, first->cmd);
+      cli_printf(c, " - %s\n", first->brief);
+    }
+    return;
+  }
+#endif
+
   // Find word boundary: position after last space in editor buffer
   int word_start = plen;
   while(word_start > 0 && ed->buf[word_start - 1] != ' ')
@@ -619,7 +690,12 @@ do_completion(cli_t *c, cli_ed_t *ed, int list_only)
     prev_seg = suffix;
     prev_len = seg_len;
 
-    cli_printf(c, "  %.*s\n", seg_len, suffix);
+#ifdef ENABLE_CLI_EXTENDED_HELP
+    if(*seg_end == '\0' && p->brief)
+      cli_printf(c, "  %-16.*s %s\n", seg_len, suffix, p->brief);
+    else
+#endif
+      cli_printf(c, "  %.*s\n", seg_len, suffix);
   }
 }
 
@@ -1477,6 +1553,136 @@ test_integration_edit_and_execute(void)
 
 
 // ====================================================================
+// Extended help tests
+// ====================================================================
+
+static void
+test_help_question_synopsis(void)
+{
+  // '?' on exact command with synopsis should show usage
+  cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
+  test_output_reset();
+
+  cli_ed_set(&ed, "i2c scan");
+  do_completion(&c, &ed, 1);
+  CHECK(test_output_contains("i2c scan <bus>"));
+}
+
+static void
+test_help_question_brief_only(void)
+{
+  // '?' on exact command with brief but no synopsis
+  cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
+  test_output_reset();
+
+  cli_ed_set(&ed, "reset");
+  do_completion(&c, &ed, 1);
+  CHECK(test_output_contains("reset - Reset the system"));
+}
+
+static void
+test_help_question_no_extended(void)
+{
+  // '?' on exact command with neither synopsis nor brief
+  cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
+  test_output_reset();
+
+  cli_ed_set(&ed, "arp");
+  do_completion(&c, &ed, 1);
+  // Should not crash; output should be minimal (just newline from pass 2)
+  CHECK(!test_output_contains("arp -"));
+  CHECK(!test_output_contains("arp <"));
+}
+
+static void
+test_help_question_trailing_space(void)
+{
+  // '?' after "i2c scan " (trailing space) should still show synopsis
+  cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
+  test_output_reset();
+
+  cli_ed_set(&ed, "i2c scan ");
+  do_completion(&c, &ed, 1);
+  CHECK(test_output_contains("i2c scan <bus>"));
+}
+
+static void
+test_dispatch_invalid_args_with_synopsis(void)
+{
+  // ERR_INVALID_ARGS with synopsis should show usage
+  cli_t c = {};
+  dispatch_tracking_reset();
+  test_output_reset();
+  char line[] = "i2c scan";
+  dispatch_command(&c, line);
+  CHECK(!strcmp(last_dispatched_cmd, "i2c_scan"));
+  CHECK(test_output_contains("Usage: i2c scan <bus>"));
+  CHECK(!test_output_contains("! Error:"));
+}
+
+static void
+test_dispatch_invalid_args_without_synopsis(void)
+{
+  // ERR_INVALID_ARGS without synopsis should show old error format
+  cli_t c = {};
+  dispatch_tracking_reset();
+  test_output_reset();
+  char line[] = "reset";
+  dispatch_command(&c, line);
+  CHECK(!strcmp(last_dispatched_cmd, "reset"));
+  CHECK(test_output_contains("! Error:"));
+  CHECK(!test_output_contains("Usage:"));
+}
+
+static void
+test_help_brief_column(void)
+{
+  // help should show brief text in right column for leaf commands
+  cli_t c = {};
+  test_output_reset();
+  char *argv[] = { "help" };
+  show_help(&c, 1, argv);
+  CHECK(test_output_contains("Reset the system"));
+  CHECK(test_output_contains("Show system uptime"));
+}
+
+static void
+test_help_brief_not_for_groups(void)
+{
+  // Groups should not show brief text (only leaf commands do)
+  cli_t c = {};
+  test_output_reset();
+  char *argv[] = { "help" };
+  show_help(&c, 1, argv);
+  // "i2c" is a group prefix at top level, should not show "Scan i2c bus"
+  CHECK(!test_output_contains("Scan i2c bus"));
+}
+
+static void
+test_completion_listing_brief(void)
+{
+  // Listing alternatives should show brief for leaf commands
+  cli_t c = {};
+  cli_ed_t ed;
+  cli_ed_init(&ed);
+  test_output_reset();
+
+  // "i2c " with list_only=1 (?) lists subcommands with brief
+  cli_ed_set(&ed, "i2c ");
+  do_completion(&c, &ed, 1);
+  CHECK(test_output_contains("Scan i2c bus"));
+}
+
+
+// ====================================================================
 // Test runner
 // ====================================================================
 
@@ -1529,6 +1735,17 @@ static const struct {
   {"dispatch: multi-level with args",test_dispatch_multilevel_with_args},
   {"dispatch: unknown command",      test_dispatch_unknown},
   {"dispatch: incomplete group",     test_dispatch_incomplete_group},
+
+  // Extended help tests
+  {"exthelp: ? synopsis",              test_help_question_synopsis},
+  {"exthelp: ? brief only",            test_help_question_brief_only},
+  {"exthelp: ? no extended",           test_help_question_no_extended},
+  {"exthelp: ? trailing space",        test_help_question_trailing_space},
+  {"exthelp: ERR_INVALID_ARGS+synopsis", test_dispatch_invalid_args_with_synopsis},
+  {"exthelp: ERR_INVALID_ARGS no synopsis", test_dispatch_invalid_args_without_synopsis},
+  {"exthelp: help brief column",       test_help_brief_column},
+  {"exthelp: brief not for groups",    test_help_brief_not_for_groups},
+  {"exthelp: completion listing brief", test_completion_listing_brief},
 
   // Integration tests
   {"integ: tab complete and execute",  test_integration_tab_then_execute},
