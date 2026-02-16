@@ -2,6 +2,7 @@
 
 #include <mios/pci.h>
 #include <mios/mios.h>
+#include <mios/cli.h>
 #include <mios/sys.h>
 #include <mios/driver.h>
 #include <mios/eventlog.h>
@@ -111,6 +112,7 @@ _Static_assert(PBUF_DATA_SIZE >= 1536);
 #define RX_DESC_DATA1_STATUS_ICE_               (0x00020000)
 #define RX_DESC_DATA1_STATUS_TCE_               (0x00010000)
 #define RX_DESC_DATA1_STATUS_ICSM_              (0x00000001)
+#define RX_DESC_DATA1_STATUS_FCSE_              (0x0000003c)
 #define RX_DESC_DATA2_TS_NS_MASK_               (0x3FFFFFFF)
 
 #define ID_REV                                  (0x00)
@@ -120,6 +122,8 @@ _Static_assert(PBUF_DATA_SIZE >= 1536);
 #define ID_REV_ID_LAN743X_                      (0x74300000)
 
 #define HW_CFG                                  (0x010)
+//Write Register 0x010 = 0x02000000 (the key is bit 25 = 1 to enable LAN7431 125MHz Clock)
+#define HW_CFG_125MHZ_CLOCK_                    BIT(25)
 #define HW_CFG_RST_PROTECT_PCIE_                BIT(19)
 #define HW_CFG_HOT_RESET_DIS_                   BIT(15)
 #define HW_CFG_D3_VAUX_OVR_                     BIT(14)
@@ -193,6 +197,8 @@ _Static_assert(PBUF_DATA_SIZE >= 1536);
 #define MAC_CR_ADD_                             (0x00001000)
 #define MAC_CR_ASD_                             (0x00000800)
 
+//Write Register 0x128 = 0x00000002 (LAN7431 enables TXC delay, no RXC delay)
+
 #define PMT_CTL                                 (0x0014)
 #define PMT_CTL_ETH_PHY_RST_                    (0x00000010)
 #define PMT_CTL_READY_                          (0x00000080)
@@ -239,6 +245,8 @@ typedef struct lan743x {
   uint32_t irq;
   char name[16];
 
+  bool is_7431;  // true for 7431, false for 7430
+
 } lan743x_t;
 
 
@@ -265,6 +273,7 @@ lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt,
     return ERR_QUEUE_FULL;
   }
 
+
   for(pb = pkt; pb != NULL; pb = pb->pb_next) {
 
     int bufidx = wrptr & TX_RING_MASK;
@@ -276,7 +285,7 @@ lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt,
     l->tx_size[bufidx] = pb->pb_buflen;
     l->tx_pkt_ctr[bufidx] = !!(pb->pb_flags & PBUF_EOP);
     tx->buf = pb->pb_data + pb->pb_offset;
-
+    //sthexdump(stdio, "OUT", (uint8_t *)tx->buf + 6, 32, 0);
     uint32_t cmd = pb->pb_buflen
       | TX_DESC_DATA0_DTYPE_DATA_
       | TX_DESC_DATA0_FCS_;
@@ -295,7 +304,6 @@ lan743x_eth_output(struct ether_netif *eni, pbuf_t *pkt,
   // Wait until the end to hand over the descriptor for the first fragment
   dmb();
   reg_wr(l->mmio + TX_TAIL(0), wrptr & TX_RING_MASK);
-  dmb();
 
   l->tx_wrptr = wrptr;
 
@@ -323,15 +331,18 @@ handle_rx(lan743x_t *l)
 
     int flags = PBUF_SOP | PBUF_EOP;
 
-    const uint32_t data1 = rx->data1;
-    // If the checksum is lllegal, skip the check and let the
+    const uint32_t csum = rx->data1;
+    // If the checksum is illegal, skip the check and let the
     // IP stack handle it
-    if(!(data1 & RX_DESC_DATA1_STATUS_ICSM_)) {
-      if(unlikely(data1 & RX_DESC_DATA1_STATUS_ICE_)) {
+    if(csum & RX_DESC_DATA1_STATUS_FCSE_) {
+      l->eni.eni_stats.rx_crc++;
+      discard = 1;
+    } else if(!(csum & RX_DESC_DATA1_STATUS_ICSM_)) {
+      if(unlikely(csum & RX_DESC_DATA1_STATUS_ICE_)) {
         discard = 1;
         atomic_inc(&l->eni.eni_ni.ni_ipv4_bad_cksum);
-      } else if(unlikely(status & RX_DESC_DATA1_STATUS_TCE_)) {
-        int type = (status >> 13) & 0b11;
+      } else if(unlikely(csum & RX_DESC_DATA1_STATUS_TCE_)) {
+        int type = (csum >> 13) & 0b11;
         discard = 1;
         if (type == 1)
           atomic_inc(&l->eni.eni_ni.ni_tcp_bad_cksum);
@@ -343,7 +354,6 @@ handle_rx(lan743x_t *l)
         flags |= PBUF_CKSUM_OK;
       }
     }
-
     if(!discard) {
       void *buf = l->rx_pbuf_data[l->next_rx & RX_RING_MASK];
       pbuf_t *pb = pbuf_get(0);
@@ -367,6 +377,7 @@ handle_rx(lan743x_t *l)
 
           cache_op(nextbuf, PBUF_DATA_SIZE, DCACHE_INVALIDATE);
           rx->buf = nextbuf;
+          //sthexdump(stdio, "IN", ((uint8_t *)rx->buf + 2 + 6), 32, 0);
           l->rx_pbuf_data[l->next_rx & RX_RING_MASK] = nextbuf;
         } else {
           l->eni.eni_stats.rx_sw_qdrop++;
@@ -435,9 +446,13 @@ lan743x_irq(void *arg)
 static error_t
 lan743x_reset(lan743x_t *l)
 {
-  uint64_t deadline = clock_get() + 100000;
+  uint64_t deadline = clock_get() + 200000;
   uint32_t data = reg_rd(l->mmio + HW_CFG);
+
   data |= HW_CFG_LRST_;
+  if(l->is_7431) {
+    data |= HW_CFG_125MHZ_CLOCK_;
+  }
   reg_wr(l->mmio + HW_CFG, data);
 
   while(1) {
@@ -448,14 +463,28 @@ lan743x_reset(lan743x_t *l)
       return ERR_TIMEOUT;
     }
   }
+
+  // Reset TX DMA
   reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_TX_SWR_(0));
-  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_T_(0)| DMAC_CMD_STOP_T_(0)))
+  deadline = clock_get() + 200000;
+  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_T_(0) | DMAC_CMD_STOP_T_(0)))
         == (DMAC_CMD_START_T_(0) | DMAC_CMD_STOP_T_(0))) {
+    if(clock_get() > deadline) {
+      evlog(LOG_ERR, "%s: failed to reset TX DMA", l->name);
+      return ERR_TIMEOUT;
+    }
   }
+
+  // Reset RX DMA
   const uint32_t rx_reset_bit = DMAC_CMD_RX_SWR_(0);
   reg_wr(l->mmio + DMAC_CMD, rx_reset_bit);
-  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_R_(0)| DMAC_CMD_STOP_R_(0)))
+  deadline = clock_get() + 200000;
+  while((reg_rd(l->mmio + DMAC_CMD) & (DMAC_CMD_START_R_(0) | DMAC_CMD_STOP_R_(0)))
         == (DMAC_CMD_START_R_(0) | DMAC_CMD_STOP_R_(0))) {
+    if(clock_get() > deadline) {
+      evlog(LOG_ERR, "%s: failed to reset RX DMA", l->name);
+      return ERR_TIMEOUT;
+    }
   }
 
   return 0;
@@ -463,13 +492,12 @@ lan743x_reset(lan743x_t *l)
 
 
 static void
-mii_write(void *arg, uint16_t reg, uint16_t value)
+mii_write0(lan743x_t *l, uint16_t reg, uint16_t value)
 {
-  lan743x_t *l = arg;
-
   reg_wr(l->mmio + MAC_MII_DATA, value);
+  uint32_t phyaddr  = l->is_7431 ? 0 : 1;
   uint32_t acc =
-    1 << 11
+    phyaddr << 11
     | ((reg << MAC_MII_ACC_MIIRINDA_SHIFT_) &
        MAC_MII_ACC_MIIRINDA_MASK_ )
     | MAC_MII_ACC_MII_WRITE_
@@ -483,12 +511,11 @@ mii_write(void *arg, uint16_t reg, uint16_t value)
 
 
 static uint16_t
-mii_read(void *arg, uint16_t reg)
+mii_read0(lan743x_t *l, uint16_t reg)
 {
-  lan743x_t *l = arg;
-
+  uint32_t phyaddr  = l->is_7431 ? 0 : 1;
   uint32_t acc =
-    1ul << 11 |
+    phyaddr << 11 |
     ((reg << MAC_MII_ACC_MIIRINDA_SHIFT_) &
      MAC_MII_ACC_MIIRINDA_MASK_ )
     | MAC_MII_ACC_MII_READ_
@@ -498,6 +525,39 @@ mii_read(void *arg, uint16_t reg)
   }
   return reg_rd(l->mmio + MAC_MII_DATA);
 }
+
+#define REG_REGCR   0x000d
+#define REG_ADDAR   0x000e
+
+static uint16_t
+mii_read(lan743x_t *l,uint16_t reg)
+{
+  if(reg < 0x20) {
+    return mii_read0(l, reg);
+  }
+
+  // Extended register access
+  mii_write0(l, REG_REGCR, 0x1f);
+  mii_write0(l, REG_ADDAR, reg);
+  mii_write0(l, REG_REGCR, 0x401f);
+  return mii_read0(l, REG_ADDAR);
+}
+
+static void
+mii_write(lan743x_t *l, uint16_t reg, uint16_t val)
+{
+  if(reg < 0x20) {
+    return mii_write0(l, reg, val);
+  }
+
+  // Extended register access
+  mii_write0(l, REG_REGCR, 0x1f);
+  mii_write0(l, REG_ADDAR, reg);
+  mii_write0(l, REG_REGCR, 0x401f);
+  return mii_write0(l, REG_ADDAR, val);
+}
+
+
 
 static void
 lan7431_print_info(struct device *dev, struct stream *st)
@@ -541,6 +601,43 @@ static const device_class_t lan743x_device_class = {
   .dc_dtor = lan743x_dtor,
 };
 
+static void
+lan7430_phy_init(lan743x_t *l)
+{
+  uint16_t anar = mii_read(l, 0x4);
+  uint16_t gtcr = mii_read(l, 0x9);
+
+  // If we're not announcing all full duplex rates over autoneg, make sure we do
+  if(anar != 0x1e1 || gtcr != 0x200) {
+    mii_write(l, 0x4, 0x01e1);
+    mii_write(l, 0x9, 0x0200);
+
+    // Reset and restart autoneg
+    mii_write(l, 0, 0x9200);
+  }
+}
+
+static void
+lan7431_phy_init(lan743x_t *l)
+{
+  uint16_t anar = mii_read(l, 0x4);
+  uint16_t gtcr = mii_read(l, 0x9);
+
+  mii_write(l, 0x1df, 0x0041);
+  mii_write(l, 0x32, mii_read(l, 0x32) | 3);
+
+  mii_write(l, 0xc6, 0x10);
+  mii_write(l, 0x86, 0x0077);
+  mii_write(l, 0x170, (0xf << 1) | 1);
+  // If we're not announcing all full duplex rates over autoneg, make sure we do
+  if(anar != 0x1e1 || gtcr != 0x200) {
+    mii_write(l, 0x4, 0x01e1);
+    mii_write(l, 0x9, 0x0200);
+  }
+
+  mii_write(l, 0xc00, 0x9140);
+}
+
 static void *__attribute__((noreturn))
 lan743x_phy_thread(void *arg)
 {
@@ -548,13 +645,14 @@ lan743x_phy_thread(void *arg)
   int current_up = 0;
 
   while(l->phy_run) {
+    (void)mii_read(l, 1);
     const int up = !!(mii_read(l, 1) & 4);
     if(current_up ^ up) {
       net_task_raise(&l->eni.eni_ni.ni_task, up ?
                      NETIF_TASK_STATUS_UP : NETIF_TASK_STATUS_DOWN);
       current_up = up;
     }
-    usleep(100000);
+    usleep(500000);
   }
   thread_exit(NULL);
 }
@@ -566,7 +664,11 @@ lan743x_attach(device_t *d)
     return ERR_MISMATCH;
 
   pci_dev_t *pd = (pci_dev_t *)d;
-  if(pd->pd_vid != 0x1055 || pd->pd_pid != 0x7430)
+  if(pd->pd_vid != 0x1055)
+    return ERR_MISMATCH;
+
+  // Support both 7430 and 7431
+  if(pd->pd_pid != 0x7430 && pd->pd_pid != 0x7431)
     return ERR_MISMATCH;
 
   uint64_t mmio = pd->pd_bar[0];
@@ -574,12 +676,18 @@ lan743x_attach(device_t *d)
     return ERR_INVALID_ADDRESS;
 
   uint32_t rev = reg_rd(mmio + ID_REV);
-  if((ID_REV_ID_MASK_ & rev) != ID_REV_ID_LAN7430_)
+  uint32_t chip_id = ID_REV_ID_MASK_ & rev;
+
+  // Validate chip ID matches expected variant
+  if(chip_id != ID_REV_ID_LAN7430_ && chip_id != ID_REV_ID_LAN7431_)
     return ERR_MISMATCH;
 
   lan743x_t *l = xalloc(sizeof(lan743x_t), 0, MEM_CLEAR);
   l->pd = pd;
   l->mmio = mmio;
+  l->is_7431 = (chip_id == ID_REV_ID_LAN7431_);
+
+  evlog(LOG_DEBUG,"pci %02x:%02x",  pci_cfg_rd8(pd, 0x1c),  pci_cfg_rd8(pd, 0x1b));
 
   lan743x_reset(l);
   usleep(10000);
@@ -674,7 +782,7 @@ lan743x_attach(device_t *d)
 
   reg_wr(l->mmio + DMAC_CMD, DMAC_CMD_START_T_(0) | DMAC_CMD_START_R_(0) );
 
-  reg_wr(mmio + RX_TAIL(0), RX_RING_MASK);
+  reg_wr(l->mmio + RX_TAIL(0), RX_RING_MASK);
   l->rx_last_tail = RX_RING_MASK;
 
   l->eni.eni_output = lan743x_eth_output;
@@ -694,30 +802,27 @@ lan743x_attach(device_t *d)
   uint16_t phyid_low  = mii_read(l, 0x2);
   uint16_t phyid_high = mii_read(l, 0x3);
 
-  evlog(LOG_INFO, "%s: lan743x rev %d attached IRQ %d phy %04x:%04x",
-        l->name, rev & 0xffff, l->irq,
+  evlog(LOG_INFO, "%s: lan%s rev %d attached IRQ %d phy %04x:%04x",
+        l->name, l->is_7431 ? "7431" : "7430", rev & 0xffff, l->irq,
         phyid_high, phyid_low);
-  uint16_t anar = mii_read(l, 0x4);
-  uint16_t gtcr = mii_read(l, 0x9);
 
-  // If we're not announcing all full duplex rates over autoneg, make sure we do
-  if(anar != 0x1e1 || gtcr != 0x200) {
-    mii_write(l, 0x4, 0x01e1);
-    mii_write(l, 0x9, 0x0200);
-
-    // Reset and restart autoneg
-    mii_write(l, 0, 0x9200);
+  // Use variant-specific PHY initialization
+  if(l->is_7431) {
+    lan7431_phy_init(l);
+  } else {
+    lan7430_phy_init(l);
   }
 
-  reg_wr(l->mmio + MAC_CR, reg_rd(l->mmio + MAC_CR) | MAC_CR_ADD_ | MAC_CR_ASD_);
-  reg_wr(l->mmio + MAC_RX, reg_rd(l->mmio + MAC_RX) | 1);
+  // Write Register 0x100 = 0x0002200A (the key is bit 19 = 0 to enable RGMII mode)
+  uint32_t old = reg_rd(l->mmio + MAC_CR);
+  reg_wr(l->mmio + MAC_CR, old | MAC_CR_ADD_ | MAC_CR_ASD_ );
+  reg_wr(l->mmio + MAC_RX, reg_rd(l->mmio + MAC_RX) | 0x1);
   reg_wr(l->mmio + MAC_TX, reg_rd(l->mmio + MAC_TX) | 1);
 
   uint32_t  dmac_status =
     DMAC_INT_BIT_RXFRM_(0)
     | DMAC_INT_BIT_TX_IOC_(0);
   reg_wr(l->mmio + DMAC_INT_STS, dmac_status);
-
 
   // accept unicast, broadcast and multicast
   reg_wr(l->mmio + 0x508, 1 << 10 | 1 << 9 | 1 << 8 );
@@ -728,5 +833,57 @@ lan743x_attach(device_t *d)
 
   return 0;
 }
+
+static error_t
+cmd_mii_ctrl(cli_t *cli, int argc, char **argv)
+{
+  if (argc < 2) {
+    cli_printf(cli, "mii_reg <reg> [<value>]\n");
+    return ERR_INVALID_ARGS;
+  }
+  lan743x_t *l = (lan743x_t *)SLIST_FIRST(&ether_netifs);
+
+  const int addr = atoix(argv[1]);
+  if (argc == 2) {
+    cli_printf(cli, "reg 0x%04x : 0x%04x\n", addr, mii_read(l, addr));
+    return ERR_OK;
+  }
+
+  const int val = atoix(argv[2]);
+
+  mii_write(l, addr, val);
+  cli_printf(cli, "reg 0x%04x : 0x%04x\n", addr, mii_read(l, addr));
+  return ERR_OK;
+}
+
+
+CLI_CMD_DEF("mii_reg", cmd_mii_ctrl);
+
+
+static error_t
+cmd_lan_ctrl(cli_t *cli, int argc, char **argv)
+{
+  if (argc < 2) {
+    cli_printf(cli, "lan_ctrl <reg> [<value>]\n");
+    return ERR_INVALID_ARGS;
+  }
+  lan743x_t *l = (lan743x_t *)SLIST_FIRST(&ether_netifs);
+
+  const int addr = atoix(argv[1]);
+  if (argc == 2) {
+    cli_printf(cli, "reg 0x%04x : 0x%08x\n", addr, reg_rd(l->mmio +  addr));
+    return ERR_OK;
+  }
+
+  const uint32_t val = atoix(argv[2]);
+
+  reg_wr(l->mmio + addr, val);
+  cli_printf(cli, "reg 0x%04x : 0x%08x\n", addr, reg_rd(l->mmio + addr));
+  return ERR_OK;
+}
+
+
+CLI_CMD_DEF("lan_ctrl", cmd_lan_ctrl);
+
 
 DRIVER(lan743x_attach, 1);
