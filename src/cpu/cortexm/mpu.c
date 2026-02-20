@@ -32,6 +32,7 @@ mpu_init(void)
 
   printf("MPU: %d regions\n", num_regions);
 
+#ifdef CPU_STACK_REDZONE_SIZE
   if(CPU_STACK_REDZONE_SIZE == 32) {
     // Last MPU region is used as 32 byte stack redzone
 
@@ -39,7 +40,7 @@ mpu_init(void)
     *MPU_RBAR = (intptr_t)idle_stack | redzone_rbar_bits;
     *MPU_RASR = (4 << 1) | 1; // 2^(4 + 1) = 32 byte + enable
   }
-
+#endif
   *MPU_CTRL = 5; // Enable MPU
 }
 
