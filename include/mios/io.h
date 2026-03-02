@@ -196,3 +196,5 @@ indirect_gpio_refresh_shadow(indirect_gpio_t *ig)
 {
   return ig->vtable->refresh_shadow(ig);
 }
+
+indirect_gpio_t *gpio_as_indirect_gpio(void);

@@ -76,3 +76,77 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull,
 {
 
 }
+
+
+static error_t
+igtg_conf_input(struct indirect_gpio *ig, unsigned int line, gpio_pull_t pull)
+{
+  gpio_conf_input(line, pull);
+  return 0;
+}
+
+static error_t
+igtg_conf_output(struct indirect_gpio *ig, unsigned int line,
+                 gpio_output_type_t type, gpio_output_speed_t speed,
+                 gpio_pull_t pull, int initial_value)
+{
+  // A workaround to deal with that gpio_conf_output() have no initial value
+  gpio_conf_input(line, pull);
+  gpio_set_output(line, initial_value);
+  gpio_conf_output(line, type, speed, pull);
+  return 0;
+}
+
+
+static error_t
+igtg_set_pin(struct indirect_gpio *ig, unsigned int line, int on)
+{
+  gpio_set_output(line, on);
+  return 0;
+}
+
+
+static error_t
+igtg_get_pin(struct indirect_gpio *ig, unsigned int line, int *status)
+{
+  *status = gpio_get_input(line);
+  return 0;
+}
+
+
+static error_t
+igtg_refresh_shadow(struct indirect_gpio *ig)
+{
+  return 0;
+}
+
+
+static error_t
+igtg_conf_irq(struct indirect_gpio *ig, unsigned int line,
+              gpio_pull_t pull,
+              void (*cb)(void *arg), void *arg,
+              gpio_edge_t edge, int level)
+{
+  gpio_conf_irq(line, pull, cb, arg, edge, level);
+  return 0;
+}
+
+
+static const gpio_vtable_t indirect_gpio_to_gpio_vtable = {
+  .conf_input = igtg_conf_input,
+  .conf_output = igtg_conf_output,
+  .set_pin = igtg_set_pin,
+  .get_pin = igtg_get_pin,
+  .conf_irq = igtg_conf_irq,
+  .refresh_shadow = igtg_refresh_shadow
+};
+
+static indirect_gpio_t indirect_gpio_to_gpio = {
+  &indirect_gpio_to_gpio_vtable
+};
+
+indirect_gpio_t *
+gpio_as_indirect_gpio(void)
+{
+  return &indirect_gpio_to_gpio;
+}
