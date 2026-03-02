@@ -4,7 +4,10 @@
 
 #include "tcal9539.h"
 #include <mios/io.h>
+#include <mios/task.h>
 #include <stdlib.h>
+
+#include "irq.h"
 
 #define TCAL9539_INPUT0  0x00
 #define TCAL9539_INPUT1  0x01
@@ -29,10 +32,20 @@ typedef struct {
   i2c_t *i2c;
   uint8_t address;
   uint16_t output;
-  uint16_t irqs;
+  uint16_t irq_mask;
   uint16_t direction;  // 1 = input (default)
   uint16_t pull_enable;
   uint16_t pull_direction;
+
+  uint16_t input_snapshot;
+  uint16_t callback_mask;
+  uint8_t irq_pending;
+  task_waitable_t irq_waitq;
+  struct {
+    void (*cb)(void *arg);
+    void *arg;
+    gpio_edge_t edge;
+  } pin_irq[16];
 } tcal9539_t;
 
 
@@ -129,17 +142,37 @@ tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
 }
 
 static error_t
-tcal9539_set_irq(indirect_gpio_t *ig, unsigned int line, int set)
+tcal9539_conf_irq(indirect_gpio_t *ig, unsigned int line,
+                  gpio_pull_t pull,
+                  void (*cb)(void *arg), void *arg,
+                  gpio_edge_t edge, int level)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
 
   if(line >= 16)
     return ERR_INVALID_ID;
 
-  if(set)
-    return tcal9539_clr_bit_in_reg(tc, line, &tc->irqs, TCAL9539_IRQMSK0);
-  else
-    return tcal9539_set_bit_in_reg(tc, line, &tc->irqs, TCAL9539_IRQMSK0);
+  error_t err = tcal9539_conf_pull(tc, line, pull);
+  if(err)
+    return err;
+
+  err = tcal9539_set_bit_in_reg(tc, line, &tc->direction, TCAL9539_CFG0);
+  if(err)
+    return err;
+
+  tc->pin_irq[line].cb = cb;
+  tc->pin_irq[line].arg = arg;
+  tc->pin_irq[line].edge = edge;
+
+  if(cb) {
+    tc->callback_mask |= (1 << line);
+    // Unmask IRQ for this pin (clear bit = unmask)
+    return tcal9539_clr_bit_in_reg(tc, line, &tc->irq_mask, TCAL9539_IRQMSK0);
+  } else {
+    tc->callback_mask &= ~(1 << line);
+    // Mask IRQ for this pin (set bit = mask)
+    return tcal9539_set_bit_in_reg(tc, line, &tc->irq_mask, TCAL9539_IRQMSK0);
+  }
 }
 
 
@@ -258,6 +291,50 @@ tcal9539_refresh_shadow(indirect_gpio_t *ig)
 }
 
 
+static void
+tcal9539_irq_handler(void *arg)
+{
+  tcal9539_t *tc = arg;
+  tc->irq_pending = 1;
+  task_wakeup(&tc->irq_waitq, 0);
+}
+
+
+__attribute__((noreturn))
+static void *
+tcal9539_dispatch_thread(void *arg)
+{
+  tcal9539_t *tc = arg;
+
+  while(1) {
+    while(!tc->irq_pending)
+      task_sleep(&tc->irq_waitq);
+
+    tc->irq_pending = 0;
+
+    uint16_t inputs;
+    if(tcal9539_read_u16(tc, TCAL9539_INPUT0, &inputs))
+      continue;
+
+    uint16_t changed = (inputs ^ tc->input_snapshot) & tc->callback_mask;
+    tc->input_snapshot = inputs;
+
+    while(changed) {
+      int pin = __builtin_ctz(changed);
+      changed &= ~(1 << pin);
+
+      int new_val = (inputs >> pin) & 1;
+      gpio_edge_t edge = tc->pin_irq[pin].edge;
+
+      if((new_val && (edge & GPIO_RISING_EDGE)) ||
+         (!new_val && (edge & GPIO_FALLING_EDGE))) {
+        tc->pin_irq[pin].cb(tc->pin_irq[pin].arg);
+      }
+    }
+  }
+}
+
+
 static const gpio_vtable_t tcal9539_vtable = {
   .conf_input = tcal9539_conf_input,
   .conf_output = tcal9539_conf_output,
@@ -265,13 +342,13 @@ static const gpio_vtable_t tcal9539_vtable = {
   .get_pin = tcal9539_get_pin,
   .get_port = tcal9539_get_port,
   .get_mode = tcal9539_get_mode,
-  .set_irq = tcal9539_set_irq,
+  .conf_irq = tcal9539_conf_irq,
   .refresh_shadow = tcal9539_refresh_shadow,
 };
 
 
 indirect_gpio_t *
-tcal9539_create(i2c_t *i2c, uint8_t address)
+tcal9539_create(i2c_t *i2c, uint8_t address, gpio_t irq_pin)
 {
   tcal9539_t *tc = calloc(1, sizeof(tcal9539_t));
 
@@ -279,9 +356,21 @@ tcal9539_create(i2c_t *i2c, uint8_t address)
   tc->i2c = i2c;
   tc->address = address;
   tc->output = 0xffff;
-  tc->irqs = 0xffff;
+  tc->irq_mask = 0xffff;
   tc->direction = 0xffff;
   tc->pull_direction = 0xffff;
+
+  if(irq_pin != GPIO_UNUSED) {
+    task_waitable_init(&tc->irq_waitq, "tcal");
+
+    // Read initial input state
+    tcal9539_read_u16(tc, TCAL9539_INPUT0, &tc->input_snapshot);
+
+    gpio_conf_irq(irq_pin, GPIO_PULL_NONE, tcal9539_irq_handler, tc,
+                  GPIO_FALLING_EDGE, IRQ_LEVEL_CLOCK);
+
+    thread_create(tcal9539_dispatch_thread, tc, 0, "tcal9539", 0, 6);
+  }
 
   return &tc->gpio;
 }
