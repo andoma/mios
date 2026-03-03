@@ -646,7 +646,7 @@ begins(const char *s1, const char *s2)
 }
 
 
-static void __attribute__((constructor(1200)))
+static void __attribute__((constructor(6000)))
 t234ccplex_pcie_init(void)
 {
   const ctrl_conf_t *pcie_slots[] = {
