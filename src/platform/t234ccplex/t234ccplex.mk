@@ -28,7 +28,7 @@ SRCS += ${P}/t234ccplex.c \
 	${P}/asm.s \
 
 SRCS += ${T234}/t234_bootflash.c \
-
+	${T234}/t234_i2c.c \
 
 ENABLE_TASK_ACCOUNTING := no
 ENABLE_RTL8168 := yes
