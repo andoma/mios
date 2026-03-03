@@ -39,16 +39,15 @@ static const struct {
   uint8_t tx_dma;
   uint8_t rx_dma;
   uint16_t clkid;
-  uint8_t af;
   uint8_t irq;
   uint8_t fifo_size;
 } spi_config[] = {
-  { SPI1_BASE, 38, 37, CLK_SPI1, 5, 35, 16 },
-  { SPI2_BASE, 40, 39, CLK_SPI2, 5, 36, 16 },
-  { SPI3_BASE, 62, 61, CLK_SPI3, 6, 51, 16 },
-  { SPI4_BASE, 84, 83, CLK_SPI4, 5, 84, 8 },
-  { SPI5_BASE, 86, 85, CLK_SPI5, 5, 85, 8 },
-  { SPI6_BASE, 12, 11, CLK_SPI6, 8, 86, 8 },
+  { SPI1_BASE, 38, 37, CLK_SPI1, 35, 16 },
+  { SPI2_BASE, 40, 39, CLK_SPI2, 36, 16 },
+  { SPI3_BASE, 62, 61, CLK_SPI3, 51, 16 },
+  { SPI4_BASE, 84, 83, CLK_SPI4, 84, 8 },
+  { SPI5_BASE, 86, 85, CLK_SPI5, 85, 8 },
+  { SPI6_BASE, 12, 11, CLK_SPI6, 86, 8 },
 };
 
 
@@ -336,19 +335,12 @@ rx_complete(stm32_dma_instance_t instance, uint32_t status, void *arg)
 
 
 spi_t *
-stm32h7_spi_create(unsigned int instance, gpio_t clk, gpio_t miso,
-                   gpio_t mosi, gpio_output_speed_t speed)
+stm32h7_spi_create_unit(unsigned int instance)
 {
   instance--;
 
   if(instance > ARRAYSIZE(spi_config))
     panic("spi: Invalid instance %d", instance + 1);
-
-  const uint8_t af = spi_config[instance].af;
-  gpio_conf_af(clk,  af, GPIO_PUSH_PULL,  speed, GPIO_PULL_NONE);
-  if (miso != GPIO_UNUSED)
-    gpio_conf_af(miso, af, GPIO_OPEN_DRAIN, speed, GPIO_PULL_UP);
-  gpio_conf_af(mosi, af, GPIO_PUSH_PULL,  speed, GPIO_PULL_NONE);
 
   stm32h7_spi_t *spi = calloc(1, sizeof(stm32h7_spi_t));
   snprintf(spi->name, sizeof(spi->name), "spi%d", instance + 1);
