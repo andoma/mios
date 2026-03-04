@@ -1,4 +1,5 @@
 #include <mios/ethphy.h>
+#include <mios/driver.h>
 #include <mios/eventlog.h>
 
 // Datasheet: https://www.ti.com/lit/ds/symlink/dp83826e.pdf
@@ -40,21 +41,25 @@ reg_write(const ethphy_reg_io_t *regio, void *arg, uint16_t reg, uint16_t val)
 
 
 static error_t
-dp83826_init(ethphy_mode_t mode,
-             const ethphy_reg_io_t *regio,
-             void *arg)
+dp83826_attach(device_t *d)
 {
+  if(d->d_type != DEVICE_TYPE_ETHPHY)
+    return ERR_MISMATCH;
+
+  ethphy_dev_t *ed = (ethphy_dev_t *)d;
+  const ethphy_reg_io_t *regio = ed->ed_regio;
+  void *arg = ed->ed_arg;
+  ethphy_mode_t mode = ed->ed_mode;
+
   uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
   uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
 
   if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
-    evlog(LOG_ERR, "dp83826: Invalid PHY ID 0x%04x:0x%04x", id1, id2);
-    return ERR_NO_DEVICE;
+    return ERR_MISMATCH;
   }
   uint16_t model = (id2 >> 4) & 0x3f;
   if(model != 0x13 && model != 0x11) {
-    evlog(LOG_ERR, "dp83826: Invalid model 0x%04x:0x%04x", id1, id2);
-    return ERR_NO_DEVICE;
+    return ERR_MISMATCH;
   }
 
   uint16_t sor = reg_read(regio, arg, REG_SOR1);
@@ -80,7 +85,4 @@ dp83826_init(ethphy_mode_t mode,
   return 0;
 }
 
-
-const ethphy_driver_t ethphy_dp83826 = {
-  .init = dp83826_init,
-};
+DRIVER(dp83826_attach, 5);

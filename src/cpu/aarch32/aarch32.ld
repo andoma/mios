@@ -56,6 +56,7 @@ SECTIONS {
                 KEEP(*(ghook))
                 _ghook_array_end = .;
                 . = ALIGN(4);
+
         } >RAM
 
         .build_id : {

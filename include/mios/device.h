@@ -47,8 +47,9 @@ typedef struct device_class {
 
 #define DEVICE_F_DEBUG 0x1
 
-#define DEVICE_TYPE_UNDEF 0
-#define DEVICE_TYPE_PCI   1
+#define DEVICE_TYPE_UNDEF  0
+#define DEVICE_TYPE_PCI    1
+#define DEVICE_TYPE_ETHPHY 2
 
 typedef struct device {
   const char *d_name;

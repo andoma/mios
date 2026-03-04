@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <mios/error.h>
+#include <mios/device.h>
 #include <mios/stream.h>
 
 typedef enum {
@@ -15,17 +16,9 @@ typedef struct ethphy_reg_io {
   void (*write)(void *arg, uint16_t reg, uint16_t value);
 } ethphy_reg_io_t;
 
-typedef struct {
-
-  error_t (*init)(ethphy_mode_t mode,
-                  const ethphy_reg_io_t *regio,
-                  void *arg);
-
-  void (*print_diagnostics)(stream_t *s,
-                            const ethphy_reg_io_t *regio,
-                            void *arg);
-
-} ethphy_driver_t;
-
-extern const ethphy_driver_t ethphy_dp83826;
-extern const ethphy_driver_t ethphy_dp83869;
+typedef struct ethphy_dev {
+  device_t ed_dev;
+  ethphy_mode_t ed_mode;
+  const ethphy_reg_io_t *ed_regio;
+  void *ed_arg;
+} ethphy_dev_t;

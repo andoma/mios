@@ -2,6 +2,8 @@
 #include "stm32f4_reg.h"
 #include "stm32f4_clk.h"
 
+#include <mios/driver.h>
+
 #include <net/pbuf.h>
 #include <net/ether.h>
 #include <net/ptp.h>
@@ -641,8 +643,7 @@ stm32f4_eth_set_clock(struct ether_netif *eni, int64_t offset_ns)
 
 void
 stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
-                 const ethphy_driver_t *ethphy, int phy_addr,
-                 ethphy_mode_t mode, uint32_t flags)
+                 int phy_addr, ethphy_mode_t mode, uint32_t flags)
 {
   stm32f4_eth_t *se = &eth;
 
@@ -676,9 +677,15 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
 
   se->se_phyaddr = phy_addr;
 
-  if(ethphy) {
-    error_t err = ethphy->init(mode, &stm32f4_eth_mdio, se);
-    if(err) {
+  {
+    ethphy_dev_t ed = {
+      .ed_dev = { .d_type = DEVICE_TYPE_ETHPHY },
+      .ed_mode = mode,
+      .ed_regio = &stm32f4_eth_mdio,
+      .ed_arg = se,
+    };
+    error_t err = driver_attach(&ed.ed_dev);
+    if(err && err != ERR_NOT_FOUND) {
       evlog(LOG_ERR, "stm32f4: PHY init failed");
       return;
     }

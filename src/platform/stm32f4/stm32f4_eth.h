@@ -9,8 +9,7 @@
 #endif
 
 void stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
-                      const ethphy_driver_t *ethphy, int phy_addr,
-                      ethphy_mode_t mode, uint32_t flags);
+                      int phy_addr, ethphy_mode_t mode, uint32_t flags);
 
 
 __attribute__((unused))

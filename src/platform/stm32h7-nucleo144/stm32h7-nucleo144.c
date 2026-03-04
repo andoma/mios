@@ -74,8 +74,7 @@ platform_init_late(void)
   stm32h7_eth_init(GPIO_UNUSED,
                    nucleo144_eth_gpios,
                    ARRAYSIZE(nucleo144_eth_gpios),
-                   NULL, 0,
-                   ETHPHY_MODE_RMII,
+                   0, ETHPHY_MODE_RMII,
                    STM32H7_ETH_ENABLE_PTP_TIMESTAMPING);
 
   // ETH PPS OUT

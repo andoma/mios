@@ -64,6 +64,7 @@ SECTIONS {
                 _driver_array_end = .;
                 . = ALIGN(8);
 
+
                 . = ALIGN(4096);
                 _efi_runtime_begin = .;
                 KEEP(*(efi_runtime))

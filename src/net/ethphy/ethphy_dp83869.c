@@ -1,4 +1,5 @@
 #include <mios/ethphy.h>
+#include <mios/driver.h>
 #include <mios/eventlog.h>
 #include <stdio.h>
 
@@ -171,17 +172,22 @@ dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
 }
 
 static error_t
-dp83869_init(ethphy_mode_t mode,
-             const ethphy_reg_io_t *regio,
-             void *arg)
+dp83869_attach(device_t *d)
 {
+  if(d->d_type != DEVICE_TYPE_ETHPHY)
+    return ERR_MISMATCH;
+
+  ethphy_dev_t *ed = (ethphy_dev_t *)d;
+  const ethphy_reg_io_t *regio = ed->ed_regio;
+  void *arg = ed->ed_arg;
+  ethphy_mode_t mode = ed->ed_mode;
+
   uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
   uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
 
   // PHYIDR1 reset value = 0x2000, PHYIDR2 = 0xA0F1
   if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
-    evlog(LOG_ERR, "dp83869: Invalid PHY ID 0x%04x:0x%04x", id1, id2);
-    return ERR_NO_DEVICE;
+    return ERR_MISMATCH;
   }
 
   uint16_t model = (id2 >> 4) & 0x3f;
@@ -189,8 +195,7 @@ dp83869_init(ethphy_mode_t mode,
 
   // DP83869HM model number = 0x0F
   if(model != 0x0f) {
-    evlog(LOG_ERR, "dp83869: Unexpected model 0x%02x (rev %d)", model, rev);
-    return ERR_NO_DEVICE;
+    return ERR_MISMATCH;
   }
 
   uint16_t strap = reg_read(regio, arg, REG_STRAP_STS);
@@ -418,7 +423,4 @@ dp83869_print_diagnostics(stream_t *s,
   stprintf(s, "  BMCR: 0x%04x, BMSR: 0x%04x\n", bmcr, bmsr);
 }
 
-const ethphy_driver_t ethphy_dp83869 = {
-  .init = dp83869_init,
-  .print_diagnostics = dp83869_print_diagnostics,
-};
+DRIVER(dp83869_attach, 5);
