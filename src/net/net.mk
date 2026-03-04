@@ -40,6 +40,7 @@ SRCS-${ENABLE_NET_ETHER} += \
 	${SRC}/net/ether.c \
 	${SRC}/net/lldp.c \
 	${SRC}/net/ethphy/ethphy_dp83826.c \
+	${SRC}/net/ethphy/ethphy_dp83869.c \
 
 SRCS-${ENABLE_NET_HTTP} += \
        ${SRC}/net/http/http.c \

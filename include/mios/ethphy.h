@@ -2,10 +2,12 @@
 
 #include <stdint.h>
 #include <mios/error.h>
+#include <mios/stream.h>
 
 typedef enum {
   ETHPHY_MODE_MII,
   ETHPHY_MODE_RMII,
+  ETHPHY_MODE_RGMII,
 } ethphy_mode_t;
 
 typedef struct ethphy_reg_io {
@@ -19,6 +21,11 @@ typedef struct {
                   const ethphy_reg_io_t *regio,
                   void *arg);
 
+  void (*print_diagnostics)(stream_t *s,
+                            const ethphy_reg_io_t *regio,
+                            void *arg);
+
 } ethphy_driver_t;
 
 extern const ethphy_driver_t ethphy_dp83826;
+extern const ethphy_driver_t ethphy_dp83869;
