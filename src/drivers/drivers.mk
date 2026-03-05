@@ -58,3 +58,6 @@ SRCS-${ENABLE_LAN743X} += \
 
 SRCS-${ENABLE_HDC302x} += \
 	${SRC}/drivers/hdc302x.c
+
+SRCS-${ENABLE_DRV8899} += \
+	${SRC}/drivers/drv8899.c
