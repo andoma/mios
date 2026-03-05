@@ -47,10 +47,6 @@ typedef struct device_class {
 
 #define DEVICE_F_DEBUG 0x1
 
-#define DEVICE_TYPE_UNDEF  0
-#define DEVICE_TYPE_PCI    1
-#define DEVICE_TYPE_ETHPHY 2
-
 typedef struct device {
   const char *d_name;
   const device_class_t *d_class;
@@ -58,7 +54,6 @@ typedef struct device {
   STAILQ_ENTRY(device) d_link;
   atomic_t d_refcount;
   uint16_t d_flags;
-  uint16_t d_type;
 } device_t;
 
 void device_register(device_t *d);

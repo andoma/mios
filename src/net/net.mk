@@ -40,10 +40,10 @@ SRCS-${ENABLE_NET_ETHER} += \
 	${SRC}/net/ether.c \
 	${SRC}/net/lldp.c \
 
-SRCS-${ENABLE_ETHPHY_DP83826} += \
+SRCS-${ENABLE_DP83826} += \
 	${SRC}/net/ethphy/ethphy_dp83826.c
 
-SRCS-${ENABLE_ETHPHY_DP83869} += \
+SRCS-${ENABLE_DP83869} += \
 	${SRC}/net/ethphy/ethphy_dp83869.c
 
 SRCS-${ENABLE_NET_HTTP} += \

@@ -1,7 +1,7 @@
 #include <mios/driver.h>
 
 error_t
-driver_attach(struct device *dev)
+driver_probe(uint16_t type, void *metadata)
 {
   extern unsigned long _driver_array_begin;
   extern unsigned long _driver_array_end;
@@ -12,7 +12,7 @@ driver_attach(struct device *dev)
   error_t rval = ERR_NOT_FOUND;
 
   for(; d != e; d++) {
-    error_t err = d->attach(dev);
+    error_t err = d->probe(type, metadata);
     if(!err)
       return 0;
     if(err != ERR_MISMATCH)

@@ -338,7 +338,7 @@ pci_device_probe(pci_dev_t *pd, uint64_t mem_base)
   reg |= 1 << 2; // Bus master Enable
   pci_cfg_wr32(pd, 4, reg);
 
-  return driver_attach(&pd->pd_dev);
+  return driver_probe(DRIVER_TYPE_PCI, pd);
 }
 
 
@@ -387,7 +387,6 @@ probe_ctrl(t234_pci_ctrl_t *tpc)
   snprintf(tpd->tpd_name, sizeof(tpd->tpd_name), "%sd%d",
            tpc->tpc_conf->name, dev);
   d->d_name = tpd->tpd_name;
-  d->d_type = DEVICE_TYPE_PCI;
   d->d_class = &t234_pci_dev_class;
   d->d_parent = &tpc->tpc_dev;
   device_retain(d->d_parent);

@@ -178,6 +178,8 @@ typedef struct stm32h7_eth {
 
   uint8_t se_phyaddr;
 
+  const ethphy_class_t *se_ethphy_class;
+
 #ifdef ENABLE_NET_PTP
   int64_t se_accumulated_drift_ppb;
   uint32_t se_addend;
@@ -206,6 +208,8 @@ rx_desc_give(stm32h7_eth_t *se, size_t index, void *buf)
 }
 
 
+static const ethphy_reg_io_t stm32h7_eth_mdio;
+
 static void
 stm32h7_eth_print_info(struct device *dev, struct stream *st)
 {
@@ -219,6 +223,9 @@ stm32h7_eth_print_info(struct device *dev, struct stream *st)
 
   ptp_print_info(st, &se->se_eni);
 #endif
+
+  if(se->se_ethphy_class && se->se_ethphy_class->print_info)
+    se->se_ethphy_class->print_info(st, &stm32h7_eth_mdio, se);
 }
 
 
@@ -681,16 +688,16 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
 
   {
     ethphy_dev_t ed = {
-      .ed_dev = { .d_type = DEVICE_TYPE_ETHPHY },
       .ed_mode = mode,
       .ed_regio = &stm32h7_eth_mdio,
       .ed_arg = se,
     };
-    error_t err = driver_attach(&ed.ed_dev);
+    error_t err = driver_probe(DRIVER_TYPE_ETHPHY, &ed);
     if(err && err != ERR_NOT_FOUND) {
       evlog(LOG_ERR, "stm32h7: PHY init failed");
       return;
     }
+    se->se_ethphy_class = ed.ed_class;
   }
 
   se->se_eni.eni_addr[0] = 0x02;

@@ -171,79 +171,6 @@ dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
   reg_write(regio, arg, REG_GEN_CTRL, GEN_CTRL_SW_RESET);
 }
 
-static error_t
-dp83869_attach(device_t *d)
-{
-  if(d->d_type != DEVICE_TYPE_ETHPHY)
-    return ERR_MISMATCH;
-
-  ethphy_dev_t *ed = (ethphy_dev_t *)d;
-  const ethphy_reg_io_t *regio = ed->ed_regio;
-  void *arg = ed->ed_arg;
-  ethphy_mode_t mode = ed->ed_mode;
-
-  uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
-  uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
-
-  // PHYIDR1 reset value = 0x2000, PHYIDR2 = 0xA0F1
-  if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
-    return ERR_MISMATCH;
-  }
-
-  uint16_t model = (id2 >> 4) & 0x3f;
-  uint16_t rev = id2 & 0xf;
-
-  // DP83869HM model number = 0x0F
-  if(model != 0x0f) {
-    return ERR_MISMATCH;
-  }
-
-  uint16_t strap = reg_read(regio, arg, REG_STRAP_STS);
-  uint16_t opmode_strap = (strap >> 9) & 0x7;
-
-  evlog(LOG_DEBUG, "dp83869: Model 0x%02x rev %d, strap opmode %d, "
-        "phy_addr %d, aneg %s",
-        model, rev, opmode_strap,
-        (strap >> 4) & 0xf,
-        (strap & 0x2) ? "enabled" : "disabled");
-
-  if(mode != ETHPHY_MODE_RGMII && mode != ETHPHY_MODE_MII) {
-    evlog(LOG_ERR, "dp83869: Unsupported MAC mode %d", mode);
-    return ERR_INVALID_ARGS;
-  }
-
-  // Determine media from strap configuration:
-  // opmode 0 = RGMII to Copper, 1 = RGMII to 1000Base-X, etc.
-  dp83869_media_t media;
-  switch(opmode_strap) {
-  case 0: // RGMII to Copper
-  case 6: // SGMII to Copper
-    media = DP83869_MEDIA_COPPER;
-    break;
-  case 1: // RGMII to 1000Base-X
-  case 2: // RGMII to 100Base-FX
-  case 4: // 1000Base-T to 1000Base-X
-  case 5: // 100Base-TX to 100Base-FX
-    media = DP83869_MEDIA_FIBER;
-    break;
-  default:
-    media = DP83869_MEDIA_COPPER;
-    break;
-  }
-
-  if(media == DP83869_MEDIA_COPPER) {
-    dp83869_set_mode_copper(regio, arg, mode);
-    evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Copper",
-          mode == ETHPHY_MODE_RGMII ? "R" : "");
-  } else {
-    dp83869_set_mode_fiber(regio, arg, mode);
-    evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Fiber",
-          mode == ETHPHY_MODE_RGMII ? "R" : "");
-  }
-
-  return 0;
-}
-
 static const char *
 speed_str(uint16_t phy_status)
 {
@@ -423,4 +350,83 @@ dp83869_print_diagnostics(stream_t *s,
   stprintf(s, "  BMCR: 0x%04x, BMSR: 0x%04x\n", bmcr, bmsr);
 }
 
-DRIVER(dp83869_attach, 5);
+static const ethphy_class_t dp83869_class = {
+  .print_info = dp83869_print_diagnostics,
+};
+
+
+static error_t
+dp83869_probe(uint16_t type, void *metadata)
+{
+  if(type != DRIVER_TYPE_ETHPHY)
+    return ERR_MISMATCH;
+
+  ethphy_dev_t *ed = metadata;
+  const ethphy_reg_io_t *regio = ed->ed_regio;
+  void *arg = ed->ed_arg;
+  ethphy_mode_t mode = ed->ed_mode;
+
+  uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
+  uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
+
+  // PHYIDR1 reset value = 0x2000, PHYIDR2 = 0xA0F1
+  if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
+    return ERR_MISMATCH;
+  }
+
+  uint16_t model = (id2 >> 4) & 0x3f;
+  uint16_t rev = id2 & 0xf;
+
+  // DP83869HM model number = 0x0F
+  if(model != 0x0f) {
+    return ERR_MISMATCH;
+  }
+
+  uint16_t strap = reg_read(regio, arg, REG_STRAP_STS);
+  uint16_t opmode_strap = (strap >> 9) & 0x7;
+
+  evlog(LOG_DEBUG, "dp83869: Model 0x%02x rev %d, strap opmode %d, "
+        "phy_addr %d, aneg %s",
+        model, rev, opmode_strap,
+        (strap >> 4) & 0xf,
+        (strap & 0x2) ? "enabled" : "disabled");
+
+  if(mode != ETHPHY_MODE_RGMII && mode != ETHPHY_MODE_MII) {
+    evlog(LOG_ERR, "dp83869: Unsupported MAC mode %d", mode);
+    return ERR_INVALID_ARGS;
+  }
+
+  // Determine media from strap configuration:
+  // opmode 0 = RGMII to Copper, 1 = RGMII to 1000Base-X, etc.
+  dp83869_media_t media;
+  switch(opmode_strap) {
+  case 0: // RGMII to Copper
+  case 6: // SGMII to Copper
+    media = DP83869_MEDIA_COPPER;
+    break;
+  case 1: // RGMII to 1000Base-X
+  case 2: // RGMII to 100Base-FX
+  case 4: // 1000Base-T to 1000Base-X
+  case 5: // 100Base-TX to 100Base-FX
+    media = DP83869_MEDIA_FIBER;
+    break;
+  default:
+    media = DP83869_MEDIA_COPPER;
+    break;
+  }
+
+  if(media == DP83869_MEDIA_COPPER) {
+    dp83869_set_mode_copper(regio, arg, mode);
+    evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Copper",
+          mode == ETHPHY_MODE_RGMII ? "R" : "");
+  } else {
+    dp83869_set_mode_fiber(regio, arg, mode);
+    evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Fiber",
+          mode == ETHPHY_MODE_RGMII ? "R" : "");
+  }
+
+  ed->ed_class = &dp83869_class;
+  return 0;
+}
+
+DRIVER(dp83869_probe, 5);

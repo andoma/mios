@@ -41,12 +41,12 @@ reg_write(const ethphy_reg_io_t *regio, void *arg, uint16_t reg, uint16_t val)
 
 
 static error_t
-dp83826_attach(device_t *d)
+dp83826_probe(uint16_t type, void *metadata)
 {
-  if(d->d_type != DEVICE_TYPE_ETHPHY)
+  if(type != DRIVER_TYPE_ETHPHY)
     return ERR_MISMATCH;
 
-  ethphy_dev_t *ed = (ethphy_dev_t *)d;
+  ethphy_dev_t *ed = metadata;
   const ethphy_reg_io_t *regio = ed->ed_regio;
   void *arg = ed->ed_arg;
   ethphy_mode_t mode = ed->ed_mode;
@@ -82,7 +82,8 @@ dp83826_attach(device_t *d)
         mode == ETHPHY_MODE_RMII ? "R":"");
 
   reg_write(regio, arg, REG_RCSR, rcsr);
+  ed->ed_class = NULL;
   return 0;
 }
 
-DRIVER(dp83826_attach, 5);
+DRIVER(dp83826_probe, 5);

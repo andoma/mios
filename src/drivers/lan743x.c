@@ -6,6 +6,7 @@
 #include <mios/sys.h>
 #include <mios/driver.h>
 #include <mios/eventlog.h>
+#include <mios/ethphy.h>
 
 #include <util/crc32.h>
 
@@ -246,6 +247,8 @@ typedef struct lan743x {
   char name[16];
 
   bool is_7431;  // true for 7431, false for 7430
+
+  const ethphy_class_t *ethphy_class;
 
 } lan743x_t;
 
@@ -559,12 +562,16 @@ mii_write(lan743x_t *l, uint16_t reg, uint16_t val)
 
 
 
+static const ethphy_reg_io_t lan743x_ethphy_regio;
+
 static void
 lan7431_print_info(struct device *dev, struct stream *st)
 {
   lan743x_t *l = (lan743x_t *)dev;
   ether_print((ether_netif_t *)dev, st);
   stprintf(st, "\t%u IRQ\n", l->irq_counter);
+  if(l->ethphy_class && l->ethphy_class->print_info)
+    l->ethphy_class->print_info(st, &lan743x_ethphy_regio, l);
 }
 
 
@@ -617,26 +624,22 @@ lan7430_phy_init(lan743x_t *l)
   }
 }
 
-static void
-lan7431_phy_init(lan743x_t *l)
+static uint16_t
+lan743x_ethphy_read(void *arg, uint16_t reg)
 {
-  uint16_t anar = mii_read(l, 0x4);
-  uint16_t gtcr = mii_read(l, 0x9);
-
-  mii_write(l, 0x1df, 0x0041);
-  mii_write(l, 0x32, mii_read(l, 0x32) | 3);
-
-  mii_write(l, 0xc6, 0x10);
-  mii_write(l, 0x86, 0x0077);
-  mii_write(l, 0x170, (0xf << 1) | 1);
-  // If we're not announcing all full duplex rates over autoneg, make sure we do
-  if(anar != 0x1e1 || gtcr != 0x200) {
-    mii_write(l, 0x4, 0x01e1);
-    mii_write(l, 0x9, 0x0200);
-  }
-
-  mii_write(l, 0xc00, 0x9140);
+  return mii_read0(arg, reg);
 }
+
+static void
+lan743x_ethphy_write(void *arg, uint16_t reg, uint16_t value)
+{
+  mii_write0(arg, reg, value);
+}
+
+static const ethphy_reg_io_t lan743x_ethphy_regio = {
+  .read = lan743x_ethphy_read,
+  .write = lan743x_ethphy_write,
+};
 
 static void *__attribute__((noreturn))
 lan743x_phy_thread(void *arg)
@@ -658,12 +661,12 @@ lan743x_phy_thread(void *arg)
 }
 
 static error_t
-lan743x_attach(device_t *d)
+lan743x_probe(uint16_t type, void *metadata)
 {
-  if(d->d_type != DEVICE_TYPE_PCI)
+  if(type != DRIVER_TYPE_PCI)
     return ERR_MISMATCH;
 
-  pci_dev_t *pd = (pci_dev_t *)d;
+  pci_dev_t *pd = metadata;
   if(pd->pd_vid != 0x1055)
     return ERR_MISMATCH;
 
@@ -787,9 +790,9 @@ lan743x_attach(device_t *d)
 
   l->eni.eni_output = lan743x_eth_output;
 
-  snprintf(l->name, sizeof(l->name), "eth_%s", d->d_name);
-  l->eni.eni_ni.ni_dev.d_parent = d;
-  device_retain(d);
+  snprintf(l->name, sizeof(l->name), "eth_%s", pd->pd_dev.d_name);
+  l->eni.eni_ni.ni_dev.d_parent = &pd->pd_dev;
+  device_retain(&pd->pd_dev);
 
   ether_netif_init(&l->eni, l->name, &lan743x_device_class);
 
@@ -808,7 +811,16 @@ lan743x_attach(device_t *d)
 
   // Use variant-specific PHY initialization
   if(l->is_7431) {
-    lan7431_phy_init(l);
+    ethphy_dev_t ed = {
+      .ed_mode = ETHPHY_MODE_RGMII,
+      .ed_regio = &lan743x_ethphy_regio,
+      .ed_arg = l,
+    };
+    error_t err = driver_probe(DRIVER_TYPE_ETHPHY, &ed);
+    if(err) {
+      evlog(LOG_ERR, "%s: External PHY init failed: %d", l->name, err);
+    }
+    l->ethphy_class = ed.ed_class;
   } else {
     lan7430_phy_init(l);
   }
@@ -886,4 +898,4 @@ cmd_lan_ctrl(cli_t *cli, int argc, char **argv)
 CLI_CMD_DEF("lan_ctrl", cmd_lan_ctrl);
 
 
-DRIVER(lan743x_attach, 1);
+DRIVER(lan743x_probe, 1);

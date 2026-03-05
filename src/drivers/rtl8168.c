@@ -404,12 +404,12 @@ mii_read(void *arg, uint16_t reg)
 
 
 static error_t
-rtl8168_attach(device_t *d)
+rtl8168_probe(uint16_t type, void *metadata)
 {
-  if(d->d_type != DEVICE_TYPE_PCI)
+  if(type != DRIVER_TYPE_PCI)
     return ERR_MISMATCH;
 
-  pci_dev_t *pd = (pci_dev_t *)d;
+  pci_dev_t *pd = metadata;
   if(pd->pd_vid != 0x10ec || pd->pd_pid != 0x8168)
     return ERR_MISMATCH;
 
@@ -503,9 +503,9 @@ rtl8168_attach(device_t *d)
 
   r->irq = pci_irq_attach_intx(pd, PCI_INTA, IRQ_LEVEL_NET, rtl8168_irq, r);
 
-  snprintf(r->name, sizeof(r->name), "eth_%s", d->d_name);
-  r->eni.eni_ni.ni_dev.d_parent = d;
-  device_retain(d);
+  snprintf(r->name, sizeof(r->name), "eth_%s", pd->pd_dev.d_name);
+  r->eni.eni_ni.ni_dev.d_parent = &pd->pd_dev;
+  device_retain(&pd->pd_dev);
   ether_netif_init(&r->eni, r->name, &rtl8168_device_class);
 
   evlog(LOG_INFO, "%s: rtl8168 attached IRQ %d", r->name, r->irq);
@@ -525,4 +525,4 @@ rtl8168_attach(device_t *d)
   return 0;
 }
 
-DRIVER(rtl8168_attach, 1);
+DRIVER(rtl8168_probe, 1);
