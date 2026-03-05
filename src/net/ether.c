@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <sys/param.h>
 
 #include "irq.h"
 #include "ether.h"
@@ -149,6 +150,13 @@ ether_input(netif_t *ni, pbuf_t *pb)
 
   if(pbuf_pullup(pb, sizeof(ether_hdr_t)))
     goto out;
+
+  if(unlikely(ni->ni_dev.d_flags & DEVICE_F_DEBUG)) {
+    int len = MIN(pb->pb_buflen, 32);
+    evlog(LOG_DEBUG, "%s: RX: {%d} %.*s",
+          ni->ni_dev.d_name, pb->pb_buflen, -len,
+          (const char *)pbuf_cdata(pb, 0));
+  }
 
   const ether_hdr_t *eh = pbuf_data(pb, 0);
 
