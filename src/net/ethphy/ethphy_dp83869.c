@@ -125,50 +125,44 @@ static void
 dp83869_set_mode_copper(const ethphy_reg_io_t *regio, void *arg,
                         ethphy_mode_t mode)
 {
-  // Set operation mode to RGMII-to-Copper (Section 7.4.8.1)
+  // Section 7.4.8.1: RGMII-to-Copper mode initialization
   reg_write(regio, arg, REG_OP_MODE_DECODE, 0x0040);
 
-  // Reset BMCR
+  // Software Reset to apply mode change
+  reg_write(regio, arg, REG_GEN_CTRL, GEN_CTRL_SW_RESET);
+
+  for(int i = 0; i < 1000; i++) {
+    if(!(reg_read(regio, arg, REG_GEN_CTRL) & GEN_CTRL_SW_RESET))
+      break;
+  }
+
+  // Configure registers AFTER reset (reset wipes register state)
   reg_write(regio, arg, REG_BMCR, 0x1140);
-
-  // Advertise 100Base-TX and 10Base-T ability
   reg_write(regio, arg, REG_ANAR, 0x01e1);
-
-  // Reset GEN_CFG1
   reg_write(regio, arg, REG_GEN_CFG1, 0x0300);
-
-  // Reset PHY_CONTROL
   reg_write(regio, arg, REG_PHY_CONTROL, 0x5048);
 
   if(mode == ETHPHY_MODE_RGMII) {
-    // Enable RGMII TX and RX clock delay (shift mode, 2ns default)
+    // Bit=0 → "shifted" → delay ON. Both delays enabled for copper.
     uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
-    rgmii_ctrl |= RGMII_CTRL_TX_CLK_DELAY | RGMII_CTRL_RX_CLK_DELAY;
+    rgmii_ctrl &= ~(RGMII_CTRL_TX_CLK_DELAY | RGMII_CTRL_RX_CLK_DELAY);
     reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
   }
-
-  // Software reset
-  reg_write(regio, arg, REG_GEN_CTRL, GEN_CTRL_SW_RESET);
 }
 
 static void
 dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
                        ethphy_mode_t mode)
 {
-  // Set operation mode to RGMII-to-1000Base-X (Section 7.4.8.2)
-  reg_write(regio, arg, REG_OP_MODE_DECODE, 0x0041);
-
-  // Reset FX_CTRL
-  reg_write(regio, arg, REG_FX_CTRL, 0x1140);
+  // Straps already configure opmode=1 (RGMII-to-1000Base-X).
 
   if(mode == ETHPHY_MODE_RGMII) {
+    // Bit=0 means "shifted" (delay ON), bit=1 means "aligned" (no delay).
+    // Both TX and RX delays ON for RGMII-to-1000Base-X.
     uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
-    rgmii_ctrl |= RGMII_CTRL_TX_CLK_DELAY | RGMII_CTRL_RX_CLK_DELAY;
+    rgmii_ctrl &= ~(RGMII_CTRL_TX_CLK_DELAY | RGMII_CTRL_RX_CLK_DELAY);
     reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
   }
-
-  // Software reset
-  reg_write(regio, arg, REG_GEN_CTRL, GEN_CTRL_SW_RESET);
 }
 
 static const char *
@@ -284,8 +278,8 @@ dp83869_print_diagnostics(stream_t *s,
   // RGMII settings
   stprintf(s, "  RGMII_CTRL: 0x%04x (TX_delay=%s, RX_delay=%s)\n",
            rgmii_ctrl,
-           (rgmii_ctrl & RGMII_CTRL_TX_CLK_DELAY) ? "on" : "off",
-           (rgmii_ctrl & RGMII_CTRL_RX_CLK_DELAY) ? "on" : "off");
+           (rgmii_ctrl & RGMII_CTRL_TX_CLK_DELAY) ? "off" : "on",
+           (rgmii_ctrl & RGMII_CTRL_RX_CLK_DELAY) ? "off" : "on");
 
   uint16_t tx_delay = (rgmii_dll >> 4) & 0xf;
   uint16_t rx_delay = rgmii_dll & 0xf;
