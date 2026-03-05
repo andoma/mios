@@ -453,9 +453,6 @@ lan743x_reset(lan743x_t *l)
   uint32_t data = reg_rd(l->mmio + HW_CFG);
 
   data |= HW_CFG_LRST_;
-  if(l->is_7431) {
-    data |= HW_CFG_125MHZ_CLOCK_;
-  }
   reg_wr(l->mmio + HW_CFG, data);
 
   while(1) {
@@ -465,6 +462,12 @@ lan743x_reset(lan743x_t *l)
       evlog(LOG_ERR, "%s: failed to reset", l->name);
       return ERR_TIMEOUT;
     }
+  }
+
+  if(l->is_7431) {
+    data = reg_rd(l->mmio + HW_CFG);
+    data |= HW_CFG_125MHZ_CLOCK_;
+    reg_wr(l->mmio + HW_CFG, data);
   }
 
   // Reset TX DMA
@@ -821,6 +824,9 @@ lan743x_probe(uint16_t type, void *metadata)
       evlog(LOG_ERR, "%s: External PHY init failed: %d", l->name, err);
     }
     l->ethphy_class = ed.ed_class;
+
+    // Disable MAC-side TXC delay — PHY RX clock delay handles TX timing
+    reg_wr(l->mmio + 0x128, 0);
   } else {
     lan7430_phy_init(l);
   }
