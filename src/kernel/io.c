@@ -1,6 +1,10 @@
 #include <mios/io.h>
 #include <mios/error.h>
+#include <mios/task.h>
 #include <sys/uio.h>
+#include <stdlib.h>
+
+#include "irq.h"
 
 error_t
 i2c_rw(struct i2c *i2c, uint8_t addr,
@@ -79,16 +83,16 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull,
 
 
 static error_t
-igtg_conf_input(struct indirect_gpio *ig, unsigned int line, gpio_pull_t pull)
+mmgpio_conf_input(struct xgpio *ig, unsigned int line, gpio_pull_t pull)
 {
   gpio_conf_input(line, pull);
   return 0;
 }
 
 static error_t
-igtg_conf_output(struct indirect_gpio *ig, unsigned int line,
-                 gpio_output_type_t type, gpio_output_speed_t speed,
-                 gpio_pull_t pull, int initial_value)
+mmgpio_conf_output(struct xgpio *ig, unsigned int line,
+                   gpio_output_type_t type, gpio_output_speed_t speed,
+                   gpio_pull_t pull, int initial_value)
 {
   // A workaround to deal with that gpio_conf_output() have no initial value
   gpio_conf_input(line, pull);
@@ -99,7 +103,7 @@ igtg_conf_output(struct indirect_gpio *ig, unsigned int line,
 
 
 static error_t
-igtg_set_pin(struct indirect_gpio *ig, unsigned int line, int on)
+mmgpio_set(struct xgpio *ig, unsigned int line, int on)
 {
   gpio_set_output(line, on);
   return 0;
@@ -107,7 +111,7 @@ igtg_set_pin(struct indirect_gpio *ig, unsigned int line, int on)
 
 
 static error_t
-igtg_get_pin(struct indirect_gpio *ig, unsigned int line, int *status)
+mmgpio_get(struct xgpio *ig, unsigned int line, int *status)
 {
   *status = gpio_get_input(line);
   return 0;
@@ -115,38 +119,104 @@ igtg_get_pin(struct indirect_gpio *ig, unsigned int line, int *status)
 
 
 static error_t
-igtg_refresh_shadow(struct indirect_gpio *ig)
+mmgpio_refresh_shadow(struct xgpio *ig)
 {
   return 0;
 }
 
 
 static error_t
-igtg_conf_irq(struct indirect_gpio *ig, unsigned int line,
-              gpio_pull_t pull,
-              void (*cb)(void *arg), void *arg,
-              gpio_edge_t edge, int level)
+mmgpio_conf_irq(struct xgpio *ig, unsigned int line,
+                gpio_pull_t pull,
+                void (*cb)(void *arg), void *arg,
+                gpio_edge_t edge, int level)
 {
   gpio_conf_irq(line, pull, cb, arg, edge, level);
   return 0;
 }
 
 
-static const gpio_vtable_t indirect_gpio_to_gpio_vtable = {
-  .conf_input = igtg_conf_input,
-  .conf_output = igtg_conf_output,
-  .set_pin = igtg_set_pin,
-  .get_pin = igtg_get_pin,
-  .conf_irq = igtg_conf_irq,
-  .refresh_shadow = igtg_refresh_shadow
+static const xgpio_vtable_t mmgpio_vtable = {
+  .conf_input = mmgpio_conf_input,
+  .conf_output = mmgpio_conf_output,
+  .set = mmgpio_set,
+  .get = mmgpio_get,
+  .conf_irq = mmgpio_conf_irq,
+  .refresh_shadow = mmgpio_refresh_shadow
 };
 
-static indirect_gpio_t indirect_gpio_to_gpio = {
-  &indirect_gpio_to_gpio_vtable
+xgpio_t mmgpio = {
+  &mmgpio_vtable
 };
 
-indirect_gpio_t *
-gpio_as_indirect_gpio(void)
+
+struct xgpio_irq_mux {
+  task_waitable_t waitq;
+  SLIST_HEAD(, xgpio) list;
+  gpio_t gpio;
+  uint8_t pending;
+  uint8_t soft_wakeup;
+};
+
+static void
+xgpio_irq_mux_isr(void *arg)
 {
-  return &indirect_gpio_to_gpio;
+  struct xgpio_irq_mux *m = arg;
+  m->pending = !gpio_get_input(m->gpio);
+  task_wakeup(&m->waitq, 0);
+}
+
+
+__attribute__((noreturn))
+static void *
+xgpio_irq_mux_thread(void *arg)
+{
+  struct xgpio_irq_mux *m = arg;
+  xgpio_t *ig;
+
+  while(1) {
+
+    int q = irq_forbid(IRQ_LEVEL_SWITCH);
+    while(m->pending == 0 && m->soft_wakeup == 0) {
+      task_sleep(&m->waitq);
+    }
+    m->soft_wakeup = 0;
+    irq_permit(q);
+
+    SLIST_FOREACH(ig, &m->list, shared_irq_link) {
+      ig->vtable->irq(ig);
+    }
+  }
+}
+
+
+struct xgpio_irq_mux *
+xgpio_irq_mux_create(gpio_t gpio)
+{
+  struct xgpio_irq_mux *m = calloc(1, sizeof(struct xgpio_irq_mux));
+
+  task_waitable_init(&m->waitq, "gpio");
+  m->gpio = gpio;
+
+  gpio_conf_irq(gpio, GPIO_PULL_UP, xgpio_irq_mux_isr, m,
+                GPIO_BOTH_EDGES, IRQ_LEVEL_SWITCH);
+
+  thread_create(xgpio_irq_mux_thread, m, 0, "xgpiomux", 0, 12);
+  return m;
+}
+
+
+void
+xgpio_irq_mux_link(struct xgpio_irq_mux *m, xgpio_t *gpio)
+{
+  SLIST_INSERT_HEAD(&m->list, gpio, shared_irq_link);
+}
+
+void
+xgpio_irq_mux_wakeup(struct xgpio_irq_mux *m)
+{
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  m->soft_wakeup = 1;
+  task_wakeup(&m->waitq, 0);
+  irq_permit(q);
 }

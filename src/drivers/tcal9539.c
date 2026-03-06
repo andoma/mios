@@ -5,6 +5,7 @@
 #include "tcal9539.h"
 #include <mios/io.h>
 #include <mios/task.h>
+#include <mios/eventlog.h>
 #include <stdlib.h>
 
 #include "irq.h"
@@ -28,8 +29,10 @@
 
 
 typedef struct {
-  indirect_gpio_t gpio;
+  xgpio_t gpio;
   i2c_t *i2c;
+  struct xgpio_irq_mux *irq_mux;
+
   uint8_t address;
   uint16_t output;
   uint16_t irq_mask;
@@ -37,14 +40,15 @@ typedef struct {
   uint16_t pull_enable;
   uint16_t pull_direction;
 
-  uint16_t input_snapshot;
-  uint16_t callback_mask;
-  uint8_t irq_pending;
-  task_waitable_t irq_waitq;
+  uint16_t input_shadow;
+  uint16_t input_prev; // For edge detection
+
+  uint16_t irq_mask_rising_edge;
+  uint16_t irq_mask_falling_edge;
+
   struct {
     void (*cb)(void *arg);
     void *arg;
-    gpio_edge_t edge;
   } pin_irq[16];
 } tcal9539_t;
 
@@ -112,7 +116,7 @@ tcal9539_conf_pull(tcal9539_t *tc, unsigned int line, gpio_pull_t pull)
 
 
 static error_t
-tcal9539_conf_input(indirect_gpio_t *ig, unsigned int line, gpio_pull_t pull)
+tcal9539_conf_input(xgpio_t *ig, unsigned int line, gpio_pull_t pull)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
   if(line >= 16)
@@ -122,12 +126,24 @@ tcal9539_conf_input(indirect_gpio_t *ig, unsigned int line, gpio_pull_t pull)
   if(err)
     return err;
 
-  return tcal9539_set_bit_in_reg(tc, line, &tc->direction, TCAL9539_CFG0);
+  err = tcal9539_set_bit_in_reg(tc, line, &tc->direction, TCAL9539_CFG0);
+  if(err)
+    return err;
+
+  if(tc->irq_mux == NULL)
+    return 0;
+
+  err = tcal9539_clr_bit_in_reg(tc, line, &tc->irq_mask, TCAL9539_IRQMSK0);
+  if(err)
+    return err;
+
+  xgpio_irq_mux_wakeup(tc->irq_mux);
+  return 0;
 }
 
 
 static error_t
-tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
+tcal9539_set_pin(xgpio_t *ig, unsigned int line, int on)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
 
@@ -142,51 +158,48 @@ tcal9539_set_pin(indirect_gpio_t *ig, unsigned int line, int on)
 }
 
 static error_t
-tcal9539_conf_irq(indirect_gpio_t *ig, unsigned int line,
+tcal9539_conf_irq(xgpio_t *ig, unsigned int line,
                   gpio_pull_t pull,
                   void (*cb)(void *arg), void *arg,
                   gpio_edge_t edge, int level)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
 
-  if(line >= 16)
-    return ERR_INVALID_ID;
-
-  error_t err = tcal9539_conf_pull(tc, line, pull);
-  if(err)
-    return err;
-
-  err = tcal9539_set_bit_in_reg(tc, line, &tc->direction, TCAL9539_CFG0);
-  if(err)
-    return err;
+  if(tc->irq_mux == NULL)
+    return ERR_BAD_CONFIG;
 
   tc->pin_irq[line].cb = cb;
   tc->pin_irq[line].arg = arg;
-  tc->pin_irq[line].edge = edge;
 
-  if(cb) {
-    tc->callback_mask |= (1 << line);
-    // Unmask IRQ for this pin (clear bit = unmask)
-    return tcal9539_clr_bit_in_reg(tc, line, &tc->irq_mask, TCAL9539_IRQMSK0);
-  } else {
-    tc->callback_mask &= ~(1 << line);
-    // Mask IRQ for this pin (set bit = mask)
-    return tcal9539_set_bit_in_reg(tc, line, &tc->irq_mask, TCAL9539_IRQMSK0);
-  }
+  if(edge & GPIO_RISING_EDGE)
+    tc->irq_mask_rising_edge |= 1 << line;
+
+  if(edge & GPIO_FALLING_EDGE)
+    tc->irq_mask_falling_edge |= 1 << line;
+
+  return tcal9539_conf_input(ig, line, pull);
 }
 
 
 static error_t
-tcal9539_conf_output(indirect_gpio_t *ig, unsigned int line,
+tcal9539_conf_output(xgpio_t *ig, unsigned int line,
                      gpio_output_type_t type, gpio_output_speed_t speed,
                      gpio_pull_t pull, int initial_value)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
+  error_t err;
 
   if(line >= 16)
     return ERR_INVALID_ID;
 
-  error_t err = tcal9539_conf_pull(tc, line, pull);
+  if(tc->irq_mux) {
+    // Disable IRQ if any
+    err = tcal9539_set_bit_in_reg(tc, line, &tc->irq_mask, TCAL9539_IRQMSK0);
+    if(err)
+      return err;
+  }
+
+  err = tcal9539_conf_pull(tc, line, pull);
   if(err)
     return err;
 
@@ -201,15 +214,19 @@ tcal9539_conf_output(indirect_gpio_t *ig, unsigned int line,
 
 
 static error_t
-tcal9539_get_pin(indirect_gpio_t *ig, unsigned int line, int *status)
+tcal9539_get_pin(xgpio_t *ig, unsigned int line, int *status)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
 
   if(line >= 16)
     return ERR_INVALID_ID;
 
-
   if((1 << line) & tc->direction) {
+
+    if(tc->irq_mux != NULL) {
+      *status = (tc->input_shadow >> line) & 1;
+      return 0;
+    }
 
     uint8_t val;
     error_t err = i2c_read_u8(tc->i2c, tc->address, line >> 3, &val);
@@ -225,25 +242,8 @@ tcal9539_get_pin(indirect_gpio_t *ig, unsigned int line, int *status)
   return 0;
 }
 
-static error_t
-tcal9539_get_port(indirect_gpio_t *ig, unsigned int port, uint32_t *status)
-{
-  tcal9539_t *tc = (tcal9539_t *)ig;
-
-  if(port >= 2)
-    return ERR_INVALID_ID;
-
-  uint8_t val;
-  error_t err = i2c_read_u8(tc->i2c, tc->address, port, &val);
-  if(err)
-    return err;
-
-  *status = val;
-  return 0;
-}
-
 static int
-tcal9539_get_mode(indirect_gpio_t *ig, unsigned int line)
+tcal9539_get_mode(xgpio_t *ig, unsigned int line)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
   return (tc->direction >> line) & 1;
@@ -272,7 +272,7 @@ tcal9539_read_u16(tcal9539_t *tc, uint8_t reg, uint16_t *value)
 
 
 static error_t
-tcal9539_refresh_shadow(indirect_gpio_t *ig)
+tcal9539_refresh_shadow(xgpio_t *ig)
 {
   tcal9539_t *tc = (tcal9539_t *)ig;
   error_t err;
@@ -291,64 +291,50 @@ tcal9539_refresh_shadow(indirect_gpio_t *ig)
 }
 
 
+
+
 static void
-tcal9539_irq_handler(void *arg)
+tcal9539_irq(xgpio_t *ig)
 {
-  tcal9539_t *tc = arg;
-  tc->irq_pending = 1;
-  task_wakeup(&tc->irq_waitq, 0);
-}
+  tcal9539_t *tc = (tcal9539_t *)ig;
 
+  if(tcal9539_read_u16(tc, TCAL9539_INPUT0, &tc->input_shadow))
+    return;
 
-__attribute__((noreturn))
-static void *
-tcal9539_dispatch_thread(void *arg)
-{
-  tcal9539_t *tc = arg;
+  uint16_t both_edges = tc->irq_mask_rising_edge | tc->irq_mask_falling_edge;
+  uint16_t changed = (tc->input_shadow ^ tc->input_prev) & both_edges;
 
-  while(1) {
-    while(!tc->irq_pending)
-      task_sleep(&tc->irq_waitq);
+  tc->input_prev = tc->input_shadow;
 
-    tc->irq_pending = 0;
+  while(changed) {
+    const int pin = __builtin_ctz(changed);
+    const int mask = 1 << pin;
+    changed &= ~mask;
 
-    uint16_t inputs;
-    if(tcal9539_read_u16(tc, TCAL9539_INPUT0, &inputs))
-      continue;
+    const int new_val = tc->input_shadow & mask;
 
-    uint16_t changed = (inputs ^ tc->input_snapshot) & tc->callback_mask;
-    tc->input_snapshot = inputs;
-
-    while(changed) {
-      int pin = __builtin_ctz(changed);
-      changed &= ~(1 << pin);
-
-      int new_val = (inputs >> pin) & 1;
-      gpio_edge_t edge = tc->pin_irq[pin].edge;
-
-      if((new_val && (edge & GPIO_RISING_EDGE)) ||
-         (!new_val && (edge & GPIO_FALLING_EDGE))) {
-        tc->pin_irq[pin].cb(tc->pin_irq[pin].arg);
-      }
+    if((new_val && (mask & tc->irq_mask_rising_edge)) ||
+       (!new_val && (mask & tc->irq_mask_falling_edge))) {
+      tc->pin_irq[pin].cb(tc->pin_irq[pin].arg);
     }
   }
 }
 
 
-static const gpio_vtable_t tcal9539_vtable = {
+static const xgpio_vtable_t tcal9539_vtable = {
   .conf_input = tcal9539_conf_input,
   .conf_output = tcal9539_conf_output,
-  .set_pin = tcal9539_set_pin,
-  .get_pin = tcal9539_get_pin,
-  .get_port = tcal9539_get_port,
+  .set = tcal9539_set_pin,
+  .get = tcal9539_get_pin,
   .get_mode = tcal9539_get_mode,
   .conf_irq = tcal9539_conf_irq,
   .refresh_shadow = tcal9539_refresh_shadow,
+  .irq = tcal9539_irq,
 };
 
 
-indirect_gpio_t *
-tcal9539_create(i2c_t *i2c, uint8_t address, gpio_t irq_pin)
+xgpio_t *
+tcal9539_create(i2c_t *i2c, uint8_t address, struct xgpio_irq_mux *m)
 {
   tcal9539_t *tc = calloc(1, sizeof(tcal9539_t));
 
@@ -360,16 +346,11 @@ tcal9539_create(i2c_t *i2c, uint8_t address, gpio_t irq_pin)
   tc->direction = 0xffff;
   tc->pull_direction = 0xffff;
 
-  if(irq_pin != GPIO_UNUSED) {
-    task_waitable_init(&tc->irq_waitq, "tcal");
-
+  if(m != NULL) {
     // Read initial input state
-    tcal9539_read_u16(tc, TCAL9539_INPUT0, &tc->input_snapshot);
-
-    gpio_conf_irq(irq_pin, GPIO_PULL_NONE, tcal9539_irq_handler, tc,
-                  GPIO_FALLING_EDGE, IRQ_LEVEL_CLOCK);
-
-    thread_create(tcal9539_dispatch_thread, tc, 0, "tcal9539", 0, 6);
+    tcal9539_read_u16(tc, TCAL9539_INPUT0, &tc->input_shadow);
+    xgpio_irq_mux_link(m, &tc->gpio);
+    tc->irq_mux = m;
   }
 
   return &tc->gpio;
