@@ -194,7 +194,8 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   }
 
   if(gpio_irq_level[group] && gpio_irq_level[group] != level) {
-    panic("IRQ level conflict for group %d", group);
+    panic("IRQ level conflict for group %d (current level:%d  want:%d)", group,
+          gpio_irq_level[group], level);
   }
 
   if(!gpio_irq_level[group]) {

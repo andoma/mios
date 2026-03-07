@@ -251,8 +251,10 @@ xgpio_conf_irq_pin(const xgpio_pin_t *xp, gpio_pull_t pull,
 // xpgio_irq_mux
 // Used to hook up mmgpio IRQ to one or multiple xgpio controllers
 // Assumes active-low / open-drain IRQ lines
-
-struct xgpio_irq_mux *xgpio_irq_mux_create(gpio_t gpio);
+// irq_level can be any irq_level really (we just use it for task
+// switch interlock) but some platforms share IRQs among multiple
+// GPIO pins so it is useful to be able to change it
+struct xgpio_irq_mux *xgpio_irq_mux_create(gpio_t gpio, int irq_level);
 
 void xgpio_irq_mux_link(struct xgpio_irq_mux *m, xgpio_t *gpio);
 

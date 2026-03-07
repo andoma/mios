@@ -156,6 +156,7 @@ struct xgpio_irq_mux {
   gpio_t gpio;
   uint8_t pending;
   uint8_t soft_wakeup;
+  uint8_t irq_level;
 };
 
 static void
@@ -176,7 +177,7 @@ xgpio_irq_mux_thread(void *arg)
 
   while(1) {
 
-    int q = irq_forbid(IRQ_LEVEL_SWITCH);
+    int q = irq_forbid(m->irq_level);
     while(m->pending == 0 && m->soft_wakeup == 0) {
       task_sleep(&m->waitq);
     }
@@ -191,15 +192,15 @@ xgpio_irq_mux_thread(void *arg)
 
 
 struct xgpio_irq_mux *
-xgpio_irq_mux_create(gpio_t gpio)
+xgpio_irq_mux_create(gpio_t gpio, int irq_level)
 {
   struct xgpio_irq_mux *m = calloc(1, sizeof(struct xgpio_irq_mux));
 
   task_waitable_init(&m->waitq, "gpio");
   m->gpio = gpio;
-
+  m->irq_level = irq_level;
   gpio_conf_irq(gpio, GPIO_PULL_UP, xgpio_irq_mux_isr, m,
-                GPIO_BOTH_EDGES, IRQ_LEVEL_SWITCH);
+                GPIO_BOTH_EDGES, irq_level);
 
   thread_create(xgpio_irq_mux_thread, m, 0, "xgpiomux", 0, 12);
   return m;
@@ -215,7 +216,7 @@ xgpio_irq_mux_link(struct xgpio_irq_mux *m, xgpio_t *gpio)
 void
 xgpio_irq_mux_wakeup(struct xgpio_irq_mux *m)
 {
-  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  int q = irq_forbid(m->irq_level);
   m->soft_wakeup = 1;
   task_wakeup(&m->waitq, 0);
   irq_permit(q);
