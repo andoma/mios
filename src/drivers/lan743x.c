@@ -825,8 +825,8 @@ lan743x_probe(uint16_t type, void *metadata)
     }
     l->ethphy_class = ed.ed_class;
 
-    // Disable MAC-side TXC delay — PHY RX clock delay handles TX timing
-    reg_wr(l->mmio + 0x128, 0);
+    // RGMII TX delay is handled by the MAC
+    reg_wr(l->mmio + 0x128, 2);
   } else {
     lan7430_phy_init(l);
   }

@@ -143,9 +143,13 @@ dp83869_set_mode_copper(const ethphy_reg_io_t *regio, void *arg,
   reg_write(regio, arg, REG_PHY_CONTROL, 0x5048);
 
   if(mode == ETHPHY_MODE_RGMII) {
-    // Bit=0 → "shifted" → delay ON. Both delays enabled for copper.
     uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
-    rgmii_ctrl &= ~(RGMII_CTRL_TX_CLK_DELAY | RGMII_CTRL_RX_CLK_DELAY);
+
+    // The DELAY bits are confusing because 1 means off, 0 means on
+    // We do TX-delay in the MAC
+
+    rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
+    rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
     reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
   }
 }
@@ -157,10 +161,13 @@ dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
   // Straps already configure opmode=1 (RGMII-to-1000Base-X).
 
   if(mode == ETHPHY_MODE_RGMII) {
-    // Bit=0 means "shifted" (delay ON), bit=1 means "aligned" (no delay).
-    // Both TX and RX delays ON for RGMII-to-1000Base-X.
     uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
-    rgmii_ctrl &= ~(RGMII_CTRL_TX_CLK_DELAY | RGMII_CTRL_RX_CLK_DELAY);
+
+    // The DELAY bits are confusing because 1 means off, 0 means on
+    // We do TX-delay in the MAC
+
+    rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
+    rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
     reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
   }
 }
