@@ -36,6 +36,13 @@ struct stream *ota_get_stream(void);
  */
 error_t ota_prohibit_upgrade(void);
 
+/*
+ * Optionally implemented by application to receive OTA progress updates.
+ * Called once per flash sector (4 kB) during the write phase.
+ * current_bytes: bytes written so far, total_bytes: total image size.
+ */
+void ota_progress(uint32_t current_bytes, uint32_t total_bytes);
+
 
 /*
  * Write out a binary stream to spiflash and generate upgrade headers, etc
