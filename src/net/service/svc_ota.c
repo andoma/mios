@@ -12,6 +12,12 @@
 #include <mios/task.h>
 #include <mios/eventlog.h>
 #include <mios/block.h>
+#include <mios/ota.h>
+
+__attribute__((weak)) void
+ota_progress(uint32_t current_bytes, uint32_t total_bytes)
+{
+}
 
 #include "net/pbuf.h"
 
@@ -141,6 +147,7 @@ ota_perform(svc_ota_t *sa)
           return err;
         }
         erased_sector = sector;
+        ota_progress(current_byte, total_bytes);
       }
 
       void *buf = pbuf_data(pb, 0);
