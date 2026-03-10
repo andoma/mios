@@ -362,6 +362,8 @@ stm32h7_clk_deinit(void)
   reg_wr(RCC_APB1HRSTR, 0);
   reg_wr(RCC_APB2RSTR, 0);
   reg_wr(RCC_APB3RSTR, 0);
+
+  stm32h7_exti_deinit();
 }
 
 void

@@ -164,5 +164,7 @@ reset_peripheral(uint16_t id)
 
 void stm32h7_clk_deinit(void);
 
+void stm32h7_exti_deinit(void);
+
 struct stream;
 void stm32h7_print_clocks(struct stream *st);

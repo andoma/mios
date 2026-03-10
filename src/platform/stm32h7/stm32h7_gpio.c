@@ -207,6 +207,18 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
 }
 
 
+// No reset from RCC to EXTI so we need to clear manually
+void
+stm32h7_exti_deinit(void)
+{
+  reg_wr(EXTI_RTSR1, 0);
+  reg_wr(EXTI_FTSR1, 0);
+  reg_wr(EXTI_CPUIMR1, 0);
+  // Clear all pending
+  reg_wr(EXTI_CPUPR1, 0xffffffff);
+}
+
+
 
 static void __attribute__((noinline))
 gpio_irq(int line)
