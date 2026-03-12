@@ -36,11 +36,14 @@
 #define REG_SGMII_AUTO_NEG_STATUS 0x0037
 #define REG_STRAP_STS       0x006e  // Strap Status
 #define REG_RGMII_DLL_CTRL  0x0086  // RGMII Delay Control
+#define REG_IO_MUX_CFG      0x0170  // IO Mux Configuration
 #define REG_OP_MODE_DECODE  0x01df  // Operation Mode Decode
 #define REG_FX_CTRL         0x0c00  // Fiber Control
 #define REG_FX_STS          0x0c01  // Fiber Status
 #define REG_FX_PHYID1       0x0c02  // Fiber PHY ID 1
 #define REG_FX_PHYID2       0x0c03  // Fiber PHY ID 2
+#define REG_FX_ANAR         0x0c04  // Fiber Auto-Neg Advertisement
+#define REG_FX_ANLPAR       0x0c05  // Fiber Auto-Neg LP Ability
 
 // BMCR bits
 #define BMCR_RESET          (1 << 15)
@@ -158,7 +161,16 @@ static void
 dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
                        ethphy_mode_t mode)
 {
-  // Straps already configure opmode=1 (RGMII-to-1000Base-X).
+  // Explicitly set RGMII-to-1000Base-X mode (match Linux: 0x0041)
+  reg_write(regio, arg, REG_OP_MODE_DECODE, 0x0041);
+
+  // Set FX_CTRL: auto-neg, full duplex, 1000M
+  reg_write(regio, arg, REG_FX_CTRL,
+            BMCR_AUTONEG_EN | BMCR_DUPLEX_EN | BMCR_SPEED_SEL_MSB);
+
+  // Soft reset sequence (from Linux driver)
+  reg_write(regio, arg, 0x00c6, 0x10);
+  reg_write(regio, arg, REG_RGMII_DLL_CTRL, 0x0077);
 
   if(mode == ETHPHY_MODE_RGMII) {
     uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
@@ -170,6 +182,14 @@ dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
     rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
     reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
   }
+
+  // Configure IO mux for fiber signal detect
+  reg_write(regio, arg, REG_IO_MUX_CFG, 0x1f);
+
+  // Reset FX_CTRL to apply (RESET bit is self-clearing)
+  reg_write(regio, arg, REG_FX_CTRL,
+            BMCR_RESET | BMCR_AUTONEG_EN | BMCR_DUPLEX_EN |
+            BMCR_SPEED_SEL_MSB);
 }
 
 static const char *
@@ -336,6 +356,8 @@ dp83869_print_diagnostics(stream_t *s,
      cfg_opmode == CFG_OPMODE_100BT_100FX) {
     uint16_t fx_ctrl = reg_read(regio, arg, REG_FX_CTRL);
     uint16_t fx_sts = reg_read(regio, arg, REG_FX_STS);
+    uint16_t fx_anar = reg_read(regio, arg, REG_FX_ANAR);
+    uint16_t fx_anlpar = reg_read(regio, arg, REG_FX_ANLPAR);
     stprintf(s, "  FX_CTRL: 0x%04x (ANEG=%s, Speed=%s, Duplex=%s)\n",
              fx_ctrl,
              (fx_ctrl & (1 << 12)) ? "on" : "off",
@@ -345,6 +367,14 @@ dp83869_print_diagnostics(stream_t *s,
              fx_sts,
              (fx_sts & (1 << 2)) ? "UP" : "DOWN",
              (fx_sts & (1 << 5)) ? "Yes" : "No");
+    stprintf(s, "  FX_ANAR: 0x%04x (FD=%d HD=%d Pause=%d AsmDir=%d)\n",
+             fx_anar,
+             (fx_anar >> 5) & 1, (fx_anar >> 6) & 1,
+             (fx_anar >> 7) & 1, (fx_anar >> 8) & 1);
+    stprintf(s, "  FX_ANLPAR: 0x%04x (FD=%d HD=%d Pause=%d AsmDir=%d)\n",
+             fx_anlpar,
+             (fx_anlpar >> 5) & 1, (fx_anlpar >> 6) & 1,
+             (fx_anlpar >> 7) & 1, (fx_anlpar >> 8) & 1);
   }
 
   // BMCR raw
