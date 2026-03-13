@@ -105,6 +105,10 @@ stm32h7_adc_init(uint32_t base, uint32_t pcsel, uint32_t difsel)
 	 reg_rd(base + ADC3_CALFACT));
 }
 
+void stm32h7_adc_enable_tsense(void)
+{
+  reg_set_bit(ADC3_BASE + ADC3_CCR, 23);
+}
 
 void
 stm32h7_adc_set_smpr(uint32_t base, uint32_t channel, uint32_t value)
