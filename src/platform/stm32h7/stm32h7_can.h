@@ -5,7 +5,9 @@
 struct dsig_filter;
 struct can_netif;
 
-#define STM32H7_CAN_TIM3_TIMESTAMPING 0x1
+#include "platform/stm32/stm32_fdcan.h"
+
+#define STM32H7_CAN_TIM3_TIMESTAMPING 0x10000
 
 struct can_netif *stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
                                    unsigned int nominal_bitrate,

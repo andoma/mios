@@ -63,7 +63,7 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
                                  nominal_bitrate,
                                  data_bitrate, clk_get_freq(CLK_FDCAN),
                                  NULL,
-                                 output_filter);
+                                 output_filter, 0);
   if(err) {
     printf("%s: Failed to initialize\n", name);
     return;

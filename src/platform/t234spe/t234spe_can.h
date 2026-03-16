@@ -5,6 +5,8 @@
 struct dsig_filter;
 struct can_netif;
 
+#include "platform/stm32/stm32_fdcan.h"
+
 struct can_netif *tegra243_spe_can_init(unsigned int nominal_bitrate,
                                         unsigned int data_bitrate,
                                         const struct dsig_filter *input_filter,

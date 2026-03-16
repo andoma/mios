@@ -1,5 +1,7 @@
 #include "irq.h"
 
+#include "stm32_fdcan.h"
+
 #include <assert.h>
 
 #include <mios/eventlog.h>
@@ -13,6 +15,8 @@
 #include "net/net.h"
 
 #include <mios/bytestream.h>
+
+#define FDCAN_TDCR  0x048
 
 #define FDCAN_FLSSA(x)     (0x000 + 4 * (x))
 #define FDCAN_FLESA         0x070
@@ -343,7 +347,8 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
                  uint32_t nominal_bitrate, uint32_t data_bitrate,
                  uint32_t clockfreq,
                  const struct dsig_filter *dif,
-                 const struct dsig_filter *dof)
+                 const struct dsig_filter *dof,
+                 uint32_t flags)
 {
   int stdidx = 0;
 
@@ -396,6 +401,7 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
 
   can_timing_t nom, data;
   error_t err;
+
   err = fdcan_calculate_timings(clockfreq, nominal_bitrate, 75,
                                 512, 256, 128, &nom, "nominal");
   if(err)
@@ -406,12 +412,22 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
   if(err)
     return err;
 
-  reg_wr(fc->reg_base + FDCAN_DBTP,
-         ((data.prescaler - 1) << 16) |
-         ((data.t1 - 1) << 8) |
-         ((data.t2 - 1) << 4) |
-         ((data.t2 - 1) << 0) |
-         0);
+  uint32_t dbtp =
+    ((data.prescaler - 1) << 16) |
+    ((data.t1 - 1) << 8) |
+    ((data.t2 - 1) << 4) |
+    ((data.t2 - 1) << 0) |
+    0;
+
+  if(flags & FDCAN_ENABLE_TDC) {
+    // TDCO: SSP offset in CAN clock cycles = sample point position
+    const int tdco = (1 + data.t1) * data.prescaler;
+    reg_wr(fc->reg_base + FDCAN_TDCR, tdco << 8);
+
+    dbtp |= (1 << 23); // TDC: Transceiver Delay Compensation;
+  }
+
+  reg_wr(fc->reg_base + FDCAN_DBTP, dbtp);
 
   reg_wr(fc->reg_base + FDCAN_NBTP,
          ((nom.prescaler - 1) << 16) |

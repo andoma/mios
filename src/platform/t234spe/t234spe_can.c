@@ -91,7 +91,8 @@ tegra243_spe_can_init(unsigned int nominal_bitrate,
                                  nominal_bitrate, data_bitrate,
                                  50000000,
                                  input_filter,
-                                 output_filter);
+                                 output_filter,
+                                 flags);
   if(err) {
     printf("%s: Failed to initialize\n", name);
     return NULL;
