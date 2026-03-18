@@ -55,8 +55,7 @@ void irq_96(void) { i2c_irq(g_i2c[3]); }
 
 
 i2c_t *
-stm32h7_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
-                   gpio_pull_t pull, int scl_freq)
+stm32h7_i2c_create_unit(unsigned int instance, int scl_freq)
 {
   instance--;
   if(instance > ARRAYSIZE(i2c_configs))
@@ -73,9 +72,6 @@ stm32h7_i2c_create(unsigned int instance, gpio_t scl, gpio_t sda,
   if(timingr == -1) {
     panic("i2c-%d: Unsupported timing", instance + 1);
   }
-
-  gpio_conf_af(scl, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
-  gpio_conf_af(sda, 4, GPIO_OPEN_DRAIN, GPIO_SPEED_HIGH, pull);
 
   clk_enable(c->clk_id);
 
