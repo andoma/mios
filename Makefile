@@ -37,6 +37,13 @@ LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc
 CFLAGS += -ffunction-sections -fdata-sections -Wno-attributes
 LDFLAGS += -Wl,--gc-sections -Wl,--build-id=sha1
 
+ifdef BTS
+BUILD_TIMESTAMP := $(shell date "+%Y-%m-%d %H:%M:%S")
+CFLAGS += -DMIOS_BUILD_TIMESTAMP="\"${BUILD_TIMESTAMP}\""
+# Make sure the version.c gets recompiled for new timestamp
+.PHONY: ${SRC}/version.c
+endif
+
 # Needed for linker script includes
 LDFLAGS += -L${SRC}
 

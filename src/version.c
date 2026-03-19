@@ -70,6 +70,9 @@ mios_print_version(stream_t *s)
 
   stprintf(s, "Mios version:");
   stprintversion(s, _miosversion);
+#ifdef MIOS_BUILD_TIMESTAMP
+  stprintf(s, "Build time: %s\n", MIOS_BUILD_TIMESTAMP);
+#endif
 
   stprintf(s, "BuildID: ");
   sthexstr(s, mios_build_id(), 20);
