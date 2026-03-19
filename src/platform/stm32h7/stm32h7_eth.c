@@ -674,9 +674,9 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
     gpio_conf_output(phyrst, GPIO_PUSH_PULL,
                      GPIO_SPEED_LOW, GPIO_PULL_NONE);
     gpio_set_output(phyrst, 0);
-    udelay(10);
+    udelay(50);
     gpio_set_output(phyrst, 1);
-    udelay(10);
+    udelay(4000);
   }
 
   clk_enable(CLK_ETH1MACEN);
