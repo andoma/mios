@@ -22,6 +22,7 @@ SRCS += ${C}/systick.c \
 	${P}/stm32h7_spi.c \
 	${P}/stm32h7_adc.c \
 	${P}/stm32h7_can.c \
+	${P}/stm32h7_pwg.c \
 	${P}/stm32h7_systim.c \
 	${P}/stm32h7_idle.c \
 	${P}/stm32h7_info.c \
