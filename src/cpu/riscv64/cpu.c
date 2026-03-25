@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdarg.h>
 #include "cpu.h"
 
 
@@ -46,14 +47,15 @@
 
 
 void *
-cpu_stack_init(uint64_t *stack, void *(*entry)(void *arg), void *arg,
-               void (*thread_exit)(void))
+cpu_stack_init(uint64_t *stack, void *entry,
+               void (*thread_exit)(void), int nargs, va_list ap)
 {
   stack -= 16 + 14;
   memset(stack, 0, 8 * 30);
   stack[0]  = (uint64_t)entry;
   stack[14] = (uint64_t)thread_exit;
-  stack[18] = (uint64_t)arg;
+  for(int i = 0; i < nargs; i++)
+    stack[18 + i] = va_arg(ap, uintptr_t); // a0-a3 (x10-x13)
   return stack;
 }
 

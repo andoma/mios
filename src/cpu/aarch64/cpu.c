@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdarg.h>
 #include <mios/task.h>
 
 #include <malloc.h>
@@ -13,27 +14,32 @@ struct cpu cpu0;
 
 
 /**
-   Stack frame:
+   Stack frame (34 x 64-bit words):
 
-   ELR
-   SPSR
-   x1
-   x0
+   [33] ELR
+   [32] SPSR
+   [31] x1
+   [30] x0
+   [29] x2    ...  [28] x3
    ...
-
+   [1]  (padding)
+   [0]  x30 (LR)
 */
 
 void *
-cpu_stack_init(uint64_t *stack, void *(*entry)(void *arg), void *arg,
-               void (*thread_exit)(void *))
+cpu_stack_init(uint64_t *stack, void *entry,
+               void (*thread_exit)(void *), int nargs, va_list ap)
 {
-  *--stack = (intptr_t)entry;
-  *--stack = 0x60000344;
-  *--stack = (intptr_t)0;   // r1
-  *--stack = (intptr_t)arg; // r0
-  for(size_t i = 2; i < 31; i++)
-    *--stack = 0;
-  *--stack = (intptr_t)thread_exit;
+  stack -= 34;
+  memset(stack, 0, 8 * 34);
+  stack[33] = (intptr_t)entry;
+  stack[32] = 0x60000344;
+  stack[0]  = (intptr_t)thread_exit;
+
+  // x0 at [30], x1 at [31], x2 at [29], x3 at [28], ...
+  static const int arg_idx[] = { 30, 31, 29, 28 };
+  for(int i = 0; i < nargs; i++)
+    stack[arg_idx[i]] = va_arg(ap, uintptr_t);
   return stack;
 }
 

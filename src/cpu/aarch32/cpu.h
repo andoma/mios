@@ -22,8 +22,8 @@ cpu_stack_redzone(thread_t *t)
 
 
 void *
-cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
-               void (*thread_exit)(void *));
+cpu_stack_init(uint32_t *stack, void *entry,
+               void (*thread_exit)(void *), int nargs, va_list ap);
 
 
 static inline uint32_t

@@ -12,8 +12,8 @@
 
 #define MIN_STACK_SIZE 256
 
-void *cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
-                     void (*thread_exit)(void *));
+void *cpu_stack_init(uint32_t *stack, void *entry,
+                     void (*thread_exit)(void *), int nargs, va_list ap);
 
 typedef struct cpu {
   sched_cpu_t sched;

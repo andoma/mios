@@ -1,6 +1,7 @@
 #include "cpu.h"
 
 #include <malloc.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include <mios/timer.h>
@@ -32,15 +33,16 @@ cpu_init(void)
 
 
 void *
-cpu_stack_init(uint32_t *stack, void *(*entry)(void *arg), void *arg,
-               void (*thread_exit)(void *))
+cpu_stack_init(uint32_t *stack, void *entry,
+               void (*thread_exit)(void *), int nargs, va_list ap)
 {
   *--stack = 0x0000001f;  // CPSR (SYS mode)
   *--stack = (uint32_t) entry;
   *--stack = (uint32_t) thread_exit;
   for(int i = 0; i < 13; i++)
     *--stack = 0;
-  stack[8] = (uint32_t) arg; // r0
+  for(int i = 0; i < nargs; i++)
+    stack[8 + i] = (uint32_t)va_arg(ap, uintptr_t); // r0-r3
   return stack;
 }
 

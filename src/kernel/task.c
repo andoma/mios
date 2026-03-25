@@ -340,8 +340,9 @@ get_default_stacksize(int flags)
 }
 
 thread_t *
-thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
-              const char *name, int flags, unsigned int prio)
+thread_create_va(void *entry, size_t stack_size,
+                 const char *name, int flags, unsigned int prio,
+                 int nargs, va_list ap)
 {
   cpu_t *cpu = curcpu();
 
@@ -400,7 +401,7 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   }
 #endif
 
-  t->t_sp = cpu_stack_init(sp, entry, arg, thread_exit);
+  t->t_sp = cpu_stack_init(sp, entry, thread_exit, nargs, ap);
   t->t_sp_bottom = sp_bottom;
   t->t_stream = NULL;
 
@@ -417,6 +418,29 @@ thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
   irq_permit(s);
 
   schedule();
+  return t;
+}
+
+
+thread_t *
+thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
+              const char *name, int flags, unsigned int prio)
+{
+  return _thread_createv_n(entry, stack_size, name, flags, prio,
+                           1, arg);
+}
+
+
+thread_t *
+_thread_createv_n(void *entry, size_t stack_size,
+                  const char *name, int flags, unsigned int prio,
+                  int nargs, ...)
+{
+  va_list ap;
+  va_start(ap, nargs);
+  thread_t *t = thread_create_va(entry, stack_size, name, flags, prio,
+                                 nargs, ap);
+  va_end(ap);
   return t;
 }
 

@@ -20,6 +20,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <sys/queue.h>
 
@@ -225,10 +226,9 @@ void thread_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
 #define TASK_MEMTYPE_SHIFT     16
 
 /**
- * Create a new thread
+ * Create a new thread (va_list variant)
  *
  * @param entry       Thread entry point function
- * @param arg         Argument to pass to the entry function
  * @param stack_size  Size of the stack to allocate for the thread (in bytes)
  * @param name        Name of the thread (max 10 characters, will be truncated)
  * @param flags       Thread creation flags:
@@ -241,11 +241,33 @@ void thread_init_cpu(sched_cpu_t *sc, const char *cpu_name, void *sp_bottom);
  *                    - Memory type can be specified in bits 16+
  * @param prio        Thread priority (1-31, where 31 is highest;
  *                                     0 is reserved for idle)
+ * @param nargs       Number of arguments to pass to the entry function (max 4)
+ * @param ap          va_list of arguments to pass to the entry function
  *
  * @return Pointer to the created thread structure, or NULL on failure
  */
+thread_t *thread_create_va(void *entry, size_t stack_size,
+                           const char *name, int flags, unsigned int prio,
+                           int nargs, va_list ap);
+
 thread_t *thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                         const char *name, int flags, unsigned int prio);
+
+thread_t *_thread_createv_n(void *entry, size_t stack_size,
+                            const char *name, int flags, unsigned int prio,
+                            int nargs, ...);
+
+#define _TC_ARG_N(_1, _2, _3, _4, N, ...) N
+#define _TC_NARG_(...) _TC_ARG_N(__VA_ARGS__)
+#define _TC_NARG(...)  _TC_NARG_(__VA_ARGS__, 4, 3, 2, 1)
+
+#define thread_createv(fn, stack, name, flags, prio, ...)               \
+  ({                                                                    \
+    _Static_assert(_TC_NARG(__VA_ARGS__) <= 4,                          \
+                   "thread_createv: too many arguments (max 4)");       \
+    _thread_createv_n((fn), (stack), (name), (flags), (prio),           \
+                      _TC_NARG(__VA_ARGS__), __VA_ARGS__);              \
+  })
 
 /**
  * Exit the current thread
