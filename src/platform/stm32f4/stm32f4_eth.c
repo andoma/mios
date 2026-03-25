@@ -128,8 +128,6 @@ typedef struct stm32f4_eth {
   uint8_t se_tx_wrptr; // Where we will write next TX desc
 
   uint8_t se_phyaddr;
-  uint8_t se_phyrst;
-  uint8_t se_miimode;
 
   timer_t se_periodic;
 
@@ -610,10 +608,10 @@ stm32f4_eth_set_clock(struct ether_netif *eni, int64_t offset_ns)
 #endif
 
 __attribute__((noreturn))
-static void *
-stm32f4_thread(void *arg)
+static void
+stm32f4_thread(stm32f4_eth_t *se, gpio_t phyrst,
+               ethphy_mode_t miimode, uint32_t flags)
 {
-  stm32f4_eth_t *se = arg;
   device_t *self = &se->se_eni.eni_ni.ni_dev;
 
   clk_enable(CLK_ETH);
@@ -622,12 +620,12 @@ stm32f4_thread(void *arg)
 
   reset_peripheral(CLK_ETH);
 
-  if(se->se_phyrst != GPIO_UNUSED) {
-    gpio_conf_output(se->se_phyrst, GPIO_PUSH_PULL,
+  if(phyrst != GPIO_UNUSED) {
+    gpio_conf_output(phyrst, GPIO_PUSH_PULL,
                      GPIO_SPEED_LOW, GPIO_PULL_NONE);
-    gpio_set_output(se->se_phyrst, 0);
+    gpio_set_output(phyrst, 0);
     usleep(100000);
-    gpio_set_output(se->se_phyrst, 1);
+    gpio_set_output(phyrst, 1);
     usleep(100000);
   }
 
@@ -638,7 +636,7 @@ stm32f4_thread(void *arg)
     thread_exit(0);
   }
 
-  se->se_eni.eni_phy = init(&se->se_eni, se->se_miimode);
+  se->se_eni.eni_phy = init(&se->se_eni, miimode);
   if(se->se_eni.eni_phy == NULL) {
     evlog(LOG_ERR, "%s: Failed to init PHY", self->d_name);
     thread_exit(0);
@@ -786,8 +784,6 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   stm32f4_eth_t *se = &eth;
 
   se->se_phyaddr = phy_addr;
-  se->se_phyrst = phyrst;
-  se->se_miimode = mode;
 
   ether_netif_init(&se->se_eni, "eth0", &stm32f4_eth_device_class);
 
@@ -837,6 +833,7 @@ stm32f4_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
     tx->next = se->se_txring + ((i + 1) & (ETH_TX_RING_SIZE - 1));
   }
 
-  thread_create(stm32f4_thread, se, 512, "eth",
-                TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
+  thread_createv(stm32f4_thread, 512, "eth",
+                 TASK_NO_FPU | TASK_NO_DMA_STACK, 4,
+                 se, phyrst, mode, flags);
 }

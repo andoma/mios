@@ -127,59 +127,43 @@ append_parameter_request_list(pbuf_t *pb)
 }
 
 
-typedef struct {
-  struct netif *ni;
-  pbuf_t *vsi; // vendor specific info
-  char *bootfile;
-} dhcp_update_aux_t;
-
 __attribute__((noreturn))
-static void *
-dhcpv4_update_thread(void *arg)
+static void
+dhcpv4_update_thread(netif_t *ni, pbuf_t *vsi, char *bootfile)
 {
-  dhcp_update_aux_t *dua = arg;
-  pbuf_t *vsi = dua->vsi;
   const void *vsidata = vsi ? pbuf_data(vsi, 0) : NULL;
   size_t vsisize = vsi ? vsi->pb_buflen : 0;
-  ghook_invoke(GHOOK_DHCP_UPDATE, dua->ni, vsidata, vsisize, dua->bootfile);
+  ghook_invoke(GHOOK_DHCP_UPDATE, ni, vsidata, vsisize, bootfile);
   pbuf_free(vsi);
-  device_release(&dua->ni->ni_dev);
-  free(dua->bootfile);
-  free(dua);
+  device_release(&ni->ni_dev);
+  free(bootfile);
   thread_exit(0);
 }
 
 static void
 dhcpv4_update(netif_t *ni, pbuf_t **vsi, char **bootfile)
 {
-  dhcp_update_aux_t *dua = xalloc(sizeof(dhcp_update_aux_t),
-                                  0, MEM_MAY_FAIL);
-  if(dua == NULL)
-    return;
+  pbuf_t *vsi_arg = NULL;
+  char *bootfile_arg = NULL;
 
   if(vsi != NULL) {
-    dua->vsi = *vsi;
+    vsi_arg = *vsi;
     *vsi = NULL;
-  } else {
-    dua->vsi = NULL;
   }
 
   if(bootfile != NULL) {
-    dua->bootfile = *bootfile;
+    bootfile_arg = *bootfile;
     *bootfile = NULL;
-  } else {
-    dua->bootfile = NULL;
   }
 
-  dua->ni = ni;
   device_retain(&ni->ni_dev);
 
-  thread_t *t = thread_create(dhcpv4_update_thread, dua,
-                              0, "dhcpupdate", TASK_DETACHED, 1);
+  thread_t *t = thread_createv(dhcpv4_update_thread, 0, "dhcpupdate",
+                               TASK_DETACHED, 1, ni, vsi_arg, bootfile_arg);
   if(t == NULL) {
-    pbuf_free(dua->vsi);
+    pbuf_free(vsi_arg);
     device_release(&ni->ni_dev);
-    free(dua);
+    free(bootfile_arg);
   }
 }
 
