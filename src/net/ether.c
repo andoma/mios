@@ -4,6 +4,7 @@
 #include <mios/timer.h>
 #include <mios/eventlog.h>
 #include <mios/mios.h>
+#include <mios/ethphy.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <inttypes.h>
@@ -304,19 +305,26 @@ ether_status_change(struct netif *ni)
 }
 
 void
-ether_netif_init(ether_netif_t *eni, const char *name,
-                 const device_class_t *dc)
+ether_netif_init(ether_netif_t *eni,
+                 const char *name,
+                 const ethmac_device_class_t *edc)
+{
+  netif_init(&eni->eni_ni, name, &edc->dc);
+}
+
+void
+ether_netif_attach(ether_netif_t *eni)
 {
   eni->eni_ni.ni_output_ipv4 = ether_ipv4_output;
   eni->eni_ni.ni_input = ether_input;
   eni->eni_ni.ni_status_change = ether_status_change;
 
-  netif_attach(&eni->eni_ni, name, dc);
+  netif_attach(&eni->eni_ni);
 
   SLIST_INSERT_HEAD(&ether_netifs, eni, eni_global_link);
   eni->eni_periodic.t_opaque = eni;
   eni->eni_periodic.t_cb = ether_periodic;
-  eni->eni_periodic.t_name = name;
+  eni->eni_periodic.t_name = eni->eni_ni.ni_dev.d_name;
 
   net_timer_arm(&eni->eni_periodic, clock_get() + 1000000);
 }

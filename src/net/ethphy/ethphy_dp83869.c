@@ -1,6 +1,9 @@
 #include <mios/ethphy.h>
 #include <mios/driver.h>
 #include <mios/eventlog.h>
+
+#include <net/ether.h>
+
 #include <stdio.h>
 
 // Datasheet: TI DP83869HM (SNLS614D)
@@ -97,97 +100,79 @@ typedef enum {
 } dp83869_media_t;
 
 static uint16_t
-reg_read(const ethphy_reg_io_t *regio, void *arg, uint16_t reg)
+reg_read(struct ether_netif *eni, uint16_t reg)
 {
-  if(reg < 0x20) {
-    return regio->read(arg, reg);
-  }
-
-  // Extended register access
-  regio->write(arg, REG_REGCR, 0x001f);
-  regio->write(arg, REG_ADDAR, reg);
-  regio->write(arg, REG_REGCR, 0x401f);
-  return regio->read(arg, REG_ADDAR);
+  return ethphy_mii_read(eni, reg);
 }
 
 static void
-reg_write(const ethphy_reg_io_t *regio, void *arg, uint16_t reg, uint16_t val)
+reg_write(struct ether_netif *eni, uint16_t reg, uint16_t val)
 {
-  if(reg < 0x20) {
-    return regio->write(arg, reg, val);
-  }
-
-  // Extended register access
-  regio->write(arg, REG_REGCR, 0x001f);
-  regio->write(arg, REG_ADDAR, reg);
-  regio->write(arg, REG_REGCR, 0x401f);
-  return regio->write(arg, REG_ADDAR, val);
+  ethphy_mii_write(eni, reg, val);
 }
 
 static void
-dp83869_set_mode_copper(const ethphy_reg_io_t *regio, void *arg,
-                        ethphy_mode_t mode)
+dp83869_set_mode_copper(struct ether_netif *eni, ethphy_mode_t mode)
 {
   // Section 7.4.8.1: RGMII-to-Copper mode initialization
-  reg_write(regio, arg, REG_OP_MODE_DECODE, 0x0040);
+  reg_write(eni, REG_OP_MODE_DECODE, 0x0040);
 
   // Software Reset to apply mode change
-  reg_write(regio, arg, REG_GEN_CTRL, GEN_CTRL_SW_RESET);
+  reg_write(eni, REG_GEN_CTRL, GEN_CTRL_SW_RESET);
 
   for(int i = 0; i < 1000; i++) {
-    if(!(reg_read(regio, arg, REG_GEN_CTRL) & GEN_CTRL_SW_RESET))
+    if(!(reg_read(eni, REG_GEN_CTRL) & GEN_CTRL_SW_RESET))
       break;
   }
 
   // Configure registers AFTER reset (reset wipes register state)
-  reg_write(regio, arg, REG_BMCR, 0x1140);
-  reg_write(regio, arg, REG_ANAR, 0x01e1);
-  reg_write(regio, arg, REG_GEN_CFG1, 0x0300);
-  reg_write(regio, arg, REG_PHY_CONTROL, 0x5048);
+  reg_write(eni, REG_BMCR, 0x1140);
+  reg_write(eni, REG_ANAR, 0x01e1);
+  reg_write(eni, REG_GEN_CFG1, 0x0300);
+  reg_write(eni, REG_PHY_CONTROL, 0x5048);
 
   if(mode == ETHPHY_MODE_RGMII) {
-    uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
+    uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
 
     // The DELAY bits are confusing because 1 means off, 0 means on
     // We do TX-delay in the MAC
 
     rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
     rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
-    reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
+    reg_write(eni, REG_RGMII_CTRL, rgmii_ctrl);
   }
 }
 
 static void
-dp83869_set_mode_fiber(const ethphy_reg_io_t *regio, void *arg,
-                       ethphy_mode_t mode)
+dp83869_set_mode_fiber(struct ether_netif *eni, ethphy_mode_t mode)
 {
   // Explicitly set RGMII-to-1000Base-X mode (match Linux: 0x0041)
-  reg_write(regio, arg, REG_OP_MODE_DECODE, 0x0041);
+  reg_write(eni, REG_OP_MODE_DECODE, 0x0041);
 
   // Set FX_CTRL: auto-neg, full duplex, 1000M
-  reg_write(regio, arg, REG_FX_CTRL,
+  reg_write(eni, REG_FX_CTRL,
             BMCR_AUTONEG_EN | BMCR_DUPLEX_EN | BMCR_SPEED_SEL_MSB);
 
   // Soft reset sequence (from Linux driver)
-  reg_write(regio, arg, 0x00c6, 0x10);
-  reg_write(regio, arg, REG_RGMII_DLL_CTRL, 0x0077);
+  reg_write(eni, 0x00c6, 0x10);
+  reg_write(eni, REG_RGMII_DLL_CTRL, 0x0077);
 
   if(mode == ETHPHY_MODE_RGMII) {
-    uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
+    uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
 
     // The DELAY bits are confusing because 1 means off, 0 means on
     // We do TX-delay in the MAC
 
     rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
     rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
-    reg_write(regio, arg, REG_RGMII_CTRL, rgmii_ctrl);
+    reg_write(eni, REG_RGMII_CTRL, rgmii_ctrl);
   }
 
   // Configure IO mux for fiber signal detect
-  reg_write(regio, arg, REG_IO_MUX_CFG, 0x1f);
+  reg_write(eni, REG_IO_MUX_CFG, 0x1f);
 
   // Reset FX_CTRL to apply (RESET bit is self-clearing)
-  reg_write(regio, arg, REG_FX_CTRL,
+  reg_write(eni, REG_FX_CTRL,
             BMCR_RESET | BMCR_AUTONEG_EN | BMCR_DUPLEX_EN |
             BMCR_SPEED_SEL_MSB);
 }
@@ -219,31 +204,31 @@ opmode_str(uint16_t opmode)
 }
 
 static void
-dp83869_print_diagnostics(stream_t *s,
-                          const ethphy_reg_io_t *regio,
-                          void *arg)
+dp83869_print_diagnostics(struct device *dev, stream_t *s)
 {
-  uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
-  uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
-  uint16_t bmcr = reg_read(regio, arg, REG_BMCR);
-  uint16_t bmsr = reg_read(regio, arg, REG_BMSR);
+  struct ether_netif *eni = (struct ether_netif *)dev->d_parent;
+
+  uint16_t id1 = reg_read(eni, REG_PHYIDR1);
+  uint16_t id2 = reg_read(eni, REG_PHYIDR2);
+  uint16_t bmcr = reg_read(eni, REG_BMCR);
+  uint16_t bmsr = reg_read(eni, REG_BMSR);
   // Read BMSR twice -- link status is latched-low
-  bmsr = reg_read(regio, arg, REG_BMSR);
-  uint16_t phy_status = reg_read(regio, arg, REG_PHY_STATUS);
-  uint16_t anar = reg_read(regio, arg, REG_ANAR);
-  uint16_t alnpar = reg_read(regio, arg, REG_ALNPAR);
-  uint16_t gen_cfg1 = reg_read(regio, arg, REG_GEN_CFG1);
-  uint16_t gen_status1 = reg_read(regio, arg, REG_GEN_STATUS1);
-  uint16_t gen_status2 = reg_read(regio, arg, REG_GEN_STATUS2);
-  uint16_t gen_cfg2 = reg_read(regio, arg, REG_GEN_CFG2);
-  uint16_t int_status = reg_read(regio, arg, REG_INTERRUPT_STATUS);
-  uint16_t rx_err_cnt = reg_read(regio, arg, REG_RX_ERR_CNT);
-  uint16_t strap = reg_read(regio, arg, REG_STRAP_STS);
-  uint16_t opmode = reg_read(regio, arg, REG_OP_MODE_DECODE);
-  uint16_t rgmii_ctrl = reg_read(regio, arg, REG_RGMII_CTRL);
-  uint16_t rgmii_dll = reg_read(regio, arg, REG_RGMII_DLL_CTRL);
-  uint16_t phy_ctrl = reg_read(regio, arg, REG_PHY_CONTROL);
-  uint16_t lkscr = reg_read(regio, arg, REG_1KSCR);
+  bmsr = reg_read(eni, REG_BMSR);
+  uint16_t phy_status = reg_read(eni, REG_PHY_STATUS);
+  uint16_t anar = reg_read(eni, REG_ANAR);
+  uint16_t alnpar = reg_read(eni, REG_ALNPAR);
+  uint16_t gen_cfg1 = reg_read(eni, REG_GEN_CFG1);
+  uint16_t gen_status1 = reg_read(eni, REG_GEN_STATUS1);
+  uint16_t gen_status2 = reg_read(eni, REG_GEN_STATUS2);
+  uint16_t gen_cfg2 = reg_read(eni, REG_GEN_CFG2);
+  uint16_t int_status = reg_read(eni, REG_INTERRUPT_STATUS);
+  uint16_t rx_err_cnt = reg_read(eni, REG_RX_ERR_CNT);
+  uint16_t strap = reg_read(eni, REG_STRAP_STS);
+  uint16_t opmode = reg_read(eni, REG_OP_MODE_DECODE);
+  uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
+  uint16_t rgmii_dll = reg_read(eni, REG_RGMII_DLL_CTRL);
+  uint16_t phy_ctrl = reg_read(eni, REG_PHY_CONTROL);
+  uint16_t lkscr = reg_read(eni, REG_1KSCR);
 
   stprintf(s, "DP83869HM PHY Diagnostics\n");
   stprintf(s, "  PHY ID: 0x%04x:0x%04x (model 0x%02x rev %d)\n",
@@ -354,10 +339,10 @@ dp83869_print_diagnostics(stream_t *s,
      cfg_opmode == CFG_OPMODE_RGMII_100FX ||
      cfg_opmode == CFG_OPMODE_1000BT_1000BX ||
      cfg_opmode == CFG_OPMODE_100BT_100FX) {
-    uint16_t fx_ctrl = reg_read(regio, arg, REG_FX_CTRL);
-    uint16_t fx_sts = reg_read(regio, arg, REG_FX_STS);
-    uint16_t fx_anar = reg_read(regio, arg, REG_FX_ANAR);
-    uint16_t fx_anlpar = reg_read(regio, arg, REG_FX_ANLPAR);
+    uint16_t fx_ctrl = reg_read(eni, REG_FX_CTRL);
+    uint16_t fx_sts = reg_read(eni, REG_FX_STS);
+    uint16_t fx_anar = reg_read(eni, REG_FX_ANAR);
+    uint16_t fx_anlpar = reg_read(eni, REG_FX_ANLPAR);
     stprintf(s, "  FX_CTRL: 0x%04x (ANEG=%s, Speed=%s, Duplex=%s)\n",
              fx_ctrl,
              (fx_ctrl & (1 << 12)) ? "on" : "off",
@@ -381,39 +366,19 @@ dp83869_print_diagnostics(stream_t *s,
   stprintf(s, "  BMCR: 0x%04x, BMSR: 0x%04x\n", bmcr, bmsr);
 }
 
-static const ethphy_class_t dp83869_class = {
-  .print_info = dp83869_print_diagnostics,
+static const device_class_t dp83869_class = {
+  .dc_print_info = dp83869_print_diagnostics,
 };
 
 
-static error_t
-dp83869_probe(uint16_t type, void *metadata)
+static device_t *
+dp83869_init(struct ether_netif *eni, ethphy_mode_t mode)
 {
-  if(type != DRIVER_TYPE_ETHPHY)
-    return ERR_MISMATCH;
-
-  ethphy_dev_t *ed = metadata;
-  const ethphy_reg_io_t *regio = ed->ed_regio;
-  void *arg = ed->ed_arg;
-  ethphy_mode_t mode = ed->ed_mode;
-
-  uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
-  uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
-
-  // PHYIDR1 reset value = 0x2000, PHYIDR2 = 0xA0F1
-  if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
-    return ERR_MISMATCH;
-  }
-
+  uint16_t id2 = reg_read(eni, REG_PHYIDR2);
   uint16_t model = (id2 >> 4) & 0x3f;
   uint16_t rev = id2 & 0xf;
 
-  // DP83869HM model number = 0x0F
-  if(model != 0x0f) {
-    return ERR_MISMATCH;
-  }
-
-  uint16_t strap = reg_read(regio, arg, REG_STRAP_STS);
+  uint16_t strap = reg_read(eni, REG_STRAP_STS);
   uint16_t opmode_strap = (strap >> 9) & 0x7;
 
   evlog(LOG_DEBUG, "dp83869: Model 0x%02x rev %d, strap opmode %d, "
@@ -424,7 +389,7 @@ dp83869_probe(uint16_t type, void *metadata)
 
   if(mode != ETHPHY_MODE_RGMII && mode != ETHPHY_MODE_MII) {
     evlog(LOG_ERR, "dp83869: Unsupported MAC mode %d", mode);
-    return ERR_INVALID_ARGS;
+    return NULL;
   }
 
   // Determine media from strap configuration:
@@ -447,17 +412,40 @@ dp83869_probe(uint16_t type, void *metadata)
   }
 
   if(media == DP83869_MEDIA_COPPER) {
-    dp83869_set_mode_copper(regio, arg, mode);
+    dp83869_set_mode_copper(eni, mode);
     evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Copper",
           mode == ETHPHY_MODE_RGMII ? "R" : "");
   } else {
-    dp83869_set_mode_fiber(regio, arg, mode);
+    dp83869_set_mode_fiber(eni, mode);
     evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Fiber",
           mode == ETHPHY_MODE_RGMII ? "R" : "");
   }
 
-  ed->ed_class = &dp83869_class;
-  return 0;
+  return ethphy_create((device_t *)eni, &dp83869_class, sizeof(device_t));
+}
+
+static void *
+dp83869_probe(driver_type_t type, device_t *parent)
+{
+  if(type != DRIVER_TYPE_ETHPHY)
+    return NULL;
+
+  struct ether_netif *eni = (struct ether_netif *)parent;
+
+  uint16_t id1 = reg_read(eni, REG_PHYIDR1);
+  uint16_t id2 = reg_read(eni, REG_PHYIDR2);
+
+  // PHYIDR1 reset value = 0x2000, PHYIDR2 = 0xA0F1
+  if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000)
+    return NULL;
+
+  uint16_t model = (id2 >> 4) & 0x3f;
+
+  // DP83869HM model number = 0x0F
+  if(model != 0x0f)
+    return NULL;
+
+  return &dp83869_init;
 }
 
 DRIVER(dp83869_probe, 5);

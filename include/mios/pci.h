@@ -43,6 +43,8 @@ typedef struct pci_dev {
 
 } pci_dev_t;
 
+typedef error_t (pci_fn_init_t)(pci_dev_t *dev);
+
 
 static inline uint8_t pci_cfg_rd8(struct pci_dev *pd, uint32_t reg)
 {

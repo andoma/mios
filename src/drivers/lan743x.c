@@ -226,9 +226,6 @@ typedef struct lan743x {
   desc_t *tx_ring;
   int *rx_wr_back_ptr;
 
-  thread_t *phy_thread;
-  int phy_run;
-
   uint32_t rx_last_tail;
 
   int next_rx;
@@ -247,8 +244,6 @@ typedef struct lan743x {
   char name[16];
 
   bool is_7431;  // true for 7431, false for 7430
-
-  const ethphy_class_t *ethphy_class;
 
 } lan743x_t;
 
@@ -511,6 +506,7 @@ mii_write0(lan743x_t *l, uint16_t reg, uint16_t value)
 
   reg_wr(l->mmio + MAC_MII_ACC, acc);
   while(reg_rd(l->mmio + MAC_MII_ACC) & 1) {
+    usleep(10);
   }
 
 }
@@ -528,44 +524,10 @@ mii_read0(lan743x_t *l, uint16_t reg)
     | MAC_MII_ACC_MII_BUSY_;
   reg_wr(l->mmio +  MAC_MII_ACC, acc);
   while(reg_rd(l->mmio + MAC_MII_ACC) & 1) {
+    usleep(10);
   }
   return reg_rd(l->mmio + MAC_MII_DATA);
 }
-
-#define REG_REGCR   0x000d
-#define REG_ADDAR   0x000e
-
-static uint16_t
-mii_read(lan743x_t *l,uint16_t reg)
-{
-  if(reg < 0x20) {
-    return mii_read0(l, reg);
-  }
-
-  // Extended register access
-  mii_write0(l, REG_REGCR, 0x1f);
-  mii_write0(l, REG_ADDAR, reg);
-  mii_write0(l, REG_REGCR, 0x401f);
-  return mii_read0(l, REG_ADDAR);
-}
-
-static void
-mii_write(lan743x_t *l, uint16_t reg, uint16_t val)
-{
-  if(reg < 0x20) {
-    return mii_write0(l, reg, val);
-  }
-
-  // Extended register access
-  mii_write0(l, REG_REGCR, 0x1f);
-  mii_write0(l, REG_ADDAR, reg);
-  mii_write0(l, REG_REGCR, 0x401f);
-  return mii_write0(l, REG_ADDAR, val);
-}
-
-
-
-static const ethphy_reg_io_t lan743x_ethphy_regio;
 
 static void
 lan7431_print_info(struct device *dev, struct stream *st)
@@ -573,8 +535,6 @@ lan7431_print_info(struct device *dev, struct stream *st)
   lan743x_t *l = (lan743x_t *)dev;
   ether_print((ether_netif_t *)dev, st);
   stprintf(st, "\t%u IRQ\n", l->irq_counter);
-  if(l->ethphy_class && l->ethphy_class->print_info)
-    l->ethphy_class->print_info(st, &lan743x_ethphy_regio, l);
 }
 
 
@@ -587,106 +547,65 @@ lan743x_disable(struct device *dev)
   return 0;
 }
 
-static error_t
-lan743x_shutdown(struct device *dev)
-{
-  lan743x_t *l = (lan743x_t *)dev;
-
-  netif_detach(&l->eni.eni_ni);
-  l->phy_run = 0;
-  thread_join(l->phy_thread);
-  return 0;
-}
-
 static void
 lan743x_dtor(struct device *dev)
 {
   free(dev);
 }
 
-static const device_class_t lan743x_device_class = {
-  .dc_print_info = lan7431_print_info,
-  .dc_disable = lan743x_disable,
-  .dc_shutdown = lan743x_shutdown,
-  .dc_dtor = lan743x_dtor,
+static int
+edc_mii_read(ether_netif_t *eni, uint16_t reg)
+{
+  return mii_read0((lan743x_t *)eni, reg);
+}
+
+static error_t
+edc_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t value)
+{
+  mii_write0((lan743x_t *)eni, reg, value);
+  return 0;
+}
+
+static const ethmac_device_class_t lan743x_device_class = {
+  .dc = {
+    .dc_print_info = lan7431_print_info,
+    .dc_disable = lan743x_disable,
+    .dc_dtor = lan743x_dtor,
+  },
+  .edc_mii_read = edc_mii_read,
+  .edc_mii_write = edc_mii_write,
 };
 
 static void
 lan7430_phy_init(lan743x_t *l)
 {
-  uint16_t anar = mii_read(l, 0x4);
-  uint16_t gtcr = mii_read(l, 0x9);
+  uint16_t anar = ethphy_mii_read(&l->eni, 0x4);
+  uint16_t gtcr = ethphy_mii_read(&l->eni, 0x9);
 
   // If we're not announcing all full duplex rates over autoneg, make sure we do
   if(anar != 0x1e1 || gtcr != 0x200) {
-    mii_write(l, 0x4, 0x01e1);
-    mii_write(l, 0x9, 0x0200);
+    ethphy_mii_write(&l->eni, 0x4, 0x01e1);
+    ethphy_mii_write(&l->eni, 0x9, 0x0200);
 
     // Reset and restart autoneg
-    mii_write(l, 0, 0x9200);
+    ethphy_mii_write(&l->eni, 0, 0x9200);
   }
 }
 
-static uint16_t
-lan743x_ethphy_read(void *arg, uint16_t reg)
-{
-  return mii_read0(arg, reg);
-}
-
-static void
-lan743x_ethphy_write(void *arg, uint16_t reg, uint16_t value)
-{
-  mii_write0(arg, reg, value);
-}
-
-static const ethphy_reg_io_t lan743x_ethphy_regio = {
-  .read = lan743x_ethphy_read,
-  .write = lan743x_ethphy_write,
-};
-
-static void *__attribute__((noreturn))
+__attribute__((noreturn))
+static void *
 lan743x_phy_thread(void *arg)
 {
   lan743x_t *l = arg;
-  int current_up = 0;
-
-  while(l->phy_run) {
-    (void)mii_read(l, 1);
-    const int up = !!(mii_read(l, 1) & 4);
-    if(current_up ^ up) {
-      net_task_raise(&l->eni.eni_ni.ni_task, up ?
-                     NETIF_TASK_STATUS_UP : NETIF_TASK_STATUS_DOWN);
-      current_up = up;
-    }
-    usleep(500000);
-  }
-  thread_exit(NULL);
+  ethphy_link_poll(&l->eni);
 }
 
 static error_t
-lan743x_probe(uint16_t type, void *metadata)
+lan743x_init(pci_dev_t *pd)
 {
-  if(type != DRIVER_TYPE_PCI)
-    return ERR_MISMATCH;
-
-  pci_dev_t *pd = metadata;
-  if(pd->pd_vid != 0x1055)
-    return ERR_MISMATCH;
-
-  // Support both 7430 and 7431
-  if(pd->pd_pid != 0x7430 && pd->pd_pid != 0x7431)
-    return ERR_MISMATCH;
-
   uint64_t mmio = pd->pd_bar[0];
-  if(mmio == 0)
-    return ERR_INVALID_ADDRESS;
-
   uint32_t rev = reg_rd(mmio + ID_REV);
   uint32_t chip_id = ID_REV_ID_MASK_ & rev;
-
-  // Validate chip ID matches expected variant
-  if(chip_id != ID_REV_ID_LAN7430_ && chip_id != ID_REV_ID_LAN7431_)
-    return ERR_MISMATCH;
 
   lan743x_t *l = xalloc(sizeof(lan743x_t), 0, MEM_CLEAR);
   l->pd = pd;
@@ -805,25 +724,19 @@ lan743x_probe(uint16_t type, void *metadata)
 
   while (!(reg_rd(l->mmio + PMT_CTL) & PMT_CTL_READY_ )) {}
 
-  uint16_t phyid_low  = mii_read(l, 0x2);
-  uint16_t phyid_high = mii_read(l, 0x3);
+  evlog(LOG_INFO, "%s: lan%s rev %d attached IRQ %d",
+        l->name, l->is_7431 ? "7431" : "7430", rev & 0xffff, l->irq);
 
-  evlog(LOG_INFO, "%s: lan%s rev %d attached IRQ %d phy %04x:%04x",
-        l->name, l->is_7431 ? "7431" : "7430", rev & 0xffff, l->irq,
-        phyid_high, phyid_low);
+  device_t *self = &l->eni.eni_ni.ni_dev;
 
   // Use variant-specific PHY initialization
   if(l->is_7431) {
-    ethphy_dev_t ed = {
-      .ed_mode = ETHPHY_MODE_RGMII,
-      .ed_regio = &lan743x_ethphy_regio,
-      .ed_arg = l,
-    };
-    error_t err = driver_probe(DRIVER_TYPE_ETHPHY, &ed);
-    if(err) {
-      evlog(LOG_ERR, "%s: External PHY init failed: %d", l->name, err);
+    ethphy_init_t *init = driver_probe(DRIVER_TYPE_ETHPHY, self);
+    if(init) {
+      l->eni.eni_phy = init(&l->eni, ETHPHY_MODE_RGMII);
+    } else {
+      evlog(LOG_ERR, "%s: No PHY driver found", l->name);
     }
-    l->ethphy_class = ed.ed_class;
 
     // RGMII TX delay is handled by the MAC
     reg_wr(l->mmio + 0x128, 2);
@@ -845,9 +758,10 @@ lan743x_probe(uint16_t type, void *metadata)
   // accept unicast, broadcast and multicast
   reg_wr(l->mmio + 0x508, 1 << 10 | 1 << 9 | 1 << 8 );
 
-  l->phy_run = 1;
-  l->phy_thread = thread_create(lan743x_phy_thread, l, 0, "phy",
-                                TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
+  ether_netif_attach(&l->eni);
+
+  thread_create(lan743x_phy_thread, l, 0, "phy",
+                TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
 
   return 0;
 }
@@ -859,18 +773,18 @@ cmd_mii_ctrl(cli_t *cli, int argc, char **argv)
     cli_printf(cli, "mii_reg <reg> [<value>]\n");
     return ERR_INVALID_ARGS;
   }
-  lan743x_t *l = (lan743x_t *)SLIST_FIRST(&ether_netifs);
+  ether_netif_t *eni = (ether_netif_t *)SLIST_FIRST(&ether_netifs);
 
   const int addr = atoix(argv[1]);
   if (argc == 2) {
-    cli_printf(cli, "reg 0x%04x : 0x%04x\n", addr, mii_read(l, addr));
+    cli_printf(cli, "reg 0x%04x : 0x%04x\n", addr, ethphy_mii_read(eni, addr));
     return ERR_OK;
   }
 
   const int val = atoix(argv[2]);
 
-  mii_write(l, addr, val);
-  cli_printf(cli, "reg 0x%04x : 0x%04x\n", addr, mii_read(l, addr));
+  ethphy_mii_write(eni, addr, val);
+  cli_printf(cli, "reg 0x%04x : 0x%04x\n", addr, ethphy_mii_read(eni, addr));
   return ERR_OK;
 }
 
@@ -889,7 +803,7 @@ cmd_lan_ctrl(cli_t *cli, int argc, char **argv)
 
   const int addr = atoix(argv[1]);
   if (argc == 2) {
-    cli_printf(cli, "reg 0x%04x : 0x%08x\n", addr, reg_rd(l->mmio +  addr));
+    cli_printf(cli, "reg 0x%04x : 0x%08x\n", addr, reg_rd(l->mmio + addr));
     return ERR_OK;
   }
 
@@ -903,5 +817,33 @@ cmd_lan_ctrl(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF("lan_ctrl", cmd_lan_ctrl);
 
+
+static void *
+lan743x_probe(driver_type_t type, device_t *parent)
+{
+  if(type != DRIVER_TYPE_PCI)
+    return NULL;
+
+  pci_dev_t *pd = (pci_dev_t *)parent;
+  if(pd->pd_vid != 0x1055)
+    return NULL;
+
+  // Support both 7430 and 7431
+  if(pd->pd_pid != 0x7430 && pd->pd_pid != 0x7431)
+    return NULL;
+
+  uint64_t mmio = pd->pd_bar[0];
+  if(mmio == 0)
+    return NULL;
+
+  uint32_t rev = reg_rd(mmio + ID_REV);
+  uint32_t chip_id = ID_REV_ID_MASK_ & rev;
+
+  // Validate chip ID matches expected variant
+  if(chip_id != ID_REV_ID_LAN7430_ && chip_id != ID_REV_ID_LAN7431_)
+    return NULL;
+
+  return &lan743x_init;
+}
 
 DRIVER(lan743x_probe, 1);

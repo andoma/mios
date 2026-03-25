@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mios/timer.h>
+#include <mios/task.h>
 
 #include "netif.h"
 #include "ptp.h"
@@ -8,7 +9,6 @@
 #define ETHERTYPE_IPV4  0x0800
 #define ETHERTYPE_ARP   0x0806
 #define ETHERTYPE_PTPv2 0x88f7
-
 
 typedef struct ether_hdr {
   uint8_t dst_addr[6];
@@ -54,6 +54,9 @@ typedef struct ether_netif {
 
   timer_t eni_lldp_timer;
 
+  struct device *eni_phy;
+  mutex_t eni_phy_ext_mutex;
+
 #ifdef ENABLE_NET_PTP
   ptp_ether_state_t eni_ptp;
 
@@ -63,9 +66,22 @@ typedef struct ether_netif {
 
 } ether_netif_t;
 
+typedef struct ethmac_device_class {
+  device_class_t dc;
 
-void ether_netif_init(ether_netif_t *eni, const char *name,
-                      const device_class_t *dc);
+  int (*edc_mii_read)(struct ether_netif *eni, uint16_t reg);
+  error_t (*edc_mii_write)(struct ether_netif *eni,
+                           uint16_t reg, uint16_t value);
+  void (*edc_set_speed)(struct ether_netif *eni, int speed);
+  void (*edc_set_duplex)(struct ether_netif *eni, int full);
+} ethmac_device_class_t;
+
+
+void ether_netif_init(ether_netif_t *eni,
+                      const char *name,
+                      const ethmac_device_class_t *edc);
+
+void ether_netif_attach(ether_netif_t *eni);
 
 void ether_netif_fini(ether_netif_t *eni);
 

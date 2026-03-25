@@ -177,8 +177,8 @@ typedef struct stm32h7_eth {
   uint8_t se_tx_wrptr; // Where we will write next TX desc
 
   uint8_t se_phyaddr;
-
-  const ethphy_class_t *se_ethphy_class;
+  uint8_t se_phyrst;
+  uint8_t se_miimode;
 
 #ifdef ENABLE_NET_PTP
   int64_t se_accumulated_drift_ppb;
@@ -190,6 +190,10 @@ typedef struct stm32h7_eth {
 
 
 static stm32h7_eth_t stm32h7_eth;
+
+static error_t stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pb,
+                                  pbuf_tx_cb_t *txcb, uint32_t id);
+static void stm32h7_eth_irq(void *arg);
 
 
 
@@ -208,30 +212,20 @@ rx_desc_give(stm32h7_eth_t *se, size_t index, void *buf)
 }
 
 
-static const ethphy_reg_io_t stm32h7_eth_mdio;
-
 static void
 stm32h7_eth_print_info(struct device *dev, struct stream *st)
 {
-  stm32h7_eth_t *se = (stm32h7_eth_t *)dev;
-
   ether_print((ether_netif_t *)dev, st);
 #ifdef ENABLE_NET_PTP
+  stm32h7_eth_t *se = (stm32h7_eth_t *)dev;
   stprintf(st, "\tMAC time: %u.%u\n",
            reg_rd(ETH_MACSTSR),
            reg_rd(ETH_MACSTNR));
 
   ptp_print_info(st, &se->se_eni);
 #endif
-
-  if(se->se_ethphy_class && se->se_ethphy_class->print_info)
-    se->se_ethphy_class->print_info(st, &stm32h7_eth_mdio, se);
 }
 
-
-static const device_class_t stm32h7_eth_device_class = {
-  .dc_print_info = stm32h7_eth_print_info,
-};
 
 static uint16_t
 mii_read(void *arg, uint16_t reg)
@@ -277,25 +271,176 @@ mii_write(void *arg, uint16_t reg, uint16_t value)
 }
 
 
-static void *__attribute__((noreturn))
-stm32h7_phy_thread(void *arg)
+static int
+edc_mii_read(ether_netif_t *eni, uint16_t reg)
+{
+  return mii_read((stm32h7_eth_t *)eni, reg);
+}
+
+static error_t
+edc_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t value)
+{
+  mii_write((stm32h7_eth_t *)eni, reg, value);
+  return 0;
+}
+
+static void
+stm32h7_eth_set_speed(ether_netif_t *eni, int speed)
+{
+  if(speed == 100)
+    reg_set_bit(ETH_MACCR, 14);
+  else
+    reg_clr_bit(ETH_MACCR, 14);
+}
+
+static void
+stm32h7_eth_set_duplex(ether_netif_t *eni, int full)
+{
+  if(full)
+    reg_set_bit(ETH_MACCR, 13);
+  else
+    reg_clr_bit(ETH_MACCR, 13);
+}
+
+static const ethmac_device_class_t stm32h7_eth_device_class = {
+  .dc = {
+    .dc_print_info = stm32h7_eth_print_info,
+  },
+  .edc_mii_read = edc_mii_read,
+  .edc_mii_write = edc_mii_write,
+  .edc_set_speed = stm32h7_eth_set_speed,
+  .edc_set_duplex = stm32h7_eth_set_duplex,
+};
+
+__attribute__((noreturn))
+static void *
+stm32h7_thread(void *arg)
 {
   stm32h7_eth_t *se = arg;
-  int current_up = 0;
-  while(1) {
-    mii_read(se, 1);
-    int n = mii_read(se, 1);
-    int up = !!(n & 4);
+  device_t *self = &se->se_eni.eni_ni.ni_dev;
 
-    if(!current_up && up) {
-      current_up = 1;
-      net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
-    } else if(current_up && !up) {
-      current_up = 0;
-      net_task_raise(&se->se_eni.eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
-    }
+  if(se->se_phyrst != GPIO_UNUSED) {
+    gpio_conf_output(se->se_phyrst, GPIO_PUSH_PULL,
+                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
+    gpio_set_output(se->se_phyrst, 0);
+    usleep(100000);
+    gpio_set_output(se->se_phyrst, 1);
     usleep(100000);
   }
+
+  clk_enable(CLK_ETH1MACEN);
+  clk_enable(CLK_ETH1TXEN);
+  clk_enable(CLK_ETH1RXEN);
+
+  reset_peripheral(CLK_ETH1MACEN);
+
+  ethphy_init_t *init = driver_probe(DRIVER_TYPE_ETHPHY, self);
+
+  if(init == NULL) {
+    evlog(LOG_ERR, "%s: No PHY driver found", self->d_name);
+    thread_exit(0);
+  }
+
+  se->se_eni.eni_phy = init(&se->se_eni, se->se_miimode);
+
+  // Soft reset
+  reg_set_bit(ETH_DMAMR, 0);
+
+  int i = 0;
+  while(reg_rd(ETH_DMAMR) & 1) {
+    i++;
+    usleep(10);
+    if(i == 100) {
+      evlog(LOG_ERR, "Ethernet MAC failed to initialize, no clock?");
+      thread_exit(0);
+    }
+  }
+  usleep(10);
+
+#ifdef ENABLE_NET_PTP
+  if(flags & STM32H7_ETH_ENABLE_PTP_TIMESTAMPING) {
+
+    const unsigned int ahb_freq = clk_get_freq(CLK_ETH1MACEN);
+
+    uint32_t ssinc = (1000000000 / ahb_freq) + 1;
+
+    uint64_t numerator = 1000000000ULL;
+    uint64_t denominator = ahb_freq * ssinc;
+    se->se_addend = (numerator << 32) / denominator;
+
+    se->se_ppb_scale_mult = se->se_addend / 1000;
+    se->se_ppb_scale_div = 1000000;
+    printf("AHB: %d\n", ahb_freq);
+    printf("ssinc:%d addend:0x%x  scale_mult:%d scale_div:%d\n",
+           ssinc, se->se_addend, se->se_ppb_scale_mult, se->se_ppb_scale_div);
+
+    reg_wr(ETH_MACTSCR,
+           (1 << 11) | // PTPv2 ethernet
+           (1 << 10) | // Enable timestamping for PTPv2
+           (1 << 9)  | // Rollover ns at 999999999
+           (1 << 1)  | // Fine mode
+           (1 << 0)  | // Enable
+           0);
+
+    reg_set_bits(ETH_MACSSIR, 16, 8, ssinc);
+
+    reg_wr(ETH_MACSTSUR, 0);
+    reg_wr(ETH_MACSTNUR, 0);
+    reg_set_bit(ETH_MACTSCR, 2);
+
+    reg_wr(ETH_MACTSAR, se->se_addend);
+    reg_set_bit(ETH_MACTSCR, 5);
+    while(reg_get_bit(ETH_MACTSCR, 5));
+
+    se->se_eni.eni_adjust_mac_clock = stm32h7_eth_set_clock;
+
+    reg_wr(ETH_MACPPSCR, 1);
+  }
+#endif
+
+  // DMA config
+
+  reg_wr(ETH_MACPFR, 1 << 31);  // Receive ALL
+
+  reg_set_bit(ETH_MTLTXQOMR, 1);
+
+  reg_set_bits(ETH_DMACTXCR, 16, 5, 1);
+
+  reg_set_bits(ETH_DMACRXCR, 16, 5, 1);
+
+  reg_set_bits(ETH_DMACRXCR, 1, 14, PBUF_DATA_SIZE - DMA_BUFFER_PAD);
+
+  reg_wr(ETH_DMACTXDLAR, (uint32_t)se->se_txring);
+  reg_wr(ETH_DMACTXRLR,  ETH_TX_RING_SIZE - 1);
+  reg_wr(ETH_DMACTXDTPR, (uint32_t)se->se_txring);
+
+  reg_wr(ETH_DMACRXDLAR, (uint32_t)se->se_rxring);
+  reg_wr(ETH_DMACRXRLR,  ETH_RX_RING_SIZE - 1);
+
+  reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
+
+  reg_set_bit(ETH_MACCR, 21); // CST: Strip CRC for type packets in RX path
+
+  reg_set_bit(ETH_MACCR, 0); // Enable RX
+  reg_set_bit(ETH_MACCR, 1); // Enable TX
+
+  // Start DMA
+  reg_set_bit(ETH_DMACRXCR, 0);
+  reg_set_bit(ETH_DMACTXCR, 0);
+
+  se->se_eni.eni_output = stm32h7_eth_output;
+
+  se->se_eni.eni_ni.ni_flags |=
+    NETIF_F_TX_IPV4_CKSUM_OFFLOAD |
+    NETIF_F_TX_ICMP_CKSUM_OFFLOAD |
+    NETIF_F_TX_UDP_CKSUM_OFFLOAD |
+    NETIF_F_TX_TCP_CKSUM_OFFLOAD;
+
+  ether_netif_attach(&se->se_eni);
+
+  irq_enable_fn_arg(61, IRQ_LEVEL_NET, stm32h7_eth_irq, se);
+
+  ethphy_link_poll(&se->se_eni);
 }
 
 
@@ -569,10 +714,6 @@ stm32h7_eth_irq(void *arg)
   reg_wr(ETH_DMACSR, dmacsr);
 }
 
-static const ethphy_reg_io_t stm32h7_eth_mdio = {
-  .read = mii_read,
-  .write = mii_write
-};
 
 #ifdef ENABLE_NET_PTP
 
@@ -657,6 +798,12 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
 {
   stm32h7_eth_t *se = &stm32h7_eth;
 
+  se->se_phyaddr = phy_addr;
+  se->se_phyrst = phyrst;
+  se->se_miimode = mode;
+
+  ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
+
   clk_enable(CLK_SYSCFG);
 
   if(mode == ETHPHY_MODE_RMII) {
@@ -670,36 +817,6 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
                  GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
   }
 
-  if(phyrst != GPIO_UNUSED) {
-    gpio_conf_output(phyrst, GPIO_PUSH_PULL,
-                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
-    gpio_set_output(phyrst, 0);
-    udelay(50);
-    gpio_set_output(phyrst, 1);
-    udelay(4000);
-  }
-
-  clk_enable(CLK_ETH1MACEN);
-  clk_enable(CLK_ETH1TXEN);
-  clk_enable(CLK_ETH1RXEN);
-
-  reset_peripheral(CLK_ETH1MACEN);
-  se->se_phyaddr = phy_addr;
-
-  {
-    ethphy_dev_t ed = {
-      .ed_mode = mode,
-      .ed_regio = &stm32h7_eth_mdio,
-      .ed_arg = se,
-    };
-    error_t err = driver_probe(DRIVER_TYPE_ETHPHY, &ed);
-    if(err && err != ERR_NOT_FOUND) {
-      evlog(LOG_ERR, "stm32h7: PHY init failed");
-      return;
-    }
-    se->se_ethphy_class = ed.ed_class;
-  }
-
   se->se_eni.eni_addr[0] = 0x02;
   se->se_eni.eni_addr[1] = 0x00;
 
@@ -710,85 +827,9 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   se->se_next_rx = 0;
   STAILQ_INIT(&se->se_rx_scatter_queue);
   se->se_txring = xalloc(sizeof(desc_t) * ETH_TX_RING_SIZE, 0,
-                         MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
+                         MEM_CLEAR | MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
   se->se_rxring = xalloc(sizeof(desc_t) * ETH_RX_RING_SIZE, 0,
-                         MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
-
-  // Soft reset
-  reg_set_bit(ETH_DMAMR, 0);
-
-  int i = 0;
-  while(reg_rd(ETH_DMAMR) & 1) {
-    i++;
-    if(i == 1000000) {
-      evlog(LOG_ERR, "Ethernet MAC failed to initialize, no clock?");
-      return;
-    }
-  }
-  udelay(10);
-
-#ifdef ENABLE_NET_PTP
-  if(flags & STM32H7_ETH_ENABLE_PTP_TIMESTAMPING) {
-
-    const unsigned int ahb_freq = clk_get_freq(CLK_ETH1MACEN);
-
-    uint32_t ssinc = (1000000000 / ahb_freq) + 1;
-
-    uint64_t numerator = 1000000000ULL;
-    uint64_t denominator = ahb_freq * ssinc;
-    se->se_addend = (numerator << 32) / denominator;
-
-    se->se_ppb_scale_mult = se->se_addend / 1000;
-    se->se_ppb_scale_div = 1000000;
-    printf("AHB: %d\n", ahb_freq);
-    printf("ssinc:%d addend:0x%x  scale_mult:%d scale_div:%d\n",
-           ssinc, se->se_addend, se->se_ppb_scale_mult, se->se_ppb_scale_div);
-
-    reg_wr(ETH_MACTSCR,
-           (1 << 11) | // PTPv2 ethernet
-           (1 << 10) | // Enable timestamping for PTPv2
-           (1 << 9)  | // Rollover ns at 999999999
-           (1 << 1)  | // Fine mode
-           (1 << 0)  | // Enable
-           0);
-
-    reg_set_bits(ETH_MACSSIR, 16, 8, ssinc);
-
-    reg_wr(ETH_MACSTSUR, 0);
-    reg_wr(ETH_MACSTNUR, 0);
-    reg_set_bit(ETH_MACTSCR, 2);
-
-    reg_wr(ETH_MACTSAR, se->se_addend);
-    reg_set_bit(ETH_MACTSCR, 5);
-    while(reg_get_bit(ETH_MACTSCR, 5));
-
-    se->se_eni.eni_adjust_mac_clock = stm32h7_eth_set_clock;
-
-    reg_wr(ETH_MACPPSCR, 1);
-  }
-#endif
-
-  // DMA config
-
-  reg_wr(ETH_MACPFR, 1 << 31);  // Receive ALL
-
-  reg_set_bit(ETH_MTLTXQOMR, 1);
-
-  reg_set_bits(ETH_DMACTXCR, 16, 5, 1);
-
-  reg_set_bits(ETH_DMACRXCR, 16, 5, 1);
-
-  reg_set_bits(ETH_DMACRXCR, 1, 14, PBUF_DATA_SIZE - DMA_BUFFER_PAD);
-
-  memset(se->se_txring, 0, sizeof(desc_t) * ETH_TX_RING_SIZE);
-  memset(se->se_rxring, 0, sizeof(desc_t) * ETH_RX_RING_SIZE);
-
-  reg_wr(ETH_DMACTXDLAR, (uint32_t)se->se_txring);
-  reg_wr(ETH_DMACTXRLR,  ETH_TX_RING_SIZE - 1);
-  reg_wr(ETH_DMACTXDTPR, (uint32_t)se->se_txring);
-
-  reg_wr(ETH_DMACRXDLAR, (uint32_t)se->se_rxring);
-  reg_wr(ETH_DMACRXRLR,  ETH_RX_RING_SIZE - 1);
+                         MEM_CLEAR | MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
 
   for(int i = 0; i < ETH_RX_RING_SIZE; i++) {
     void *buf = pbuf_data_get(0);
@@ -797,32 +838,6 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
     rx_desc_give(se, i, buf);
   }
 
-  reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
-
-  reg_set_bit(ETH_MACCR, 21); // CST: Strip CRC for type packets in RX path
-  //  reg_set_bit(ETH_MACCR, 20); // ACS: Strip CRC in RX path
-
-  reg_set_bit(ETH_MACCR, 0); // Enable RX
-  reg_set_bit(ETH_MACCR, 1); // Enable TX
-
-  reg_set_bit(ETH_MACCR, 14); // 100Mbit
-  reg_set_bit(ETH_MACCR, 13); // FullDuplex
-
-  // Start DMA
-  reg_set_bit(ETH_DMACRXCR, 0);
-  reg_set_bit(ETH_DMACTXCR, 0);
-
-  se->se_eni.eni_output = stm32h7_eth_output;
-
-  se->se_eni.eni_ni.ni_flags |=
-    NETIF_F_TX_IPV4_CKSUM_OFFLOAD |
-    NETIF_F_TX_ICMP_CKSUM_OFFLOAD |
-    NETIF_F_TX_UDP_CKSUM_OFFLOAD |
-    NETIF_F_TX_TCP_CKSUM_OFFLOAD;
-
-  ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
-
-  irq_enable_fn_arg(61, IRQ_LEVEL_NET, stm32h7_eth_irq, se);
-  thread_create(stm32h7_phy_thread, se, 512, "phy", 0, 4);
+  thread_create(stm32h7_thread, se, 512, "eth", 0, 4);
 }
 

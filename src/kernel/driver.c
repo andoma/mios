@@ -1,7 +1,8 @@
 #include <mios/driver.h>
+#include <mios/eventlog.h>
 
-error_t
-driver_probe(uint16_t type, void *metadata)
+void *
+driver_probe(driver_type_t type, device_t *parent)
 {
   extern unsigned long _driver_array_begin;
   extern unsigned long _driver_array_end;
@@ -9,14 +10,13 @@ driver_probe(uint16_t type, void *metadata)
   const driver_t *d = (void *)&_driver_array_begin;
   const driver_t *e = (void *)&_driver_array_end;
 
-  error_t rval = ERR_NOT_FOUND;
+  void *fn;
 
   for(; d != e; d++) {
-    error_t err = d->probe(type, metadata);
-    if(!err)
-      return 0;
-    if(err != ERR_MISMATCH)
-      rval = err;
+    evlog(LOG_DEBUG, "PROBE %p", d->probe);
+    fn = d->probe(type, parent);
+    if(fn != NULL)
+      return fn;
   }
-  return rval;
+  return NULL;
 }

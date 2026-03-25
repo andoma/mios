@@ -98,7 +98,9 @@ typedef struct nexthop {
 
 
 
-void netif_attach(netif_t *ni, const char *name, const device_class_t *dc);
+void netif_init(netif_t *ni, const char *name, const device_class_t *dc);
+
+void netif_attach(netif_t *ni);
 
 void netif_detach(netif_t *ni);
 

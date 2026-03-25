@@ -338,7 +338,11 @@ pci_device_probe(pci_dev_t *pd, uint64_t mem_base)
   reg |= 1 << 2; // Bus master Enable
   pci_cfg_wr32(pd, 4, reg);
 
-  return driver_probe(DRIVER_TYPE_PCI, pd);
+  pci_fn_init_t *init = driver_probe(DRIVER_TYPE_PCI, &pd->pd_dev);
+  if(init == NULL)
+    return ERR_NOT_IMPLEMENTED; // No driver found
+
+  return init(pd);
 }
 
 

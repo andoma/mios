@@ -6,63 +6,25 @@
 
 #define REG_PHYIDR1 0x0002
 #define REG_PHYIDR2 0x0003
-#define REG_REGCR   0x000d
-#define REG_ADDAR   0x000e
 #define REG_RCSR    0x0017
 #define REG_SOR1    0x0467
 
-static uint16_t
-reg_read(const ethphy_reg_io_t *regio, void *arg, uint16_t reg)
+
+device_t *dp83826_init(struct ether_netif *eni, ethphy_mode_t mode);
+
+
+
+static const device_class_t ethphy_dp83826 = {
+};
+
+
+device_t *
+dp83826_init(struct ether_netif *eni, ethphy_mode_t mode)
 {
-  if(reg < 0x20) {
-    return regio->read(arg, reg);
-  }
+  const uint16_t sor = ethphy_mii_read(eni, REG_SOR1);
+  const uint16_t id2 = ethphy_mii_read(eni, REG_PHYIDR2);
+  const uint16_t model = (id2 >> 4) & 0x3f;
 
-  // Extended register access
-  regio->write(arg, REG_REGCR, 0x1f);
-  regio->write(arg, REG_ADDAR, reg);
-  regio->write(arg, REG_REGCR, 0x401f);
-  return regio->read(arg, REG_ADDAR);
-}
-
-static void
-reg_write(const ethphy_reg_io_t *regio, void *arg, uint16_t reg, uint16_t val)
-{
-  if(reg < 0x20) {
-    return regio->write(arg, reg, val);
-  }
-
-  // Extended register access
-  regio->write(arg, REG_REGCR, 0x1f);
-  regio->write(arg, REG_ADDAR, reg);
-  regio->write(arg, REG_REGCR, 0x401f);
-  return regio->write(arg, REG_ADDAR, val);
-}
-
-
-static error_t
-dp83826_probe(uint16_t type, void *metadata)
-{
-  if(type != DRIVER_TYPE_ETHPHY)
-    return ERR_MISMATCH;
-
-  ethphy_dev_t *ed = metadata;
-  const ethphy_reg_io_t *regio = ed->ed_regio;
-  void *arg = ed->ed_arg;
-  ethphy_mode_t mode = ed->ed_mode;
-
-  uint16_t id1 = reg_read(regio, arg, REG_PHYIDR1);
-  uint16_t id2 = reg_read(regio, arg, REG_PHYIDR2);
-
-  if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
-    return ERR_MISMATCH;
-  }
-  uint16_t model = (id2 >> 4) & 0x3f;
-  if(model != 0x13 && model != 0x11) {
-    return ERR_MISMATCH;
-  }
-
-  uint16_t sor = reg_read(regio, arg, REG_SOR1);
   char strapbits[12];
   for(int i = 0; i < 11; i++) {
     strapbits[i] = (sor >> i) & 1 ? '1' : '0';
@@ -72,7 +34,7 @@ dp83826_probe(uint16_t type, void *metadata)
   evlog(LOG_DEBUG, "dp83826: Revision %d in %s mode (Strap:%s)",
         id2 & 0xf, model == 0x13 ? "Enhanced" : "Basic", strapbits);
 
-  uint16_t rcsr = reg_read(regio, arg, REG_RCSR);
+  uint16_t rcsr = ethphy_mii_read(eni, REG_RCSR);
   if(mode == ETHPHY_MODE_RMII) {
     rcsr |= 0x20;
   } else {
@@ -81,9 +43,32 @@ dp83826_probe(uint16_t type, void *metadata)
   evlog(LOG_DEBUG, "dp83826: Running in %sMII mode",
         mode == ETHPHY_MODE_RMII ? "R":"");
 
-  reg_write(regio, arg, REG_RCSR, rcsr);
-  ed->ed_class = NULL;
-  return 0;
+  ethphy_mii_write(eni, REG_RCSR, rcsr);
+
+  return ethphy_create((device_t *)eni, &ethphy_dp83826, sizeof(device_t));
+}
+
+static void *
+dp83826_probe(driver_type_t type, device_t *parent)
+{
+  if(type != DRIVER_TYPE_ETHPHY)
+    return NULL;
+
+  // For DRIVER_TYPE_ETHPHY, the parent is a ether_netif_t device
+  struct ether_netif *eni = (struct ether_netif *)parent;
+
+  const uint16_t id1 = ethphy_mii_read(eni, REG_PHYIDR1);
+  const uint16_t id2 = ethphy_mii_read(eni, REG_PHYIDR2);
+
+  if(id1 != 0x2000 || (id2 & 0xfc00) != 0xa000) {
+    return NULL;
+  }
+  const uint16_t model = (id2 >> 4) & 0x3f;
+  if(model != 0x13 && model != 0x11) {
+    return NULL;
+  }
+
+  return &dp83826_init;
 }
 
 DRIVER(dp83826_probe, 5);

@@ -44,5 +44,6 @@ can_netif_attach(can_netif_t *cni, const char *name,
   cni->cni_ni.ni_input = can_input;
   cni->cni_ni.ni_mtu = 8; // Should be set by caller
 
-  netif_attach(&cni->cni_ni, name, dc);
+  netif_init(&cni->cni_ni, name, dc);
+  netif_attach(&cni->cni_ni);
 }

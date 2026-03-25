@@ -38,6 +38,8 @@ SRCS-${ENABLE_NET_IPV4} += \
 
 SRCS-${ENABLE_NET_ETHER} += \
 	${SRC}/net/ether.c \
+	${SRC}/net/ethphy.c \
+	${SRC}/net/ethphy/ethphy_generic.c \
 	${SRC}/net/lldp.c \
 
 SRCS-${ENABLE_DP83826} += \

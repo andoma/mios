@@ -92,14 +92,12 @@ netif_task_cb(net_task_t *nt, uint32_t signals)
   }
 
   if(signals & NETIF_TASK_STATUS_UP && !(ni->ni_flags & NETIF_F_UP)) {
-    evlog(LOG_INFO, "%s: Link status: %s", ni->ni_dev.d_name, "UP");
     ni->ni_flags |= NETIF_F_UP;
     if(ni->ni_status_change)
       ni->ni_status_change(ni);
     ghook_invoke(GHOOK_NETIF_LINK_STATUS, ni);
   }
   if(signals & NETIF_TASK_STATUS_DOWN && (ni->ni_flags & NETIF_F_UP)) {
-    evlog(LOG_INFO, "%s: Link status: %s", ni->ni_dev.d_name, "DOWN");
     ni->ni_flags &= ~NETIF_F_UP;
     if(ni->ni_status_change)
       ni->ni_status_change(ni);
@@ -190,8 +188,17 @@ net_task_raise(net_task_t *nt, uint32_t signals)
   irq_permit(q);
 }
 
+
 void
-netif_attach(netif_t *ni, const char *name, const device_class_t *dc)
+netif_init(netif_t *ni, const char *name, const device_class_t *dc)
+{
+  ni->ni_dev.d_class = dc;
+  ni->ni_dev.d_name = name;
+}
+
+
+void
+netif_attach(netif_t *ni)
 {
   STAILQ_INIT(&ni->ni_rx_queue);
 
@@ -202,8 +209,6 @@ netif_attach(netif_t *ni, const char *name, const device_class_t *dc)
   SLIST_INSERT_HEAD(&netifs, ni, ni_global_link);
   if(ni->ni_buffers_avail)
     ni->ni_buffers_avail(ni);
-  ni->ni_dev.d_class = dc;
-  ni->ni_dev.d_name = name;
   mutex_unlock(&netif_mutex);
 
   device_register(&ni->ni_dev);

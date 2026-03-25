@@ -210,11 +210,38 @@ rtl8168_dtor(struct device *dev)
   free(dev);
 }
 
-static const device_class_t rtl8168_device_class = {
-  .dc_print_info = rtl8168_print_info,
-  .dc_disable = rtl8168_disable,
-  .dc_shutdown = rtl8168_shutdown,
-  .dc_dtor = rtl8168_dtor,
+static void
+mii_write(rtl8168_t *r, uint16_t reg, uint16_t value)
+{
+  reg_wr(r->mmio + RTK_PHY_ACCESS,
+         (1 << 31) | (reg << 16) | value);
+
+  while(reg_rd(r->mmio + RTK_PHY_ACCESS) & (1 << 31)) {
+  }
+}
+
+
+static uint16_t
+mii_read(rtl8168_t *r, uint16_t reg)
+{
+  reg_wr(r->mmio + RTK_PHY_ACCESS, reg << 16);
+
+  while(1) {
+    uint32_t x = reg_rd(r->mmio + RTK_PHY_ACCESS);
+
+    if(x & (1 << 31)) {
+      return x & 0xffff;
+    }
+  }
+}
+
+static const ethmac_device_class_t rtl8168_device_class = {
+  .dc = {
+    .dc_print_info = rtl8168_print_info,
+    .dc_disable = rtl8168_disable,
+    .dc_shutdown = rtl8168_shutdown,
+    .dc_dtor = rtl8168_dtor,
+  },
 };
 
 
@@ -373,53 +400,10 @@ rtl8168_reset(rtl8168_t *r)
 }
 
 
-static void
-mii_write(void *arg, uint16_t reg, uint16_t value)
-{
-  rtl8168_t *r = arg;
-
-  reg_wr(r->mmio + RTK_PHY_ACCESS,
-         (1 << 31) | (reg << 16) | value);
-
-  while(reg_rd(r->mmio + RTK_PHY_ACCESS) & (1 << 31)) {
-  }
-}
-
-
-static uint16_t
-mii_read(void *arg, uint16_t reg)
-{
-  rtl8168_t *r = arg;
-
-  reg_wr(r->mmio + RTK_PHY_ACCESS, reg << 16);
-
-  while(1) {
-    uint32_t x = reg_rd(r->mmio + RTK_PHY_ACCESS);
-
-    if(x & (1 << 31)) {
-      return x & 0xffff;
-    }
-  }
-}
-
-
 static error_t
-rtl8168_probe(uint16_t type, void *metadata)
+rtl8168_init(pci_dev_t *pd)
 {
-  if(type != DRIVER_TYPE_PCI)
-    return ERR_MISMATCH;
-
-  pci_dev_t *pd = metadata;
-  if(pd->pd_vid != 0x10ec || pd->pd_pid != 0x8168)
-    return ERR_MISMATCH;
-
   uint64_t mmio = pd->pd_bar[2];
-  if(mmio == 0)
-    return ERR_INVALID_ADDRESS;
-
-  uint32_t rev = reg_rd(mmio + RTK_TXCFG) & 0x7CC00000;
-  if(rev != 0x54000000)
-    return ERR_MISMATCH;
 
   rtl8168_t *r = xalloc(sizeof(rtl8168_t), 0, MEM_CLEAR);
   r->pd = pd;
@@ -507,6 +491,7 @@ rtl8168_probe(uint16_t type, void *metadata)
   r->eni.eni_ni.ni_dev.d_parent = &pd->pd_dev;
   device_retain(&pd->pd_dev);
   ether_netif_init(&r->eni, r->name, &rtl8168_device_class);
+  ether_netif_attach(&r->eni);
 
   evlog(LOG_INFO, "%s: rtl8168 attached IRQ %d", r->name, r->irq);
   handle_link_change(r);
@@ -523,6 +508,27 @@ rtl8168_probe(uint16_t type, void *metadata)
     mii_write(r, 0, 0x9200);
   }
   return 0;
+}
+
+static void *
+rtl8168_probe(driver_type_t type, device_t *parent)
+{
+  if(type != DRIVER_TYPE_PCI)
+    return NULL;
+
+  pci_dev_t *pd = (pci_dev_t *)parent;
+  if(pd->pd_vid != 0x10ec || pd->pd_pid != 0x8168)
+    return NULL;
+
+  uint64_t mmio = pd->pd_bar[2];
+  if(mmio == 0)
+    return NULL;
+
+  uint32_t rev = reg_rd(mmio + RTK_TXCFG) & 0x7CC00000;
+  if(rev != 0x54000000)
+    return NULL;
+
+  return &rtl8168_init;
 }
 
 DRIVER(rtl8168_probe, 1);

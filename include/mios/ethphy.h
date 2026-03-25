@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <mios/error.h>
 #include <mios/stream.h>
+#include <mios/device.h>
 
 typedef enum {
   ETHPHY_MODE_MII,
@@ -10,18 +11,24 @@ typedef enum {
   ETHPHY_MODE_RGMII,
 } ethphy_mode_t;
 
-typedef struct ethphy_reg_io {
-  uint16_t (*read)(void *arg, uint16_t reg);
-  void (*write)(void *arg, uint16_t reg, uint16_t value);
-} ethphy_reg_io_t;
+struct ether_netif;
 
-typedef struct ethphy_class {
-  void (*print_info)(struct stream *s, const ethphy_reg_io_t *regio, void *arg);
-} ethphy_class_t;
+typedef device_t *(ethphy_init_t)(struct ether_netif *mac, ethphy_mode_t mode);
 
-typedef struct ethphy_dev {
-  ethphy_mode_t ed_mode;
-  const ethphy_reg_io_t *ed_regio;
-  void *ed_arg;
-  const ethphy_class_t *ed_class;
-} ethphy_dev_t;
+device_t *ethphy_create(device_t *parent, const device_class_t *dc,
+                        size_t size);
+/**
+ * Read & write MII registers from currently attached PHY
+ *
+ * Handles IEEE 802.3 Clause 22 Extension (Extended register access)
+ */
+
+int ethphy_mii_read(struct ether_netif *eni, uint16_t reg);
+
+error_t ethphy_mii_write(struct ether_netif *eni, uint16_t reg, uint16_t value);
+
+/**
+ * Poll PHY link status (MII register 1, bit 2) in a loop.
+ * Raises NETIF_TASK_STATUS_UP/DOWN on transitions.
+ */
+void ethphy_link_poll(struct ether_netif *eni) __attribute__((noreturn));
