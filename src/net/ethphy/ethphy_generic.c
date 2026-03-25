@@ -5,6 +5,7 @@
 #include <net/ether.h>
 
 static const device_class_t ethphy_generic = {
+  .dc_class_name = "ethphy",
 };
 
 static device_t *

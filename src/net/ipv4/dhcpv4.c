@@ -565,16 +565,16 @@ static const char *dhcp_state_str =
 void
 dhcpv4_print(ether_netif_t *eni, struct stream *st)
 {
-  stprintf(st, "\tDHCP State: %s\n",
+  stprintf(st, "DHCP State: %s\n",
            strtbl(dhcp_state_str, eni->eni_dhcp_state));
-  stprintf(st, "\t\tOur address: %Id\n", eni->eni_dhcp_requested_ip);
-  stprintf(st, "\t\tServer: %Id\n", eni->eni_dhcp_server_ip);
+  stprintf(st, "  Our address: %Id\n", eni->eni_dhcp_requested_ip);
+  stprintf(st, "  Server: %Id\n", eni->eni_dhcp_server_ip);
   if(eni->eni_dhcp_state) {
     int delta = (eni->eni_dhcp_timer.t_expire - clock_get()) / 1000000;
     if(eni->eni_dhcp_state == DHCP_STATE_BOUND) {
-      stprintf(st, "\t\tRenew in: %d seconds\n", delta);
+      stprintf(st, "  Renew in: %d seconds\n", delta);
     } else if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
-      stprintf(st, "\t\tRe-init in: %d seconds\n", delta);
+      stprintf(st, "  Re-init in: %d seconds\n", delta);
     }
   }
 }

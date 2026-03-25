@@ -208,165 +208,56 @@ dp83869_print_diagnostics(struct device *dev, stream_t *s)
 {
   struct ether_netif *eni = (struct ether_netif *)dev->d_parent;
 
-  uint16_t id1 = reg_read(eni, REG_PHYIDR1);
   uint16_t id2 = reg_read(eni, REG_PHYIDR2);
-  uint16_t bmcr = reg_read(eni, REG_BMCR);
-  uint16_t bmsr = reg_read(eni, REG_BMSR);
-  // Read BMSR twice -- link status is latched-low
-  bmsr = reg_read(eni, REG_BMSR);
-  uint16_t phy_status = reg_read(eni, REG_PHY_STATUS);
-  uint16_t anar = reg_read(eni, REG_ANAR);
-  uint16_t alnpar = reg_read(eni, REG_ALNPAR);
-  uint16_t gen_cfg1 = reg_read(eni, REG_GEN_CFG1);
-  uint16_t gen_status1 = reg_read(eni, REG_GEN_STATUS1);
-  uint16_t gen_status2 = reg_read(eni, REG_GEN_STATUS2);
-  uint16_t gen_cfg2 = reg_read(eni, REG_GEN_CFG2);
-  uint16_t int_status = reg_read(eni, REG_INTERRUPT_STATUS);
-  uint16_t rx_err_cnt = reg_read(eni, REG_RX_ERR_CNT);
-  uint16_t strap = reg_read(eni, REG_STRAP_STS);
   uint16_t opmode = reg_read(eni, REG_OP_MODE_DECODE);
-  uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
-  uint16_t rgmii_dll = reg_read(eni, REG_RGMII_DLL_CTRL);
-  uint16_t phy_ctrl = reg_read(eni, REG_PHY_CONTROL);
-  uint16_t lkscr = reg_read(eni, REG_1KSCR);
+  uint16_t cfg_opmode = opmode & OP_MODE_DECODE_CFG_OPMODE_MASK;
 
-  stprintf(s, "DP83869HM PHY Diagnostics\n");
-  stprintf(s, "  PHY ID: 0x%04x:0x%04x (model 0x%02x rev %d)\n",
-           id1, id2, (id2 >> 4) & 0x3f, id2 & 0xf);
-
-  stprintf(s, "  Operation Mode: %s (%s interface)\n",
-           opmode_str(opmode),
+  stprintf(s, "DP83869HM rev %d, %s (%s)\n",
+           id2 & 0xf, opmode_str(opmode),
            (opmode & OP_MODE_DECODE_RGMII_MII_SEL) ? "MII" : "RGMII");
 
-  stprintf(s, "  Strap: opmode=%d phy_addr=%d aneg=%s mirror=%s\n",
-           (strap >> 9) & 0x7,
-           (strap >> 4) & 0xf,
-           (strap & 0x2) ? "on" : "off",
-           (strap & (1 << 12)) ? "on" : "off");
+  int has_copper = (cfg_opmode == CFG_OPMODE_RGMII_COPPER ||
+                    cfg_opmode == CFG_OPMODE_SGMII_COPPER ||
+                    cfg_opmode == CFG_OPMODE_1000BT_1000BX ||
+                    cfg_opmode == CFG_OPMODE_100BT_100FX);
 
-  // Link status
-  stprintf(s, "  Link: %s\n",
-           (bmsr & BMSR_LINK_STS) ? "UP" : "DOWN");
+  int has_fiber = (cfg_opmode == CFG_OPMODE_RGMII_1000BX ||
+                   cfg_opmode == CFG_OPMODE_RGMII_100FX ||
+                   cfg_opmode == CFG_OPMODE_1000BT_1000BX ||
+                   cfg_opmode == CFG_OPMODE_100BT_100FX);
 
-  stprintf(s, "  Speed: %s, Duplex: %s, Resolved: %s\n",
-           speed_str(phy_status),
-           (phy_status & PHY_STATUS_DUPLEX) ? "Full" : "Half",
-           (phy_status & PHY_STATUS_RESOLVED) ? "Yes" : "No");
+  if(has_copper) {
+    uint16_t bmsr = reg_read(eni, REG_BMSR);
+    bmsr = reg_read(eni, REG_BMSR); // Read twice -- link status is latched-low
+    uint16_t phy_status = reg_read(eni, REG_PHY_STATUS);
+    uint16_t rx_err_cnt = reg_read(eni, REG_RX_ERR_CNT);
 
-  stprintf(s, "  MDI-X: AB=%s CD=%s\n",
-           (phy_status & PHY_STATUS_MDI_X_AB) ? "MDI-X" : "MDI",
-           (phy_status & PHY_STATUS_MDI_X_CD) ? "MDI-X" : "MDI");
+    stprintf(s, "Copper: %s, %s %s duplex\n",
+             (bmsr & BMSR_LINK_STS) ? "UP" : "DOWN",
+             speed_str(phy_status),
+             (phy_status & PHY_STATUS_DUPLEX) ? "full" : "half");
 
-  // Auto-negotiation
-  stprintf(s, "  Auto-Neg: %s, Complete: %s\n",
-           (bmcr & BMCR_AUTONEG_EN) ? "Enabled" : "Disabled",
-           (bmsr & BMSR_AUTONEG_COMP) ? "Yes" : "No");
-
-  stprintf(s, "  ANAR: 0x%04x, ALNPAR: 0x%04x\n", anar, alnpar);
-
-  // 1000BASE-T
-  stprintf(s, "  1KSCR: 0x%04x (1000BX_FD=%d 1000BX_HD=%d "
-           "1000BT_FD=%d 1000BT_HD=%d)\n",
-           lkscr,
-           (lkscr >> 15) & 1, (lkscr >> 14) & 1,
-           (lkscr >> 13) & 1, (lkscr >> 12) & 1);
-
-  stprintf(s, "  GEN_CFG1: 0x%04x (1000BT_FD_ADV=%d 1000BT_HD_ADV=%d)\n",
-           gen_cfg1, (gen_cfg1 >> 9) & 1, (gen_cfg1 >> 8) & 1);
-
-  // GEN_STATUS1
-  stprintf(s, "  GEN_STATUS1: 0x%04x (Leader=%s, Local_RX=%s, "
-           "Remote_RX=%s, Idle_Err=%d)\n",
-           gen_status1,
-           (gen_status1 & (1 << 14)) ? "Leader" : "Follower",
-           (gen_status1 & (1 << 13)) ? "OK" : "FAIL",
-           (gen_status1 & (1 << 12)) ? "OK" : "FAIL",
-           gen_status1 & 0xff);
-
-  // LP abilities for 1000BT
-  stprintf(s, "  LP 1000BT: FD=%d HD=%d\n",
-           (gen_status1 >> 11) & 1, (gen_status1 >> 10) & 1);
-
-  // RGMII settings
-  stprintf(s, "  RGMII_CTRL: 0x%04x (TX_delay=%s, RX_delay=%s)\n",
-           rgmii_ctrl,
-           (rgmii_ctrl & RGMII_CTRL_TX_CLK_DELAY) ? "off" : "on",
-           (rgmii_ctrl & RGMII_CTRL_RX_CLK_DELAY) ? "off" : "on");
-
-  uint16_t tx_delay = (rgmii_dll >> 4) & 0xf;
-  uint16_t rx_delay = rgmii_dll & 0xf;
-  stprintf(s, "  RGMII_DLL: TX=0x%x RX=0x%x\n", tx_delay, rx_delay);
-
-  // PHY_CONTROL
-  stprintf(s, "  PHY_CTRL: 0x%04x (TX_FIFO=%d RX_FIFO=%d "
-           "MDI_CROSS=%d Force_Link=%d)\n",
-           phy_ctrl,
-           (phy_ctrl >> 14) & 3, (phy_ctrl >> 12) & 3,
-           (phy_ctrl >> 5) & 3,
-           (phy_ctrl >> 10) & 1);
-
-  // GEN_CFG2
-  stprintf(s, "  GEN_CFG2: 0x%04x (SGMII_ANEG=%s, Speed_Opt=%s)\n",
-           gen_cfg2,
-           (gen_cfg2 & (1 << 7)) ? "on" : "off",
-           (gen_cfg2 & (1 << 9)) ? "on" : "off");
-
-  // Error counters and status
-  stprintf(s, "  RX Error Count: %d\n", rx_err_cnt);
-
-  stprintf(s, "  GEN_STATUS2: 0x%04x (Core=%s, PRBS_Lock=%d, "
-           "PRBS_SyncLoss=%d)\n",
-           gen_status2,
-           (gen_status2 & (1 << 6)) ? "normal" : "sleep/pwdn",
-           (gen_status2 >> 11) & 1,
-           (gen_status2 >> 10) & 1);
-
-  stprintf(s, "  INT_STATUS: 0x%04x", int_status);
-  if(int_status & (1 << 15)) stprintf(s, " ANEG_ERR");
-  if(int_status & (1 << 14)) stprintf(s, " SPEED_CHG");
-  if(int_status & (1 << 13)) stprintf(s, " DUPLEX_CHG");
-  if(int_status & (1 << 10)) stprintf(s, " LINK_CHG");
-  if(int_status & (1 << 7))  stprintf(s, " ADC_FIFO");
-  if(int_status & (1 << 6))  stprintf(s, " MDI_CROSS");
-  if(int_status & (1 << 2))  stprintf(s, " XGMII_ERR");
-  if(int_status & (1 << 1))  stprintf(s, " POLARITY_CHG");
-  if(int_status & (1 << 0))  stprintf(s, " JABBER");
-  stprintf(s, "\n");
-
-  // Fiber status (if applicable)
-  uint16_t cfg_opmode = opmode & OP_MODE_DECODE_CFG_OPMODE_MASK;
-  if(cfg_opmode == CFG_OPMODE_RGMII_1000BX ||
-     cfg_opmode == CFG_OPMODE_RGMII_100FX ||
-     cfg_opmode == CFG_OPMODE_1000BT_1000BX ||
-     cfg_opmode == CFG_OPMODE_100BT_100FX) {
-    uint16_t fx_ctrl = reg_read(eni, REG_FX_CTRL);
-    uint16_t fx_sts = reg_read(eni, REG_FX_STS);
-    uint16_t fx_anar = reg_read(eni, REG_FX_ANAR);
-    uint16_t fx_anlpar = reg_read(eni, REG_FX_ANLPAR);
-    stprintf(s, "  FX_CTRL: 0x%04x (ANEG=%s, Speed=%s, Duplex=%s)\n",
-             fx_ctrl,
-             (fx_ctrl & (1 << 12)) ? "on" : "off",
-             (fx_ctrl & (1 << 13)) ? "100M" : "1000M",
-             (fx_ctrl & (1 << 8)) ? "Full" : "Half");
-    stprintf(s, "  FX_STS: 0x%04x (Link=%s, ANEG_Complete=%s)\n",
-             fx_sts,
-             (fx_sts & (1 << 2)) ? "UP" : "DOWN",
-             (fx_sts & (1 << 5)) ? "Yes" : "No");
-    stprintf(s, "  FX_ANAR: 0x%04x (FD=%d HD=%d Pause=%d AsmDir=%d)\n",
-             fx_anar,
-             (fx_anar >> 5) & 1, (fx_anar >> 6) & 1,
-             (fx_anar >> 7) & 1, (fx_anar >> 8) & 1);
-    stprintf(s, "  FX_ANLPAR: 0x%04x (FD=%d HD=%d Pause=%d AsmDir=%d)\n",
-             fx_anlpar,
-             (fx_anlpar >> 5) & 1, (fx_anlpar >> 6) & 1,
-             (fx_anlpar >> 7) & 1, (fx_anlpar >> 8) & 1);
+    if(rx_err_cnt)
+      stprintf(s, "  RX errors: %d\n", rx_err_cnt);
   }
 
-  // BMCR raw
-  stprintf(s, "  BMCR: 0x%04x, BMSR: 0x%04x\n", bmcr, bmsr);
+  if(has_fiber) {
+    uint16_t fx_sts = reg_read(eni, REG_FX_STS);
+    stprintf(s, "Fiber: %s, Auto-Neg %s\n",
+             (fx_sts & (1 << 2)) ? "UP" : "DOWN",
+             (fx_sts & (1 << 5)) ? "complete" : "pending");
+  }
+
+  if(!(opmode & OP_MODE_DECODE_RGMII_MII_SEL)) {
+    uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
+    stprintf(s, "RGMII delay: TX=%s RX=%s\n",
+             (rgmii_ctrl & RGMII_CTRL_TX_CLK_DELAY) ? "off" : "on",
+             (rgmii_ctrl & RGMII_CTRL_RX_CLK_DELAY) ? "off" : "on");
+  }
 }
 
 static const device_class_t dp83869_class = {
+  .dc_class_name = "ethphy",
   .dc_print_info = dp83869_print_diagnostics,
 };
 

@@ -353,16 +353,17 @@ t234_pci_dev_print(struct device *dev, struct stream *st)
   t234_pci_dev_t *tpd = (t234_pci_dev_t *)dev;
   pci_dev_t *pd = &tpd->tpd_dev;
 
-  stprintf(st, "\tVendor:0x%04x Product:0x%04x ClassCode:0x%08x\n",
+  stprintf(st, "Vendor:0x%04x Product:0x%04x ClassCode:0x%08x\n",
            pd->pd_vid, pd->pd_pid, pd->pd_classcode);
   for(int i = 0; i < 6; i++) {
     if(pd->pd_bar[i])
-      stprintf(st, "\tBAR[%d] = 0x%lx\n", i, pd->pd_bar[i]);
+      stprintf(st, "BAR[%d] = 0x%lx\n", i, pd->pd_bar[i]);
   }
 }
 
 
 static const device_class_t t234_pci_dev_class = {
+  .dc_class_name = "PCI Device",
   .dc_print_info = t234_pci_dev_print,
   .dc_shutdown = device_shutdown,
 };
@@ -462,26 +463,25 @@ t234_pci_rp_print(struct device *dev, struct stream *st)
   t234_pci_ctrl_t *tpc = (t234_pci_ctrl_t *)dev;
   uint32_t rp_base = tpc->tpc_conf->rp_base;
 
-  stprintf(st, "\tVendor:0x%04x Product:0x%04x @ 0x%x\n",
+  stprintf(st, "Vendor:0x%04x Product:0x%04x @ 0x%x\n",
            reg_rd16(rp_base), reg_rd16(rp_base + 2), rp_base);
-
 
   // Print AER. For Tegra we know it starts at 0x100...
   // Once moved to common PCI code, this needs to be enumerated
-  stprintf(st, "\tUncorrectable errors:0x%08x\n",
+  stprintf(st, "Uncorrectable errors:0x%08x\n",
            reg_rd(rp_base + 0x104));
-  stprintf(st, "\tCorrectable errors:  0x%08x\n",
+  stprintf(st, "Correctable errors:  0x%08x\n",
            reg_rd(rp_base + 0x110));
-  stprintf(st, "\tRoot port errors:    0x%08x\n",
+  stprintf(st, "Root port errors:    0x%08x\n",
            reg_rd(rp_base + 0x130));
-  stprintf(st, "\tCapture Ctrl:        0x%08x\n",
+  stprintf(st, "Capture Ctrl:        0x%08x\n",
            reg_rd(rp_base + 0x118));
-  stprintf(st, "\tCaptured TLP:        0x%08x:0x%08x:0x%08x:0x%08x\n",
+  stprintf(st, "Captured TLP:        0x%08x:0x%08x:0x%08x:0x%08x\n",
            reg_rd(rp_base + 0x11c),
            reg_rd(rp_base + 0x120),
            reg_rd(rp_base + 0x124),
            reg_rd(rp_base + 0x128));
-  stprintf(st, "\tError source:        0x%08x\n",
+  stprintf(st, "Error source:        0x%08x\n",
            reg_rd(rp_base + 0x134));
 }
 
@@ -495,6 +495,7 @@ t234pcie_dtor(device_t *d)
 
 
 static const device_class_t t234pcie_class = {
+  .dc_class_name = "T234 PCIe Root Controller",
   .dc_shutdown = t234pcie_shutdown,
   .dc_dtor = t234pcie_dtor,
   .dc_print_info = t234_pci_rp_print,

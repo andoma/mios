@@ -15,6 +15,7 @@ device_t *dp83826_init(struct ether_netif *eni, ethphy_mode_t mode);
 
 
 static const device_class_t ethphy_dp83826 = {
+  .dc_class_name = "ethphy",
 };
 
 

@@ -341,7 +341,7 @@ ether_netif_fini(ether_netif_t *eni)
 void
 ether_print(ether_netif_t *en, struct stream *st)
 {
-  stprintf(st, "\tMac address: %02x:%02x:%02x:%02x:%02x:%02x\n",
+  stprintf(st, "Mac address: %02x:%02x:%02x:%02x:%02x:%02x\n",
            en->eni_addr[0],
            en->eni_addr[1],
            en->eni_addr[2],
@@ -349,28 +349,28 @@ ether_print(ether_netif_t *en, struct stream *st)
            en->eni_addr[4],
            en->eni_addr[5]);
 
-  stprintf(st, "\tTX  packets: %"PRIu64"  bytes: %"PRIu64"  drops: %"PRIu64"\n",
+  stprintf(st, "TX  packets: %"PRIu64"  bytes: %"PRIu64"  drops: %"PRIu64"\n",
            en->eni_stats.tx_pkt,
            en->eni_stats.tx_byte,
            en->eni_stats.tx_qdrop);
 
-  stprintf(st, "\tRX  packets: %"PRIu64"  bytes: %"PRIu64"  CRC: %"PRIu64"\n",
+  stprintf(st, "RX  packets: %"PRIu64"  bytes: %"PRIu64"  CRC: %"PRIu64"\n",
            en->eni_stats.rx_pkt,
            en->eni_stats.rx_byte,
            en->eni_stats.rx_crc);
-  stprintf(st, "\t    hw-drop: %"PRIu64"  sw-drop: %"PRIu64"  other: %"PRIu64"\n",
+  stprintf(st, "    hw-drop: %"PRIu64"  sw-drop: %"PRIu64"  other: %"PRIu64"\n",
            en->eni_stats.rx_hw_qdrop,
            en->eni_stats.rx_sw_qdrop,
            en->eni_stats.rx_other_err);
 
   stprintf(st,
-           "\t    bad ipv4: %u  v4 cksum: %u  TCP cksum: %u  UDP cksum: %u\n",
+           "    bad ipv4: %u  v4 cksum: %u  TCP cksum: %u  UDP cksum: %u\n",
            atomic_get(&en->eni_ni.ni_ipv4_bad),
            atomic_get(&en->eni_ni.ni_ipv4_bad_cksum),
            atomic_get(&en->eni_ni.ni_tcp_bad_cksum),
            atomic_get(&en->eni_ni.ni_udp_bad_cksum));
 
-  stprintf(st, "\tIP address: %Id/%d\n", en->eni_ni.ni_ipv4_local_addr,
+  stprintf(st, "IP address: %Id/%d\n", en->eni_ni.ni_ipv4_local_addr,
            en->eni_ni.ni_ipv4_local_prefixlen);
 
   dhcpv4_print(en, st);

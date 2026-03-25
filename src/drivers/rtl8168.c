@@ -183,7 +183,7 @@ rtl8168_print_info(struct device *dev, struct stream *st)
 {
   rtl8168_t *r = (rtl8168_t *)dev;
   ether_print((ether_netif_t *)dev, st);
-  stprintf(st, "\t%u IRQ\n", r->irq_counter);
+  stprintf(st, "%u IRQ\n", r->irq_counter);
 }
 
 
@@ -237,6 +237,7 @@ mii_read(rtl8168_t *r, uint16_t reg)
 
 static const ethmac_device_class_t rtl8168_device_class = {
   .dc = {
+    .dc_class_name = "RTL8168",
     .dc_print_info = rtl8168_print_info,
     .dc_disable = rtl8168_disable,
     .dc_shutdown = rtl8168_shutdown,

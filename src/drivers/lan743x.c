@@ -534,7 +534,7 @@ lan7431_print_info(struct device *dev, struct stream *st)
 {
   lan743x_t *l = (lan743x_t *)dev;
   ether_print((ether_netif_t *)dev, st);
-  stprintf(st, "\t%u IRQ\n", l->irq_counter);
+  stprintf(st, "%u IRQ\n", l->irq_counter);
 }
 
 
@@ -568,6 +568,7 @@ edc_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t value)
 
 static const ethmac_device_class_t lan743x_device_class = {
   .dc = {
+    .dc_class_name = "LAN743x",
     .dc_print_info = lan7431_print_info,
     .dc_disable = lan743x_disable,
     .dc_dtor = lan743x_dtor,

@@ -15,6 +15,7 @@ typedef enum {
 } device_power_state_t;
 
 typedef struct device_class {
+  const char *dc_class_name;
   void (*dc_print_info)(struct device *dev, struct stream *s);
   void (*dc_power_state)(struct device *dev, device_power_state_t state);
 

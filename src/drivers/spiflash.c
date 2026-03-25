@@ -324,7 +324,7 @@ spiflash_print_info(struct device *dev, struct stream *s)
 {
   spiflash_t *sf = container_of(dev, spiflash_t, dev);
 
-  stprintf(s, "\tSector size:%u  Total sectors:%u  Total size:%u kB\n",
+  stprintf(s, "Sector size:%u  Total sectors:%u  Total size:%u kB\n",
            1 << sf->block_shift,
            sf->sectors,
            ((1 << sf->block_shift) * sf->sectors) / 1024);
@@ -332,7 +332,7 @@ spiflash_print_info(struct device *dev, struct stream *s)
   for(size_t i = 0; i < 4; i++) {
     if(!sf->erase_commands[i].size)
       continue;
-    stprintf(s, "\tErase size:%6d cmd3:0x%02x cmd4:0x%02x erasetime:%d ms\n",
+    stprintf(s, "Erase size:%6d cmd3:0x%02x cmd4:0x%02x erasetime:%d ms\n",
              1 << sf->erase_commands[i].size,
              sf->erase_commands[i].cmd3,
              sf->erase_commands[i].cmd4,
@@ -341,6 +341,7 @@ spiflash_print_info(struct device *dev, struct stream *s)
 }
 
 static const device_class_t spiflash_device_class = {
+  .dc_class_name = "spiflash",
   .dc_print_info = spiflash_print_info,
 };
 
