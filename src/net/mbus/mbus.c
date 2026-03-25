@@ -319,18 +319,18 @@ mbus_input(struct netif *ni, struct pbuf *pb)
 void
 mbus_print_info(mbus_netif_t *mni, struct stream *st)
 {
-  stprintf(st, "\tRX Packets:\n");
-  stprintf(st, "\t\tBytes:%u  Packets:%u  ",
+  stprintf(st, "RX Packets:\n");
+  stprintf(st, "  Bytes:%u  Packets:%u  ",
            mni->mni_rx_bytes, mni->mni_rx_packets);
   stprintf(st, "CRC:%u  Runts:%u\n",
            mni->mni_rx_crc_errors, mni->mni_rx_runts);
-  stprintf(st, "\tTX Packets:\n");
+  stprintf(st, "TX Packets:\n");
 
-  stprintf(st, "\t\tBytes:%u  Sent:%u  Qdrops:%u  Failed:%u\n",
+  stprintf(st, "  Bytes:%u  Sent:%u  Qdrops:%u  Failed:%u\n",
            mni->mni_tx_bytes,  mni->mni_tx_packets,
            mni->mni_tx_qdrops, mni->mni_tx_fail);
-  stprintf(st, "\tLocal address: %d\n", mbus_local_addr);
-  stprintf(st, "\tActive hosts:");
+  stprintf(st, "Local address: %d\n", mbus_local_addr);
+  stprintf(st, "Active hosts:");
   for(int i = 0; i < 32; i++) {
     if((1 << i) & mni->mni_active_hosts) {
       stprintf(st, "%d ", i);
@@ -381,7 +381,8 @@ mbus_netif_attach(mbus_netif_t *mni, const char *name,
 #ifdef ENABLE_NET_DSIG
   mni->mni_ni.ni_dsig_output = mbus_dsig_output;
 #endif
-  netif_attach(&mni->mni_ni, name, dc);
+  netif_init(&mni->mni_ni, name, dc);
+  netif_attach(&mni->mni_ni);
 
   SLIST_INSERT_HEAD(&mbus_netifs, mni, mni_global_link);
 }

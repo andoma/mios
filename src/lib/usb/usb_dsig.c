@@ -215,6 +215,7 @@ usb_dsig_print_info(struct device *dev, struct stream *st)
 
 
 static const device_class_t usb_dsig_device_class = {
+  .dc_class_name = "usb-dsig",
   .dc_print_info = usb_dsig_print_info
 };
 

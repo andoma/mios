@@ -162,22 +162,22 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
   uint32_t tec = ecr & 0xff;
   uint32_t psr = reg_rd(fc->reg_base + FDCAN_PSR);
 
-  stprintf(st, "\tReceived packets, Fifo0:%u  Fifo1:%u\n",
+  stprintf(st, "Received packets, Fifo0:%u  Fifo1:%u\n",
            fc->rx_fifo0, fc->rx_fifo1);
-  stprintf(st, "\tTransmitted packets:%u  Drops:%u\n",
+  stprintf(st, "Transmitted packets:%u  Drops:%u\n",
            fc->tx, fc->tx_drop);
 
-  stprintf(st, "\tReceive error counter:%d  Transmit error counter:%d\n",
+  stprintf(st, "Receive error counter:%d  Transmit error counter:%d\n",
            rec, tec);
-  stprintf(st, "\tBus off recovery attempts:%u\n",
+  stprintf(st, "Bus off recovery attempts:%u\n",
            fc->recovery_attempts);
-  stprintf(st, "\tBus state: O%s, ", psr & 0x80 ? "ff" : "n");
+  stprintf(st, "Bus state: O%s, ", psr & 0x80 ? "ff" : "n");
   stprintf(st, "Receiver passive: %s\n", ecr & 0x8000 ? "Yes" : "No");
 
-  stprintf(st, "\tActivity: %s\n",
+  stprintf(st, "Activity: %s\n",
            strtbl("Synchronizing\0Idle\0Receiver\0Transmitter\0\0",
                   (psr >> 3) & 3));
-  stprintf(st, "\tLast error code: %s\n",
+  stprintf(st, "Last error code: %s\n",
            strtbl("None\0Stuffing\0Form\0AckErr\0Bit1Err\0Big0Err\0CRC\0NoChange\0\0",
                   psr & 7));
 }
@@ -257,6 +257,7 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
 
 
 static const device_class_t stm32_fdcan_device_class = {
+  .dc_class_name = "fdcan",
   .dc_print_info = stm32_fdcan_print_info,
 };
 

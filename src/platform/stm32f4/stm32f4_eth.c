@@ -181,14 +181,14 @@ stm32f4_eth_print_info(struct device *dev, struct stream *st)
   ether_print(&se->se_eni, st);
 
   uint32_t dmasr = reg_rd(ETH_DMASR);
-  stprintf(st, "\tDMASR: TPS: %d  ", (dmasr >> 20) & 7);
+  stprintf(st, "DMASR: TPS: %d  ", (dmasr >> 20) & 7);
   stprintf(st, "RPS: %d  ", (dmasr >> 17) & 7);
   stprintflags(st, dmasr_bitnames, dmasr & 0x1ffff, " ");
   stprintf(st, "\n");
 
   uint32_t macdbg = reg_rd(ETH_MACDBGR);
-  stprintf(st, "\tMACDBG: 0x%08x\n", macdbg);
-  stprintf(st, "\tMAC/TX: %s%s%s%s %s%s%s\n",
+  stprintf(st, "MACDBG: 0x%08x\n", macdbg);
+  stprintf(st, "MAC/TX: %s%s%s%s %s%s%s\n",
            macdbg & (1 << 25) ? "TFF " : "",
            macdbg & (1 << 24) ? "TFNE " : "",
            macdbg & (1 << 22) ? "TFWA " : "",
@@ -197,7 +197,7 @@ stm32f4_eth_print_info(struct device *dev, struct stream *st)
            strtbl(mactxfcstatus, (macdbg >> 17) & 3),
            macdbg & (1 << 16) ? "MMTEA " : "");
 #ifdef ENABLE_NET_PTP
-  stprintf(st, "\tMAC time: %u.%u\n",
+  stprintf(st, "MAC time: %u.%u\n",
            reg_rd(ETH_PTPTSHR),
            reg_rd(ETH_PTPTSLR));
   ptp_print_info(st, &se->se_eni);
@@ -767,6 +767,7 @@ stm32f4_eth_set_duplex(ether_netif_t *eni, int full)
 
 static const ethmac_device_class_t stm32f4_eth_device_class = {
   .dc = {
+    .dc_class_name = "stm32f4 Ethernet NIC",
     .dc_print_info = stm32f4_eth_print_info,
   },
 

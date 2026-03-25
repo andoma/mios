@@ -257,7 +257,7 @@ dp83869_print_diagnostics(struct device *dev, stream_t *s)
 }
 
 static const device_class_t dp83869_class = {
-  .dc_class_name = "ethphy",
+  .dc_class_name = "DP83869 PHY",
   .dc_print_info = dp83869_print_diagnostics,
 };
 

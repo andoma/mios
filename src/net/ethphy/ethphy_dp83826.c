@@ -1,11 +1,14 @@
 #include <mios/ethphy.h>
 #include <mios/driver.h>
 #include <mios/eventlog.h>
+#include <stdio.h>
 
 // Datasheet: https://www.ti.com/lit/ds/symlink/dp83826e.pdf
 
+#define REG_BMSR    0x0001
 #define REG_PHYIDR1 0x0002
 #define REG_PHYIDR2 0x0003
+#define REG_PHYSTS  0x0010
 #define REG_RCSR    0x0017
 #define REG_SOR1    0x0467
 
@@ -14,8 +17,34 @@ device_t *dp83826_init(struct ether_netif *eni, ethphy_mode_t mode);
 
 
 
+static void
+dp83826_print_info(struct device *dev, struct stream *s)
+{
+  struct ether_netif *eni = (struct ether_netif *)dev->d_parent;
+
+  uint16_t id2 = ethphy_mii_read(eni, REG_PHYIDR2);
+  uint16_t model = (id2 >> 4) & 0x3f;
+  uint16_t bmsr = ethphy_mii_read(eni, REG_BMSR);
+  bmsr = ethphy_mii_read(eni, REG_BMSR); // Read twice -- link status is latched-low
+  uint16_t physts = ethphy_mii_read(eni, REG_PHYSTS);
+
+  stprintf(s, "DP83826%c rev %d\n",
+           model == 0x13 ? 'E' : 'I',
+           id2 & 0xf);
+
+  stprintf(s, "Link: %s, %s %s duplex\n",
+           (bmsr & (1 << 2)) ? "UP" : "DOWN",
+           (physts & (1 << 1)) ? "10M" : "100M",
+           (physts & (1 << 2)) ? "full" : "half");
+
+  uint16_t rcsr = ethphy_mii_read(eni, REG_RCSR);
+  stprintf(s, "Interface: %sMII\n",
+           (rcsr & 0x20) ? "R" : "");
+}
+
 static const device_class_t ethphy_dp83826 = {
-  .dc_class_name = "ethphy",
+  .dc_class_name = "DP83826 PHY",
+  .dc_print_info = dp83826_print_info,
 };
 
 

@@ -248,6 +248,7 @@ nrf52_spi_power_state(struct device *dev, device_power_state_t state)
 }
 
 static const device_class_t nrf52_spi_device_class = {
+  .dc_class_name = "spi",
   .dc_power_state = nrf52_spi_power_state,
 };
 

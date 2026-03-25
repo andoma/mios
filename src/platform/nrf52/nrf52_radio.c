@@ -946,7 +946,7 @@ static void
 nrf52_radio_print_info(struct device *dev, struct stream *st)
 {
   nrf52_radio_t *nr = (nrf52_radio_t *)dev;
-  stprintf(st, "\tAddr: %02x:%02x:%02x:%02x:%02x:%02x  State: %s\n",
+  stprintf(st, "Addr: %02x:%02x:%02x:%02x:%02x:%02x  State: %s\n",
            nr->nr_addr[5],
            nr->nr_addr[4],
            nr->nr_addr[3],
@@ -960,7 +960,7 @@ nrf52_radio_print_info(struct device *dev, struct stream *st)
 
   connection_t *con = &nr->nr_con;
 
-  stprintf(st, "\tPeer: %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d\n",
+  stprintf(st, "Peer: %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d\n",
            con->addr[5],
            con->addr[4],
            con->addr[3],
@@ -969,28 +969,28 @@ nrf52_radio_print_info(struct device *dev, struct stream *st)
            con->addr[0],
            -con->rssi);
 
-  stprintf(st, "\twindowSize: %d  interval: %d  timeout: %d\n",
+  stprintf(st, "windowSize: %d  interval: %d  timeout: %d\n",
            con->transmitWindowSize,
            con->connInterval,
            con->timeout);
 
-  stprintf(st, "\tChannels: ");
+  stprintf(st, "Channels: ");
   for(int i = 0; i < 37; i++) {
     stprintf(st, "%c", con->chmap[i] == i ? 'X' : '_');
   }
   stprintf(st, "\n");
 
 
-  stprintf(st, "\tEventCounter: %d\n", con->eventCounter);
-  stprintf(st, "\tRX frames:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
+  stprintf(st, "EventCounter: %d\n", con->eventCounter);
+  stprintf(st, "RX frames:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
            con->stat.rx,
            con->stat.rx_bad_seq,
            con->stat.rx_silent,
            con->stat.rx_crc,
            con->stat.rx_qdrops);
-  stprintf(st, "\tMax len:%d\n", con->stat.rx_maxlen);
+  stprintf(st, "Max len:%d\n", con->stat.rx_maxlen);
 
-  stprintf(st, "\tTX frames:%d  Retransmissions:%d Qdepth:%d\n",
+  stprintf(st, "TX frames:%d  Retransmissions:%d Qdepth:%d\n",
            con->stat.tx, con->stat.tx_retransmissions,
            con->l2c.l2c_tx_queue_len);
 
@@ -999,6 +999,7 @@ nrf52_radio_print_info(struct device *dev, struct stream *st)
 
 
 static const device_class_t nrf52_ble_device_class = {
+  .dc_class_name = "ble",
   .dc_print_info = nrf52_radio_print_info,
 };
 
@@ -1117,7 +1118,8 @@ nrf52_radio_ble_init(const char *name)
   nr->nr_slow_timer.t_opaque = nr;
   nr->nr_slow_timer.t_name = "radio";
 
-  netif_attach(&nr->nr_bn, "ble", &nrf52_ble_device_class);
+  netif_init(&nr->nr_bn, "ble", &nrf52_ble_device_class);
+  netif_attach(&nr->nr_bn);
   printf("BLE radio initialized\n");
 }
 

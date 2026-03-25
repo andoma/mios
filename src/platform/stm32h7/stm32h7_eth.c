@@ -179,6 +179,7 @@ typedef struct stm32h7_eth {
   uint8_t se_phyaddr;
   uint8_t se_phyrst;
   uint8_t se_miimode;
+  uint32_t se_flags;
 
 #ifdef ENABLE_NET_PTP
   int64_t se_accumulated_drift_ppb;
@@ -218,7 +219,7 @@ stm32h7_eth_print_info(struct device *dev, struct stream *st)
   ether_print((ether_netif_t *)dev, st);
 #ifdef ENABLE_NET_PTP
   stm32h7_eth_t *se = (stm32h7_eth_t *)dev;
-  stprintf(st, "\tMAC time: %u.%u\n",
+  stprintf(st, "MAC time: %u.%u\n",
            reg_rd(ETH_MACSTSR),
            reg_rd(ETH_MACSTNR));
 
@@ -304,6 +305,7 @@ stm32h7_eth_set_duplex(ether_netif_t *eni, int full)
 
 static const ethmac_device_class_t stm32h7_eth_device_class = {
   .dc = {
+    .dc_class_name = "stm32h7 Ethernet NIC",
     .dc_print_info = stm32h7_eth_print_info,
   },
   .edc_mii_read = edc_mii_read,
@@ -311,6 +313,84 @@ static const ethmac_device_class_t stm32h7_eth_device_class = {
   .edc_set_speed = stm32h7_eth_set_speed,
   .edc_set_duplex = stm32h7_eth_set_duplex,
 };
+
+
+#ifdef ENABLE_NET_PTP
+
+
+#define PTP_STEP_THRESHOLD_NS  100000000LL // 10 ms
+#define MAX_ADJ_PPB            100000
+#define SERVO_KP_SHIFT         2
+#define SERVO_KI_SHIFT         7
+
+void
+ptp_clock_slew(stm32h7_eth_t *se, int64_t offset_ns)
+{
+  int64_t adj_p = offset_ns >> SERVO_KP_SHIFT;
+  se->se_accumulated_drift_ppb += (offset_ns >> SERVO_KI_SHIFT);
+
+  // Anti-windup clamping
+  if(se->se_accumulated_drift_ppb > MAX_ADJ_PPB)
+    se->se_accumulated_drift_ppb = MAX_ADJ_PPB;
+  else if(se->se_accumulated_drift_ppb < -MAX_ADJ_PPB)
+    se->se_accumulated_drift_ppb = -MAX_ADJ_PPB;
+
+  int64_t total_ppb = adj_p + se->se_accumulated_drift_ppb;
+  int32_t addend_adjustment =
+    (total_ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
+
+  uint32_t final_addend = se->se_addend + addend_adjustment;
+
+  reg_wr(ETH_MACTSAR, final_addend);
+  reg_set_bit(ETH_MACTSCR, 5);
+}
+
+
+int64_t
+stm32h7_get_current_mac_time(void)
+{
+  while(1) {
+    const uint32_t cur_s = reg_rd(ETH_MACSTSR);
+    const uint32_t cur_ns = reg_rd(ETH_MACSTNR);
+    if(cur_s == reg_rd(ETH_MACSTSR)) {
+      return (int64_t)cur_s * 1000000000 + cur_ns;
+    }
+  }
+}
+
+
+static void
+ptp_clock_step(stm32h7_eth_t *se, int64_t offset_ns)
+{
+  int64_t cur_t = stm32h7_get_current_mac_time();
+  int64_t ch = cur_t + offset_ns;
+
+  reg_wr(ETH_MACSTSUR, ch / 1000000000);
+  reg_wr(ETH_MACSTNUR, ch % 1000000000);
+  reg_set_bit(ETH_MACTSCR, 2);
+  while(reg_get_bit(ETH_MACTSCR, 2));
+
+  se->se_accumulated_drift_ppb = 0; // Reset clock servo integrator
+
+  evlog(LOG_DEBUG, "%s: Step adjust %lld", se->se_eni.eni_ni.ni_dev.d_name,
+        offset_ns);
+}
+
+
+static void
+stm32h7_eth_set_clock(struct ether_netif *eni, int64_t offset_ns)
+{
+  stm32h7_eth_t *se = (stm32h7_eth_t *)eni;
+  int64_t abs_offset = (offset_ns < 0) ? -offset_ns : offset_ns;
+
+  if(abs_offset > PTP_STEP_THRESHOLD_NS) {
+    ptp_clock_step(se, offset_ns);
+  } else {
+    ptp_clock_slew(se, offset_ns);
+  }
+}
+
+#endif
 
 __attribute__((noreturn))
 static void *
@@ -358,7 +438,7 @@ stm32h7_thread(void *arg)
   usleep(10);
 
 #ifdef ENABLE_NET_PTP
-  if(flags & STM32H7_ETH_ENABLE_PTP_TIMESTAMPING) {
+  if(se->se_flags & STM32H7_ETH_ENABLE_PTP_TIMESTAMPING) {
 
     const unsigned int ahb_freq = clk_get_freq(CLK_ETH1MACEN);
 
@@ -715,83 +795,6 @@ stm32h7_eth_irq(void *arg)
 }
 
 
-#ifdef ENABLE_NET_PTP
-
-
-#define PTP_STEP_THRESHOLD_NS  100000000LL // 10 ms
-#define MAX_ADJ_PPB            100000
-#define SERVO_KP_SHIFT         2
-#define SERVO_KI_SHIFT         7
-
-void
-ptp_clock_slew(stm32h7_eth_t *se, int64_t offset_ns)
-{
-  int64_t adj_p = offset_ns >> SERVO_KP_SHIFT;
-  se->se_accumulated_drift_ppb += (offset_ns >> SERVO_KI_SHIFT);
-
-  // Anti-windup clamping
-  if(se->se_accumulated_drift_ppb > MAX_ADJ_PPB)
-    se->se_accumulated_drift_ppb = MAX_ADJ_PPB;
-  else if(se->se_accumulated_drift_ppb < -MAX_ADJ_PPB)
-    se->se_accumulated_drift_ppb = -MAX_ADJ_PPB;
-
-  int64_t total_ppb = adj_p + se->se_accumulated_drift_ppb;
-  int32_t addend_adjustment =
-    (total_ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
-
-  uint32_t final_addend = se->se_addend + addend_adjustment;
-
-  reg_wr(ETH_MACTSAR, final_addend);
-  reg_set_bit(ETH_MACTSCR, 5);
-}
-
-
-int64_t
-stm32h7_get_current_mac_time(void)
-{
-  while(1) {
-    const uint32_t cur_s = reg_rd(ETH_MACSTSR);
-    const uint32_t cur_ns = reg_rd(ETH_MACSTNR);
-    if(cur_s == reg_rd(ETH_MACSTSR)) {
-      return (int64_t)cur_s * 1000000000 + cur_ns;
-    }
-  }
-}
-
-
-static void
-ptp_clock_step(stm32h7_eth_t *se, int64_t offset_ns)
-{
-  int64_t cur_t = stm32h7_get_current_mac_time();
-  int64_t ch = cur_t + offset_ns;
-
-  reg_wr(ETH_MACSTSUR, ch / 1000000000);
-  reg_wr(ETH_MACSTNUR, ch % 1000000000);
-  reg_set_bit(ETH_MACTSCR, 2);
-  while(reg_get_bit(ETH_MACTSCR, 2));
-
-  se->se_accumulated_drift_ppb = 0; // Reset clock servo integrator
-
-  evlog(LOG_DEBUG, "%s: Step adjust %lld", se->se_eni.eni_ni.ni_dev.d_name,
-        offset_ns);
-}
-
-
-static void
-stm32h7_eth_set_clock(struct ether_netif *eni, int64_t offset_ns)
-{
-  stm32h7_eth_t *se = (stm32h7_eth_t *)eni;
-  int64_t abs_offset = (offset_ns < 0) ? -offset_ns : offset_ns;
-
-  if(abs_offset > PTP_STEP_THRESHOLD_NS) {
-    ptp_clock_step(se, offset_ns);
-  } else {
-    ptp_clock_slew(se, offset_ns);
-  }
-}
-
-#endif
-
 void
 stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
                  int phy_addr, ethphy_mode_t mode, int flags)
@@ -801,6 +804,7 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
   se->se_phyaddr = phy_addr;
   se->se_phyrst = phyrst;
   se->se_miimode = mode;
+  se->se_flags = flags;
 
   ether_netif_init(&se->se_eni, "eth0", &stm32h7_eth_device_class);
 

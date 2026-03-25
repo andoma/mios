@@ -307,6 +307,7 @@ mbus_svc_dtor(struct device *dev)
 
 
 static const device_class_t mbus_svc_device_class = {
+  .dc_class_name = "mbus-gw",
   .dc_print_info = mbus_svc_print_info,
   .dc_dtor = mbus_svc_dtor,
 };

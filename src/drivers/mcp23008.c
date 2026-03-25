@@ -16,7 +16,7 @@ struct mcp23008 {
 
 
 const device_class_t mcp23008_dev_class = {
-
+  .dc_class_name = "mcp23008",
 };
 
 

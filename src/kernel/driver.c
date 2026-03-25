@@ -1,5 +1,4 @@
 #include <mios/driver.h>
-#include <mios/eventlog.h>
 
 void *
 driver_probe(driver_type_t type, device_t *parent)
@@ -13,7 +12,6 @@ driver_probe(driver_type_t type, device_t *parent)
   void *fn;
 
   for(; d != e; d++) {
-    evlog(LOG_DEBUG, "PROBE %p", d->probe);
     fn = d->probe(type, parent);
     if(fn != NULL)
       return fn;

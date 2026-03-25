@@ -299,8 +299,8 @@ static void
 mbus_uart_print_info(struct device *dev, struct stream *st)
 {
   uart_mbus_t *um = (uart_mbus_t *)dev;
-  stprintf(st, "\tByte interface:\n");
-  stprintf(st, "\t\t%u Fifo overrun  %u Framing  %u Noise\n",
+  stprintf(st, "Byte interface:\n");
+  stprintf(st, "  %u Fifo overrun  %u Framing  %u Noise\n",
            um->rx_fifo_full,
            um->rx_framing_error, um->rx_noise_error);
   mbus_print_info(&um->um_mni, st);
@@ -318,6 +318,7 @@ mbus_uart_power_state(struct device *dev, device_power_state_t state)
 }
 
 static const device_class_t mbus_uart_device_class = {
+  .dc_class_name = "mbus-uart",
   .dc_print_info = mbus_uart_print_info,
   .dc_power_state = mbus_uart_power_state,
 };

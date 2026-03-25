@@ -1034,26 +1034,26 @@ usb_print_info(struct device *d, struct stream *st)
   struct usb_ctrl *uc = (struct usb_ctrl *)d;
 
   const uint32_t dsts = reg_rd(OTG_DSTS);
-  stprintf(st, "\tCore status: %s   D-:%d  D+:%d  Suspend:%d\n",
+  stprintf(st, "Core status: %s   D-:%d  D+:%d  Suspend:%d\n",
            dsts & 0x8 ? "Error" : "OK",
            ((dsts >> 22) & 1),
            ((dsts >> 23) & 1),
            dsts & 1);
 
-  stprintf(st, "\tResets: %d  Enumerations: %d  Core errors: %d\n",
+  stprintf(st, "Resets: %d  Enumerations: %d  Core errors: %d\n",
            uc->uc_resets,
            uc->uc_enumerations,
            uc->uc_erratic_errors);
 
   if(!(dsts & 1)) {
-    stprintf(st, "\tAssigned address: %d   Last SOF Frame: %d\n",
+    stprintf(st, "Assigned address: %d   Last SOF Frame: %d\n",
              uc->uc_assigned_addr,
              (dsts >> 8) & 0x3fff);
   } else {
-    stprintf(st, "\tDisconnected\n");
+    stprintf(st, "Disconnected\n");
   }
 
-  stprintf(st, "\tIN Endpoints: (TX)\n");
+  stprintf(st, "IN Endpoints: (TX)\n");
   for(int i = 0; i < uc->uc_num_endpoints; i++) {
     uint32_t diepctl = reg_rd(OTG_DIEPCTL(i));
 
@@ -1069,7 +1069,7 @@ usb_print_info(struct device *d, struct stream *st)
     status[7] = 0;
 
 
-    stprintf(st, "\t\t[%d] = %3d 0x%08x 0x%08x %s %d ",
+    stprintf(st, "  [%d] = %3d 0x%08x 0x%08x %s %d ",
              i,
              reg_rd(OTG_DTXFSTS(i)),
              reg_rd(OTG_DIEPINT(i)),
@@ -1107,6 +1107,7 @@ probe_endpoints(usb_ctrl_t *uc)
 
 
 static const device_class_t otg_class = {
+  .dc_class_name = "usb-otg",
   .dc_print_info = usb_print_info
 };
 

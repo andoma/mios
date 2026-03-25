@@ -187,6 +187,7 @@ usb_mbus_print_info(struct device *dev, struct stream *st)
 
 
 static const device_class_t usb_mbus_device_class = {
+  .dc_class_name = "usb-mbus",
   .dc_print_info = usb_mbus_print_info
 };
 

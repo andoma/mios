@@ -821,18 +821,18 @@ l2cap_print(l2cap_t *l2c, stream_t *st)
 {
   l2cap_connection_t *lc = NULL;
   while((lc = l2cap_connection_next(l2c, lc)) != NULL) {
-    stprintf(st, "\tL2CAP:\t%s (PSM:0x%x)\n", lc->lc_name, lc->lc_psm);
+    stprintf(st, "L2CAP: %s (PSM:0x%x)\n", lc->lc_name, lc->lc_psm);
 
-    stprintf(st, "\t\tLocal:  CID:%d Credits:%d\n",
+    stprintf(st, "  Local:  CID:%d Credits:%d\n",
              lc->lc_local_cid,
              lc->lc_local_credits);
 
-    stprintf(st, "\t\tRemote: CID:%d MTU:%d MPS:%d Credits:%d\n",
+    stprintf(st, "  Remote: CID:%d MTU:%d MPS:%d Credits:%d\n",
              lc->lc_remote_cid,
              lc->lc_remote_mtu,
              lc->lc_remote_mps,
              lc->lc_remote_credits);
-    stprintf(st, "\t\tRX credits: deficit:%d queued:%d\n",
+    stprintf(st, "  RX credits: deficit:%d queued:%d\n",
              lc->lc_credit_deficit,
              lc->lc_queued_credits);
     stprintf(st, "\n");

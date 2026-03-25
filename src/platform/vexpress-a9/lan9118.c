@@ -48,16 +48,19 @@ lan9118_eth_print_info(struct device *dev, struct stream *st)
 {
   lan9118_eth_t *le = (lan9118_eth_t *)dev;
   ether_print(&le->le_eni, st);
-  stprintf(st, "\tIRQ count:%d\n", le->le_irq_count);
-  stprintf(st, "\tRXFifoInf: 0x%08x\n",
+  stprintf(st, "IRQ count:%d\n", le->le_irq_count);
+  stprintf(st, "RXFifoInf: 0x%08x\n",
            reg_rd(le->le_base_addr + LAN9118_RX_FIFO_INF));
-  stprintf(st, "\tMac error status counter:%d\n",
+  stprintf(st, "Mac error status counter:%d\n",
            le->le_rx_error);
 
 }
 
-static const device_class_t lan9118_eth_device_class = {
-  .dc_print_info = lan9118_eth_print_info,
+static const ethmac_device_class_t lan9118_eth_device_class = {
+  .dc = {
+    .dc_class_name = "LAN9118",
+    .dc_print_info = lan9118_eth_print_info,
+  }
 };
 
 static error_t
@@ -235,6 +238,7 @@ lan9118_init(uint32_t base_addr, int irq)
   le->le_eni.eni_output = lan9118_eth_output;
 
   ether_netif_init(&le->le_eni, "eth0", &lan9118_eth_device_class);
+  ether_netif_attach(&le->le_eni);
 
   net_task_raise(&le->le_eni.eni_ni.ni_task, NETIF_TASK_STATUS_UP);
 

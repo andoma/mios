@@ -582,26 +582,26 @@ usb_print_info(struct device *d, struct stream *st)
   struct usb_ctrl *uc = (struct usb_ctrl *)d;
 
   const uint16_t cntr = reg_rd(USB_CNTR);
-  stprintf(st, "\tFrontend: %s\n",
+  stprintf(st, "Frontend: %s\n",
            (cntr & 2) ? "Off" : "On");
 
   const uint16_t fnr = reg_rd(USB_FNR);
-  stprintf(st, "\tRXDP:%d RXDM:%d Locked:%d Lost SOF:%d Frame:%d\n",
+  stprintf(st, "RXDP:%d RXDM:%d Locked:%d Lost SOF:%d Frame:%d\n",
            (fnr >> 15) & 1,
            (fnr >> 14) & 1,
            (fnr >> 13) & 1,
            (fnr >> 11) & 3,
            (fnr >> 0) & 0x7ff);
   const uint16_t daddr = reg_rd(USB_DADDR);
-  stprintf(st, "\tEnable: %d  Assigned Address: %d\n",
+  stprintf(st, "Enable: %d  Assigned Address: %d\n",
            (daddr >> 7) & 1,
            daddr & 0x7f);
 
-  stprintf(st, "\tIN Endpoints (TX)\n");
+  stprintf(st, "IN Endpoints (TX)\n");
   for(size_t i = 0; i < MAX_NUM_ENDPOINTS; i++) {
     const uint16_t epnr = reg_rd(USB_EPnR(i));
 
-    stprintf(st, "\t\t%d %-9s %-5s IRQ:%d Dtog:%d | ",
+    stprintf(st, "  %d %-9s %-5s IRQ:%d Dtog:%d | ",
              i,
              typestr(epnr),
              statbits((epnr >> 4) & 3),
@@ -620,11 +620,11 @@ usb_print_info(struct device *d, struct stream *st)
     stprintf(st, "\n");
   }
 
-  stprintf(st, "\n\tOUT Endpoints (RX)\n");
+  stprintf(st, "\nOUT Endpoints (RX)\n");
   for(size_t i = 0; i < MAX_NUM_ENDPOINTS; i++) {
     const uint16_t epnr = reg_rd(USB_EPnR(i));
 
-    stprintf(st, "\t\t%d %-9s %-5s Irq:%d Dtog:%d | ",
+    stprintf(st, "  %d %-9s %-5s Irq:%d Dtog:%d | ",
              i,
              typestr(epnr),
              statbits((epnr >> 12) & 3),
@@ -666,6 +666,7 @@ usb_power_state(struct device *dev, device_power_state_t state)
 
 
 static const device_class_t stm32g4_otgfs_class = {
+  .dc_class_name = "usb",
   .dc_print_info = usb_print_info,
   .dc_power_state = usb_power_state,
 };

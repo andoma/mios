@@ -238,15 +238,16 @@ stm32_bxcan_print_info(struct device *dev, struct stream *st)
   uint32_t tec = (esr >> 16) & 0xff;
   uint32_t lec = (esr >> 4) & 7;
 
-  stprintf(st, "\tReceive error counter: %d\n", rec);
-  stprintf(st, "\tTransmit error counter: %d\n", tec);
-  stprintf(st, "\tLast error code: %d\n", lec);
-  stprintf(st, "\tBus Off: %s\n", esr & 0x4 ? "Yes" : "No");
-  stprintf(st, "\tError Passive: %s\n", esr & 0x2 ? "Yes" : "No");
-  stprintf(st, "\tError Warning: %s\n", esr & 0x1 ? "Yes" : "No");
+  stprintf(st, "Receive error counter: %d\n", rec);
+  stprintf(st, "Transmit error counter: %d\n", tec);
+  stprintf(st, "Last error code: %d\n", lec);
+  stprintf(st, "Bus Off: %s\n", esr & 0x4 ? "Yes" : "No");
+  stprintf(st, "Error Passive: %s\n", esr & 0x2 ? "Yes" : "No");
+  stprintf(st, "Error Warning: %s\n", esr & 0x1 ? "Yes" : "No");
 }
 
 static const device_class_t stm32_bxcan_device_class = {
+  .dc_class_name = "bxcan",
   .dc_print_info = stm32_bxcan_print_info,
 };
 

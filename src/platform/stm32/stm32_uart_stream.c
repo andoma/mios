@@ -232,7 +232,7 @@ static void
 stm32_uart_print_info(struct device *dev, struct stream *st)
 {
   stm32_uart_stream_t *u = (void *)dev - offsetof(stm32_uart_stream_t, device);
-  stprintf(st, "\tOverrun:%d Noise:%d Framing:%d\n",
+  stprintf(st, "Overrun:%d Noise:%d Framing:%d\n",
            u->rx_overrun,
            u->rx_noise,
            u->rx_framing_error);
@@ -250,6 +250,7 @@ stm32_uart_set_io_ctrl(stream_t *s, gpio_t tx_enable, int tx_pol_invert,
 }
 
 static const device_class_t stm32_uart_class = {
+  .dc_class_name = "uart",
   .dc_print_info = stm32_uart_print_info,
 };
 

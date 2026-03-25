@@ -454,13 +454,13 @@ static void
 mbus_uart_print_info(struct device *dev, struct stream *st)
 {
   uart_mbus_t *um = (uart_mbus_t *)dev;
-  stprintf(st, "\tTX Header:\n");
-  stprintf(st, "\t\tTimeout:%u  Bad:%u  state0:%u\n",
+  stprintf(st, "TX Header:\n");
+  stprintf(st, "  Timeout:%u  Bad:%u  state0:%u\n",
            um->tx_header_timeout, um->tx_header_bad,
            um->tx_header_0);
 
-  stprintf(st, "\tRX Header:\n");
-  stprintf(st, "\t\tBytes:%u  OK:%u  Timeout:%u  ",
+  stprintf(st, "RX Header:\n");
+  stprintf(st, "  Bytes:%u  OK:%u  Timeout:%u  ",
            um->rx_header_bytes,
            um->rx_header_ok,
            um->rx_header_timeout);
@@ -471,8 +471,8 @@ mbus_uart_print_info(struct device *dev, struct stream *st)
            um->rx_header_crc,
            um->rx_header_bad);
 
-  stprintf(st, "\tRX Payload:\n");
-  stprintf(st, "\t\tBytes:%u  OK:%u  Timeout:%u  ",
+  stprintf(st, "RX Payload:\n");
+  stprintf(st, "  Bytes:%u  OK:%u  Timeout:%u  ",
            um->rx_payload_bytes,
            um->rx_payload_ok,
            um->rx_payload_timeout);
@@ -497,6 +497,7 @@ mbus_uart_power_state(struct device *dev, device_power_state_t state)
 }
 
 static const device_class_t mbus_uart_device_class = {
+  .dc_class_name = "mbus-uart",
   .dc_print_info = mbus_uart_print_info,
   .dc_power_state = mbus_uart_power_state,
 };

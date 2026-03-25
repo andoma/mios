@@ -205,8 +205,8 @@ void
 ptp_print_info(stream_t *st, struct ether_netif *eni)
 {
   const ptp_ether_state_t *pes = &eni->eni_ptp;
-  stprintf(st, "\tPTP Offset:%"PRId64" ns  Delay:%d ns\n", pes->pes_offset,
+  stprintf(st, "PTP Offset:%"PRId64" ns  Delay:%d ns\n", pes->pes_offset,
            pes->pes_one_way_delay);
-  stprintf(st, "\tDownstream delay %"PRId64" ns\n", pes->pes_t1_cf >> 16);
-  stprintf(st, "\tUpstream   delay %"PRId64" ns\n", pes->pes_t4_cf >> 16);
+  stprintf(st, "Downstream delay %"PRId64" ns\n", pes->pes_t1_cf >> 16);
+  stprintf(st, "Upstream   delay %"PRId64" ns\n", pes->pes_t4_cf >> 16);
 }
