@@ -41,6 +41,10 @@ drv8899_read_reg(drv8899_t *d, uint8_t reg)
   error_t err = d->spi->rw(d->spi, d->tx, d->rx, 2, d->cs, d->spi_config);
   if(err)
     return err;
+  // SDO status byte: [1][1][UVLO][CPUV][OCP][0][TF][OL]
+  // Validate fixed bits: top two must be 1, bit 2 (RSVD) must be 0
+  if((d->rx[0] & 0xc4) != 0xc0)
+    return ERR_MALFORMED;
   return d->rx[1];
 }
 
