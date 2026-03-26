@@ -70,6 +70,12 @@ exc_bus_fault(void *frame)
 int
 exc_handle_usage_fault(void)
 {
+#ifdef HAVE_PSPLIM
+  if(*UFSR & 0x10) {
+    // STKOF - Stack overflow via PSPLIM
+    return -1; // Escalate to exc_usage_fault
+  }
+#endif
 #ifdef __ARM_FP
   uint16_t ufsr = *UFSR;
   if(ufsr == 0x8) {
@@ -110,6 +116,13 @@ exc_usage_fault(void *frame)
 {
   uint16_t ufsr = *UFSR;
 
+#ifdef HAVE_PSPLIM
+  if(ufsr & 0x10) {
+    thread_t *const t = thread_current();
+    panic_frame(frame, "Stack overflow task:\"%s\"",
+                t ? t->t_name : "?");
+  }
+#endif
   if(ufsr & 0x2) {
     // Most likely an attempt to return to non-thumb code, etc
     panic_frame(frame, "Invalid use of EPSR");

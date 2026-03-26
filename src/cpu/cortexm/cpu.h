@@ -30,7 +30,9 @@ cpu_fpu_enable(int on)
 static inline void
 cpu_stack_redzone(thread_t *t)
 {
-#ifdef CPU_STACK_REDZONE_SIZE
+#ifdef HAVE_PSPLIM
+  asm volatile ("msr psplim, %0" :: "r"(t->t_sp_bottom));
+#elif defined(CPU_STACK_REDZONE_SIZE)
   static volatile unsigned int * const MPU_RBAR = (unsigned int *)0xe000ed9c;
   extern uint8_t redzone_rbar_bits;
 
