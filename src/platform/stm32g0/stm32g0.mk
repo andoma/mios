@@ -10,7 +10,8 @@ ENTRYPOINT ?= $(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),bl_start,start)
 
 include ${SRC}/cpu/cortexm/cortexm0plus.mk
 
-SRCS += ${C}/systick.c \
+SRCS += ${C}/entry-xip.s \
+	${C}/systick.c \
 	${P}/stm32g0.c \
 	${P}/stm32g0_clk.c \
 	${P}/stm32g0_gpio.c \

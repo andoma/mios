@@ -10,7 +10,8 @@ ENTRYPOINT ?= $(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),bl_start,start)
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
-SRCS += ${P}/nrf52.c \
+SRCS += ${C}/entry-xip.s \
+	${P}/nrf52.c \
 	${P}/nrf52_clk.c \
 	${P}/nrf52_uart.c \
 	${P}/nrf52_gpio.c \
