@@ -65,7 +65,7 @@ clock_servo_step(clock_servo_t *cs, int64_t offset_ns)
   cs->cs_sample_count = 0;
   cs->cs_sample_write = 0;
 
-  evlog(LOG_DEBUG, "%s: Step adjust %lld ns", clk->clk_class->name, offset_ns);
+  evlog(LOG_DEBUG, "%s: Step adjust %" PRId64 " ns", clk->clk_class->name, offset_ns);
 }
 
 
