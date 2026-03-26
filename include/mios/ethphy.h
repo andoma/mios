@@ -32,3 +32,5 @@ error_t ethphy_mii_write(struct ether_netif *eni, uint16_t reg, uint16_t value);
  * Raises NETIF_TASK_STATUS_UP/DOWN on transitions.
  */
 void ethphy_link_poll(struct ether_netif *eni) __attribute__((noreturn));
+
+void ethphy_print_status(struct ether_netif *eni, struct stream *s);

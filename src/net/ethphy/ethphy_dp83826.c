@@ -24,22 +24,13 @@ dp83826_print_info(struct device *dev, struct stream *s)
 
   uint16_t id2 = ethphy_mii_read(eni, REG_PHYIDR2);
   uint16_t model = (id2 >> 4) & 0x3f;
-  uint16_t bmsr = ethphy_mii_read(eni, REG_BMSR);
-  bmsr = ethphy_mii_read(eni, REG_BMSR); // Read twice -- link status is latched-low
-  uint16_t physts = ethphy_mii_read(eni, REG_PHYSTS);
-
-  stprintf(s, "DP83826%c rev %d\n",
-           model == 0x13 ? 'E' : 'I',
-           id2 & 0xf);
-
-  stprintf(s, "Link: %s, %s %s duplex\n",
-           (bmsr & (1 << 2)) ? "UP" : "DOWN",
-           (physts & (1 << 1)) ? "10M" : "100M",
-           (physts & (1 << 2)) ? "full" : "half");
 
   uint16_t rcsr = ethphy_mii_read(eni, REG_RCSR);
-  stprintf(s, "Interface: %sMII\n",
+  stprintf(s, "DP83826%c rev %d  Interface: %sMII\n",
+           model == 0x13 ? 'E' : 'I',
+           id2 & 0xf,
            (rcsr & 0x20) ? "R" : "");
+  ethphy_print_status(eni, s);
 }
 
 static const device_class_t ethphy_dp83826 = {

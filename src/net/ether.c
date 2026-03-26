@@ -341,6 +341,9 @@ ether_netif_fini(ether_netif_t *eni)
 void
 ether_print(ether_netif_t *en, struct stream *st)
 {
+  stprintf(st, "Link: %s\n",
+           (en->eni_ni.ni_flags & NETIF_F_UP) ? "UP" : "DOWN");
+
   stprintf(st, "Mac address: %02x:%02x:%02x:%02x:%02x:%02x\n",
            en->eni_addr[0],
            en->eni_addr[1],
