@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <mios/clock_realtime.h>
+#include "util/clock_servo.h"
+
 struct pbuf;
 struct pbuf_timestamp;
 struct ether_netif;
@@ -35,6 +38,10 @@ typedef struct ptp_ether_state {
   int64_t pes_offset;
   int pes_one_way_delay;
 
+  clock_realtime_t pes_clock;
+  clock_servo_t pes_servo;
+
 } ptp_ether_state_t;
 
-void ptp_print_info(struct stream *st, struct ether_netif *eni);
+// Returns 1 if synchronized
+int ptp_print_info(struct stream *st, struct ether_netif *eni);

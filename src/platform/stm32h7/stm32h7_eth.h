@@ -3,10 +3,6 @@
 #include <mios/io.h>
 #include <mios/ethphy.h>
 
-#ifdef ENABLE_NET_PTP
-#define STM32H7_ETH_ENABLE_PTP_TIMESTAMPING 0x1
-#endif
-
 void stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
                       int phy_addr, ethphy_mode_t mode, int flags);
 

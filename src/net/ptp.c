@@ -69,8 +69,8 @@ calc(ether_netif_t *eni)
   const int64_t one_way_delay = (d_sm + d_ms) / 2;
   const int64_t offset        = (d_sm - d_ms) / 2;
 
-  if(eni->eni_adjust_mac_clock != NULL)
-    eni->eni_adjust_mac_clock(eni, offset);
+  if(pes->pes_clock.clk_class != NULL)
+    clock_servo_adjust(&pes->pes_servo, offset, 1);
 
   pes->pes_offset = offset;
   pes->pes_one_way_delay = one_way_delay;
@@ -201,12 +201,18 @@ ptpv2_input(ether_netif_t *eni, pbuf_t *pb, pbuf_timestamp_t *pt,
 }
 
 
-void
+int
 ptp_print_info(stream_t *st, struct ether_netif *eni)
 {
   const ptp_ether_state_t *pes = &eni->eni_ptp;
+  if(!pes->pes_servo.cs_synchronized) {
+    stprintf(st, "PTP: not synchronized\n");
+    return 0;
+  }
   stprintf(st, "PTP Offset:%"PRId64" ns  Delay:%d ns\n", pes->pes_offset,
            pes->pes_one_way_delay);
-  stprintf(st, "Downstream delay %"PRId64" ns\n", pes->pes_t1_cf >> 16);
-  stprintf(st, "Upstream   delay %"PRId64" ns\n", pes->pes_t4_cf >> 16);
+  stprintf(st, "  Downstream delay %"PRId64" ns\n", pes->pes_t1_cf >> 16);
+  stprintf(st, "  Upstream   delay %"PRId64" ns\n", pes->pes_t4_cf >> 16);
+  clock_servo_print(&pes->pes_servo, st);
+  return 1;
 }

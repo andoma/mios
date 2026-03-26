@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <mios/driver.h>
+#include <mios/type_macros.h>
 
 #include <net/pbuf.h>
 #include <net/ether.h>
@@ -18,8 +19,9 @@
 #include "stm32h7_clk.h"
 #include "stm32h7_eth.h"
 
-#define DMA_BUFFER_PAD 2
+#define MAC_NAME "stm32h7-eth"
 
+#define DMA_BUFFER_PAD 2
 
 typedef struct {
   union {
@@ -179,7 +181,6 @@ typedef struct stm32h7_eth {
   uint8_t se_phyaddr;
 
 #ifdef ENABLE_NET_PTP
-  int64_t se_accumulated_drift_ppb;
   uint32_t se_addend;
   int32_t se_ppb_scale_mult;
   int32_t se_ppb_scale_div;
@@ -216,11 +217,12 @@ stm32h7_eth_print_info(struct device *dev, struct stream *st)
   ether_print((ether_netif_t *)dev, st);
 #ifdef ENABLE_NET_PTP
   stm32h7_eth_t *se = (stm32h7_eth_t *)dev;
-  stprintf(st, "MAC time: %u.%u\n",
-           reg_rd(ETH_MACSTSR),
-           reg_rd(ETH_MACSTNR));
 
-  ptp_print_info(st, &se->se_eni);
+  if(ptp_print_info(st, &se->se_eni)) {
+    stprintf(st, "  Hardware time: %u.%u\n",
+             reg_rd(ETH_MACSTSR),
+             reg_rd(ETH_MACSTNR));
+  }
 #endif
 }
 
@@ -302,7 +304,7 @@ stm32h7_eth_set_duplex(ether_netif_t *eni, int full)
 
 static const ethmac_device_class_t stm32h7_eth_device_class = {
   .dc = {
-    .dc_class_name = "stm32h7 Ethernet NIC",
+    .dc_class_name = MAC_NAME,
     .dc_print_info = stm32h7_eth_print_info,
   },
   .edc_mii_read = edc_mii_read,
@@ -314,77 +316,85 @@ static const ethmac_device_class_t stm32h7_eth_device_class = {
 
 #ifdef ENABLE_NET_PTP
 
-
-#define PTP_STEP_THRESHOLD_NS  100000000LL // 10 ms
-#define MAX_ADJ_PPB            100000
-#define SERVO_KP_SHIFT         2
-#define SERVO_KI_SHIFT         7
-
-void
-ptp_clock_slew(stm32h7_eth_t *se, int64_t offset_ns)
+static void
+stm32h7_clock_set_time(clock_realtime_t *clk, int64_t nsec)
 {
-  int64_t adj_p = offset_ns >> SERVO_KP_SHIFT;
-  se->se_accumulated_drift_ppb += (offset_ns >> SERVO_KI_SHIFT);
-
-  // Anti-windup clamping
-  if(se->se_accumulated_drift_ppb > MAX_ADJ_PPB)
-    se->se_accumulated_drift_ppb = MAX_ADJ_PPB;
-  else if(se->se_accumulated_drift_ppb < -MAX_ADJ_PPB)
-    se->se_accumulated_drift_ppb = -MAX_ADJ_PPB;
-
-  int64_t total_ppb = adj_p + se->se_accumulated_drift_ppb;
-  int32_t addend_adjustment =
-    (total_ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
-
-  uint32_t final_addend = se->se_addend + addend_adjustment;
-
-  reg_wr(ETH_MACTSAR, final_addend);
-  reg_set_bit(ETH_MACTSCR, 5);
+  reg_wr(ETH_MACSTSUR, nsec / 1000000000);
+  reg_wr(ETH_MACSTNUR, nsec % 1000000000);
+  reg_set_bit(ETH_MACTSCR, 2);
+  while(reg_get_bit(ETH_MACTSCR, 2));
 }
 
-
-int64_t
-stm32h7_get_current_mac_time(void)
+static int64_t
+stm32h7_clock_get_time(clock_realtime_t *clk)
 {
   while(1) {
-    const uint32_t cur_s = reg_rd(ETH_MACSTSR);
-    const uint32_t cur_ns = reg_rd(ETH_MACSTNR);
-    if(cur_s == reg_rd(ETH_MACSTSR)) {
-      return (int64_t)cur_s * 1000000000 + cur_ns;
+    uint32_t s = reg_rd(ETH_MACSTSR);
+    uint32_t ns = reg_rd(ETH_MACSTNR);
+    if(s == reg_rd(ETH_MACSTSR)) {
+      return (int64_t)s * 1000000000 + ns;
     }
   }
 }
 
-
 static void
-ptp_clock_step(stm32h7_eth_t *se, int64_t offset_ns)
+stm32h7_clock_adj_time(clock_realtime_t *clk, int32_t ppb)
 {
-  int64_t cur_t = stm32h7_get_current_mac_time();
-  int64_t ch = cur_t + offset_ns;
+  stm32h7_eth_t *se =
+    container_of(clk, stm32h7_eth_t, se_eni.eni_ptp.pes_clock);
 
-  reg_wr(ETH_MACSTSUR, ch / 1000000000);
-  reg_wr(ETH_MACSTNUR, ch % 1000000000);
-  reg_set_bit(ETH_MACTSCR, 2);
-  while(reg_get_bit(ETH_MACTSCR, 2));
+  int32_t addend_adjustment =
+    ((int64_t)ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
 
-  se->se_accumulated_drift_ppb = 0; // Reset clock servo integrator
-
-  evlog(LOG_DEBUG, "%s: Step adjust %lld", se->se_eni.eni_ni.ni_dev.d_name,
-        offset_ns);
+  uint32_t final_addend = se->se_addend + addend_adjustment;
+  reg_wr(ETH_MACTSAR, final_addend);
+  reg_set_bit(ETH_MACTSCR, 5);
 }
 
+static const clock_realtime_class_t stm32h7_clock_realtime_class = {
+  .name = MAC_NAME,
+  .set_time = stm32h7_clock_set_time,
+  .get_time = stm32h7_clock_get_time,
+  .adj_time = stm32h7_clock_adj_time,
+};
 
 static void
-stm32h7_eth_set_clock(struct ether_netif *eni, int64_t offset_ns)
+stm32h7_ptp_init(stm32h7_eth_t *se)
 {
-  stm32h7_eth_t *se = (stm32h7_eth_t *)eni;
-  int64_t abs_offset = (offset_ns < 0) ? -offset_ns : offset_ns;
+  const unsigned int ahb_freq = clk_get_freq(CLK_ETH1MACEN);
 
-  if(abs_offset > PTP_STEP_THRESHOLD_NS) {
-    ptp_clock_step(se, offset_ns);
-  } else {
-    ptp_clock_slew(se, offset_ns);
-  }
+  uint32_t ssinc = (1000000000 / ahb_freq) + 1;
+
+  uint64_t numerator = 1000000000ULL;
+  uint64_t denominator = ahb_freq * ssinc;
+  se->se_addend = (numerator << 32) / denominator;
+
+  se->se_ppb_scale_mult = se->se_addend / 1000;
+  se->se_ppb_scale_div = 1000000;
+
+  reg_wr(ETH_MACTSCR,
+         (1 << 11) | // PTPv2 ethernet
+         (1 << 10) | // Enable timestamping for PTPv2
+         (1 << 9)  | // Rollover ns at 999999999
+         (1 << 1)  | // Fine mode
+         (1 << 0)  | // Enable
+         0);
+
+  reg_set_bits(ETH_MACSSIR, 16, 8, ssinc);
+
+  reg_wr(ETH_MACSTSUR, 0);
+  reg_wr(ETH_MACSTNUR, 0);
+  reg_set_bit(ETH_MACTSCR, 2);
+
+  reg_wr(ETH_MACTSAR, se->se_addend);
+  reg_set_bit(ETH_MACTSCR, 5);
+  while(reg_get_bit(ETH_MACTSCR, 5));
+
+  se->se_eni.eni_ptp.pes_clock.clk_class = &stm32h7_clock_realtime_class;
+  clock_servo_init(&se->se_eni.eni_ptp.pes_servo,
+                   &se->se_eni.eni_ptp.pes_clock);
+
+  reg_wr(ETH_MACPPSCR, 1);
 }
 
 #endif
@@ -435,44 +445,7 @@ stm32h7_thread(stm32h7_eth_t *se, gpio_t phyrst,
   usleep(10);
 
 #ifdef ENABLE_NET_PTP
-  if(flags & STM32H7_ETH_ENABLE_PTP_TIMESTAMPING) {
-
-    const unsigned int ahb_freq = clk_get_freq(CLK_ETH1MACEN);
-
-    uint32_t ssinc = (1000000000 / ahb_freq) + 1;
-
-    uint64_t numerator = 1000000000ULL;
-    uint64_t denominator = ahb_freq * ssinc;
-    se->se_addend = (numerator << 32) / denominator;
-
-    se->se_ppb_scale_mult = se->se_addend / 1000;
-    se->se_ppb_scale_div = 1000000;
-    printf("AHB: %d\n", ahb_freq);
-    printf("ssinc:%d addend:0x%x  scale_mult:%d scale_div:%d\n",
-           ssinc, se->se_addend, se->se_ppb_scale_mult, se->se_ppb_scale_div);
-
-    reg_wr(ETH_MACTSCR,
-           (1 << 11) | // PTPv2 ethernet
-           (1 << 10) | // Enable timestamping for PTPv2
-           (1 << 9)  | // Rollover ns at 999999999
-           (1 << 1)  | // Fine mode
-           (1 << 0)  | // Enable
-           0);
-
-    reg_set_bits(ETH_MACSSIR, 16, 8, ssinc);
-
-    reg_wr(ETH_MACSTSUR, 0);
-    reg_wr(ETH_MACSTNUR, 0);
-    reg_set_bit(ETH_MACTSCR, 2);
-
-    reg_wr(ETH_MACTSAR, se->se_addend);
-    reg_set_bit(ETH_MACTSCR, 5);
-    while(reg_get_bit(ETH_MACTSCR, 5));
-
-    se->se_eni.eni_adjust_mac_clock = stm32h7_eth_set_clock;
-
-    reg_wr(ETH_MACPPSCR, 1);
-  }
+  stm32h7_ptp_init(se);
 #endif
 
   // DMA config

@@ -59,9 +59,6 @@ typedef struct ether_netif {
 
 #ifdef ENABLE_NET_PTP
   ptp_ether_state_t eni_ptp;
-
-  void (*eni_adjust_mac_clock)(struct ether_netif *eni, int64_t offset);
-
 #endif
 
 } ether_netif_t;
