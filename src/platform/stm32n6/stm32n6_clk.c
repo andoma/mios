@@ -108,14 +108,3 @@ stm32n6_init_pll(unsigned int hse_freq)
 
   return NULL;
 }
-
-#include <mios/cli.h>
-#include <unistd.h>
-
-static error_t
-cmd_sleep(cli_t *cli, int argc, char **argv)
-{
-  sleep(10);
-  return 0;
-}
-CLI_CMD_DEF("sleep", cmd_sleep);
