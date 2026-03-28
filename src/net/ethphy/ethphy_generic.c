@@ -12,19 +12,34 @@ ethphy_print_status(struct ether_netif *eni, struct stream *s)
   bmsr = ethphy_mii_read(eni, 0x01); // Read twice -- link status is latched-low
 
   if(bmsr & (1 << 2)) {
-    uint16_t adv = ethphy_mii_read(eni, 0x04);
-    uint16_t lpa = ethphy_mii_read(eni, 0x05);
-    int common = adv & lpa;
-    const char *speed = "10M";
-    const char *duplex = "half";
-    if(common & (1 << 8)) {
-      speed = "100M"; duplex = "full";
-    } else if(common & (1 << 7)) {
-      speed = "100M";
-    } else if(common & (1 << 6)) {
-      duplex = "full";
+    int speed = 10;
+    int full_duplex = 0;
+
+    if(bmsr & (1 << 8)) {
+      uint16_t gbcr = ethphy_mii_read(eni, 0x09);
+      uint16_t gbsr = ethphy_mii_read(eni, 0x0a);
+      if((gbcr & (1 << 9)) && (gbsr & (1 << 11))) {
+        speed = 1000; full_duplex = 1;
+      } else if((gbcr & (1 << 8)) && (gbsr & (1 << 10))) {
+        speed = 1000;
+      }
     }
-    stprintf(s, "Link: UP, %s %s duplex\n", speed, duplex);
+
+    if(speed < 1000) {
+      uint16_t adv = ethphy_mii_read(eni, 0x04);
+      uint16_t lpa = ethphy_mii_read(eni, 0x05);
+      int common = adv & lpa;
+      if(common & (1 << 8)) {
+        speed = 100; full_duplex = 1;
+      } else if(common & (1 << 7)) {
+        speed = 100;
+      } else if(common & (1 << 6)) {
+        full_duplex = 1;
+      }
+    }
+
+    stprintf(s, "Link: UP, %dM %s duplex\n",
+             speed, full_duplex ? "full" : "half");
   } else {
     stprintf(s, "Link: DOWN\n");
   }
