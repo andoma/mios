@@ -86,6 +86,11 @@ SECTIONS {
                 _ghook_array_end = .;
                 . = ALIGN(4);
 
+                . = ALIGN(4);
+                _driver_array_begin = .;
+                KEEP(*(SORT_BY_NAME(driver.*)))
+                _driver_array_end = .;
+                . = ALIGN(4);
 
         } >RAM
 

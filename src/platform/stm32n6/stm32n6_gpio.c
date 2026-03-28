@@ -136,9 +136,9 @@ static uint8_t gpio_irq_level[7];
 #define EXTI_CPUIMR1     (EXTI_BASE + 0x80)
 #define EXTI_CPUPR1      (EXTI_BASE + 0x88)
 
-#define SYSCFG_BASE 0x58000400
+#include "stm32n6_syscfg.h"
 
-#define SYSCFG_EXTICR(x) (SYSCFG_BASE + 0x8 + (4 * x))
+#define SYSCFG_EXTICR(x) (SYSCFG_BASE + 0x60 + (4 * (x)))
 
 void
 gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
