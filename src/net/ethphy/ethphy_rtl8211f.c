@@ -62,14 +62,16 @@ rtl8211f_print_info(struct device *dev, struct stream *s)
   ethphy_print_status(eni, s);
 }
 
-static const device_class_t rtl8211f_class = {
-  .dc_class_name = "RTL8211F PHY",
-  .dc_print_info = rtl8211f_print_info,
+static const ethphy_device_class_t rtl8211f_class = {
+  .dc = {
+    .dc_class_name = "RTL8211F PHY",
+    .dc_print_info = rtl8211f_print_info,
+  },
 };
 
 
 static device_t *
-rtl8211f_init(struct ether_netif *eni, ethphy_mode_t mode)
+rtl8211f_init(struct ether_netif *eni, ethphy_mode_t mode, unsigned int flags)
 {
   uint16_t id2 = reg_read(eni, REG_PHYIDR2);
 
@@ -85,14 +87,18 @@ rtl8211f_init(struct ether_netif *eni, ethphy_mode_t mode)
   }
 
   if(mode == ETHPHY_MODE_RGMII) {
-    // Configure RGMII TX delay: enable (PHY adds 2ns on TX)
     uint16_t txdly = ext_read(eni, 0xd08, 0x11);
-    txdly |= RTL8211F_TX_DELAY;
+    if(flags & ETHPHY_DELAY_TX)
+      txdly |= RTL8211F_TX_DELAY;
+    else
+      txdly &= ~RTL8211F_TX_DELAY;
     ext_write(eni, 0xd08, 0x11, txdly);
 
-    // Configure RGMII RX delay: enable (PHY adds 2ns on RX)
     uint16_t rxdly = ext_read(eni, 0xd08, 0x15);
-    rxdly |= RTL8211F_RX_DELAY;
+    if(flags & ETHPHY_DELAY_RX)
+      rxdly |= RTL8211F_RX_DELAY;
+    else
+      rxdly &= ~RTL8211F_RX_DELAY;
     ext_write(eni, 0xd08, 0x15, rxdly);
   }
 

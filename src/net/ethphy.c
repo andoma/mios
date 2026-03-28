@@ -1,4 +1,4 @@
-#include "ethphy.h"
+#include <mios/ethphy.h>
 #include "ether.h"
 #include "netif.h"
 
@@ -95,6 +95,14 @@ ethphy_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t val)
 void
 ethphy_link_poll(ether_netif_t *eni)
 {
+  // Check if PHY provides a custom link poll
+  if(eni->eni_phy != NULL) {
+    const ethphy_device_class_t *pdc =
+      (const ethphy_device_class_t *)eni->eni_phy->d_class;
+    if(pdc->link_poll != NULL)
+      pdc->link_poll(eni);
+  }
+
   const char *name = eni->eni_ni.ni_dev.d_name;
   const ethmac_device_class_t *edc = (const void *)eni->eni_ni.ni_dev.d_class;
   int current_up = 0;
@@ -155,11 +163,11 @@ ethphy_link_poll(ether_netif_t *eni)
 
 
 device_t *
-ethphy_create(device_t *parent, device_class_t *dc, size_t size)
+ethphy_create(device_t *parent, const ethphy_device_class_t *dc, size_t size)
 {
   device_t *d = calloc(1, size);
   d->d_name = parent->d_name;
-  d->d_class = dc;
+  d->d_class = &dc->dc;
   d->d_parent = parent;
   device_retain(parent);
 

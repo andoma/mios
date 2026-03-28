@@ -57,16 +57,24 @@ generic_print_info(struct device *dev, struct stream *s)
   ethphy_print_status(eni, s);
 }
 
-static const device_class_t ethphy_generic = {
-  .dc_class_name = "Generic PHY",
-  .dc_print_info = generic_print_info,
+static const ethphy_device_class_t ethphy_generic = {
+  .dc = {
+    .dc_class_name = "Generic PHY",
+    .dc_print_info = generic_print_info,
+  },
 };
 
 static device_t *
-generic_init(struct ether_netif *eni, ethphy_mode_t mode)
+generic_init(struct ether_netif *eni, ethphy_mode_t mode, unsigned int flags)
 {
   const uint16_t id1 = ethphy_mii_read(eni, 0x02);
   const uint16_t id2 = ethphy_mii_read(eni, 0x03);
+
+  if(id1 == 0xffff && id2 == 0xffff) {
+    evlog(LOG_ERR, "%s: No PHY responding (MDIO reads 0xFFFF)",
+          eni->eni_ni.ni_dev.d_name);
+    return NULL;
+  }
 
   evlog(LOG_INFO, "%s: PHY OUI:0x%05x Model:0x%02x Rev:%d",
         eni->eni_ni.ni_dev.d_name,
