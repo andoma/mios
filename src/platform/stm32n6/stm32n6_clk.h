@@ -27,6 +27,7 @@
 #define RCC_APB1LENR      (RCC_BASE + 0x264)
 
 #define RCC_APB2ENR       (RCC_BASE + 0x26c)
+#define RCC_APB4ENR1      (RCC_BASE + 0x274)
 
 
 #define CLK_GPIO(x)   CLK_ID(RCC_AHB4ENR, (x))
@@ -41,6 +42,18 @@
 #define CLK_USART8    CLK_ID(RCC_APB1LENR, 31)
 #define CLK_USART9    CLK_ID(RCC_APB2ENR, 6)
 #define CLK_USART10   CLK_ID(RCC_APB2ENR, 7)
+
+#define CLK_I2C1      CLK_ID(RCC_APB1LENR, 21)
+#define CLK_I2C2      CLK_ID(RCC_APB1LENR, 22)
+#define CLK_I2C3      CLK_ID(RCC_APB1LENR, 23)
+#define CLK_I2C4      CLK_ID(RCC_APB4ENR1, 7)
+
+#define CLK_SPI1      CLK_ID(RCC_APB2ENR, 12)
+#define CLK_SPI2      CLK_ID(RCC_APB1LENR, 14)
+#define CLK_SPI3      CLK_ID(RCC_APB1LENR, 15)
+#define CLK_SPI4      CLK_ID(RCC_APB2ENR, 13)
+#define CLK_SPI5      CLK_ID(RCC_APB2ENR, 20)
+#define CLK_SPI6      CLK_ID(RCC_APB4ENR1, 5)
 
 #define CLK_XSPI1     CLK_ID(RCC_AHB5ENR, 5)
 #define CLK_XSPI2     CLK_ID(RCC_AHB5ENR, 12)
