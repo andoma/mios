@@ -1,86 +1,89 @@
-#include "stm32n6_uart.h"
-#include "stm32n6_reg.h"
-#include "stm32n6_pwr.h"
 #include "stm32n6_clk.h"
-#include "stm32n6_usb.h"
+#include "stm32n6_ramcfg.h"
+#include "stm32n6_rif.h"
+#include "stm32n6_syscfg.h"
 
 #include <malloc.h>
-#include <stdio.h>
 
-#include <mios/timer.h>
 #include <mios/sys.h>
 
-#include <usb/usb.h>
+#include <net/pbuf.h>
+
+#include "mpu_v8.h"
+
+// AXISRAM layout (nonsecure aliases):
+//   AXISRAM1:  0x24000000 - 0x240FFFFF  (1 MB)   - CPU_NOC, DMA accessible
+//   AXISRAM2:  0x24100000 - 0x241FFFFF  (1 MB)   - CPU_NOC, DMA accessible
+//   AXISRAM3:  0x24200000 - 0x2426FFFF  (448 KB) - NPU_NIC
+//   AXISRAM4:  0x24270000 - 0x242DFFFF  (448 KB) - NPU_NIC
+//   AXISRAM5:  0x242E0000 - 0x2434FFFF  (448 KB) - NPU_NIC
+//   AXISRAM6:  0x24350000 - 0x243BFFFF  (448 KB) - NPU_NIC
+//
+// DMA carveouts from top of AXISRAM2 (growing downward):
+
+#define AXISRAM2_END      0x24200000
+#define AXISRAM36_END     0x243C0000
+
+#define NOCACHE_SIZE      0x1000      // 4 KB non-cached DMA descriptors
+#define PBUF_ARENA_SIZE   0x10000     // 64 KB pbuf data arena
+
+#define NOCACHE_END       AXISRAM2_END
+#define NOCACHE_BASE      (NOCACHE_END - NOCACHE_SIZE)
+#define PBUF_ARENA_END    NOCACHE_BASE
+#define PBUF_ARENA_BASE   (PBUF_ARENA_END - PBUF_ARENA_SIZE)
+
+#define HEAP_DMA_END      PBUF_ARENA_BASE
 
 
 
-static void __attribute__((constructor(101)))
-board_init_clk(void)
-{
-  stm32n6_init_pll(48000000);
-}
-
-static void __attribute__((constructor(102)))
-board_init_console(void)
-{
-  static stm32_uart_stream_t console;
-  stdio = stm32n6_uart_init(&console, 1, 115200, GPIO_PE(5), GPIO_PE(6),
-                            UART_CTRLD_IS_PANIC, "console");
-}
 
 static void  __attribute__((constructor(120)))
 stm32n6_init(void)
 {
-  heap_add_mem(HEAP_START_EBSS, 0x24100000,
+  // Enable interleaving for AXISRAM3-6
+  reg_set_bit(SYSCFG_NPU_ICNCR, 0);
+
+  // Enable clocks for AXISRAM3-6
+  reg_or(RCC_MEMENR, (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 8));
+
+  // Turn off shutdown flag for AXISRAM3-6
+  for(int i = 3; i <= 6; i++) {
+    reg_clr_bit(RAMCFG_AXISRAMxCR(i), 20);
+  }
+  asm volatile("dsb");
+
+  // AXISRAM1+2 DMA heap (below carveouts)
+  heap_add_mem(HEAP_START_EBSS, HEAP_DMA_END,
                MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE | MEM_TYPE_CODE, 20);
 
+  // AXISRAM3-6 general heap (not DMA accessible)
+  heap_add_mem(AXISRAM2_END, AXISRAM36_END, 0, 15);
+
+  // DTCM (128 KB, minus 1 KB for MSP stack)
   heap_add_mem(0x20000400, 0x20020000, MEM_TYPE_LOCAL, 30);
 
-  reg_set_bit(PWR_SVMCR3, 26); // VDDIO3VRSEL (1.8V)
-  reg_set_bit(PWR_SVMCR3, 9);  // VDDIO3SV
-  reg_set_bit(PWR_SVMCR3, 1);  // VDDIO3VMEN
+  // Non-cached region for DMA descriptor rings (top of AXISRAM2)
+  // heap_add_mem before MPU region so writes go through cache normally,
+  // then MPU makes it non-cached for subsequent DMA use
+  heap_add_mem(NOCACHE_BASE, NOCACHE_END,
+               MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
+  mpu_add_region_v8(NOCACHE_BASE, NOCACHE_END,
+                    MPU_V8_XN | MPU_V8_AP_RW | MPU_V8_SH_NONE,
+                    MPU_V8_ATTR_NORMAL_NC);
 
-  reg_set_bit(PWR_SVMCR3, 10);  // USB33SV
-  reg_set_bit(PWR_SVMCR3, 2);   // USB33VMEN
-}
+  mpu_enable();
 
-static timer_t blinky_timer;
-static char blinky_phase;
+  // Pbuf data arena (cache-line aligned, used by ethernet DMA)
+  pbuf_data_add((void *)PBUF_ARENA_BASE, (void *)PBUF_ARENA_END);
 
-static int blinky_duration = 500000;
+  // Configure ETH1 DMA master as CID 1, Secure, Privileged
+  stm32n6_rif_set_master_attr(RIF_MASTER_ETH1, 1, 1, 1);
 
-static void
-blinky_callback(void *arg, uint64_t now)
-{
-  blinky_phase = !blinky_phase;
-  gpio_set_output(GPIO_PG(10), blinky_phase);
-  timer_arm_abs(&blinky_timer, now + blinky_duration);
-}
+  // Configure ETH1 peripheral as Secure + Privileged
+  stm32n6_rif_set_periph_sec(RIF_PERIPH_ETH1_REG, RIF_PERIPH_ETH1_BIT, 1, 1);
 
-
-static void  __attribute__((constructor(500)))
-led_init(void)
-{
-  gpio_conf_output(GPIO_PG(10), GPIO_PUSH_PULL, GPIO_SPEED_LOW,
-                   GPIO_PULL_NONE);
-
-  gpio_set_output(GPIO_PG(10), 1);
-
-  blinky_timer.t_cb = blinky_callback;
-  timer_arm_abs(&blinky_timer, blinky_duration);
-}
-
-
-static void  __attribute__((constructor(900)))
-late_init(void)
-{
-  struct usb_interface_queue q;
-  STAILQ_INIT(&q);
-
-  // Expose a serial-port that is a normal console to this OS
-  usb_cdc_create_shell(&q);
-
-  stm32n6_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32n6-dk", &q);
+  // Open RISAF2 (AXISRAM1/2) for all CIDs
+  stm32n6_risaf_open_base_region(RISAF2_BASE, 0xFF);
 }
 
 
