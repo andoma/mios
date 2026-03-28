@@ -11,11 +11,21 @@ typedef enum {
   ETHPHY_MODE_RGMII,
 } ethphy_mode_t;
 
+// Flags for ethphy_init
+#define ETHPHY_DELAY_TX  0x1  // PHY should add TX clock delay
+#define ETHPHY_DELAY_RX  0x2  // PHY should add RX clock delay
+
 struct ether_netif;
 
-typedef device_t *(ethphy_init_t)(struct ether_netif *mac, ethphy_mode_t mode);
+typedef device_t *(ethphy_init_t)(struct ether_netif *mac, ethphy_mode_t mode,
+                                  unsigned int flags);
 
-device_t *ethphy_create(device_t *parent, const device_class_t *dc,
+typedef struct ethphy_device_class {
+  device_class_t dc;
+  void (*link_poll)(struct ether_netif *eni) __attribute__((noreturn));
+} ethphy_device_class_t;
+
+device_t *ethphy_create(device_t *parent, const ethphy_device_class_t *dc,
                         size_t size);
 /**
  * Read & write MII registers from currently attached PHY

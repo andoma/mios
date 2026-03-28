@@ -643,7 +643,7 @@ stm32f4_thread(stm32f4_eth_t *se, gpio_t phyrst,
     thread_exit(0);
   }
 
-  se->se_eni.eni_phy = init(&se->se_eni, miimode);
+  se->se_eni.eni_phy = init(&se->se_eni, miimode, 0);
   if(se->se_eni.eni_phy == NULL) {
     evlog(LOG_ERR, "%s: Failed to init PHY", self->d_name);
     thread_exit(0);

@@ -3,8 +3,10 @@
 #include <mios/eventlog.h>
 
 #include <net/ether.h>
+#include <net/netif.h>
 
 #include <stdio.h>
+#include <unistd.h>
 
 // Datasheet: TI DP83869HM (SNLS614D)
 
@@ -112,7 +114,28 @@ reg_write(struct ether_netif *eni, uint16_t reg, uint16_t val)
 }
 
 static void
-dp83869_set_mode_copper(struct ether_netif *eni, ethphy_mode_t mode)
+dp83869_set_rgmii_delay(struct ether_netif *eni, unsigned int flags)
+{
+  uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
+
+  // The DELAY bits are inverted: 1 means off, 0 means on
+  if(flags & ETHPHY_DELAY_RX)
+    rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
+  else
+    rgmii_ctrl |= RGMII_CTRL_RX_CLK_DELAY;
+
+  if(flags & ETHPHY_DELAY_TX)
+    rgmii_ctrl &= ~RGMII_CTRL_TX_CLK_DELAY;
+  else
+    rgmii_ctrl |= RGMII_CTRL_TX_CLK_DELAY;
+
+  reg_write(eni, REG_RGMII_CTRL, rgmii_ctrl);
+}
+
+
+static void
+dp83869_set_mode_copper(struct ether_netif *eni, ethphy_mode_t mode,
+                        unsigned int flags)
 {
   // Section 7.4.8.1: RGMII-to-Copper mode initialization
   reg_write(eni, REG_OP_MODE_DECODE, 0x0040);
@@ -135,16 +158,23 @@ dp83869_set_mode_copper(struct ether_netif *eni, ethphy_mode_t mode)
     uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
 
     // The DELAY bits are confusing because 1 means off, 0 means on
-    // We do TX-delay in the MAC
+    if(flags & ETHPHY_DELAY_RX)
+      rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;  // RX delay ON
+    else
+      rgmii_ctrl |= RGMII_CTRL_RX_CLK_DELAY;   // RX delay OFF
 
-    rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
-    rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
+    if(flags & ETHPHY_DELAY_TX)
+      rgmii_ctrl &= ~RGMII_CTRL_TX_CLK_DELAY;  // TX delay ON
+    else
+      rgmii_ctrl |= RGMII_CTRL_TX_CLK_DELAY;   // TX delay OFF
+
     reg_write(eni, REG_RGMII_CTRL, rgmii_ctrl);
   }
 }
 
 static void
-dp83869_set_mode_fiber(struct ether_netif *eni, ethphy_mode_t mode)
+dp83869_set_mode_fiber(struct ether_netif *eni, ethphy_mode_t mode,
+                       unsigned int flags)
 {
   // Explicitly set RGMII-to-1000Base-X mode (match Linux: 0x0041)
   reg_write(eni, REG_OP_MODE_DECODE, 0x0041);
@@ -157,16 +187,8 @@ dp83869_set_mode_fiber(struct ether_netif *eni, ethphy_mode_t mode)
   reg_write(eni, 0x00c6, 0x10);
   reg_write(eni, REG_RGMII_DLL_CTRL, 0x0077);
 
-  if(mode == ETHPHY_MODE_RGMII) {
-    uint16_t rgmii_ctrl = reg_read(eni, REG_RGMII_CTRL);
-
-    // The DELAY bits are confusing because 1 means off, 0 means on
-    // We do TX-delay in the MAC
-
-    rgmii_ctrl &= ~RGMII_CTRL_RX_CLK_DELAY;
-    rgmii_ctrl |=  RGMII_CTRL_TX_CLK_DELAY;
-    reg_write(eni, REG_RGMII_CTRL, rgmii_ctrl);
-  }
+  if(mode == ETHPHY_MODE_RGMII)
+    dp83869_set_rgmii_delay(eni, flags);
 
   // Configure IO mux for fiber signal detect
   reg_write(eni, REG_IO_MUX_CFG, 0x1f);
@@ -256,14 +278,58 @@ dp83869_print_diagnostics(struct device *dev, stream_t *s)
   }
 }
 
-static const device_class_t dp83869_class = {
-  .dc_class_name = "DP83869 PHY",
-  .dc_print_info = dp83869_print_diagnostics,
+static void dp83869_fiber_link_poll(struct ether_netif *eni)
+  __attribute__((noreturn));
+
+static void
+dp83869_fiber_link_poll(struct ether_netif *eni)
+{
+  const char *name = eni->eni_ni.ni_dev.d_name;
+  const ethmac_device_class_t *edc = (const void *)eni->eni_ni.ni_dev.d_class;
+  int current_up = 0;
+
+  while(1) {
+    uint16_t fx_sts = reg_read(eni, REG_FX_STS);
+    int up = !!(fx_sts & (1 << 2));  // Link status
+
+    if(!current_up && up) {
+      // 1000BASE-X is always 1000 Mbps full duplex
+      evlog(LOG_INFO, "%s: Fiber link up 1000 Mbps full duplex", name);
+
+      if(edc->edc_set_speed)
+        edc->edc_set_speed(eni, 1000);
+      if(edc->edc_set_duplex)
+        edc->edc_set_duplex(eni, 1);
+
+      current_up = 1;
+      net_task_raise(&eni->eni_ni.ni_task, NETIF_TASK_STATUS_UP);
+    } else if(current_up && !up) {
+      evlog(LOG_INFO, "%s: Fiber link down", name);
+      current_up = 0;
+      net_task_raise(&eni->eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
+    }
+    usleep(100000);
+  }
+}
+
+static const ethphy_device_class_t dp83869_class = {
+  .dc = {
+    .dc_class_name = "DP83869 PHY",
+    .dc_print_info = dp83869_print_diagnostics,
+  },
+};
+
+static const ethphy_device_class_t dp83869_fiber_class = {
+  .dc = {
+    .dc_class_name = "DP83869 PHY",
+    .dc_print_info = dp83869_print_diagnostics,
+  },
+  .link_poll = dp83869_fiber_link_poll,
 };
 
 
 static device_t *
-dp83869_init(struct ether_netif *eni, ethphy_mode_t mode)
+dp83869_init(struct ether_netif *eni, ethphy_mode_t mode, unsigned int flags)
 {
   uint16_t id2 = reg_read(eni, REG_PHYIDR2);
   uint16_t model = (id2 >> 4) & 0x3f;
@@ -303,16 +369,20 @@ dp83869_init(struct ether_netif *eni, ethphy_mode_t mode)
   }
 
   if(media == DP83869_MEDIA_COPPER) {
-    dp83869_set_mode_copper(eni, mode);
+    dp83869_set_mode_copper(eni, mode, flags);
     evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Copper",
           mode == ETHPHY_MODE_RGMII ? "R" : "");
   } else {
-    dp83869_set_mode_fiber(eni, mode);
+    dp83869_set_mode_fiber(eni, mode, flags);
     evlog(LOG_DEBUG, "dp83869: Configured for %sGMII-to-Fiber",
           mode == ETHPHY_MODE_RGMII ? "R" : "");
+
   }
 
-  return ethphy_create((device_t *)eni, &dp83869_class, sizeof(device_t));
+  const ethphy_device_class_t *cls = (media == DP83869_MEDIA_FIBER) ?
+    &dp83869_fiber_class : &dp83869_class;
+
+  return ethphy_create((device_t *)eni, cls, sizeof(device_t));
 }
 
 static void *

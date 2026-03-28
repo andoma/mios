@@ -13,7 +13,7 @@
 #define REG_SOR1    0x0467
 
 
-device_t *dp83826_init(struct ether_netif *eni, ethphy_mode_t mode);
+device_t *dp83826_init(struct ether_netif *eni, ethphy_mode_t mode, unsigned int flags);
 
 
 
@@ -33,14 +33,16 @@ dp83826_print_info(struct device *dev, struct stream *s)
   ethphy_print_status(eni, s);
 }
 
-static const device_class_t ethphy_dp83826 = {
-  .dc_class_name = "DP83826 PHY",
-  .dc_print_info = dp83826_print_info,
+static const ethphy_device_class_t ethphy_dp83826 = {
+  .dc = {
+    .dc_class_name = "DP83826 PHY",
+    .dc_print_info = dp83826_print_info,
+  },
 };
 
 
 device_t *
-dp83826_init(struct ether_netif *eni, ethphy_mode_t mode)
+dp83826_init(struct ether_netif *eni, ethphy_mode_t mode, unsigned int flags)
 {
   const uint16_t sor = ethphy_mii_read(eni, REG_SOR1);
   const uint16_t id2 = ethphy_mii_read(eni, REG_PHYIDR2);

@@ -734,7 +734,7 @@ lan743x_init(pci_dev_t *pd)
   if(l->is_7431) {
     ethphy_init_t *init = driver_probe(DRIVER_TYPE_ETHPHY, self);
     if(init) {
-      l->eni.eni_phy = init(&l->eni, ETHPHY_MODE_RGMII);
+      l->eni.eni_phy = init(&l->eni, ETHPHY_MODE_RGMII, ETHPHY_DELAY_RX);
     } else {
       evlog(LOG_ERR, "%s: No PHY driver found", l->name);
     }

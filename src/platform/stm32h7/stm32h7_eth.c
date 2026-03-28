@@ -421,7 +421,7 @@ stm32h7_thread(stm32h7_eth_t *se, gpio_t phyrst,
     thread_exit(0);
   }
 
-  se->se_eni.eni_phy = init(&se->se_eni, miimode);
+  se->se_eni.eni_phy = init(&se->se_eni, miimode, 0);
 
   // Soft reset
   reg_set_bit(ETH_DMAMR, 0);
