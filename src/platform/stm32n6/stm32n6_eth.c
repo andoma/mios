@@ -281,7 +281,8 @@ stm32n6_thread(stm32n6_eth_t *se, gpio_t phyrst, ethphy_mode_t miimode)
     thread_exit(0);
   }
 
-  se->se_eni.eni_phy = init(&se->se_eni, miimode);
+  se->se_eni.eni_phy = init(&se->se_eni, miimode,
+                            ETHPHY_DELAY_TX | ETHPHY_DELAY_RX);
 
   // PHY must be providing clocks before MAC soft reset can complete
   usleep(10000);
@@ -554,8 +555,9 @@ stm32n6_eth_periodic(void *opaque, uint64_t now)
 
 
 static void
-setup_rgmii_gpios(void)
+setup_rgmii_gpios(gpio_t mdio, gpio_t mdc)
 {
+  // RGMII data/clock pins — fixed by STM32N6 silicon, same on all boards
   static const uint8_t af11_pins[] = {
     GPIO_PF(14),  // ETH1_RGMII_RXD0
     GPIO_PF(15),  // ETH1_RGMII_RXD1
@@ -568,16 +570,19 @@ setup_rgmii_gpios(void)
     GPIO_PG(3),   // ETH1_RGMII_TXD2
     GPIO_PG(4),   // ETH1_RGMII_TXD3
     GPIO_PF(11),  // ETH1_RGMII_TX_CTL
-    GPIO_PD(12),  // ETH1_MDIO
-    GPIO_PD(1),   // ETH1_MDC
     GPIO_PF(2),   // ETH1_RGMII_CLK125
-    GPIO_PF(5),   // ETH1_CLK
   };
 
   for(size_t i = 0; i < sizeof(af11_pins); i++) {
     gpio_conf_af(af11_pins[i], 11, GPIO_PUSH_PULL,
                  GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
   }
+
+  // MDIO and MDC — board-specific pins, both AF11
+  gpio_conf_af(mdio, 11, GPIO_PUSH_PULL,
+               GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(mdc, 11, GPIO_PUSH_PULL,
+               GPIO_SPEED_VERY_HIGH, GPIO_PULL_NONE);
 
   // PF0 ETH1_RGMII_GTX_CLK is AF12, not AF11. Use medium speed for signal integrity.
   gpio_conf_af(GPIO_PF(0), 12, GPIO_PUSH_PULL,
@@ -593,7 +598,8 @@ setup_rgmii_gpios(void)
 
 
 void
-stm32n6_eth_init(gpio_t phyrst, int phy_addr, ethphy_mode_t mode)
+stm32n6_eth_init(gpio_t phyrst, gpio_t mdio, gpio_t mdc,
+                 int phy_addr, ethphy_mode_t mode)
 {
   stm32n6_eth_t *se = &stm32n6_eth;
 
@@ -604,7 +610,7 @@ stm32n6_eth_init(gpio_t phyrst, int phy_addr, ethphy_mode_t mode)
 
   ether_netif_init(&se->se_eni, "eth0", &stm32n6_eth_device_class);
 
-  setup_rgmii_gpios();
+  setup_rgmii_gpios(mdio, mdc);
 
   se->se_eni.eni_addr[0] = 0x02;
   se->se_eni.eni_addr[1] = 0x00;
