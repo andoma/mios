@@ -19,7 +19,6 @@
 #define GPIO_PM(x)  GPIO(12, x)
 #define GPIO_PN(x)  GPIO(13, x)
 #define GPIO_PO(x)  GPIO(14, x)
-#define GPIO_PP(x)  GPIO(15, x)
 
 #define GPIO_UNUSED 0xff
 
@@ -29,8 +28,3 @@ void gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
                   gpio_output_speed_t speed, gpio_pull_t pull);
 
 void gpio_conf_standby(gpio_t gpio, gpio_pull_t pull);
-
-typedef struct {
-  gpio_t gpio;
-  uint8_t af;
-} gpio_af_t;
