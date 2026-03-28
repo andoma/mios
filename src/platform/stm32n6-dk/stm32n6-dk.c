@@ -55,5 +55,6 @@ board_init_late(void)
 
   stm32n6_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32n6-dk", &q);
 
-  stm32n6_eth_init(GPIO_UNUSED, 1, ETHPHY_MODE_RGMII);
+  stm32n6_eth_init(GPIO_UNUSED, GPIO_PD(12), GPIO_PD(1),
+                   1, ETHPHY_MODE_RGMII);
 }
