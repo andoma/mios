@@ -48,6 +48,9 @@ SRCS-${ENABLE_DP83826} += \
 SRCS-${ENABLE_DP83869} += \
 	${SRC}/net/ethphy/ethphy_dp83869.c
 
+SRCS-${ENABLE_RTL8211F} += \
+	${SRC}/net/ethphy/ethphy_rtl8211f.c
+
 SRCS-${ENABLE_NET_HTTP} += \
        ${SRC}/net/http/http.c \
        ${SRC}/net/http/http_parser.c \
