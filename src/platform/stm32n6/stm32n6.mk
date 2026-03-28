@@ -16,6 +16,8 @@ SRCS += ${C}/systick.c \
 	${P}/stm32n6_uart.c \
 	${P}/stm32n6_xspi.c \
 	${P}/stm32n6_usb.c \
+	${P}/stm32n6_spi.c \
+	${P}/stm32n6_i2c.c \
 
 SRCS-${ENABLE_NET_IPV4} += ${P}/stm32n6_eth.c
 
