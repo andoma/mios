@@ -74,3 +74,71 @@ cmd_perftest(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF("perftest", cmd_perftest);
 
+
+static void
+memtest_region(cli_t *cli, void *buf, size_t size, const char *name)
+{
+  volatile uint32_t *p = buf;
+  size_t words = size / sizeof(uint32_t);
+  int64_t start, stop;
+  size_t rounds;
+
+  // Write test
+  start = clock_get();
+  rounds = 0;
+  while(clock_get() - start < 1000000) {
+    for(size_t i = 0; i < words; i++)
+      p[i] = i;
+    rounds++;
+  }
+  stop = clock_get();
+  uint64_t write_bps = (uint64_t)size * rounds * 1000000 / (stop - start);
+
+  // Read test
+  start = clock_get();
+  rounds = 0;
+  volatile uint32_t sink;
+  while(clock_get() - start < 1000000) {
+    for(size_t i = 0; i < words; i++)
+      sink = p[i];
+    rounds++;
+  }
+  stop = clock_get();
+  (void)sink;
+  uint64_t read_bps = (uint64_t)size * rounds * 1000000 / (stop - start);
+
+  cli_printf(cli, "  %-12s %p  W:%ld  R:%ld MB/s\n",
+             name, buf,
+             (long)(write_bps / (1024 * 1024)),
+             (long)(read_bps / (1024 * 1024)));
+}
+
+
+static error_t
+cmd_memperf(cli_t *cli, int argc, char **argv)
+{
+  const size_t size = 32768;
+
+  static const struct {
+    const char *name;
+    unsigned int type;
+  } regions[] = {
+    { "LOCAL",  MEM_TYPE_LOCAL | MEM_MAY_FAIL },
+    { "DMA",    MEM_TYPE_DMA | MEM_MAY_FAIL },
+    { "General", MEM_MAY_FAIL },
+  };
+
+  for(size_t i = 0; i < sizeof(regions) / sizeof(regions[0]); i++) {
+    void *buf = xalloc(size, 0, regions[i].type);
+    if(buf == NULL) {
+      cli_printf(cli, "  %-12s (not available)\n", regions[i].name);
+      continue;
+    }
+    memtest_region(cli, buf, size, regions[i].name);
+    free(buf);
+  }
+  return 0;
+}
+
+CLI_CMD_DEF("memperf", cmd_memperf);
+
