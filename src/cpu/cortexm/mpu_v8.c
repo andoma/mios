@@ -37,7 +37,7 @@ mpu_set_mair(void)
 }
 
 
-static void __attribute__((constructor(151)))
+static void __attribute__((constructor(101)))
 mpu_init(void)
 {
   int num_regions = (*MPU_TYPE >> 8) & 0xff;
