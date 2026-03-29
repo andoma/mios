@@ -2,6 +2,7 @@ BOARDNAME := stm32n6-dk
 
 ENABLE_NET_IPV4 := yes
 ENABLE_RTL8211F := yes
+ENABLE_LITTLEFS := yes
 
 B := ${SRC}/platform/${BOARDNAME}
 
