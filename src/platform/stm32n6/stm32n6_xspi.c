@@ -10,6 +10,7 @@
 
 #include "stm32n6_clk.h"
 #include "stm32n6_pwr.h"
+#include "irq.h"
 
 
 #define XSPI1_BASE 0x58025000
@@ -19,6 +20,7 @@
 #define XSPI_DCR1 0x008
 #define XSPI_DCR2 0x00c
 #define XSPI_SR   0x020
+#define XSPI_FCR  0x024
 #define XSPI_DLR  0x040
 #define XSPI_AR   0x048
 #define XSPI_DR   0x050
@@ -31,22 +33,51 @@
 typedef struct xspi {
   block_iface_t iface;
   mutex_t mutex;
+  task_waitable_t waitq;
   uint32_t base;
   int64_t busy_until;
   uint8_t state;
+  uint8_t tcf;
 } xspi_t;
 
 
+// CR interrupt enable bits
+#define XSPI_CR_TCIE (1 << 17)
+#define XSPI_CR_FTIE (1 << 18)
+
+// FIFO threshold: FTF fires when >= 16 bytes available (read) or free (write)
+#define XSPI_FTHRES 15
+
+static void
+xspi_irq(void *arg)
+{
+  xspi_t *xs = arg;
+  uint32_t cr = reg_rd(xs->base + XSPI_CR);
+  reg_wr(xs->base + XSPI_CR, cr & ~(XSPI_CR_TCIE | XSPI_CR_FTIE));
+  if(reg_rd(xs->base + XSPI_SR) & (1 << 1))
+    xs->tcf = 1;
+  task_wakeup_sched_locked(&xs->waitq, 0);
+}
 
 
 static void
-wait_busy(xspi_t *xs)
+xspi_wait_tc(xspi_t *xs)
 {
-  while(1) {
-    uint32_t sr = reg_rd(xs->base + XSPI_SR);
-    if(!(sr & (1 << 5)))
-      break; // Not busy == done
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+
+  if(!(reg_rd(xs->base + XSPI_SR) & (1 << 1))) {
+    // TCF not yet set — enable TCIE and sleep
+    reg_wr(xs->base + XSPI_CR, reg_rd(xs->base + XSPI_CR) | XSPI_CR_TCIE);
+    while(!xs->tcf) {
+      task_sleep_sched_locked(&xs->waitq);
+    }
   }
+  xs->tcf = 0;
+
+  // Clear TCF for next operation
+  reg_wr(xs->base + XSPI_FCR, (1 << 1));
+
+  irq_permit(q);
 }
 
 
@@ -76,9 +107,8 @@ xspi_get_status(xspi_t *xs)
 
   reg_wr(xs->base + XSPI_IR, 0x05); // Get Status
 
-  int status = reg_rd8(xs->base + XSPI_DR);
-  wait_busy(xs);
-  return status;
+  xspi_wait_tc(xs);
+  return reg_rd8(xs->base + XSPI_DR);
 }
 
 static error_t
@@ -129,7 +159,7 @@ xspi_cmd(xspi_t *xs, uint8_t cmd)
          0);
 
   reg_wr(xs->base + XSPI_IR, cmd);
-  wait_busy(xs);
+  xspi_wait_tc(xs);
   return 0;
 }
 
@@ -171,7 +201,7 @@ xspi_erase(struct block_iface *bi, size_t block, size_t count)
 
   reg_wr(xs->base + XSPI_AR, addr);
 
-  wait_busy(xs);
+  xspi_wait_tc(xs);
 
   xs->state = XSPI_STATE_BUSY;
   xs->busy_until = clock_get() + 40000; // ~40ms typical 4KB erase
@@ -206,8 +236,9 @@ xspi_write(struct block_iface *bi, size_t block,
     uint32_t addr = xs->iface.block_size * block + offset;
 
     reg_wr(xs->base + XSPI_CR,
-           (0b00 << 28) | // FMODE = WRITE
-           1);            // Enable
+           (0b00 << 28) |        // FMODE = WRITE
+           (XSPI_FTHRES << 8) |  // FIFO threshold
+           1);                    // Enable
 
     reg_wr(xs->base + XSPI_DCR1,
            (31 << 16) | // devsize, made up
@@ -231,17 +262,31 @@ xspi_write(struct block_iface *bi, size_t block,
     reg_wr(xs->base + XSPI_AR, addr);
 
     const uint8_t *src = data;
-    size_t i = 0;
+    size_t wr_remaining = to_copy;
 
-    for(; i + 4 <= to_copy; i += 4) {
+    while(wr_remaining >= 4) {
+      int q = irq_forbid(IRQ_LEVEL_SCHED);
+      if(!(reg_rd(xs->base + XSPI_SR) & (1 << 2))) {
+        // FTF not set — FIFO full, sleep until room
+        reg_wr(xs->base + XSPI_CR,
+               reg_rd(xs->base + XSPI_CR) | XSPI_CR_FTIE);
+        task_sleep_sched_locked(&xs->waitq);
+        irq_permit(q);
+        continue;
+      }
+      irq_permit(q);
+
       uint32_t w;
-      memcpy(&w, &src[i], 4);
+      memcpy(&w, src, 4);
       reg_wr(xs->base + XSPI_DR, w);
+      src += 4;
+      wr_remaining -= 4;
     }
-    for(; i < to_copy; i++) {
-      reg_wr8(xs->base + XSPI_DR, src[i]);
+    while(wr_remaining > 0) {
+      reg_wr8(xs->base + XSPI_DR, *src++);
+      wr_remaining--;
     }
-    wait_busy(xs);
+    xspi_wait_tc(xs);
 
     xs->state = XSPI_STATE_BUSY;
     xs->busy_until = clock_get() + 500; // ~500us typical page program
@@ -266,8 +311,9 @@ xspi_read(struct block_iface *bi, size_t block,
   uint32_t addr = xs->iface.block_size * block + offset;
 
   reg_wr(xs->base + XSPI_CR,
-         (0b01 << 28) | // FMODE = READ
-         1);            // Enable
+         (0b01 << 28) |        // FMODE = READ
+         (XSPI_FTHRES << 8) |  // FIFO threshold
+         1);                    // Enable
 
   reg_wr(xs->base + XSPI_DCR1,
          (31 << 16) | // devsize, made up
@@ -294,14 +340,23 @@ xspi_read(struct block_iface *bi, size_t block,
   size_t remaining = length;
 
   while(remaining > 0) {
+    int q = irq_forbid(IRQ_LEVEL_SCHED);
     uint32_t sr = reg_rd(xs->base + XSPI_SR);
     int flevel = (sr >> 8) & 0x7f;
 
     if(flevel == 0) {
-      if(!(sr & (1 << 5)))
+      if(!(sr & (1 << 5))) {
+        irq_permit(q);
         break; // Not busy and FIFO empty = transfer done
+      }
+      // FIFO empty, transfer still active — sleep until data or complete
+      reg_wr(xs->base + XSPI_CR,
+             reg_rd(xs->base + XSPI_CR) | XSPI_CR_FTIE | XSPI_CR_TCIE);
+      task_sleep_sched_locked(&xs->waitq);
+      irq_permit(q);
       continue;
     }
+    irq_permit(q);
 
     while(flevel >= 4 && remaining >= 4) {
       uint32_t w = reg_rd(xs->base + XSPI_DR);
@@ -317,7 +372,7 @@ xspi_read(struct block_iface *bi, size_t block,
       flevel--;
     }
   }
-  wait_busy(xs);
+  xspi_wait_tc(xs);
   return 0;
 }
 
@@ -367,6 +422,9 @@ xspi_norflash_create(void)
   xs->base = XSPI2_BASE;
 
   mutex_init(&xs->mutex, "xspi");
+  task_waitable_init(&xs->waitq, "xspi");
+
+  irq_enable_fn_arg(171, IRQ_LEVEL_SCHED, xspi_irq, xs);
   xs->iface.erase = xspi_erase;
   xs->iface.write = xspi_write;
   xs->iface.read = xspi_read;
