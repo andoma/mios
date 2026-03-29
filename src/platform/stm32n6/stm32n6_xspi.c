@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <malloc.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "stm32n6_clk.h"
@@ -24,6 +25,7 @@
 #define XSPI_DLR  0x040
 #define XSPI_AR   0x048
 #define XSPI_DR   0x050
+#define XSPI_TCR  0x108
 #define XSPI_CCR  0x100
 #define XSPI_IR   0x110
 
@@ -38,6 +40,15 @@ typedef struct xspi {
   int64_t busy_until;
   uint8_t state;
   uint8_t tcf;
+  uint8_t devsize;   // log2 of device size, for DCR1
+  uint8_t prescaler; // clock prescaler for DCR2
+
+  struct {
+    uint8_t size;   // log2 of erase size
+    uint8_t cmd3;   // 3-byte address command (0xff = not supported)
+    uint8_t cmd4;   // 4-byte address command (0xff = not supported)
+    uint16_t delay; // erase time in ms
+  } erase_commands[4];
 } xspi_t;
 
 
@@ -81,31 +92,53 @@ xspi_wait_tc(xspi_t *xs)
 }
 
 
-static int
-xspi_get_status(xspi_t *xs)
+static uint32_t
+xspi_read_sfdp(xspi_t *xs, uint32_t addr)
 {
   reg_wr(xs->base + XSPI_CR,
          (0b01 << 28) | // FMODE = READ
          1);            // Enable
 
   reg_wr(xs->base + XSPI_DCR1,
-         (31 << 16) | // devsize, made up
-         (0b010 << 24) | // Standard mode
+         (31 << 16) | (0b010 << 24));
+
+  reg_wr(xs->base + XSPI_DCR2, 32);
+
+  reg_wr(xs->base + XSPI_DLR, 3); // Read 4 bytes
+
+  reg_wr(xs->base + XSPI_TCR, 8); // 8 dummy cycles for SFDP
+
+  reg_wr(xs->base + XSPI_CCR,
+         (0b001 << 24) | // Data on single line
+         ( 0b10 << 12) | // 24bit address
+         (0b001 << 8)  | // Address on single line
+         (0b001 << 0)  | // Instruction on single line
          0);
 
-  reg_wr(xs->base + XSPI_DCR2,
-         32 | // prescaler
-         0);
+  reg_wr(xs->base + XSPI_IR, 0x5a); // SFDP read command
+
+  reg_wr(xs->base + XSPI_AR, addr);
+
+  xspi_wait_tc(xs);
+  uint32_t r = reg_rd(xs->base + XSPI_DR);
+  reg_wr(xs->base + XSPI_TCR, 0); // Reset dummy cycles
+  return r;
+}
+
+
+static int
+xspi_get_status(xspi_t *xs)
+{
+  reg_wr(xs->base + XSPI_CR,
+         (0b01 << 28) | 1); // FMODE = READ, Enable
 
   reg_wr(xs->base + XSPI_DLR, 0); // Read one byte
 
   reg_wr(xs->base + XSPI_CCR,
          (0b001 << 24) | // Data on single line
-         (0b000 << 8)  | // No address
-         (0b001 << 0)  | // Instruction on single line
-         0);
+         (0b001 << 0));  // Instruction on single line
 
-  reg_wr(xs->base + XSPI_IR, 0x05); // Get Status
+  reg_wr(xs->base + XSPI_IR, 0x05); // RDSR
 
   xspi_wait_tc(xs);
   return reg_rd8(xs->base + XSPI_DR);
@@ -138,25 +171,12 @@ static error_t
 xspi_cmd(xspi_t *xs, uint8_t cmd)
 {
   reg_wr(xs->base + XSPI_CR,
-         (0b00 << 28) | // FMODE = WRITE
-         1);            // Enable
-
-  reg_wr(xs->base + XSPI_DCR1,
-         (31 << 16) | // devsize, made up
-         (0b010 << 24) | // Standard mode
-         0);
-
-  reg_wr(xs->base + XSPI_DCR2,
-         32 | // prescaler
-         0);
+         (0b00 << 28) | 1); // FMODE = WRITE, Enable
 
   reg_wr(xs->base + XSPI_DLR, 0);
 
   reg_wr(xs->base + XSPI_CCR,
-         (0b000 << 24) | // No data
-         (0b000 << 8)  | // No address
-         (0b001 << 0)  | // Instruction on single line
-         0);
+         (0b001 << 0)); // Instruction on single line
 
   reg_wr(xs->base + XSPI_IR, cmd);
   xspi_wait_tc(xs);
@@ -169,43 +189,60 @@ xspi_erase(struct block_iface *bi, size_t block, size_t count)
 {
   xspi_t *xs = (xspi_t *)bi;
 
-  xspi_wait_ready(xs);
+  while(count) {
+    error_t err = xspi_wait_ready(xs);
+    if(err)
+      return err;
 
-  xspi_cmd(xs, 6); // Write enable
+    xspi_cmd(xs, 6); // Write enable
 
-  uint32_t addr = xs->iface.block_size * block;
+    const uint32_t addr = block << 12; // block_size is always 4096
 
-  reg_wr(xs->base + XSPI_CR,
-         (0b00 << 28) | // FMODE = WRITE
-         1);            // Enable
+    err = ERR_INVALID_ADDRESS;
+    for(int i = 3; i >= 0; i--) {
+      if(xs->erase_commands[i].size == 0)
+        continue;
 
-  reg_wr(xs->base + XSPI_DCR1,
-         (31 << 16) | // devsize, made up
-         (0b010 << 24) | // Standard mode
-         0);
+      size_t chunk = 1 << (xs->erase_commands[i].size - 12);
+      if(chunk > count)
+        continue;
+      if(addr & ((1 << xs->erase_commands[i].size) - 1))
+        continue;
 
-  reg_wr(xs->base + XSPI_DCR2,
-         32 | // prescaler
-         0);
+      int use4byte = addr > 0xffffff;
+      uint8_t cmd = use4byte ? xs->erase_commands[i].cmd4
+                             : xs->erase_commands[i].cmd3;
+      if(cmd == 0xff)
+        continue;
 
-  reg_wr(xs->base + XSPI_DLR, 0);
+      reg_wr(xs->base + XSPI_CR,
+             (0b00 << 28) | 1); // FMODE = WRITE, Enable
 
-  reg_wr(xs->base + XSPI_CCR,
-         (0b000 << 24) | // No data
-         ( 0b10 << 12) | // 24bit address
-         (0b001 << 8)  | // Address on single line
-         (0b001 << 0)  | // Instruction on single line
-         0);
+      reg_wr(xs->base + XSPI_DLR, 0);
 
-  reg_wr(xs->base + XSPI_IR, 0x20); // 24bit ERASE
+      reg_wr(xs->base + XSPI_CCR,
+             (0b000 << 24) |                         // No data
+             (use4byte ? (0b11 << 12) : (0b10 << 12)) | // Address size
+             (0b001 << 8) |                           // Address on single line
+             (0b001 << 0));                           // Instruction on single line
 
-  reg_wr(xs->base + XSPI_AR, addr);
+      reg_wr(xs->base + XSPI_IR, cmd);
+      reg_wr(xs->base + XSPI_AR, addr);
 
-  xspi_wait_tc(xs);
+      xspi_wait_tc(xs);
 
-  xs->state = XSPI_STATE_BUSY;
-  xs->busy_until = clock_get() + 40000; // ~40ms typical 4KB erase
+      xs->state = XSPI_STATE_BUSY;
+      xs->busy_until = clock_get() + xs->erase_commands[i].delay * 1000;
 
+      block += chunk;
+      count -= chunk;
+      err = 0;
+      break;
+    }
+
+    if(err)
+      return err;
+  }
   return 0;
 }
 
@@ -234,30 +271,21 @@ xspi_write(struct block_iface *bi, size_t block,
     xspi_cmd(xs, 6); // Write enable
 
     uint32_t addr = xs->iface.block_size * block + offset;
+    int use4byte = addr > 0xffffff;
 
     reg_wr(xs->base + XSPI_CR,
            (0b00 << 28) |        // FMODE = WRITE
            (XSPI_FTHRES << 8) |  // FIFO threshold
            1);                    // Enable
 
-    reg_wr(xs->base + XSPI_DCR1,
-           (31 << 16) | // devsize, made up
-           (0b010 << 24) | // Standard mode
-           0);
-
-    reg_wr(xs->base + XSPI_DCR2,
-           32 | // prescaler
-           0);
-
     reg_wr(xs->base + XSPI_DLR, to_copy - 1);
     reg_wr(xs->base + XSPI_CCR,
-           (0b001 << 24) | // Data on single line
-           ( 0b10 << 12) | // 24bit address
-           (0b001 << 8)  | // Address on single line
-           (0b001 << 0)  | // Instruction on single line
-           0);
+           (0b001 << 24) |                          // Data on single line
+           (use4byte ? (0b11 << 12) : (0b10 << 12)) | // Address size
+           (0b001 << 8) |                            // Address on single line
+           (0b001 << 0));                            // Instruction on single line
 
-    reg_wr(xs->base + XSPI_IR, 0x2);
+    reg_wr(xs->base + XSPI_IR, use4byte ? 0x12 : 0x02);
 
     reg_wr(xs->base + XSPI_AR, addr);
 
@@ -309,30 +337,22 @@ xspi_read(struct block_iface *bi, size_t block,
     return err;
 
   uint32_t addr = xs->iface.block_size * block + offset;
+  int use4byte = addr > 0xffffff;
 
   reg_wr(xs->base + XSPI_CR,
          (0b01 << 28) |        // FMODE = READ
          (XSPI_FTHRES << 8) |  // FIFO threshold
          1);                    // Enable
 
-  reg_wr(xs->base + XSPI_DCR1,
-         (31 << 16) | // devsize, made up
-         (0b010 << 24) | // Standard mode
-         0);
-
-  reg_wr(xs->base + XSPI_DCR2,
-         32 | // prescaler
-         0);
   reg_wr(xs->base + XSPI_DLR, length - 1);
 
   reg_wr(xs->base + XSPI_CCR,
-         (0b001 << 24) | // Data on single line
-         ( 0b10 << 12) | // 24bit address
-         (0b001 << 8)  | // Address on single line
-         (0b001 << 0)  | // Instruction on single line
-         0);
+         (0b001 << 24) |                          // Data on single line
+         (use4byte ? (0b11 << 12) : (0b10 << 12)) | // Address size
+         (0b001 << 8) |                            // Address on single line
+         (0b001 << 0));                            // Instruction on single line
 
-  reg_wr(xs->base + XSPI_IR, 0x03); // 24bit READ
+  reg_wr(xs->base + XSPI_IR, use4byte ? 0x13 : 0x03);
 
   reg_wr(xs->base + XSPI_AR, addr);
 
@@ -405,6 +425,15 @@ xspi_ctrl(struct block_iface *bi, block_ctrl_op_t op)
 }
 
 
+static const uint16_t erase_time_multipliers[4] = {1, 16, 128, 1000};
+
+static int
+calc_erase_time(uint32_t v)
+{
+  return (1 + (v & 0x1f)) * erase_time_multipliers[(v >> 5) & 3];
+}
+
+
 block_iface_t *
 xspi_norflash_create(void)
 {
@@ -420,20 +449,110 @@ xspi_norflash_create(void)
   gpio_conf_af(GPIO_PN(6), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
   xs->base = XSPI2_BASE;
+  xs->devsize = 31; // Default for SFDP probing
 
   mutex_init(&xs->mutex, "xspi");
   task_waitable_init(&xs->waitq, "xspi");
 
   irq_enable_fn_arg(171, IRQ_LEVEL_SCHED, xspi_irq, xs);
+
+  printf("xspi: ");
+
+  uint32_t sfdp_sig = xspi_read_sfdp(xs, 0);
+  if(sfdp_sig != 0x50444653) {
+    printf("Invalid SFDP signature [0x%x]\n", sfdp_sig);
+    goto bad;
+  }
+
+  uint32_t hdr2 = xspi_read_sfdp(xs, 4);
+  int nph = (hdr2 >> 16) & 0xff;
+
+  uint32_t ptpj = 0;
+  uint32_t ptp4 = 0;
+  for(int i = 0; i <= nph; i++) {
+    uint32_t ph1 = xspi_read_sfdp(xs, 0x8 + i * 8);
+    uint32_t ph2 = xspi_read_sfdp(xs, 0xc + i * 8);
+    if((ph1 & 0xff) == 0)
+      ptpj = ph2 & 0xffffff;
+    if((ph1 & 0xff) == 0x84)
+      ptp4 = ph2 & 0xffffff;
+  }
+
+  if(ptpj == 0) {
+    printf("Missing Flash Parameters\n");
+    goto bad;
+  }
+
+  uint32_t density = xspi_read_sfdp(xs, ptpj + 4);
+  if(density & 0x80000000) {
+    printf("Unsupported density 0x%x\n", density);
+    goto bad;
+  }
+
+  uint32_t size = (density + 1) >> 3;
+  uint8_t devsize = 0;
+  for(uint32_t s = size; s > 1; s >>= 1)
+    devsize++;
+  xs->devsize = devsize;
+
+  xs->iface.num_blocks = size >> 12;
+  xs->iface.block_size = 4096;
+
+  printf("%d kB (%zd sectors", (int)(size >> 10), xs->iface.num_blocks);
+  if(devsize > 24)
+    printf(", 32-bit addr");
+  printf(")  ");
+
+  // Parse erase commands from SFDP
+  uint32_t w = xspi_read_sfdp(xs, ptpj + 0x1c);
+  xs->erase_commands[0].size = w;
+  xs->erase_commands[0].cmd3 = w >> 8;
+  xs->erase_commands[1].size = w >> 16;
+  xs->erase_commands[1].cmd3 = w >> 24;
+
+  w = xspi_read_sfdp(xs, ptpj + 0x20);
+  xs->erase_commands[2].size = w;
+  xs->erase_commands[2].cmd3 = w >> 8;
+  xs->erase_commands[3].size = w >> 16;
+  xs->erase_commands[3].cmd3 = w >> 24;
+
+  w = xspi_read_sfdp(xs, ptpj + 0x24);
+  for(int i = 0; i < 4; i++)
+    xs->erase_commands[i].delay = calc_erase_time(w >> (4 + i * 7));
+
+  if(ptp4) {
+    w = xspi_read_sfdp(xs, ptp4 + 0x4);
+    xs->erase_commands[0].cmd4 = w;
+    xs->erase_commands[1].cmd4 = w >> 8;
+    xs->erase_commands[2].cmd4 = w >> 16;
+    xs->erase_commands[3].cmd4 = w >> 24;
+  } else {
+    for(int i = 0; i < 4; i++)
+      xs->erase_commands[i].cmd4 = 0xff;
+  }
+
+  // Compute prescaler for ~50MHz target SPI clock
+  unsigned int clk = clk_get_freq(CLK_XSPI2);
+  xs->prescaler = clk / 50000000;
+  if(xs->prescaler > 0)
+    xs->prescaler--;
+
+  // Write DCR1/DCR2 once — all operations reuse these
+  reg_wr(xs->base + XSPI_DCR1,
+         (xs->devsize << 16) | (0b010 << 24));
+  reg_wr(xs->base + XSPI_DCR2, xs->prescaler);
+
   xs->iface.erase = xspi_erase;
   xs->iface.write = xspi_write;
   xs->iface.read = xspi_read;
   xs->iface.ctrl = xspi_ctrl;
 
-  xs->iface.num_blocks = 4096; // probe? IDK
-  xs->iface.block_size = 4096;
-
+  printf("%dMHz OK\n", clk / (xs->prescaler + 1) / 1000000);
   return &xs->iface;
+
+ bad:
+  free(xs);
+  return NULL;
 }
 
 
