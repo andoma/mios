@@ -653,7 +653,7 @@ cmd_flashtest(cli_t *cli, int argc, char **argv)
     return ERR_NO_MEMORY;
   }
 
-  static const int test_blocks[] = { 0, 1, 2, 10, 100 };
+  int test_blocks[] = { 0, 1, 2, 10, 100, (int)bi->num_blocks - 1 };
   error_t err = 0;
 
   for(size_t t = 0; t < sizeof(test_blocks)/sizeof(test_blocks[0]); t++) {
