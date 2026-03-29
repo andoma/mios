@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <malloc.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "stm32n6_clk.h"
 #include "stm32n6_pwr.h"
@@ -24,11 +25,15 @@
 #define XSPI_CCR  0x100
 #define XSPI_IR   0x110
 
+#define XSPI_STATE_IDLE 0
+#define XSPI_STATE_BUSY 1
+
 typedef struct xspi {
   block_iface_t iface;
-  //  device_t dev;
   mutex_t mutex;
   uint32_t base;
+  int64_t busy_until;
+  uint8_t state;
 } xspi_t;
 
 
@@ -71,17 +76,31 @@ xspi_get_status(xspi_t *xs)
 
   reg_wr(xs->base + XSPI_IR, 0x05); // Get Status
 
-  return reg_rd8(xs->base + XSPI_DR);
+  int status = reg_rd8(xs->base + XSPI_DR);
+  wait_busy(xs);
+  return status;
 }
 
 static error_t
 xspi_wait_ready(xspi_t *xs)
 {
-  while(1) {
-    int status = xspi_get_status(xs);
-    if((status & 1) == 0)
-      return 0;
+  if(xs->state == XSPI_STATE_IDLE)
+    return 0;
+
+  if(xs->busy_until) {
+    sleep_until(xs->busy_until);
+    xs->busy_until = 0;
   }
+
+  for(int i = 0; i < 500; i++) {
+    int status = xspi_get_status(xs);
+    if((status & 1) == 0) {
+      xs->state = XSPI_STATE_IDLE;
+      return 0;
+    }
+    usleep(1000);
+  }
+  return ERR_FLASH_TIMEOUT;
 }
 
 
@@ -154,7 +173,8 @@ xspi_erase(struct block_iface *bi, size_t block, size_t count)
 
   wait_busy(xs);
 
-  xspi_wait_ready(xs);
+  xs->state = XSPI_STATE_BUSY;
+  xs->busy_until = clock_get() + 40000; // ~40ms typical 4KB erase
 
   return 0;
 }
@@ -211,17 +231,25 @@ xspi_write(struct block_iface *bi, size_t block,
     reg_wr(xs->base + XSPI_AR, addr);
 
     const uint8_t *src = data;
+    size_t i = 0;
 
-    for(size_t i = 0; i < to_copy; i++) {
+    for(; i + 4 <= to_copy; i += 4) {
+      uint32_t w;
+      memcpy(&w, &src[i], 4);
+      reg_wr(xs->base + XSPI_DR, w);
+    }
+    for(; i < to_copy; i++) {
       reg_wr8(xs->base + XSPI_DR, src[i]);
     }
     wait_busy(xs);
+
+    xs->state = XSPI_STATE_BUSY;
+    xs->busy_until = clock_get() + 500; // ~500us typical page program
 
     length -= to_copy;
     data += to_copy;
     offset += to_copy;
   }
-  xspi_wait_ready(xs);
   return 0;
 }
 
@@ -230,6 +258,11 @@ xspi_read(struct block_iface *bi, size_t block,
           size_t offset, void *data, size_t length)
 {
   xspi_t *xs = (xspi_t *)bi;
+
+  error_t err = xspi_wait_ready(xs);
+  if(err)
+    return err;
+
   uint32_t addr = xs->iface.block_size * block + offset;
 
   reg_wr(xs->base + XSPI_CR,
@@ -258,20 +291,33 @@ xspi_read(struct block_iface *bi, size_t block,
   reg_wr(xs->base + XSPI_AR, addr);
 
   uint8_t *dst = data;
-  size_t i = 0;
+  size_t remaining = length;
 
-  // Read back data, ugly, but shuold be sufficient to test
-  while(1) {
+  while(remaining > 0) {
     uint32_t sr = reg_rd(xs->base + XSPI_SR);
-    if(!(sr & (1 << 5)))
-      break; // Not busy == done
     int flevel = (sr >> 8) & 0x7f;
-    if(flevel == 0)
+
+    if(flevel == 0) {
+      if(!(sr & (1 << 5)))
+        break; // Not busy and FIFO empty = transfer done
       continue;
-    dst[i] = reg_rd8(xs->base + XSPI_DR);
-    i++;
-    assert(i <= length);
+    }
+
+    while(flevel >= 4 && remaining >= 4) {
+      uint32_t w = reg_rd(xs->base + XSPI_DR);
+      memcpy(dst, &w, 4);
+      dst += 4;
+      remaining -= 4;
+      flevel -= 4;
+    }
+
+    while(flevel > 0 && remaining > 0) {
+      *dst++ = reg_rd8(xs->base + XSPI_DR);
+      remaining--;
+      flevel--;
+    }
   }
+  wait_busy(xs);
   return 0;
 }
 
@@ -292,7 +338,7 @@ xspi_ctrl(struct block_iface *bi, block_ctrl_op_t op)
     return 0;
 
   case BLOCK_SYNC:
-    return 0;
+    return xspi_wait_ready(xs);
 
   case BLOCK_SUSPEND:
   case BLOCK_SHUTDOWN:
@@ -307,7 +353,7 @@ xspi_ctrl(struct block_iface *bi, block_ctrl_op_t op)
 block_iface_t *
 xspi_norflash_create(void)
 {
-  xspi_t *xs = xalloc(sizeof(xspi_t), 0, MEM_MAY_FAIL);
+  xspi_t *xs = xalloc(sizeof(xspi_t), 0, MEM_MAY_FAIL | MEM_CLEAR);
   if(xs == NULL)
     return NULL;
 
@@ -504,7 +550,84 @@ cmd_flashtest(cli_t *cli, int argc, char **argv)
       cli_printf(cli, "  write %d bytes @ offset %d OK\n", (int)wlen, (int)woff);
     }
 
-    // 4. Full block write+verify
+    // 4. Page boundary crossing writes
+    err = block_erase(bi, blk, 1);
+    if(err) { cli_printf(cli, "  RE-ERASE FAIL (boundary)\n"); break; }
+
+    static const struct { size_t off; size_t len; } boundary_tests[] = {
+      { 192, 128 },   // Crosses one page boundary (192-319)
+      { 128, 512 },   // Crosses two page boundaries (128-639)
+      { 250,  12 },   // Small write crossing boundary (250-261)
+      { 4000, 96 },   // Near end of block (4000-4095)
+    };
+
+    for(size_t bt = 0; bt < sizeof(boundary_tests)/sizeof(boundary_tests[0]); bt++) {
+      size_t woff = boundary_tests[bt].off;
+      size_t wlen = boundary_tests[bt].len;
+
+      for(size_t i = 0; i < wlen; i++)
+        wbuf[i] = (blk + i + woff) & 0xff;
+
+      err = block_write(bi, blk, woff, wbuf, wlen);
+      if(err) {
+        cli_printf(cli, "  BOUNDARY WRITE(%d@%d) FAIL: %d\n",
+                   (int)wlen, (int)woff, err);
+        goto done;
+      }
+
+      memset(rbuf, 0x55, wlen);
+      err = block_read(bi, blk, woff, rbuf, wlen);
+      if(err) {
+        cli_printf(cli, "  BOUNDARY READ(%d@%d) FAIL: %d\n",
+                   (int)wlen, (int)woff, err);
+        goto done;
+      }
+
+      bad = 0;
+      int first_bad = -1;
+      for(size_t i = 0; i < wlen; i++) {
+        if(rbuf[i] != wbuf[i]) {
+          if(first_bad < 0) first_bad = i;
+          bad++;
+        }
+      }
+      if(bad) {
+        cli_printf(cli, "  BOUNDARY VERIFY(%d@%d) FAIL: %d mismatches, first at %d\n",
+                   (int)wlen, (int)woff, bad, first_bad);
+        err = ERR_MISMATCH;
+        goto done;
+      }
+      cli_printf(cli, "  boundary write %d bytes @ offset %d OK\n",
+                 (int)wlen, (int)woff);
+    }
+
+    // 5. Rapid erase/write/read cycles (simulates LittleFS pattern)
+    for(int r = 0; r < 5; r++) {
+      err = block_erase(bi, blk, 1);
+      if(err) { cli_printf(cli, "  RAPID ERASE FAIL iter %d\n", r); goto done; }
+
+      // Write 32 bytes at offset 0 (metadata-like)
+      for(size_t i = 0; i < 32; i++)
+        wbuf[i] = (r * 17 + i + blk) & 0xff;
+      err = block_write(bi, blk, 0, wbuf, 32);
+      if(err) { cli_printf(cli, "  RAPID WRITE FAIL iter %d\n", r); goto done; }
+
+      // Immediate small read (no printf between write and read)
+      memset(rbuf, 0x55, 32);
+      err = block_read(bi, blk, 0, rbuf, 32);
+      if(err) { cli_printf(cli, "  RAPID READ FAIL iter %d\n", r); goto done; }
+
+      bad = 0;
+      for(size_t i = 0; i < 32; i++)
+        if(rbuf[i] != wbuf[i]) bad++;
+      if(bad) {
+        cli_printf(cli, "  RAPID VERIFY FAIL iter %d: %d mismatches\n", r, bad);
+        err = ERR_MISMATCH; goto done;
+      }
+    }
+    cli_printf(cli, "  rapid erase/write/read OK\n");
+
+    // 6. Full block write+verify
     err = block_erase(bi, blk, 1);
     if(err) { cli_printf(cli, "  RE-ERASE FAIL\n"); break; }
 

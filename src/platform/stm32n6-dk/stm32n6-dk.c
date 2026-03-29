@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <mios/io.h>
 #include <mios/task.h>
+#include <mios/block.h>
+#include <mios/fs.h>
+#include <mios/cli.h>
 #include "stm32n6_clk.h"
 #include "stm32n6_pwr.h"
 #include "stm32n6_usb.h"
@@ -58,3 +61,17 @@ board_init_late(void)
   stm32n6_eth_init(GPIO_UNUSED, GPIO_PD(12), GPIO_PD(1),
                    1, ETHPHY_MODE_RGMII);
 }
+
+block_iface_t *xspi_norflash_create(void);
+
+static error_t
+cmd_fs(cli_t *cli, int argc, char **argv)
+{
+  block_iface_t *bi = xspi_norflash_create();
+  if(bi == NULL)
+    return ERR_OPERATION_FAILED;
+  fs_init(bi);
+  return 0;
+}
+
+CLI_CMD_DEF("fs", cmd_fs);
