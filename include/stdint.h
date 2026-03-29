@@ -17,7 +17,7 @@ typedef __UINTPTR_TYPE__ uintptr_t;
 #define INT8_MIN    (-0x7f - 1)
 #define INT16_MIN   (-0x7fff - 1)
 #define INT32_MIN   (-0x7fffffff - 1)
-#define INT64_MIN   (-__INT64_MAX__  1)
+#define INT64_MIN   (-__INT64_MAX__ - 1)
 
 #define INT8_MAX    0x7f
 #define INT16_MAX   0x7fff
