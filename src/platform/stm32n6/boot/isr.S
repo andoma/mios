@@ -5,25 +5,26 @@
         .global     bl_start
         .thumb_func
 bl_start:
-        // Boot ROM jumps here. MSP points to boot ROM's stack in AXISRAM2.
-        // Just use it as-is. Skip DTCM for now.
+        // Boot ROM passes boot context address in r0.
+        // Don't touch r0 — it becomes the argument to bl_main(ctx).
 
-        adr r0, #bl_start
-        msr msp, r0
+        // Set MSP to just below our code (stack grows down)
+        ldr r1, =bl_start
+        msr msp, r1
 
-        // Open debug access port
-        ldr r0, = 0x56009E90
-        mov r1, #0xB4
-        str r1, [r0]
+        // Open debug access port (BSEC_AP_UNLOCK = 0xB4)
+        ldr r1, = 0x56009E90
+        mov r2, #0xB4
+        str r2, [r1]
 
-        // Enable non-secure/secure debug
-        ldr r0, = 0x56009E8C
-        ldr r1, = 0xB451B400
-        str r1, [r0]
+        // Enable non-secure/secure debug (BSEC_DBGCR = 0xB451B400)
+        ldr r1, = 0x56009E8C
+        ldr r2, = 0xB451B400
+        str r2, [r1]
 
         // Clear stack limits
-        movs r0, #0
-        msr msplim, r0
-        msr psplim, r0
+        mov r1, #0
+        msr msplim, r1
+        msr psplim, r1
 
         b bl_main
