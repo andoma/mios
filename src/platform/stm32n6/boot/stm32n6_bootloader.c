@@ -169,8 +169,20 @@ bl_delay(int count)
 // Entry point (called from assembly after DTCM/MSP init)
 // =====================================================================
 
+// Boot ROM context structure (UM3234 Table 23)
+struct boot_context {
+  uint32_t boot_partition;     // 0=none, 1=FSBL1, 2=FSBL2
+  uint32_t sd_err[6];         // SD error counters
+  uint32_t emmc_status[3];    // eMMC status
+  uint16_t boot_interface;    // 4=sNOR XSPI, 5=UART, 6=USB, 8=HyperFlash
+  uint16_t boot_instance;
+  uint32_t hse_clock_hz;
+  uint32_t reserved;
+  uint32_t auth_status;       // 0=none, 1=failed, 2=success
+} __attribute__((packed));
+
 void __attribute__((noreturn)) BL
-bl_main(void)
+bl_main(void *ctx_arg)
 {
   // Blink LED to show we're alive
   gpio_conf_output(GPIO_PG(10), GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
@@ -185,6 +197,38 @@ bl_main(void)
 
   BL_STR(msg_banner, "\nMIOS FSBL v1\n");
   bl_puts(msg_banner);
+
+  // Print boot context if valid (should be in AXISRAM2: 0x24100000 or 0x34100000)
+  uint32_t ctx_addr = (uint32_t)ctx_arg;
+  if(ctx_addr == 0x24100000 || ctx_addr == 0x34100000) {
+    const struct boot_context *ctx = ctx_arg;
+    BL_STR(msg_part, "  partition: ");
+    BL_STR(msg_iface, "  interface: ");
+    BL_STR(msg_hse, "  HSE: ");
+    BL_STR(msg_auth, "  auth: ");
+    BL_STR(msg_ctx, "  ctx @ ");
+    BL_STR(msg_nl, "\n");
+
+    bl_puts(msg_ctx);
+    bl_puthex((uint32_t)ctx);
+    bl_puts(msg_nl);
+
+    bl_puts(msg_part);
+    bl_puthex(ctx->boot_partition);
+    bl_puts(msg_nl);
+
+    bl_puts(msg_iface);
+    bl_puthex(ctx->boot_interface);
+    bl_puts(msg_nl);
+
+    bl_puts(msg_hse);
+    bl_puthex(ctx->hse_clock_hz);
+    bl_puts(msg_nl);
+
+    bl_puts(msg_auth);
+    bl_puthex(ctx->auth_status);
+    bl_puts(msg_nl);
+  }
 
   BL_STR(msg_halt, "No application, halting.\n");
   bl_puts(msg_halt);
