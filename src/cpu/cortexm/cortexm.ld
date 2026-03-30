@@ -84,6 +84,12 @@ SECTIONS {
                 . = ALIGN(4);
 
                 . = ALIGN(4);
+                _copyhandler_array_begin = .;
+                KEEP(*(SORT_BY_NAME(copyhandler.*)))
+                _copyhandler_array_end = .;
+                . = ALIGN(4);
+
+                . = ALIGN(4);
                 _driver_array_begin = .;
                 KEEP(*(SORT_BY_NAME(driver.*)))
                 _driver_array_end = .;

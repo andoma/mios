@@ -18,6 +18,8 @@ SRCS += ${SRC}/util/alert.c \
 	${SRC}/util/fdt.c \
 	${SRC}/util/elf_to_bin.c \
 	${SRC}/util/bin_to_ota.c \
+	${SRC}/util/copy.c \
+	${SRC}/util/block_stream.c \
 	${SRC}/util/clock_servo.c \
 
 ${MOS}/util/%.o : CFLAGS += ${NOFPU}

@@ -175,3 +175,17 @@ cmd_curl(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("curl", cmd_curl);
+
+
+#include <mios/copy.h>
+
+static error_t
+http_copy_read_to(const char *url, stream_t *output)
+{
+  return http_get(url, output, NULL);
+}
+
+COPY_HANDLER_DEF(http, 1,
+  .prefix = "http://",
+  .read_to = http_copy_read_to,
+);

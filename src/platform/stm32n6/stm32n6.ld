@@ -1,6 +1,6 @@
 MEMORY {
          VTBL  (rx) : ORIGIN = 0x24000000, LENGTH = 1K
-         RAM   (xrw): ORIGIN = 0x24000400, LENGTH = 128K
+         RAM   (xrw): ORIGIN = 0x24000400, LENGTH = 256K
 }
 
 SECTIONS {
@@ -84,6 +84,12 @@ SECTIONS {
                 _ghook_array_begin = .;
                 KEEP(*(ghook))
                 _ghook_array_end = .;
+                . = ALIGN(4);
+
+                . = ALIGN(4);
+                _copyhandler_array_begin = .;
+                KEEP(*(SORT_BY_NAME(copyhandler.*)))
+                _copyhandler_array_end = .;
                 . = ALIGN(4);
 
                 . = ALIGN(4);

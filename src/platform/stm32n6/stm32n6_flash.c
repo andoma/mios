@@ -1,8 +1,12 @@
 #include "stm32n6_flash.h"
 
 #include <mios/fs.h>
+#include <mios/copy.h>
 
 #include <stdio.h>
+#include <string.h>
+
+stream_t *block_write_stream_create(block_iface_t *bi);
 
 block_iface_t *xspi_norflash_create(void);
 
@@ -96,3 +100,34 @@ stm32n6_flash_init(void)
 
   fs_init(flash_partitions[FLASH_PARTITION_FILESYSTEM]);
 }
+
+
+// =====================================================================
+// Copy handler for "app:" protocol
+// =====================================================================
+
+static int
+app_slot_from_url(const char *url)
+{
+  if(!strcmp(url, "a"))
+    return FLASH_PARTITION_APP_A;
+  if(!strcmp(url, "b"))
+    return FLASH_PARTITION_APP_B;
+  return -1;
+}
+
+
+static stream_t *
+app_copy_open_write(const char *url)
+{
+  int slot = app_slot_from_url(url + 4); // Skip "app:" prefix
+  if(slot < 0)
+    return NULL;
+  return block_write_stream_create(flash_partitions[slot]);
+}
+
+
+COPY_HANDLER_DEF(app, 5,
+  .prefix = "app:",
+  .open_write = app_copy_open_write,
+);
