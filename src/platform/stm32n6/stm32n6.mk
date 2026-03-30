@@ -6,7 +6,7 @@ CPPFLAGS += -iquote${P} -include ${P}/stm32n6.h
 
 LDSCRIPT ?= ${P}/stm32n6$(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),_bootloader,).ld
 
-ENTRYPOINT = bl_start
+# ENTRYPOINT = bl_start
 
 include ${SRC}/cpu/cortexm/cortexm55.mk
 
@@ -17,6 +17,7 @@ SRCS += ${C}/systick.c \
 	${P}/stm32n6_gpio.c \
 	${P}/stm32n6_uart.c \
 	${P}/stm32n6_xspi.c \
+	${P}/stm32n6_flash.c \
 	${P}/stm32n6_usb.c \
 	${P}/stm32n6_spi.c \
 	${P}/stm32n6_i2c.c \
