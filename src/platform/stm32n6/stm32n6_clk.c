@@ -104,7 +104,10 @@ stm32n6_init_pll(unsigned int hse_freq)
   // OTGPHY2SEL == 2 (ic15_ck)
   reg_set_bits(RCC_CCIPR6, 20, 2, 2);
 
-
+  // Enable all peripheral clocks during sleep mode (LPENR registers).
+  // Without this, WFI stops peripheral clocks and interrupts can't fire.
+  for(int i = 0; i < 14; i++)
+    reg_wr(RCC_BASE + 0x284 + i * 4, 0xFFFFFFFF);
 
   return NULL;
 }
