@@ -131,3 +131,44 @@ COPY_HANDLER_DEF(app, 5,
   .prefix = "app:",
   .open_write = app_copy_open_write,
 );
+
+
+// =====================================================================
+// Boot selector: 'A' or 'B' stored at byte 0 of the boot selector
+// partition. 0xFF (erased) defaults to 'A'.
+// =====================================================================
+
+#include <mios/cli.h>
+
+static error_t
+cmd_bootslot(cli_t *cli, int argc, char **argv)
+{
+  block_iface_t *bi = flash_partitions[FLASH_PARTITION_BOOTSELECTOR];
+  if(bi == NULL)
+    return ERR_OPERATION_FAILED;
+
+  if(argc == 1) {
+    // Read current slot
+    uint8_t sel;
+    error_t err = block_read(bi, 0, 0, &sel, 1);
+    if(err) return err;
+    cli_printf(cli, "Boot slot: %c\n", sel == 'B' ? 'B' : 'A');
+    return 0;
+  }
+
+  if(argc == 2 && (argv[1][0] == 'a' || argv[1][0] == 'A' ||
+                    argv[1][0] == 'b' || argv[1][0] == 'B')) {
+    uint8_t sel = (argv[1][0] | 0x20) == 'b' ? 'B' : 'A';
+    error_t err = block_erase(bi, 0, 1);
+    if(err) return err;
+    err = block_write(bi, 0, 0, &sel, 1);
+    if(err) return err;
+    cli_printf(cli, "Boot slot set to %c\n", sel);
+    return 0;
+  }
+
+  cli_printf(cli, "Usage: bootslot [a|b]\n");
+  return ERR_INVALID_ARGS;
+}
+
+CLI_CMD_DEF("bootslot", cmd_bootslot);
