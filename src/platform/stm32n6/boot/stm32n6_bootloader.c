@@ -284,9 +284,6 @@ bl_delay(int count)
 #define XSPI_CCR  0x100
 #define XSPI_IR   0x110
 
-// XSPI2 memory-mapped base (datasheet: XSPI2 at 0x70000000)
-#define FLASH_MMAP_BASE  0x70000000
-
 static void BL
 bl_xspi_wait_busy(uint32_t base)
 {
@@ -330,38 +327,40 @@ bl_xspi_init(void)
   reg_set_bit(PWR_SVMCR3, 9);  // VDDIO3SV
   reg_set_bit(PWR_SVMCR3, 1);  // VDDIO3VMEN
 
-  // Reset XSPI subsystem
-
-  rst_assert(CLK_XSPI1);
-  rst_assert(CLK_XSPI2);
-  rst_assert(CLK_XSPIM);
-  for(volatile int i = 0; i < 100; i++) {}
-  rst_deassert(CLK_XSPI1);
-  rst_deassert(CLK_XSPI2);
-  rst_deassert(CLK_XSPIM);
-
-  // Enable clocks
-  clk_enable(CLK_XSPI2);
+  // Boot ROM used XSPI1 (MODE=1) to load us. Use it to reset the flash
+  // before switching to XSPI2, in case CubeProgrammer left it in a
+  // non-standard mode that persists across NRST.
+  clk_enable(CLK_XSPI1);
   clk_enable(CLK_XSPIM);
 
-  // XSPIM MODE=0: XSPI2→P2 (same as MIOS)
-  reg_wr(XSPIM_BASE, 0x00);
+  // Flash software reset via XSPI1 (boot ROM's controller, known working)
+  reg_wr(XSPI1_BASE + XSPI_FCR, 0x1F);  // Clear all flags
+  reg_wr(XSPI1_BASE + XSPI_TCR, 0);     // No dummy cycles
 
-  // GPIO pins for NOR flash
-  gpio_conf_af(GPIO_PN(1), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_PN(2), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_PN(3), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
-  gpio_conf_af(GPIO_PN(6), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  static const uint8_t reset_cmds[] BL_DATA = { 0x66, 0x99 };
+  for(int c = 0; c < 2; c++) {
+    reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1); // FMODE=WRITE, EN
+    reg_wr(XSPI1_BASE + XSPI_DLR, 0);
+    reg_wr(XSPI1_BASE + XSPI_CCR, (0b001 << 0));     // Instruction only
+    reg_wr(XSPI1_BASE + XSPI_IR, reset_cmds[c]);
+    while(!(reg_rd(XSPI1_BASE + XSPI_SR) & (1 << 1))) {} // Wait TCF
+    reg_wr(XSPI1_BASE + XSPI_FCR, (1 << 1));
+  }
+  for(volatile int i = 0; i < 10000; i++) {} // Wait for flash reset
 
-  // Configure XSPI2
-  reg_wr(XSPI2_BASE + XSPI_DCR1,
+  // Keep using XSPI1 (MODE=1, boot ROM's config) — don't switch XSPIM.
+  // The MODE=1→0 switch doesn't work reliably after CubeProgrammer + NRST.
+  // Configure XSPI1 for our use.
+  reg_wr(XSPI1_BASE + XSPI_CR, 0);    // Disable
+  reg_wr(XSPI1_BASE + XSPI_DCR1,
          (23 << 16) | (0b010 << 24));  // DEVSIZE=23, standard mode
-  reg_wr(XSPI2_BASE + XSPI_DCR2, 4);  // Prescaler=4 → ~30MHz SPI clock
-  reg_wr(XSPI2_BASE + XSPI_TCR, 0);   // No dummy cycles
+  reg_wr(XSPI1_BASE + XSPI_DCR2, 4);  // Prescaler=4 → ~30MHz
+  reg_wr(XSPI1_BASE + XSPI_TCR, 0);   // No dummy cycles
 }
 
-// XSPI2 memory-mapped base (datasheet: XSPI2 bank at 0x70000000)
-#define FLASH_MMAP_BASE  0x70000000
+// XSPI1 memory-mapped base (datasheet: XSPI1 bank at 0x90000000)
+// FSBL uses XSPI1 with XSPIM MODE=1 (boot ROM's config, XSPI1→P2)
+#define FLASH_MMAP_BASE  0x90000000
 
 static void BL
 bl_xspi_mmap_enable(uint32_t base)
@@ -541,7 +540,7 @@ bl_main(void *ctx_arg)
 
   // Initialize XSPI2 and switch to memory-mapped mode
   bl_xspi_init();
-  bl_xspi_mmap_enable(XSPI2_BASE);
+  bl_xspi_mmap_enable(XSPI1_BASE);
 
   // Try to load ELF from App A partition
   BL_STR(msg_app_a, "Loading App A:\n");
@@ -574,8 +573,8 @@ bl_main(void *ctx_arg)
   // VTOR is typically at the start of the first PT_LOAD segment)
   // The application's startup code will set VTOR itself.
 
-  // Reset XSPI subsystem for clean MIOS handoff
-  reg_wr(XSPI2_BASE + XSPI_CR, 0);
+  // Reset XSPI and switch to MODE=0 for MIOS (uses XSPI2)
+  reg_wr(XSPI1_BASE + XSPI_CR, 0);
   rst_assert(CLK_XSPI1);
   rst_assert(CLK_XSPI2);
   rst_assert(CLK_XSPIM);
@@ -583,6 +582,7 @@ bl_main(void *ctx_arg)
   rst_deassert(CLK_XSPI1);
   rst_deassert(CLK_XSPI2);
   rst_deassert(CLK_XSPIM);
+  reg_wr(XSPIM_BASE, 0x00); // MODE=0: XSPI2→P2
 
   // Jump to application
   typedef void (*app_entry_t)(void);
