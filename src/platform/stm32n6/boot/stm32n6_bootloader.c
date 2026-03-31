@@ -569,7 +569,21 @@ bl_main(void *ctx_arg)
 
   BL_STR(msg_nl2, "\n");
 
-  // Initialize XSPI2 and switch to memory-mapped mode
+  // Read and update boot status (BSEC scratch reg, survives reset)
+#include "stm32n6_bootstatus.h"
+
+  uint32_t bootstatus = reg_rd(BSEC_SCRATCH0);
+  bootstatus |= BOOTSTATUS_FSBL_RAN;
+
+  // Record which FSBL slot ran
+  uint32_t ctx_addr = (uint32_t)ctx_arg;
+  if(ctx_addr == 0x24100000 || ctx_addr == 0x34100000) {
+    const struct boot_context *ctx = ctx_arg;
+    if(ctx->boot_partition == 2)
+      bootstatus |= BOOTSTATUS_FSBL_SLOT_B;
+  }
+
+  // Initialize XSPI and switch to memory-mapped mode
   bl_xspi_init();
   bl_xspi_mmap_enable(XSPI1_BASE);
 
@@ -577,34 +591,63 @@ bl_main(void *ctx_arg)
 
   // Read boot selector: 'B' = slot B, anything else = slot A (default)
   uint8_t selector = flash[BOOTSELECTOR_OFFSET];
-  int try_b_first = (selector == 'B');
+  int primary_is_b = (selector == 'B');
 
-  uint32_t first_offset  = try_b_first ? APP_B_OFFSET : APP_A_OFFSET;
-  uint32_t second_offset = try_b_first ? APP_A_OFFSET : APP_B_OFFSET;
+  // Determine which slots to try, respecting dirty bits
+  uint32_t primary_dirty = primary_is_b ? BOOTSTATUS_APP_B_DIRTY
+                                        : BOOTSTATUS_APP_A_DIRTY;
+  uint32_t fallback_dirty = primary_is_b ? BOOTSTATUS_APP_A_DIRTY
+                                         : BOOTSTATUS_APP_B_DIRTY;
 
-  {
-    BL_STR(msg_slot, "Boot slot: ");
-    bl_puts(msg_slot);
-    bl_putchar(try_b_first ? 'B' : 'A');
+  uint32_t primary_offset  = primary_is_b ? APP_B_OFFSET : APP_A_OFFSET;
+  uint32_t fallback_offset = primary_is_b ? APP_A_OFFSET : APP_B_OFFSET;
+
+  int entry = -1;
+  int booted_b = primary_is_b;
+
+  if(!(bootstatus & primary_dirty)) {
+    // Primary slot is clean — try it
+    BL_STR(msg_try, "Boot ");
+    bl_puts(msg_try);
+    bl_putchar(primary_is_b ? 'B' : 'A');
     bl_puts(msg_nl2);
+
+    bootstatus |= primary_dirty;
+    if(primary_is_b)
+      bootstatus |= BOOTSTATUS_BOOTED_B;
+    else
+      bootstatus &= ~BOOTSTATUS_BOOTED_B;
+    reg_wr(BSEC_SCRATCH0, bootstatus);
+
+    entry = bl_load_elf(flash + primary_offset);
+  } else {
+    BL_STR(msg_dirty, "Slot ");
+    bl_puts(msg_dirty);
+    bl_putchar(primary_is_b ? 'B' : 'A');
+    BL_STR(msg_d2, " dirty, skip\n");
+    bl_puts(msg_d2);
   }
 
-  // Try primary slot
-  {
-    BL_STR(msg_load, "Loading: ");
-    bl_puts(msg_load);
-  }
-  int entry = bl_load_elf(flash + first_offset);
-
-  if(entry < 0) {
-    // Fallback to other slot
-    BL_STR(msg_fb, "Fallback: ");
+  if(entry < 0 && !(bootstatus & fallback_dirty)) {
+    // Fallback slot is clean — try it
+    booted_b = !primary_is_b;
+    BL_STR(msg_fb, "Fallback ");
     bl_puts(msg_fb);
-    entry = bl_load_elf(flash + second_offset);
+    bl_putchar(booted_b ? 'B' : 'A');
+    bl_puts(msg_nl2);
+
+    bootstatus |= fallback_dirty;
+    if(booted_b)
+      bootstatus |= BOOTSTATUS_BOOTED_B;
+    else
+      bootstatus &= ~BOOTSTATUS_BOOTED_B;
+    reg_wr(BSEC_SCRATCH0, bootstatus);
+
+    entry = bl_load_elf(flash + fallback_offset);
   }
 
   if(entry < 0) {
-    BL_STR(msg_halt, "No valid application, halting.\n");
+    BL_STR(msg_halt, "No bootable application, halting.\n");
     bl_puts(msg_halt);
     while(1) {}
   }
