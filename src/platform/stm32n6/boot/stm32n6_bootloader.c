@@ -356,11 +356,14 @@ bl_xspi_init(void)
   // Configure XSPI2
   reg_wr(XSPI2_BASE + XSPI_DCR1,
          (23 << 16) | (0b010 << 24));  // DEVSIZE=23, standard mode
-  reg_wr(XSPI2_BASE + XSPI_DCR2, 32); // Conservative prescaler
+  reg_wr(XSPI2_BASE + XSPI_DCR2, 4);  // Prescaler=4 → ~30MHz SPI clock
   reg_wr(XSPI2_BASE + XSPI_TCR, 0);   // No dummy cycles
 }
 
-static void __attribute__((unused)) BL
+// XSPI2 memory-mapped base (datasheet: XSPI2 bank at 0x70000000)
+#define FLASH_MMAP_BASE  0x70000000
+
+static void BL
 bl_xspi_mmap_enable(uint32_t base)
 {
   reg_wr(base + XSPI_CR, 0); // Disable
@@ -419,35 +422,13 @@ typedef struct {
 #define APP_A_OFFSET  0x100000
 #define APP_B_OFFSET  0x300000
 
-// Read from flash via XSPI1 indirect mode (TCF-based wait)
 static void BL
-bl_flash_read(uint32_t addr, void *dst, uint32_t len)
+bl_memcpy(void *dst, const void *src, uint32_t len)
 {
   uint8_t *d = dst;
-  while(len > 0) {
-    uint32_t chunk = len > 4 ? 4 : len;
-
-    reg_wr(XSPI2_BASE + XSPI_CR, (0b01 << 28) | 1); // FMODE=READ, EN
-    reg_wr(XSPI2_BASE + XSPI_DLR, chunk - 1);
-    reg_wr(XSPI2_BASE + XSPI_CCR,
-           (0b001 << 24) |  // Data single line
-           (0b10 << 12) |   // 24-bit address
-           (0b001 << 8) |   // Address single line
-           (0b001 << 0));   // Instruction single line
-    reg_wr(XSPI2_BASE + XSPI_IR, 0x03);
-    reg_wr(XSPI2_BASE + XSPI_AR, addr);
-
-    while(!(reg_rd(XSPI2_BASE + XSPI_SR) & (1 << 1))) {} // Wait TCF
-    uint32_t w = reg_rd(XSPI2_BASE + XSPI_DR);
-    reg_wr(XSPI2_BASE + XSPI_FCR, (1 << 1)); // Clear TCF
-
-    for(uint32_t i = 0; i < chunk; i++)
-      d[i] = (w >> (i * 8)) & 0xFF;
-
-    d += chunk;
-    addr += chunk;
-    len -= chunk;
-  }
+  const uint8_t *s = src;
+  while(len--)
+    *d++ = *s++;
 }
 
 static void BL
@@ -459,37 +440,34 @@ bl_memset(void *dst, int val, uint32_t len)
 }
 
 static int BL
-bl_load_elf(uint32_t flash_offset)
+bl_load_elf(const uint8_t *base)
 {
-  Elf32_Ehdr ehdr;
-  bl_flash_read(flash_offset, &ehdr, sizeof(ehdr));
+  const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)base;
 
   // Validate ELF magic
-  if(ehdr.e_ident[0] != 0x7f ||
-     ehdr.e_ident[1] != 'E' ||
-     ehdr.e_ident[2] != 'L' ||
-     ehdr.e_ident[3] != 'F') {
+  if(ehdr->e_ident[0] != 0x7f ||
+     ehdr->e_ident[1] != 'E' ||
+     ehdr->e_ident[2] != 'L' ||
+     ehdr->e_ident[3] != 'F') {
     BL_STR(msg, "  Not an ELF\n");
     bl_puts(msg);
     return -1;
   }
 
-  if(ehdr.e_ident[EI_CLASS] != ELFCLASS32 || ehdr.e_machine != EM_ARM) {
+  if(ehdr->e_ident[EI_CLASS] != ELFCLASS32 || ehdr->e_machine != EM_ARM) {
     BL_STR(msg, "  Not ARM32 ELF\n");
     bl_puts(msg);
     return -1;
   }
 
-  for(int i = 0; i < ehdr.e_phnum; i++) {
-    Elf32_Phdr phdr;
-    bl_flash_read(flash_offset + ehdr.e_phoff + i * sizeof(Elf32_Phdr),
-                  &phdr, sizeof(phdr));
+  const Elf32_Phdr *phdr = (const Elf32_Phdr *)(base + ehdr->e_phoff);
 
-    if(phdr.p_type != PT_LOAD)
+  for(int i = 0; i < ehdr->e_phnum; i++) {
+    if(phdr[i].p_type != PT_LOAD)
       continue;
 
     // Skip segments targeting the bootloader's own memory (download buffer)
-    if(phdr.p_paddr >= 0x34180000 && phdr.p_paddr < 0x34200000)
+    if(phdr[i].p_paddr >= 0x34180000 && phdr[i].p_paddr < 0x34200000)
       continue;
 
     BL_STR(msg_load, "  LOAD ");
@@ -498,27 +476,27 @@ bl_load_elf(uint32_t flash_offset)
     BL_STR(msg_bytes, " bytes)\n");
 
     bl_puts(msg_load);
-    bl_puthex(phdr.p_offset);
+    bl_puthex(phdr[i].p_offset);
     bl_puts(msg_arrow);
-    bl_puthex(phdr.p_paddr);
+    bl_puthex(phdr[i].p_paddr);
     bl_puts(msg_sz);
-    bl_puthex(phdr.p_filesz);
+    bl_puthex(phdr[i].p_filesz);
     bl_puts(msg_bytes);
 
-    // Read segment from flash to RAM
-    bl_flash_read(flash_offset + phdr.p_offset,
-                  (void *)phdr.p_paddr,
-                  phdr.p_filesz);
+    // Copy segment from memory-mapped flash to RAM
+    bl_memcpy((void *)phdr[i].p_paddr,
+              base + phdr[i].p_offset,
+              phdr[i].p_filesz);
 
     // Zero-fill BSS (memsz > filesz)
-    if(phdr.p_memsz > phdr.p_filesz) {
-      bl_memset((void *)(phdr.p_paddr + phdr.p_filesz),
+    if(phdr[i].p_memsz > phdr[i].p_filesz) {
+      bl_memset((void *)(phdr[i].p_paddr + phdr[i].p_filesz),
                 0,
-                phdr.p_memsz - phdr.p_filesz);
+                phdr[i].p_memsz - phdr[i].p_filesz);
     }
   }
 
-  return ehdr.e_entry;
+  return ehdr->e_entry;
 }
 
 // =====================================================================
@@ -561,21 +539,23 @@ bl_main(void *ctx_arg)
 
   BL_STR(msg_nl2, "\n");
 
-  // Initialize XSPI2 for flash access
+  // Initialize XSPI2 and switch to memory-mapped mode
   bl_xspi_init();
+  bl_xspi_mmap_enable(XSPI2_BASE);
 
   // Try to load ELF from App A partition
   BL_STR(msg_app_a, "Loading App A:\n");
   bl_puts(msg_app_a);
 
-  int entry = bl_load_elf(APP_A_OFFSET);
+  const uint8_t *flash = (const uint8_t *)FLASH_MMAP_BASE;
+  int entry = bl_load_elf(flash + APP_A_OFFSET);
 
   if(entry < 0) {
     // Try App B
     BL_STR(msg_app_b, "Loading App B:\n");
     bl_puts(msg_app_b);
 
-    entry = bl_load_elf(APP_B_OFFSET);
+    entry = bl_load_elf(flash + APP_B_OFFSET);
   }
 
   if(entry < 0) {
