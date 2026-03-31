@@ -262,6 +262,32 @@ bl_delay(int count)
 }
 
 // =====================================================================
+// =====================================================================
+// Watchdog
+// =====================================================================
+
+#include "stm32n6_wdog.h"
+
+#define WDOG_TIMEOUT_SEC 3
+#define WDOG_HZ 128
+
+static void BL
+bl_wdog_init(void)
+{
+  reg_wr(IWDG_KR, 0x5555);
+  reg_wr(IWDG_RLR, WDOG_HZ * WDOG_TIMEOUT_SEC);
+  reg_wr(IWDG_PR, 6);  // Prescaler (/256) for 32768 -> WDOG_HZ
+  reg_wr(IWDG_KR, 0xAAAA);
+  reg_wr(IWDG_KR, 0xCCCC);
+}
+
+static void BL
+bl_wdog_kick(void)
+{
+  reg_wr(IWDG_KR, 0xAAAA);
+}
+
+// =====================================================================
 // XSPI1 memory-mapped mode
 // Boot ROM already configured XSPI1→XSPIM_P2 (NOR flash) in indirect
 // mode. We switch to memory-mapped mode so flash appears at 0x91000000
@@ -484,6 +510,7 @@ bl_load_elf(const uint8_t *base)
     bl_puts(msg_bytes);
 
     // Copy segment from memory-mapped flash to RAM
+    bl_wdog_kick();
     bl_memcpy((void *)phdr[i].p_paddr,
               base + phdr[i].p_offset,
               phdr[i].p_filesz);
@@ -521,6 +548,9 @@ struct boot_context {
 void __attribute__((noreturn)) BL
 bl_main(void *ctx_arg)
 {
+  // Start watchdog — resets if FSBL or app startup hangs
+  bl_wdog_init();
+
   // Blink LED to show we're alive
   gpio_conf_output(GPIO_PG(10), GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   for(int n = 0; n < 6; n++) {
