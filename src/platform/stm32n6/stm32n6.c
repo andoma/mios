@@ -124,7 +124,8 @@ boot_confirm(void)
 
   reg_wr(BSEC_SCRATCH0, bs);
 
-  evlog(LOG_INFO, "Booted via application slot %c (A:%s B:%s)",
+  evlog(LOG_INFO, "Booted FSBL:%c App:%c (A:%s B:%s)",
+        (bs & BOOTSTATUS_FSBL_SLOT_B) ? 'B' : 'A',
         (bs & BOOTSTATUS_BOOTED_B) ? 'B' : 'A',
         (bs & BOOTSTATUS_APP_A_DIRTY) ? "dirty" : "ok",
         (bs & BOOTSTATUS_APP_B_DIRTY) ? "dirty" : "ok");
