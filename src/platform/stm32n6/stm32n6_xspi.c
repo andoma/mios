@@ -456,7 +456,7 @@ xspi_norflash_create(void)
 
   irq_enable_fn_arg(171, IRQ_LEVEL_SCHED, xspi_irq, xs);
 
-  printf("xspi: ");
+  printf("xspi%d: ", xs->base == XSPI1_BASE ? 1 : 2);
 
   uint32_t sfdp_sig = xspi_read_sfdp(xs, 0);
   if(sfdp_sig != 0x50444653) {
