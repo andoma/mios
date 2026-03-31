@@ -4,6 +4,8 @@
 
 #include <mios/fs.h>
 #include <mios/copy.h>
+#include <mios/ota.h>
+#include <mios/eventlog.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -359,3 +361,90 @@ cmd_bootslot(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("bootslot", cmd_bootslot);
+
+
+// =====================================================================
+// OTA: Write ELF to inactive app slot, then switch boot selector
+// =====================================================================
+
+typedef struct {
+  stream_t stream;
+  stream_t *inner;       // block_write_stream for the target partition
+  uint8_t target_slot;   // 'A' or 'B'
+} ota_stream_t;
+
+static ssize_t
+ota_write(stream_t *s, const void *data, size_t size, int flags)
+{
+  ota_stream_t *os = (ota_stream_t *)s;
+
+  ssize_t r = stream_write(os->inner, data, size, flags);
+  if(r < 0)
+    return r;
+
+  if(data == NULL) {
+    // Flush succeeded — switch boot selector to target slot
+    block_iface_t *bi = flash_partitions[FLASH_PARTITION_BOOTSELECTOR];
+    error_t err = block_erase(bi, 0, 1);
+    if(err) return err;
+    err = block_write(bi, 0, 0, &os->target_slot, 1);
+    if(err) return err;
+
+    // Clear dirty bit for target slot
+    uint32_t bs = reg_rd(BSEC_SCRATCH0);
+    if(os->target_slot == 'B')
+      bs &= ~BOOTSTATUS_APP_B_DIRTY;
+    else
+      bs &= ~BOOTSTATUS_APP_A_DIRTY;
+    reg_wr(BSEC_SCRATCH0, bs);
+
+    evlog(LOG_INFO, "OTA: written to slot %c", os->target_slot);
+  }
+
+  return r;
+}
+
+static void
+ota_close(stream_t *s)
+{
+  ota_stream_t *os = (ota_stream_t *)s;
+  stream_close(os->inner);
+  free(os);
+}
+
+static const stream_vtable_t ota_stream_vtable = {
+  .write = ota_write,
+  .close = ota_close,
+};
+
+
+struct stream *
+ota_get_stream(void)
+{
+  uint32_t bs = reg_rd(BSEC_SCRATCH0);
+  int booted_b = bs & BOOTSTATUS_BOOTED_B;
+
+  // Write to the slot we're NOT running from
+  int target_partition = booted_b ? FLASH_PARTITION_APP_A : FLASH_PARTITION_APP_B;
+  uint8_t target_slot = booted_b ? 'A' : 'B';
+
+  block_iface_t *bi = flash_partitions[target_partition];
+  if(bi == NULL)
+    return NULL;
+
+  stream_t *inner = block_write_stream_create(bi);
+  if(inner == NULL)
+    return NULL;
+
+  ota_stream_t *os = xalloc(sizeof(*os), 0, MEM_MAY_FAIL | MEM_CLEAR);
+  if(os == NULL) {
+    stream_close(inner);
+    return NULL;
+  }
+
+  os->stream.vtable = &ota_stream_vtable;
+  os->inner = inner;
+  os->target_slot = target_slot;
+
+  return &os->stream;
+}
