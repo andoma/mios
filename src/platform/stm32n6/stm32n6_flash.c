@@ -1,4 +1,6 @@
+#include "stm32n6_reg.h"
 #include "stm32n6_flash.h"
+#include "stm32n6_bootstatus.h"
 
 #include <mios/fs.h>
 #include <mios/copy.h>
@@ -123,6 +125,15 @@ app_copy_open_write(const char *url)
   int slot = app_slot_from_url(url + 4); // Skip "app:" prefix
   if(slot < 0)
     return NULL;
+
+  // Clear dirty bit for this slot — new image gets a fresh chance
+  uint32_t bs = reg_rd(BSEC_SCRATCH0);
+  if(slot == FLASH_PARTITION_APP_A)
+    bs &= ~BOOTSTATUS_APP_A_DIRTY;
+  else
+    bs &= ~BOOTSTATUS_APP_B_DIRTY;
+  reg_wr(BSEC_SCRATCH0, bs);
+
   return block_write_stream_create(flash_partitions[slot]);
 }
 

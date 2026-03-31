@@ -2,6 +2,7 @@
 #include "stm32n6_ramcfg.h"
 #include "stm32n6_rif.h"
 #include "stm32n6_syscfg.h"
+#include "stm32n6_bootstatus.h"
 
 #include <malloc.h>
 
@@ -10,6 +11,9 @@
 #include <net/pbuf.h>
 
 #include "mpu_v8.h"
+
+#include <stdio.h>
+#include <mios/eventlog.h>
 
 // AXISRAM layout (nonsecure aliases):
 //   AXISRAM1:  0x24000000 - 0x240FFFFF  (1 MB)   - CPU_NOC, DMA accessible
@@ -40,6 +44,8 @@
 static void  __attribute__((constructor(120)))
 stm32n6_init(void)
 {
+  printf("\nSTM32N6\n");
+
   // Enable interleaving for AXISRAM3-6
   reg_set_bit(SYSCFG_NPU_ICNCR, 0);
 
@@ -94,4 +100,32 @@ sys_get_serial_number(void)
   sn.data = (const void *)0x46009014;
   sn.len = 12;
   return sn;
+}
+
+
+// Confirm successful boot — clear dirty bit for current slot.
+// Only act if FSBL set the FSBL_RAN flag (skip when loaded via GDB).
+// Priority 9999 = just before main(), after all platform init.
+static void __attribute__((constructor(9999)))
+boot_confirm(void)
+{
+  uint32_t bs = reg_rd(BSEC_SCRATCH0);
+  if(!(bs & BOOTSTATUS_FSBL_RAN))
+    return;
+
+  // Clear dirty bit for current slot
+  if(bs & BOOTSTATUS_BOOTED_B)
+    bs &= ~BOOTSTATUS_APP_B_DIRTY;
+  else
+    bs &= ~BOOTSTATUS_APP_A_DIRTY;
+
+  // Clear FSBL_RAN so it must be set again on next FSBL boot
+  bs &= ~BOOTSTATUS_FSBL_RAN;
+
+  reg_wr(BSEC_SCRATCH0, bs);
+
+  evlog(LOG_INFO, "Booted via application slot %c (A:%s B:%s)",
+        (bs & BOOTSTATUS_BOOTED_B) ? 'B' : 'A',
+        (bs & BOOTSTATUS_APP_A_DIRTY) ? "dirty" : "ok",
+        (bs & BOOTSTATUS_APP_B_DIRTY) ? "dirty" : "ok");
 }
