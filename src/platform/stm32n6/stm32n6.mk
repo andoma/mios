@@ -2,9 +2,11 @@ P := ${SRC}/platform/stm32n6
 
 GLOBALDEPS += ${P}/stm32n6.mk
 
+ENABLE_TASK_ACCOUNTING ?= no
+
 CPPFLAGS += -iquote${P} -include ${P}/stm32n6.h
 
-LDSCRIPT ?= ${P}/stm32n6$(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),_bootloader,).ld
+LDSCRIPT ?= ${P}/stm32n6.ld
 
 # ENTRYPOINT = bl_start
 
@@ -24,8 +26,7 @@ SRCS += ${C}/systick.c \
 
 SRCS-${ENABLE_NET_IPV4} += ${P}/stm32n6_eth.c
 
-SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
-	${P}/boot/isr.s \
+SRCS += ${P}/boot/isr.s \
 	${P}/boot/stm32n6_bootloader.c
 
 ${MOS}/platform/stm32n6/boot/stm32n6_bootloader.o : CFLAGS = -Os -ffreestanding -Wall -Werror -mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -mgeneral-regs-only -iquote${P}
