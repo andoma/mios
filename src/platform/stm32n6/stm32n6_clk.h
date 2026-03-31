@@ -28,7 +28,10 @@
 
 #define RCC_APB2ENR       (RCC_BASE + 0x26c)
 #define RCC_APB4ENR1      (RCC_BASE + 0x274)
+#define RCC_APB4ENR2      (RCC_BASE + 0x278)
 
+
+#define CLK_BSEC      CLK_ID(RCC_APB4ENR2, 1)
 
 #define CLK_GPIO(x)   CLK_ID(RCC_AHB4ENR, (x))
 
