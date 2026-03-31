@@ -46,7 +46,7 @@ ota_get_stream(void)
     return NULL;
 
   // Start at block 4 on SPI-flash, Main mios image begins at paddr 0x8004000
-  return elf_to_bin(bin_to_ota(g_upgrade_partition, 4), 0x8004000);
+  return elf_to_bin(bin_to_ota(g_upgrade_partition, 4), 0x8004000, 0xFFFFFFFF);
 }
 
 

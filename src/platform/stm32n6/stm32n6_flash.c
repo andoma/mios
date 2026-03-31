@@ -6,7 +6,9 @@
 #include <mios/copy.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 
 stream_t *block_write_stream_create(block_iface_t *bi);
 
@@ -141,6 +143,180 @@ app_copy_open_write(const char *url)
 COPY_HANDLER_DEF(app, 5,
   .prefix = "app:",
   .open_write = app_copy_open_write,
+);
+
+
+// =====================================================================
+// Copy handler for "bootloader:" protocol
+// Accepts ELF, extracts .boot section, generates FSBL header, writes
+// to FSBL1 (and optionally FSBL2) partition.
+// =====================================================================
+
+#include <mios/elf.h>
+
+// FSBL header (UM3234 Table 32) — 160 bytes
+struct stm32n6_fsbl_header {
+  uint8_t  magic[4];            // 'S','T','M',0x32
+  uint8_t  signature[96];
+  uint32_t image_checksum;
+  uint32_t header_version;      // 0x00020300
+  uint32_t image_length;
+  uint32_t entry_point;
+  uint32_t reserved1;
+  uint32_t load_address;        // 0xFFFFFFFF
+  uint32_t reserved2;
+  uint32_t version_number;
+  uint32_t extension_flags;     // 0x80000000 (padding ext)
+  uint32_t post_header_length;
+  uint32_t binary_type;         // 0x10
+  uint8_t  pad[8];
+  uint32_t ns_payload_length;
+  uint32_t ns_payload_hash;
+} __attribute__((packed));
+
+// Padding extension header
+struct stm32n6_padding_ext {
+  uint8_t  type[4];             // 'S','T',0xFF,0xFF
+  uint32_t length;
+} __attribute__((packed));
+
+// Binary must start at offset 0x400 in flash so it lands at SRAM
+// 0x34180400 (matching the linker address). The boot ROM loads
+// header+extensions+binary contiguously to 0x34180000.
+#define FSBL_HEADER_TOTAL 0x400
+
+typedef struct {
+  stream_t stream;
+  block_iface_t *bi;
+  uint32_t checksum;
+  uint32_t offset;       // Current write offset within partition (after header)
+  uint8_t erased;
+} bootloader_write_stream_t;
+
+
+static ssize_t
+blws_write(stream_t *s, const void *data, size_t size, int flags)
+{
+  bootloader_write_stream_t *bws = (bootloader_write_stream_t *)s;
+  if(data == NULL) {
+    // Flush — pad to 32-byte alignment and write FSBL header
+
+    // Pad final bytes to 32-byte alignment
+    uint32_t image_len = bws->offset;
+    if(image_len & 31) {
+      uint8_t pad[32] = {};
+      size_t pad_len = 32 - (image_len & 31);
+      error_t err = block_write(bws->bi, 0, FSBL_HEADER_TOTAL + image_len,
+                                pad, pad_len);
+      if(err) return err;
+      for(size_t i = 0; i < pad_len; i++)
+        bws->checksum += 0; // zeros don't change sum
+      image_len += pad_len;
+    }
+
+    // Build FSBL header
+    struct stm32n6_fsbl_header hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic[0] = 'S';
+    hdr.magic[1] = 'T';
+    hdr.magic[2] = 'M';
+    hdr.magic[3] = 0x32;
+    hdr.header_version = 0x00020300;
+    hdr.image_checksum = bws->checksum;
+    hdr.image_length = image_len;
+    hdr.entry_point = 0x34180401;
+    hdr.load_address = 0xFFFFFFFF;
+    hdr.extension_flags = 0x80000000;
+    hdr.post_header_length = FSBL_HEADER_TOTAL - sizeof(struct stm32n6_fsbl_header);
+    hdr.binary_type = 0x10;
+
+    // Padding extension
+    struct stm32n6_padding_ext pad_ext;
+    pad_ext.type[0] = 'S';
+    pad_ext.type[1] = 'T';
+    pad_ext.type[2] = 0xFF;
+    pad_ext.type[3] = 0xFF;
+    pad_ext.length = FSBL_HEADER_TOTAL - sizeof(struct stm32n6_fsbl_header);
+
+    // Write padding extension and header into the already-erased first block
+    error_t err = block_write(bws->bi, 0, sizeof(hdr), &pad_ext, sizeof(pad_ext));
+    if(err) return err;
+
+    err = block_write(bws->bi, 0, 0, &hdr, sizeof(hdr));
+    if(err) return err;
+
+    printf("Bootloader: %d bytes, checksum 0x%x\n",
+           (int)image_len, (unsigned)bws->checksum);
+    return 0;
+  }
+
+  // Erase entire partition on first data
+  if(!bws->erased) {
+    error_t err = block_erase(bws->bi, 0, bws->bi->num_blocks);
+    if(err) return err;
+    bws->erased = 1;
+  }
+
+  // Update checksum
+  const uint8_t *src = data;
+  for(size_t i = 0; i < size; i++)
+    bws->checksum += src[i];
+
+  // Write data at current offset (after header area)
+  error_t err = block_write(bws->bi, 0, FSBL_HEADER_TOTAL + bws->offset,
+                            data, size);
+  if(err) return err;
+
+  bws->offset += size;
+  return size;
+}
+
+static void
+blws_close(stream_t *s)
+{
+  free(s);
+}
+
+static const stream_vtable_t bootloader_write_vtable = {
+  .write = blws_write,
+  .close = blws_close,
+};
+
+
+static stream_t *
+bootloader_copy_open_write(const char *url)
+{
+  // bootloader:a → FSBL1, bootloader:b → FSBL2
+  const char *slot_str = url + 11; // Skip "bootloader:"
+  int partition;
+  if(!strcmp(slot_str, "a"))
+    partition = FLASH_PARTITION_FSBL1;
+  else if(!strcmp(slot_str, "b"))
+    partition = FLASH_PARTITION_FSBL2;
+  else
+    return NULL;
+
+  block_iface_t *bi = flash_partitions[partition];
+  if(bi == NULL)
+    return NULL;
+
+  bootloader_write_stream_t *bws = xalloc(sizeof(*bws), 0,
+                                          MEM_MAY_FAIL | MEM_CLEAR);
+  if(bws == NULL)
+    return NULL;
+
+  bws->stream.vtable = &bootloader_write_vtable;
+  bws->bi = bi;
+
+  // Wrap with elf_to_bin to extract only the .boot section
+  // paddr range: 0x34180400 to 0x34200000
+  return elf_to_bin(&bws->stream, 0x34180400, 0x34200000);
+}
+
+
+COPY_HANDLER_DEF(bootloader, 5,
+  .prefix = "bootloader:",
+  .open_write = bootloader_copy_open_write,
 );
 
 

@@ -64,8 +64,9 @@ typedef struct elf_to_bin {
   struct stream input;
   struct stream *output;
   void *pht;
-  uint32_t ipos;   // Position in input stream
-  uint32_t paddr;  // Current output paddr
+  uint32_t ipos;       // Position in input stream
+  uint32_t paddr;      // Current output paddr
+  uint32_t paddr_end;  // End of paddr range (segments above this are skipped)
   uint32_t segment_offset; // Offset in current segment
   int segment; // Current segment
   elf32hdr_t hdr;
@@ -87,8 +88,9 @@ skip_segments(elf_to_bin_t *etb)
     }
 
     const elf32phdr_t *phdr = current_segment(etb);
-    if(phdr->type != 1 || !phdr->filesz) {
-      // Skip anything that's not PT_LOAD or is zero-sized
+    if(phdr->type != 1 || !phdr->filesz ||
+       phdr->paddr >= etb->paddr_end) {
+      // Skip non-PT_LOAD, zero-sized, or out-of-range segments
       etb->segment++;
       continue;
     }
@@ -271,7 +273,7 @@ static const stream_vtable_t etb_vtable = {
 };
 
 struct stream *
-elf_to_bin(struct stream *output, uint32_t paddr_start)
+elf_to_bin(struct stream *output, uint32_t paddr_start, uint32_t paddr_end)
 {
   if(output == NULL)
     return NULL;
@@ -283,6 +285,7 @@ elf_to_bin(struct stream *output, uint32_t paddr_start)
 
   etb->input.vtable = &etb_vtable;
   etb->paddr = paddr_start;
+  etb->paddr_end = paddr_end;
   etb->output = output;
   return &etb->input;
 }
