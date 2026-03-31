@@ -418,8 +418,9 @@ typedef struct {
 } Elf32_Phdr;
 
 // Flash partition offsets (must match stm32n6_flash.c)
-#define APP_A_OFFSET  0x100000
-#define APP_B_OFFSET  0x300000
+#define BOOTSELECTOR_OFFSET 0x080000
+#define APP_A_OFFSET        0x100000
+#define APP_B_OFFSET        0x300000
 
 static void BL
 bl_memcpy(void *dst, const void *src, uint32_t len)
@@ -542,19 +543,34 @@ bl_main(void *ctx_arg)
   bl_xspi_init();
   bl_xspi_mmap_enable(XSPI1_BASE);
 
-  // Try to load ELF from App A partition
-  BL_STR(msg_app_a, "Loading App A:\n");
-  bl_puts(msg_app_a);
-
   const uint8_t *flash = (const uint8_t *)FLASH_MMAP_BASE;
-  int entry = bl_load_elf(flash + APP_A_OFFSET);
+
+  // Read boot selector: 'B' = slot B, anything else = slot A (default)
+  uint8_t selector = flash[BOOTSELECTOR_OFFSET];
+  int try_b_first = (selector == 'B');
+
+  uint32_t first_offset  = try_b_first ? APP_B_OFFSET : APP_A_OFFSET;
+  uint32_t second_offset = try_b_first ? APP_A_OFFSET : APP_B_OFFSET;
+
+  {
+    BL_STR(msg_slot, "Boot slot: ");
+    bl_puts(msg_slot);
+    bl_putchar(try_b_first ? 'B' : 'A');
+    bl_puts(msg_nl2);
+  }
+
+  // Try primary slot
+  {
+    BL_STR(msg_load, "Loading: ");
+    bl_puts(msg_load);
+  }
+  int entry = bl_load_elf(flash + first_offset);
 
   if(entry < 0) {
-    // Try App B
-    BL_STR(msg_app_b, "Loading App B:\n");
-    bl_puts(msg_app_b);
-
-    entry = bl_load_elf(flash + APP_B_OFFSET);
+    // Fallback to other slot
+    BL_STR(msg_fb, "Fallback: ");
+    bl_puts(msg_fb);
+    entry = bl_load_elf(flash + second_offset);
   }
 
   if(entry < 0) {
