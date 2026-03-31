@@ -1,9 +1,25 @@
 MEMORY {
-         VTBL  (rx) : ORIGIN = 0x24000000, LENGTH = 1K
-         RAM   (xrw): ORIGIN = 0x24000400, LENGTH = 256K
+         BOOT  (rx)  : ORIGIN = 0x34180400, LENGTH = 510K
+         VTBL  (rx)  : ORIGIN = 0x24000000, LENGTH = 1K
+         RAM   (xrw) : ORIGIN = 0x24000400, LENGTH = 256K
 }
 
+NOCROSSREFS(.boot .text)
+
 SECTIONS {
+        .boot : {
+                . = ALIGN(32);
+                KEEP(*(.bootloader_vector))
+                *(bltext)
+                *(bldata)
+                . = ALIGN(128);
+                *(blvtbl)
+                . = ALIGN(32);
+        } >BOOT
+
+        _boot_start = ADDR(.boot);
+        _boot_end = _boot_start + SIZEOF(.boot);
+
         .isr_vector : {
                 . = ALIGN(4);
                 KEEP(*(.isr_vector))
@@ -146,6 +162,3 @@ SECTIONS {
                 _ebss = .;
         } >RAM
 }
-
-
-
