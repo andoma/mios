@@ -465,9 +465,54 @@ bl_memset(void *dst, int val, uint32_t len)
     *d++ = val;
 }
 
+// Standard CRC-32 matching mios crc32(0, ...) output
+static uint32_t BL
+bl_crc32(const uint8_t *data, uint32_t len)
+{
+  uint32_t crc = 0xFFFFFFFF;
+  for(uint32_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for(int j = 0; j < 8; j++) {
+      uint32_t mask = -(crc & 1);
+      crc = (crc >> 1) ^ (0xEDB88320 & mask);
+    }
+  }
+  return crc ^ 0xFFFFFFFF;
+}
+
+#define MIOS_APP_MAGIC    0x5041496d  // "mIAP" little-endian
+
 static int BL
 bl_load_elf(const uint8_t *base)
 {
+  // Check for partition header
+  uint32_t magic = *(const uint32_t *)(base + 0);
+  uint32_t length = *(const uint32_t *)(base + 4);
+
+  if(magic != MIOS_APP_MAGIC) {
+    BL_STR(msg, "  No mIAP header\n");
+    bl_puts(msg);
+    return -1;
+  }
+
+  // Verify CRC trailer: last 12 bytes = [~crc32(4)]["mI0sIMG1"(8)]
+  // ~crc32(0, image_data + crc_field, length - 8) == 0
+  if(length < 12) {
+    BL_STR(msg, "  Image too small\n");
+    bl_puts(msg);
+    return -1;
+  }
+
+  bl_wdog_kick();
+  uint32_t crc = bl_crc32(base + 8, length - 8);
+  if(~crc != 0) {
+    BL_STR(msg, "  CRC mismatch\n");
+    bl_puts(msg);
+    return -1;
+  }
+
+  base += 8;  // Skip partition header, point to ELF
+
   const Elf32_Ehdr *ehdr = (const Elf32_Ehdr *)base;
 
   // Validate ELF magic
