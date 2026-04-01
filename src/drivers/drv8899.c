@@ -3,15 +3,26 @@
 #include <stdlib.h>
 #include <malloc.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <stdio.h>
 
 #include <mios/eventlog.h>
+#include <mios/task.h>
+
+#define DRV8899_NAME "drv8899"
 
 // https://www.ti.com/lit/ds/symlink/drv8899-q1.pdf
 
 typedef struct drv8899 {
   spi_t *spi;
+  mutex_t mutex;
+  uint64_t next_operation; /* We need at least 0.5µs between chip selects
+                            * according to datasheet.
+                            * Our timing infra only works down to 1µs so
+                            * that's what we'll use.
+                            */
+
   uint32_t spi_config;
   gpio_t cs;
   uint8_t tx[2];
@@ -27,25 +38,41 @@ typedef struct drv8899 {
 error_t
 drv8899_write_reg(drv8899_t *d, uint8_t reg, uint8_t value)
 {
+  mutex_lock(&d->mutex);
   d->tx[0] = (reg & 0x1f) << 1;
   d->tx[1] = value;
-  return d->spi->rw(d->spi, d->tx, NULL, 2, d->cs, d->spi_config);
+  sleep_until(d->next_operation);
+  error_t err = d->spi->rw(d->spi, d->tx, NULL, 2, d->cs, d->spi_config);
+  d->next_operation = clock_get() + 1;
+  mutex_unlock(&d->mutex);
+  return err;
 }
 
 
 int
 drv8899_read_reg(drv8899_t *d, uint8_t reg)
 {
+  int rval;
+  mutex_lock(&d->mutex);
+
   d->tx[0] = 0x40 | ((reg & 0x1f) << 1);
   d->tx[1] = 0;
-  error_t err = d->spi->rw(d->spi, d->tx, d->rx, 2, d->cs, d->spi_config);
-  if(err)
-    return err;
-  // SDO status byte: [1][1][UVLO][CPUV][OCP][0][TF][OL]
-  // Validate fixed bits: top two must be 1, bit 2 (RSVD) must be 0
-  if((d->rx[0] & 0xc4) != 0xc0)
-    return ERR_MALFORMED;
-  return d->rx[1];
+
+  sleep_until(d->next_operation);
+  rval = d->spi->rw(d->spi, d->tx, d->rx, 2, d->cs, d->spi_config);
+  d->next_operation = clock_get() + 1;
+
+  if(rval == 0) {
+    // SDO status byte: [1][1][UVLO][CPUV][OCP][0][TF][OL]
+    // Validate fixed bits: top two must be 1, bit 2 (RSVD) must be 0
+
+    if((d->rx[0] & 0xc4) != 0xc0)
+      rval = ERR_MALFORMED;
+    else
+      rval = d->rx[1];
+  }
+  mutex_unlock(&d->mutex);
+  return rval;
 }
 
 
@@ -53,19 +80,19 @@ struct drv8899 *
 drv8899_create(spi_t *bus, gpio_t cs)
 {
   drv8899_t *d = xalloc(sizeof(drv8899_t), 0, MEM_TYPE_DMA | MEM_CLEAR);
-
+  mutex_init(&d->mutex, DRV8899_NAME);
   d->spi = bus;
   d->cs = cs;
   d->spi_config = bus->get_config(bus, SPI_CPHA, 1000000);
 
   int rev = drv8899_read_reg(d, DRV8899_CTRL8);
   if(rev < 0) {
-    evlog(LOG_ERR, "drv8899: SPI read failed");
+    evlog(LOG_ERR, "%s: SPI read failed", DRV8899_NAME);
     free(d);
     return NULL;
   }
 
-  evlog(LOG_DEBUG, "drv8899: rev_id=0x%x", rev & 0xf);
+  evlog(LOG_DEBUG, "%s: rev_id=0x%x", DRV8899_NAME, rev & 0xf);
   return d;
 }
 
@@ -197,7 +224,7 @@ drv8899_print_status(drv8899_t *d, stream_t *st)
 
   val = drv8899_read_reg(d, DRV8899_FAULT_STATUS);
   if(val < 0) {
-    stprintf(st, "drv8899: SPI read error\n");
+    stprintf(st, "%s: SPI read error\n", DRV8899_NAME);
     return;
   }
   stprintf(st, "Fault status: 0x%02x", val);
