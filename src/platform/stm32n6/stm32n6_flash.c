@@ -12,8 +12,6 @@
 #include <string.h>
 #include <malloc.h>
 
-stream_t *block_write_stream_create(block_iface_t *bi);
-
 block_iface_t *xspi_norflash_create(void);
 
 /*
@@ -109,6 +107,229 @@ stm32n6_flash_init(void)
 
 
 // =====================================================================
+// Application partition write stream
+//
+// On-flash format:
+//   [magic "mIAP" (4)] [length LE32 (4)] [image data] [~crc32 (4)] ["mI0sIMG1" (8)]
+//
+// The 8-byte header is only on flash, never in the streamed data.
+// Block 0 is buffered in RAM and written last (with the header filled in).
+// CRC trailer is checked/appended on flush.
+// =====================================================================
+
+#include <util/crc32.h>
+
+#define MIOS_APP_MAGIC    0x5041496d  // "mIAP" little-endian
+#define MIOS_IMG_MAGIC    "mI0sIMG1"
+#define MIOS_IMG_TRAILER  12          // 4 (crc) + 8 (magic)
+#define APP_HEADER_SIZE   8           // 4 (magic) + 4 (length)
+
+typedef struct {
+  stream_t stream;
+  block_iface_t *bi;
+  uint32_t crc;          // CRC of committed data (excludes tail)
+  uint32_t image_pos;    // Bytes committed to flash/block0 so far
+  uint8_t *block0;       // First block buffer (block_size bytes)
+  uint8_t target_slot;   // 'A' or 'B'
+  uint8_t switch_boot;   // Also switch boot selector on success
+  uint8_t tail_len;
+  uint8_t tail[MIOS_IMG_TRAILER];
+} app_write_stream_t;
+
+
+// Write committed image data to flash (or block0 buffer).
+// Data goes to flash at offset (image_pos + APP_HEADER_SIZE).
+// Block 0 is deferred in RAM; blocks 1+ are erased-on-first-touch.
+static error_t
+aws_commit(app_write_stream_t *aws, const void *data, size_t len)
+{
+  const uint8_t *src = data;
+  const size_t bs = aws->bi->block_size;
+
+  while(len > 0) {
+    size_t flash_off = aws->image_pos + APP_HEADER_SIZE;
+    size_t block = flash_off / bs;
+    size_t off_in_block = flash_off % bs;
+    size_t chunk = bs - off_in_block;
+    if(chunk > len)
+      chunk = len;
+
+    if(block == 0) {
+      memcpy(aws->block0 + flash_off, src, chunk);
+    } else {
+      if(off_in_block == 0) {
+        error_t err = block_erase(aws->bi, block, 1);
+        if(err) return err;
+      }
+      error_t err = block_write(aws->bi, block, off_in_block, src, chunk);
+      if(err) return err;
+    }
+
+    src += chunk;
+    len -= chunk;
+    aws->image_pos += chunk;
+  }
+  return 0;
+}
+
+// Commit data from the tail/input and update CRC
+static error_t
+aws_commit_with_crc(app_write_stream_t *aws, const void *data, size_t len)
+{
+  aws->crc = crc32(aws->crc, data, len);
+  return aws_commit(aws, data, len);
+}
+
+
+static ssize_t
+aws_write(stream_t *s, const void *data, size_t size, int flags)
+{
+  app_write_stream_t *aws = (app_write_stream_t *)s;
+
+  if(data == NULL) {
+    // Flush — handle trailer, write header, finalize block 0
+
+    // Check for existing trailer in buffered tail
+    if(aws->tail_len == MIOS_IMG_TRAILER &&
+       !memcmp(aws->tail + 4, MIOS_IMG_MAGIC, 8)) {
+      // Existing trailer — verify CRC
+      if(~crc32(aws->crc, aws->tail, 4) != 0) {
+        evlog(LOG_ERR, "app: image CRC mismatch");
+        return ERR_CHECKSUM_ERROR;
+      }
+      // Commit the validated trailer
+      error_t err = aws_commit(aws, aws->tail, MIOS_IMG_TRAILER);
+      if(err) return err;
+    } else {
+      // No valid trailer — flush tail data and append one
+      evlog(LOG_WARNING, "app: image has no checksum, adding one");
+
+      if(aws->tail_len > 0) {
+        error_t err = aws_commit_with_crc(aws, aws->tail, aws->tail_len);
+        if(err) return err;
+      }
+
+      uint32_t stored_crc = ~aws->crc;
+      error_t err = aws_commit(aws, &stored_crc, 4);
+      if(err) return err;
+      err = aws_commit(aws, MIOS_IMG_MAGIC, 8);
+      if(err) return err;
+    }
+
+    // Fill in the partition header in block 0
+    uint32_t magic = MIOS_APP_MAGIC;
+    uint32_t length = aws->image_pos;
+    memcpy(aws->block0 + 0, &magic, 4);
+    memcpy(aws->block0 + 4, &length, 4);
+
+    // Erase and write block 0
+    error_t err = block_erase(aws->bi, 0, 1);
+    if(err) return err;
+    err = block_write(aws->bi, 0, 0, aws->block0,
+                      aws->bi->block_size);
+    if(err) return err;
+
+    // Clear dirty bit for target slot
+    uint32_t bs = reg_rd(BSEC_SCRATCH0);
+    if(aws->target_slot == 'B')
+      bs &= ~BOOTSTATUS_APP_B_DIRTY;
+    else
+      bs &= ~BOOTSTATUS_APP_A_DIRTY;
+    reg_wr(BSEC_SCRATCH0, bs);
+
+    if(aws->switch_boot) {
+      // Switch boot selector to target slot
+      block_iface_t *sel = flash_partitions[FLASH_PARTITION_BOOTSELECTOR];
+      err = block_erase(sel, 0, 1);
+      if(err) return err;
+      err = block_write(sel, 0, 0, &aws->target_slot, 1);
+      if(err) return err;
+    }
+
+    evlog(LOG_INFO, "app: written %d bytes to slot %c%s",
+          (int)length, aws->target_slot,
+          aws->switch_boot ? " (boot switched)" : "");
+    return 0;
+  }
+
+  // Buffer the last MIOS_IMG_TRAILER bytes, commit everything else.
+  const uint8_t *src = data;
+  size_t total = aws->tail_len + size;
+
+  if(total <= MIOS_IMG_TRAILER) {
+    memcpy(aws->tail + aws->tail_len, src, size);
+    aws->tail_len = total;
+    return size;
+  }
+
+  // Commit (total - MIOS_IMG_TRAILER) bytes, keep 12 in tail
+  size_t to_flush = total - MIOS_IMG_TRAILER;
+
+  // First commit from existing tail
+  size_t from_tail = to_flush < aws->tail_len ? to_flush : aws->tail_len;
+  if(from_tail > 0) {
+    error_t err = aws_commit_with_crc(aws, aws->tail, from_tail);
+    if(err) return err;
+  }
+
+  // Then commit from new data
+  size_t from_data = to_flush - from_tail;
+  if(from_data > 0) {
+    error_t err = aws_commit_with_crc(aws, src, from_data);
+    if(err) return err;
+  }
+
+  // Build new tail: remaining old tail bytes + remaining new data
+  size_t old_tail_remaining = aws->tail_len - from_tail;
+  if(old_tail_remaining > 0)
+    memmove(aws->tail, aws->tail + from_tail, old_tail_remaining);
+  memcpy(aws->tail + old_tail_remaining, src + from_data, size - from_data);
+  aws->tail_len = MIOS_IMG_TRAILER;
+
+  return size;
+}
+
+static void
+aws_close(stream_t *s)
+{
+  app_write_stream_t *aws = (app_write_stream_t *)s;
+  free(aws->block0);
+  free(aws);
+}
+
+static const stream_vtable_t app_write_stream_vtable = {
+  .write = aws_write,
+  .close = aws_close,
+};
+
+
+static stream_t *
+app_write_stream_open(block_iface_t *bi, uint8_t target_slot, int switch_boot)
+{
+  if(bi == NULL)
+    return NULL;
+
+  app_write_stream_t *aws = xalloc(sizeof(*aws), 0, MEM_MAY_FAIL | MEM_CLEAR);
+  if(aws == NULL)
+    return NULL;
+
+  aws->block0 = xalloc(bi->block_size, 0, MEM_MAY_FAIL);
+  if(aws->block0 == NULL) {
+    free(aws);
+    return NULL;
+  }
+  memset(aws->block0, 0xff, bi->block_size);
+
+  aws->stream.vtable = &app_write_stream_vtable;
+  aws->bi = bi;
+  aws->target_slot = target_slot;
+  aws->switch_boot = switch_boot;
+
+  return &aws->stream;
+}
+
+
+// =====================================================================
 // Copy handler for "app:" protocol
 // =====================================================================
 
@@ -122,25 +343,17 @@ app_slot_from_url(const char *url)
   return -1;
 }
 
-
 static stream_t *
 app_copy_open_write(const char *url)
 {
-  int slot = app_slot_from_url(url + 4); // Skip "app:" prefix
+  const char *slot_str = url + 4; // Skip "app:" prefix
+  int slot = app_slot_from_url(slot_str);
   if(slot < 0)
     return NULL;
 
-  // Clear dirty bit for this slot — new image gets a fresh chance
-  uint32_t bs = reg_rd(BSEC_SCRATCH0);
-  if(slot == FLASH_PARTITION_APP_A)
-    bs &= ~BOOTSTATUS_APP_A_DIRTY;
-  else
-    bs &= ~BOOTSTATUS_APP_B_DIRTY;
-  reg_wr(BSEC_SCRATCH0, bs);
-
-  return block_write_stream_create(flash_partitions[slot]);
+  uint8_t target = (*slot_str | 0x20) == 'b' ? 'B' : 'A';
+  return app_write_stream_open(flash_partitions[slot], target, 0);
 }
-
 
 COPY_HANDLER_DEF(app, 5,
   .prefix = "app:",
@@ -364,59 +577,8 @@ CLI_CMD_DEF("bootslot", cmd_bootslot);
 
 
 // =====================================================================
-// OTA: Write ELF to inactive app slot, then switch boot selector
+// OTA: Write to inactive app slot, switch boot selector on success
 // =====================================================================
-
-typedef struct {
-  stream_t stream;
-  stream_t *inner;       // block_write_stream for the target partition
-  uint8_t target_slot;   // 'A' or 'B'
-} ota_stream_t;
-
-static ssize_t
-ota_write(stream_t *s, const void *data, size_t size, int flags)
-{
-  ota_stream_t *os = (ota_stream_t *)s;
-
-  ssize_t r = stream_write(os->inner, data, size, flags);
-  if(r < 0)
-    return r;
-
-  if(data == NULL) {
-    // Flush succeeded — switch boot selector to target slot
-    block_iface_t *bi = flash_partitions[FLASH_PARTITION_BOOTSELECTOR];
-    error_t err = block_erase(bi, 0, 1);
-    if(err) return err;
-    err = block_write(bi, 0, 0, &os->target_slot, 1);
-    if(err) return err;
-
-    // Clear dirty bit for target slot
-    uint32_t bs = reg_rd(BSEC_SCRATCH0);
-    if(os->target_slot == 'B')
-      bs &= ~BOOTSTATUS_APP_B_DIRTY;
-    else
-      bs &= ~BOOTSTATUS_APP_A_DIRTY;
-    reg_wr(BSEC_SCRATCH0, bs);
-
-    evlog(LOG_INFO, "OTA: written to slot %c", os->target_slot);
-  }
-
-  return r;
-}
-
-static void
-ota_close(stream_t *s)
-{
-  ota_stream_t *os = (ota_stream_t *)s;
-  stream_close(os->inner);
-  free(os);
-}
-
-static const stream_vtable_t ota_stream_vtable = {
-  .write = ota_write,
-  .close = ota_close,
-};
-
 
 struct stream *
 ota_get_stream(void)
@@ -424,27 +586,8 @@ ota_get_stream(void)
   uint32_t bs = reg_rd(BSEC_SCRATCH0);
   int booted_b = bs & BOOTSTATUS_BOOTED_B;
 
-  // Write to the slot we're NOT running from
   int target_partition = booted_b ? FLASH_PARTITION_APP_A : FLASH_PARTITION_APP_B;
   uint8_t target_slot = booted_b ? 'A' : 'B';
 
-  block_iface_t *bi = flash_partitions[target_partition];
-  if(bi == NULL)
-    return NULL;
-
-  stream_t *inner = block_write_stream_create(bi);
-  if(inner == NULL)
-    return NULL;
-
-  ota_stream_t *os = xalloc(sizeof(*os), 0, MEM_MAY_FAIL | MEM_CLEAR);
-  if(os == NULL) {
-    stream_close(inner);
-    return NULL;
-  }
-
-  os->stream.vtable = &ota_stream_vtable;
-  os->inner = inner;
-  os->target_slot = target_slot;
-
-  return &os->stream;
+  return app_write_stream_open(flash_partitions[target_partition], target_slot, 1);
 }
