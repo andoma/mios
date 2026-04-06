@@ -10,6 +10,8 @@ void reboot(void);
 
 void shutdown_notification(const char *reason);
 
+void dfu(void) __attribute__((noreturn));
+
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
 

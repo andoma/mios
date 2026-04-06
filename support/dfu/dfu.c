@@ -591,6 +591,131 @@ stm32_dfu_flasher(const struct mios_image *mi,
 }
 
 
+// Scan USB devices for a DFU Runtime interface.
+// Returns a handle to the device (with the runtime interface claimed),
+// or NULL if not found. Sets *iface_num to the interface number.
+static libusb_device_handle *
+find_dfu_runtime_device(libusb_context *ctx, int *iface_num)
+{
+  libusb_device **devlist;
+  ssize_t cnt = libusb_get_device_list(ctx, &devlist);
+
+  for(ssize_t i = 0; i < cnt; i++) {
+    struct libusb_config_descriptor *cfg;
+    if(libusb_get_active_config_descriptor(devlist[i], &cfg) != 0)
+      continue;
+
+    int found_iface = -1;
+    int valid_func_desc = 0;
+
+    for(int j = 0; j < cfg->bNumInterfaces && found_iface < 0; j++) {
+      const struct libusb_interface *iface = &cfg->interface[j];
+      for(int a = 0; a < iface->num_altsetting; a++) {
+        const struct libusb_interface_descriptor *alt = &iface->altsetting[a];
+
+        // DFU Runtime: class=0xFE, subclass=0x01, protocol=0x01
+        if(alt->bInterfaceClass != 0xfe ||
+           alt->bInterfaceSubClass != 0x01 ||
+           alt->bInterfaceProtocol != 0x01)
+          continue;
+
+        // Validate DFU Functional Descriptor in extra bytes
+        const uint8_t *p = alt->extra;
+        int rem = alt->extra_length;
+        while(rem >= 2) {
+          uint8_t bLength = p[0];
+          uint8_t bType = p[1];
+
+          if(bLength == 0 || bLength > rem)
+            break;
+
+          if(bType == DFU_FUNC_DESC && bLength >= DFU_FUNC_LEN_MIN) {
+            const struct dfu_functional_descriptor *dfu =
+              (const struct dfu_functional_descriptor *)p;
+            if(dfu->bcdDFU == 0x0110) {
+              valid_func_desc = 1;
+            }
+          }
+          p += bLength;
+          rem -= bLength;
+        }
+
+        if(valid_func_desc) {
+          found_iface = alt->bInterfaceNumber;
+          break;
+        }
+      }
+    }
+    libusb_free_config_descriptor(cfg);
+
+    if(found_iface >= 0) {
+      libusb_device_handle *h;
+      if(libusb_open(devlist[i], &h) == 0) {
+        *iface_num = found_iface;
+        libusb_free_device_list(devlist, 1);
+        return h;
+      }
+    }
+  }
+
+  libusb_free_device_list(devlist, 1);
+  return NULL;
+}
+
+
+// Send DFU_DETACH to a runtime device and wait for it to re-enumerate
+// as the ST DFU bootloader.
+static libusb_device_handle *
+detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
+                int iface_num)
+{
+  printf("Found DFU Runtime device, sending DFU_DETACH...\n");
+
+  libusb_detach_kernel_driver(rt_handle, iface_num);
+  libusb_claim_interface(rt_handle, iface_num);
+
+  // DFU_DETACH: bmRequestType=0x21 (host-to-device, class, interface)
+  //             bRequest=0x00 (DFU_DETACH)
+  //             wValue=timeout(ms), wIndex=interface, wLength=0
+  int r = libusb_control_transfer(rt_handle,
+                                  0x21,        // bmRequestType
+                                  DFU_DETACH,  // bRequest
+                                  1000,        // wValue (timeout ms)
+                                  iface_num,   // wIndex
+                                  NULL, 0,     // no data
+                                  5000);       // USB timeout
+
+  libusb_release_interface(rt_handle, iface_num);
+  libusb_close(rt_handle);
+
+  // The device resets as part of detach, so the control transfer
+  // often fails with IO error or no-device. That's expected.
+  if(r < 0 &&
+     r != LIBUSB_ERROR_IO &&
+     r != LIBUSB_ERROR_NO_DEVICE &&
+     r != LIBUSB_ERROR_PIPE) {
+    printf("DFU_DETACH failed: %s\n", libusb_error_name(r));
+    return NULL;
+  }
+
+  printf("Waiting for device to re-enumerate in DFU mode...\n");
+
+  // Poll for the ST DFU bootloader to appear
+  for(int attempt = 0; attempt < 20; attempt++) {
+    usleep(250000);
+    libusb_device_handle *h =
+      libusb_open_device_with_vid_pid(ctx, 0x483, 0xdf11);
+    if(h != NULL) {
+      printf("Device is now in DFU mode\n\n");
+      return h;
+    }
+  }
+
+  printf("Timeout waiting for DFU bootloader\n");
+  return NULL;
+}
+
+
 int
 main(int argc, char **argv)
 {
@@ -615,13 +740,24 @@ main(int argc, char **argv)
     exit(1);
   }
 
+  // First, check if a device is already in DFU bootloader mode
   libusb_device_handle *h =
     libusb_open_device_with_vid_pid(ctx, 0x483, 0xdf11);
 
   if(h == NULL) {
-    printf("Device in DFU not found\n");
+    // Not in DFU mode — look for a running device with DFU Runtime interface
+    int iface_num;
+    libusb_device_handle *rt = find_dfu_runtime_device(ctx, &iface_num);
+    if(rt != NULL) {
+      h = detach_and_wait(ctx, rt, iface_num);
+    }
+  }
+
+  if(h == NULL) {
+    printf("No DFU device found (neither bootloader nor runtime)\n");
     exit(1);
   }
+
   libusb_claim_interface(h, 0);
 
   int r = stm32_dfu_flasher(mi, h, 1);

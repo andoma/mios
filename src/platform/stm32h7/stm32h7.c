@@ -152,8 +152,8 @@ sys_get_serial_number(void)
   return sn;
 }
 
-static error_t
-cmd_dfu(cli_t *cli, int argc, char **argv)
+void
+dfu(void)
 {
   shutdown_notification("DFU");
   irq_forbid(IRQ_LEVEL_ALL);
@@ -161,6 +161,12 @@ cmd_dfu(cli_t *cli, int argc, char **argv)
   fini();
   stm32h7_clk_deinit();
   softreset(0x1ff09800);
+}
+
+static error_t
+cmd_dfu(cli_t *cli, int argc, char **argv)
+{
+  dfu();
 }
 
 CLI_CMD_DEF_EXT("dfu", cmd_dfu, NULL, "Enter Device Firmware Upgrade");

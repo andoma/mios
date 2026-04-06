@@ -68,7 +68,7 @@ platform_init_late(void)
 
   // Expose a serial-port that is a normal console to this OS
   usb_cdc_create_shell(&q);
-
+  usb_dfu_runtime_create(&q);
   stm32h7_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32h7-nucleo144", &q);
 
   stm32h7_eth_init(GPIO_UNUSED,
