@@ -69,8 +69,7 @@ typedef struct ethmac_device_class {
   int (*edc_mii_read)(struct ether_netif *eni, uint16_t reg);
   error_t (*edc_mii_write)(struct ether_netif *eni,
                            uint16_t reg, uint16_t value);
-  void (*edc_set_speed)(struct ether_netif *eni, int speed);
-  void (*edc_set_duplex)(struct ether_netif *eni, int full);
+  void (*edc_set_link_params)(struct ether_netif *eni, int speed, int full_duplex);
 } ethmac_device_class_t;
 
 

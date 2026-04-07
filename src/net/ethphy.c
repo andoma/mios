@@ -113,10 +113,8 @@ ethphy_link_poll(ether_netif_t *eni)
       evlog(LOG_INFO, "%s: Link up %d Mbps %s duplex",
             name, speed, full_duplex ? "full" : "half");
 
-      if(edc->edc_set_speed)
-        edc->edc_set_speed(eni, speed);
-      if(edc->edc_set_duplex)
-        edc->edc_set_duplex(eni, full_duplex);
+      if(edc->edc_set_link_params)
+        edc->edc_set_link_params(eni, speed, full_duplex);
 
       current_up = 1;
       net_task_raise(&eni->eni_ni.ni_task, NETIF_TASK_STATUS_UP);

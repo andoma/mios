@@ -285,21 +285,15 @@ edc_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t value)
 }
 
 static void
-stm32h7_eth_set_speed(ether_netif_t *eni, int speed)
+stm32h7_eth_set_link_params(ether_netif_t *eni, int speed, int full_duplex)
 {
+  uint32_t cr = reg_rd(ETH_MACCR);
+  cr &= ~((1 << 14) | (1 << 13)); // Clear FES and DM
   if(speed == 100)
-    reg_set_bit(ETH_MACCR, 14);
-  else
-    reg_clr_bit(ETH_MACCR, 14);
-}
-
-static void
-stm32h7_eth_set_duplex(ether_netif_t *eni, int full)
-{
-  if(full)
-    reg_set_bit(ETH_MACCR, 13);
-  else
-    reg_clr_bit(ETH_MACCR, 13);
+    cr |= (1 << 14);
+  if(full_duplex)
+    cr |= (1 << 13);
+  reg_wr(ETH_MACCR, cr);
 }
 
 static const ethmac_device_class_t stm32h7_eth_device_class = {
@@ -309,8 +303,7 @@ static const ethmac_device_class_t stm32h7_eth_device_class = {
   },
   .edc_mii_read = edc_mii_read,
   .edc_mii_write = edc_mii_write,
-  .edc_set_speed = stm32h7_eth_set_speed,
-  .edc_set_duplex = stm32h7_eth_set_duplex,
+  .edc_set_link_params = stm32h7_eth_set_link_params,
 };
 
 
