@@ -144,3 +144,5 @@ void usb_dsig_create(struct usb_interface_queue *q,
 typedef void (*usb_dfu_detach_cb_t)(void);
 
 void usb_dfu_runtime_create(struct usb_interface_queue *q);
+
+void usb_mcp_create(struct usb_interface_queue *q, uint8_t usb_sub_class);

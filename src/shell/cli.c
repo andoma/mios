@@ -19,6 +19,7 @@
 
 typedef int error_t;
 #define ERR_INVALID_ARGS (-23)
+#define ERR_NOT_FOUND    (-17)
 
 typedef struct cli {
 } cli_t;
@@ -426,6 +427,44 @@ print_cmd_name(cli_t *c, const char *cmd)
 }
 #endif
 
+error_t
+cli_dispatch(cli_t *c, char *line)
+{
+  char *argv[CLI_MAX_ARGC];
+  int argc = tokenize(line, argv, CLI_MAX_ARGC);
+  if(argc == 0)
+    return 0;
+
+  const cli_cmd_t *begin = CMD_ARRAY_BEGIN;
+  const cli_cmd_t *end = CMD_ARRAY_END;
+
+  // Try progressively joining more tokens with underscores
+  for(int join = 1; join <= argc; join++) {
+    for(const cli_cmd_t *p = begin; p != end; p++) {
+      const char *r = match_argv(p->cmd, argv, join);
+      if(r && *r == '\0') {
+        // Exact match — rebuild argv
+        argv[0] = (char *)p->cmd;
+        int new_argc = argc - join + 1;
+        for(int i = 1; i < new_argc; i++)
+          argv[i] = argv[join + i - 1];
+
+        return p->dispatch(c, new_argc, argv);
+      }
+    }
+  }
+
+  // Check if it could be a valid group prefix
+  for(const cli_cmd_t *p = begin; p != end; p++) {
+    const char *r = match_argv(p->cmd, argv, argc);
+    if(r && *r == '_')
+      return ERR_INVALID_ARGS;
+  }
+
+  return ERR_NOT_FOUND;
+}
+
+
 static void
 dispatch_command(cli_t *c, char *line)
 {
@@ -437,12 +476,10 @@ dispatch_command(cli_t *c, char *line)
   const cli_cmd_t *begin = CMD_ARRAY_BEGIN;
   const cli_cmd_t *end = CMD_ARRAY_END;
 
-  // Try progressively joining more tokens with underscores
   for(int join = 1; join <= argc; join++) {
     for(const cli_cmd_t *p = begin; p != end; p++) {
       const char *r = match_argv(p->cmd, argv, join);
       if(r && *r == '\0') {
-        // Exact match — rebuild argv
         argv[0] = (char *)p->cmd;
         int new_argc = argc - join + 1;
         for(int i = 1; i < new_argc; i++)
@@ -464,7 +501,6 @@ dispatch_command(cli_t *c, char *line)
     }
   }
 
-  // Check if it could be a valid group prefix
   for(const cli_cmd_t *p = begin; p != end; p++) {
     const char *r = match_argv(p->cmd, argv, argc);
     if(r && *r == '_') {
