@@ -271,27 +271,6 @@ tcal9539_read_u16(tcal9539_t *tc, uint8_t reg, uint16_t *value)
 }
 
 
-static error_t
-tcal9539_refresh_shadow(xgpio_t *ig)
-{
-  tcal9539_t *tc = (tcal9539_t *)ig;
-  error_t err;
-
-  err = tcal9539_read_u16(tc, TCAL9539_OUTPUT0, &tc->output);
-  if(err)
-    return err;
-  err = tcal9539_read_u16(tc, TCAL9539_CFG0, &tc->direction);
-  if(err)
-    return err;
-  err = tcal9539_read_u16(tc, TCAL9539_PUD0, &tc->pull_direction);
-  if(err)
-    return err;
-
-  return tcal9539_read_u16(tc, TCAL9539_PE0, &tc->pull_enable);
-}
-
-
-
 
 static void
 tcal9539_irq(xgpio_t *ig)
@@ -328,7 +307,6 @@ static const xgpio_vtable_t tcal9539_vtable = {
   .get = tcal9539_get_pin,
   .get_mode = tcal9539_get_mode,
   .conf_irq = tcal9539_conf_irq,
-  .refresh_shadow = tcal9539_refresh_shadow,
   .irq = tcal9539_irq,
 };
 
@@ -341,14 +319,22 @@ tcal9539_create(i2c_t *i2c, uint8_t address, struct xgpio_irq_mux *m)
   tc->gpio.vtable = &tcal9539_vtable;
   tc->i2c = i2c;
   tc->address = address;
-  tc->output = 0xffff;
   tc->irq_mask = 0xffff;
-  tc->direction = 0xffff;
-  tc->pull_direction = 0xffff;
+
+  // Read hardware state into shadow registers
+  if(tcal9539_read_u16(tc, TCAL9539_OUTPUT0, &tc->output) ||
+     tcal9539_read_u16(tc, TCAL9539_CFG0, &tc->direction) ||
+     tcal9539_read_u16(tc, TCAL9539_PUD0, &tc->pull_direction) ||
+     tcal9539_read_u16(tc, TCAL9539_PE0, &tc->pull_enable)) {
+    free(tc);
+    return NULL;
+  }
 
   if(m != NULL) {
-    // Read initial input state
-    tcal9539_read_u16(tc, TCAL9539_INPUT0, &tc->input_shadow);
+    if(tcal9539_read_u16(tc, TCAL9539_INPUT0, &tc->input_shadow)) {
+      free(tc);
+      return NULL;
+    }
     xgpio_irq_mux_link(m, &tc->gpio);
     tc->irq_mux = m;
   }

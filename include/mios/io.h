@@ -139,8 +139,6 @@ typedef struct xgpio_vtable {
                       void (*cb)(void *arg), void *arg,
                       gpio_edge_t edge, int level);
 
-  error_t (*refresh_shadow)(struct xgpio *xg);
-
   void (*irq)(struct xgpio *xg);
 
 } xgpio_vtable_t;
@@ -198,12 +196,6 @@ xgpio_conf_irq(xgpio_t *xg, unsigned int line,
                gpio_edge_t edge, int level)
 {
   return xg->vtable->conf_irq(xg, line, pull, cb, arg, edge, level);
-}
-
-static inline error_t
-xgpio_refresh_shadow(xgpio_t *xg)
-{
-  return xg->vtable->refresh_shadow(xg);
 }
 
 // xpgio_pin API

@@ -119,13 +119,6 @@ mmgpio_get(struct xgpio *ig, unsigned int line, int *status)
 
 
 static error_t
-mmgpio_refresh_shadow(struct xgpio *ig)
-{
-  return 0;
-}
-
-
-static error_t
 mmgpio_conf_irq(struct xgpio *ig, unsigned int line,
                 gpio_pull_t pull,
                 void (*cb)(void *arg), void *arg,
@@ -141,8 +134,7 @@ static const xgpio_vtable_t mmgpio_vtable = {
   .conf_output = mmgpio_conf_output,
   .set = mmgpio_set,
   .get = mmgpio_get,
-  .conf_irq = mmgpio_conf_irq,
-  .refresh_shadow = mmgpio_refresh_shadow
+  .conf_irq = mmgpio_conf_irq
 };
 
 xgpio_t mmgpio = {
