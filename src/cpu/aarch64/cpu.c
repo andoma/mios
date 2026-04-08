@@ -36,8 +36,8 @@ cpu_stack_init(uint64_t *stack, void *entry,
   stack[32] = 0x60000344;
   stack[0]  = (intptr_t)thread_exit;
 
-  // x0 at [30], x1 at [31], x2 at [29], x3 at [28], ...
-  static const int arg_idx[] = { 30, 31, 29, 28 };
+  // x0 at [30], x1 at [31], x2 at [28], x3 at [29], ...
+  static const uint8_t arg_idx[] = { 30, 31, 28, 29 };
   for(int i = 0; i < nargs; i++)
     stack[arg_idx[i]] = va_arg(ap, uintptr_t);
   return stack;
