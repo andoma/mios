@@ -13,6 +13,7 @@ LDSCRIPT ?= ${P}/stm32n6.ld
 include ${SRC}/cpu/cortexm/cortexm55.mk
 
 SRCS += ${C}/systick.c \
+	${P}/stm32n6_systim.c \
 	${P}/stm32n6_entry.s \
 	${P}/stm32n6.c \
 	${P}/stm32n6_clk.c \
