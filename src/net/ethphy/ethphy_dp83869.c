@@ -296,10 +296,8 @@ dp83869_fiber_link_poll(struct ether_netif *eni)
       // 1000BASE-X is always 1000 Mbps full duplex
       evlog(LOG_INFO, "%s: Fiber link up 1000 Mbps full duplex", name);
 
-      if(edc->edc_set_speed)
-        edc->edc_set_speed(eni, 1000);
-      if(edc->edc_set_duplex)
-        edc->edc_set_duplex(eni, 1);
+      if(edc->edc_set_link_params)
+        edc->edc_set_link_params(eni, 1000, 1);
 
       current_up = 1;
       net_task_raise(&eni->eni_ni.ni_task, NETIF_TASK_STATUS_UP);
