@@ -66,53 +66,7 @@ SECTIONS {
                 KEEP(*(SORT_BY_NAME(.fini_array.*)))
                 _fini_array_end = .;
 
-                . = ALIGN(4);
-                _clicmd_array_begin = .;
-                KEEP(*(SORT_BY_NAME(clicmd.*)))
-                _clicmd_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _rpcdef_array_begin = .;
-                KEEP(*(rpcdef))
-                _rpcdef_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _servicedef_array_begin = .;
-                KEEP(*(servicedef))
-                _servicedef_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _httproute_array_begin = .;
-                KEEP(*(httproute))
-                _httproute_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _udpinput_array_begin = .;
-                KEEP(*(udpinput))
-                _udpinput_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _ghook_array_begin = .;
-                KEEP(*(ghook))
-                _ghook_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _copyhandler_array_begin = .;
-                KEEP(*(SORT_BY_NAME(copyhandler.*)))
-                _copyhandler_array_end = .;
-                . = ALIGN(4);
-
-                . = ALIGN(4);
-                _driver_array_begin = .;
-                KEEP(*(SORT_BY_NAME(driver.*)))
-                _driver_array_end = .;
-                . = ALIGN(4);
+                INCLUDE cpu/section_arrays.ld
 
         } >RAM
 
