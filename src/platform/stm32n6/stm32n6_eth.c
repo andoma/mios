@@ -39,6 +39,8 @@ typedef struct {
 #define ETH_RDES3_LD            0x10000000
 #define ETH_RDES3_BUF2V         0x02000000
 #define ETH_RDES3_BUF1V         0x01000000
+// Write-back format: bit 30 = CTXT (context descriptor with timestamp)
+#define ETH_RDES3_CTX           0x40000000
 
 #define ETH_TDES3_OWN           0x80000000
 #define ETH_TDES3_FD            0x20000000
@@ -96,6 +98,16 @@ typedef struct {
 
 #define ETH_DMACSR       (ETH_BASE + 0x1160)
 
+// PTP Timestamp registers
+#define ETH_MACTSCR      (ETH_BASE + 0xb00)
+#define ETH_MACSSIR      (ETH_BASE + 0xb04)
+#define ETH_MACSTSR      (ETH_BASE + 0xb08)
+#define ETH_MACSTNR      (ETH_BASE + 0xb0c)
+#define ETH_MACSTSUR     (ETH_BASE + 0xb10)
+#define ETH_MACSTNUR     (ETH_BASE + 0xb14)
+#define ETH_MACTSAR      (ETH_BASE + 0xb18)
+#define ETH_MACPPSCR     (ETH_BASE + 0xb70)
+
 
 #define ETH_TX_RING_SIZE 8
 #define ETH_TX_RING_MASK (ETH_TX_RING_SIZE - 1)
@@ -113,6 +125,7 @@ typedef struct stm32n6_eth {
   desc_t *se_rxring;
 
   void *se_tx_pbuf_data[ETH_TX_RING_SIZE];
+  void *se_tx_pbuf[ETH_TX_RING_SIZE];
   void *se_rx_pbuf_data[ETH_RX_RING_SIZE];
 
   uint8_t se_next_rx;
@@ -123,6 +136,12 @@ typedef struct stm32n6_eth {
   uint8_t se_phyaddr;
 
   timer_t se_periodic;
+
+#ifdef ENABLE_NET_PTP
+  uint32_t se_addend;
+  int32_t se_ppb_scale_mult;
+  int32_t se_ppb_scale_div;
+#endif
 
 } stm32n6_eth_t;
 
@@ -156,6 +175,15 @@ static void
 stm32n6_eth_print_info(struct device *dev, struct stream *st)
 {
   ether_print((ether_netif_t *)dev, st);
+#ifdef ENABLE_NET_PTP
+  stm32n6_eth_t *se = (stm32n6_eth_t *)dev;
+  if(ptp_print_info(st, &se->se_eni)) {
+    stprintf(st, "  PTP addend:0x%x seconds:%d nano:%d\n",
+             se->se_addend,
+             reg_rd(ETH_MACSTSR),
+             reg_rd(ETH_MACSTNR));
+  }
+#endif
 }
 
 
@@ -212,7 +240,7 @@ edc_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t value)
 }
 
 static void
-stm32n6_eth_set_speed(ether_netif_t *eni, int speed)
+stm32n6_eth_set_link_params(ether_netif_t *eni, int speed, int full_duplex)
 {
   if(speed == 1000) {
     reg_clr_bit(ETH_MACCR, 15); // PS=0: GMII/RGMII
@@ -224,12 +252,8 @@ stm32n6_eth_set_speed(ether_netif_t *eni, int speed)
     reg_set_bit(ETH_MACCR, 15); // PS=1: MII/RMII
     reg_clr_bit(ETH_MACCR, 14); // FES=0: 10Mbit
   }
-}
 
-static void
-stm32n6_eth_set_duplex(ether_netif_t *eni, int full)
-{
-  if(full)
+  if(full_duplex)
     reg_set_bit(ETH_MACCR, 13);
   else
     reg_clr_bit(ETH_MACCR, 13);
@@ -242,9 +266,94 @@ static const ethmac_device_class_t stm32n6_eth_device_class = {
   },
   .edc_mii_read = edc_mii_read,
   .edc_mii_write = edc_mii_write,
-  .edc_set_speed = stm32n6_eth_set_speed,
-  .edc_set_duplex = stm32n6_eth_set_duplex,
+  .edc_set_link_params = stm32n6_eth_set_link_params,
 };
+
+
+#ifdef ENABLE_NET_PTP
+
+static void
+stm32n6_clock_set_time(clock_realtime_t *clk, int64_t nsec)
+{
+  reg_wr(ETH_MACSTSUR, nsec / 1000000000);
+  reg_wr(ETH_MACSTNUR, nsec % 1000000000);
+  reg_set_bit(ETH_MACTSCR, 2);
+  while(reg_get_bit(ETH_MACTSCR, 2));
+}
+
+static int64_t
+stm32n6_clock_get_time(clock_realtime_t *clk)
+{
+  while(1) {
+    uint32_t s = reg_rd(ETH_MACSTSR);
+    uint32_t ns = reg_rd(ETH_MACSTNR);
+    if(s == reg_rd(ETH_MACSTSR))
+      return (int64_t)s * 1000000000 + ns;
+  }
+}
+
+static void
+stm32n6_clock_adj_time(clock_realtime_t *clk, int32_t ppb)
+{
+  stm32n6_eth_t *se = &stm32n6_eth;
+
+  int32_t addend_adjustment =
+    ((int64_t)ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
+
+  uint32_t final_addend = se->se_addend + addend_adjustment;
+  reg_wr(ETH_MACTSAR, final_addend);
+  reg_set_bit(ETH_MACTSCR, 5);
+}
+
+static const clock_realtime_class_t stm32n6_clock_realtime_class = {
+  .name = MAC_NAME,
+  .set_time = stm32n6_clock_set_time,
+  .get_time = stm32n6_clock_get_time,
+  .adj_time = stm32n6_clock_adj_time,
+};
+
+static void
+stm32n6_ptp_init(stm32n6_eth_t *se)
+{
+  // Select HSE as PTP reference clock (ETH1PTPSEL = 3 = hse_ck)
+  reg_set_bits(RCC_CCIPR2, 0, 2, 3);
+
+  const unsigned int ptp_freq = stm32n6_hse_freq;
+
+  uint32_t ssinc = (1000000000 / ptp_freq) + 1;
+
+  uint64_t denominator = (uint64_t)ptp_freq * ssinc;
+  se->se_addend = (1000000000ULL << 32) / denominator;
+
+  se->se_ppb_scale_mult = se->se_addend / 1000;
+  se->se_ppb_scale_div = 1000000;
+
+  reg_wr(ETH_MACTSCR,
+         (1 << 11) | // PTPv2 ethernet
+         (1 << 10) | // Enable timestamping for PTPv2
+         (1 << 9)  | // Rollover ns at 999999999
+         (1 << 1)  | // Fine mode
+         (1 << 0)  | // Enable
+         0);
+
+  reg_set_bits(ETH_MACSSIR, 16, 8, ssinc);
+
+  reg_wr(ETH_MACSTSUR, 0);
+  reg_wr(ETH_MACSTNUR, 0);
+  reg_set_bit(ETH_MACTSCR, 2);
+
+  reg_wr(ETH_MACTSAR, se->se_addend);
+  reg_set_bit(ETH_MACTSCR, 5);
+  while(reg_get_bit(ETH_MACTSCR, 5));
+
+  se->se_eni.eni_ptp.pes_clock.clk_class = &stm32n6_clock_realtime_class;
+  clock_servo_init(&se->se_eni.eni_ptp.pes_servo,
+                   &se->se_eni.eni_ptp.pes_clock);
+
+  reg_wr(ETH_MACPPSCR, 1);
+}
+
+#endif
 
 
 __attribute__((noreturn))
@@ -300,6 +409,10 @@ stm32n6_thread(stm32n6_eth_t *se, gpio_t phyrst, ethphy_mode_t miimode)
     }
   }
   usleep(10);
+
+#ifdef ENABLE_NET_PTP
+  stm32n6_ptp_init(se);
+#endif
 
   // MTL TX queue 0: enable (TXQEN=2), store-and-forward, queue size
   reg_wr(ETH_MTL_TXQ0OMR, (7 << 16) | (2 << 2) | (1 << 1));
@@ -361,7 +474,7 @@ handle_irq_rx(stm32n6_eth_t *se)
       break;
     const int len = w3 & 0x7fff;
 
-    if(w3 & ETH_RDES3_FD) {
+    if((w3 & (ETH_RDES3_FD | ETH_RDES3_CTX)) == ETH_RDES3_FD) {
       pbuf_t *pb = STAILQ_FIRST(&se->se_rx_scatter_queue);
       if(pb != NULL) {
         pbuf_free_irq_blocked(pb);
@@ -378,43 +491,85 @@ handle_irq_rx(stm32n6_eth_t *se)
     if(pb != NULL) {
       void *nextbuf = pbuf_data_get(0);
       if(nextbuf != NULL) {
-        int flags = 0;
 
-        if(w3 & ETH_RDES3_FD) {
-          flags |= PBUF_SOP;
-          pb->pb_offset = 2;
-        } else {
-          pb->pb_offset = 0;
-        }
-        if(w3 & ETH_RDES3_LD)
-          flags |= PBUF_EOP;
+        if(unlikely(w3 & ETH_RDES3_CTX)) {
 
-        pb->pb_data = buf;
-        pb->pb_flags = flags;
+          // Context descriptor — carries RX timestamp
+          pbuf_t *pb2 = STAILQ_FIRST(&se->se_rx_scatter_queue);
+          if(likely(pb2 != NULL)) {
+            pb->pb_flags = PBUF_TIMESTAMP | PBUF_SOP;
+            pb->pb_pktlen = pb2->pb_pktlen + sizeof(pbuf_timestamp_t);
+            pb->pb_offset = 0;
+            pb->pb_buflen = sizeof(pbuf_timestamp_t);
+            pb->pb_data = buf;
 
-        if(flags == (PBUF_SOP | PBUF_EOP)) {
-          pb->pb_buflen = len;
-          pb->pb_pktlen = len;
-          se->se_eni.eni_stats.rx_pkt++;
-          se->se_eni.eni_stats.rx_byte += len;
-          STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
-          netif_wakeup(&se->se_eni.eni_ni);
-        } else {
-          STAILQ_INSERT_TAIL(&se->se_rx_scatter_queue, pb, pb_link);
+            pbuf_timestamp_t *pt = buf;
+            pt->pt_cb = NULL;
+            pt->pt_seconds = rx->w1;
+            pt->pt_nanoseconds = rx->w0;
 
-          pb->pb_buflen = len - se->se_rx_scatter_length;
-
-          if(flags & PBUF_EOP) {
-            pbuf_t *first = STAILQ_FIRST(&se->se_rx_scatter_queue);
-            first->pb_pktlen = len;
+            pb2->pb_flags &= ~PBUF_SOP;
 
             se->se_eni.eni_stats.rx_pkt++;
-            se->se_eni.eni_stats.rx_byte += len;
+            se->se_eni.eni_stats.rx_byte += pb2->pb_pktlen;
+
+            STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
             STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
                           &se->se_rx_scatter_queue);
             netif_wakeup(&se->se_eni.eni_ni);
           } else {
-            se->se_rx_scatter_length = len;
+            pbuf_put(pb);
+            pbuf_data_put(buf);
+          }
+
+        } else {
+
+          int flags = 0;
+          int tsa = 0;
+
+          if(w3 & ETH_RDES3_FD) {
+            flags |= PBUF_SOP;
+            pb->pb_offset = 2;
+          } else {
+            pb->pb_offset = 0;
+          }
+          if(w3 & ETH_RDES3_LD) {
+            flags |= PBUF_EOP;
+            if(w3 & (1 << 26)) {    // RS1V: RDES1 valid
+              if(rx->w1 & (1 << 14)) // TSA: timestamp available
+                tsa = 1;
+            }
+          }
+
+          pb->pb_data = buf;
+          pb->pb_flags = flags;
+
+          if((flags == (PBUF_SOP | PBUF_EOP)) && likely(!tsa)) {
+            pb->pb_buflen = len;
+            pb->pb_pktlen = len;
+            se->se_eni.eni_stats.rx_pkt++;
+            se->se_eni.eni_stats.rx_byte += len;
+            STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
+            netif_wakeup(&se->se_eni.eni_ni);
+          } else {
+            STAILQ_INSERT_TAIL(&se->se_rx_scatter_queue, pb, pb_link);
+
+            pb->pb_buflen = len - se->se_rx_scatter_length;
+
+            if(flags & PBUF_EOP) {
+              pbuf_t *first = STAILQ_FIRST(&se->se_rx_scatter_queue);
+              first->pb_pktlen = len;
+
+              if(likely(!tsa)) {
+                se->se_eni.eni_stats.rx_pkt++;
+                se->se_eni.eni_stats.rx_byte += len;
+                STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
+                              &se->se_rx_scatter_queue);
+                netif_wakeup(&se->se_eni.eni_ni);
+              }
+            } else {
+              se->se_rx_scatter_length = len;
+            }
           }
         }
         buf = nextbuf;
@@ -443,7 +598,29 @@ handle_irq_tx(stm32n6_eth_t *se)
       se->se_eni.eni_stats.tx_pkt++;
       se->se_eni.eni_stats.tx_byte += tx->w2 & 0x3fff;
     }
-    pbuf_data_put(se->se_tx_pbuf_data[rdptr]);
+
+    pbuf_t *pb = se->se_tx_pbuf[rdptr];
+    if(pb != NULL) {
+      // PTP TX timestamp — deliver back through RX queue
+      pbuf_timestamp_t *s = (pbuf_timestamp_t *)se->se_tx_pbuf[rdptr];
+      pbuf_timestamp_t *pt = se->se_tx_pbuf_data[rdptr];
+      pt->pt_cb = s->pt_cb;
+      pt->pt_id = s->pt_id;
+      pt->pt_seconds = tx->w1;
+      pt->pt_nanoseconds = tx->w0;
+
+      pb = (pbuf_t *)s;
+      pb->pb_flags = PBUF_SOP | PBUF_EOP | PBUF_TIMESTAMP;
+      pb->pb_offset = 0;
+      pb->pb_buflen = sizeof(pbuf_timestamp_t);
+      pb->pb_pktlen = pb->pb_buflen;
+      pb->pb_data = pt;
+
+      STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
+      netif_wakeup(&se->se_eni.eni_ni);
+    } else {
+      pbuf_data_put(se->se_tx_pbuf_data[rdptr]);
+    }
     se->se_tx_rdptr++;
   }
 }
@@ -482,18 +659,36 @@ stm32n6_eth_output(struct ether_netif *eni, pbuf_t *pb,
 
     tx->p0 = pb->pb_data + pb->pb_offset;
     tx->w1 = 0;
-    tx->w2 = (1 << 31) | pb->pb_buflen;
 
+    uint32_t w2 = (1 << 31) | pb->pb_buflen;
     uint32_t w3 = ETH_TDES3_OWN | pb->pb_pktlen;
 
-    if(pb->pb_flags & PBUF_SOP)
+    if(pb->pb_flags & PBUF_SOP) {
       w3 |= ETH_TDES3_FD;
-    if(pb->pb_flags & PBUF_EOP)
+      if(unlikely(txcb != NULL))
+        w2 |= (1 << 30); // TTSE: TX timestamp enable
+    }
+
+    tx->w2 = w2;
+
+    if(pb->pb_flags & PBUF_EOP) {
       w3 |= ETH_TDES3_LD;
+      if(unlikely(txcb != NULL)) {
+        // Reuse pbuf for TX timestamp callback
+        pbuf_timestamp_t *pt = (pbuf_timestamp_t *)pb;
+        pt->pt_cb = txcb;
+        pt->pt_id = id;
+        se->se_tx_pbuf[wrptr & ETH_TX_RING_MASK] = pb;
+        pb = NULL;
+      }
+    }
+
+    if(pb != NULL) {
+      pbuf_put(pb);
+      se->se_tx_pbuf[wrptr & ETH_TX_RING_MASK] = NULL;
+    }
 
     tx->w3 = w3;
-
-    pbuf_put(pb);
     wrptr++;
   }
 

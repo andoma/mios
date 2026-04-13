@@ -6,6 +6,7 @@
 
 
 static uint32_t apb_clk = 32000000;
+uint32_t stm32n6_hse_freq;
 
 unsigned int
 clk_get_freq(uint16_t id)
@@ -45,6 +46,8 @@ enable_ic(int unit, int divider, int source)
 const char *
 stm32n6_init_pll(unsigned int hse_freq)
 {
+  stm32n6_hse_freq = hse_freq;
+
   reg_set_bit(RCC_CR, 4); // Enable HSE (External XTAL)
   while(reg_get_bit(RCC_SR, 4) == 0) {
   }

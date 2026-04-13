@@ -122,4 +122,6 @@ rst_deassert(uint16_t id)
 
 unsigned int clk_get_freq(uint16_t id);
 
+extern uint32_t stm32n6_hse_freq;
+
 const char *stm32n6_init_pll(unsigned int hse_freq);
