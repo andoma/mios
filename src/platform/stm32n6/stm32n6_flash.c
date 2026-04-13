@@ -591,3 +591,9 @@ ota_get_stream(void)
 
   return app_write_stream_open(flash_partitions[target_partition], target_slot, 1);
 }
+
+__attribute__((weak))
+error_t ota_prohibit_upgrade(void)
+{
+  return 0;
+}
