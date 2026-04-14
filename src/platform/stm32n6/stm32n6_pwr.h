@@ -4,6 +4,7 @@
 
 #define PWR_BASE 0x56024800
 
+#define PWR_SVMCR1 (PWR_BASE + 0x34)
 #define PWR_SVMCR2 (PWR_BASE + 0x38)
 #define PWR_SVMCR3 (PWR_BASE + 0x3c)
 #define PWR_VOSCR  (PWR_BASE + 0x20)
@@ -36,6 +37,15 @@ stm32n6_pwr_vddio5_enable(int voltage)
     reg_set_bit(PWR_SVMCR2, 24); // VDDIO5VRSEL
   reg_set_bit(PWR_SVMCR2, 8);    // VDDIO5SV
   reg_set_bit(PWR_SVMCR2, 0);    // VDDIO5VMEN
+}
+
+static inline void
+stm32n6_pwr_vddio4_enable(int voltage)
+{
+  if(voltage == STM32N6_VDDIO_1V8)
+    reg_set_bit(PWR_SVMCR1, 24); // VDDIO4VRSEL
+  reg_set_bit(PWR_SVMCR1, 8);    // VDDIO4SV
+  reg_set_bit(PWR_SVMCR1, 0);    // VDDIO4VMEN
 }
 
 static inline void
