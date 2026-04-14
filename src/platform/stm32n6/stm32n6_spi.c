@@ -1,6 +1,7 @@
 #include "stm32n6_spi.h"
 #include "stm32n6_clk.h"
 #include "stm32n6_reg.h"
+#include "stm32n6_dma.h"
 
 #include <mios/type_macros.h>
 #include <mios/task.h>
@@ -12,6 +13,7 @@
 #include <string.h>
 
 #include "irq.h"
+#include "cache.h"
 
 typedef struct stm32n6_spi {
   spi_t spi;
@@ -20,6 +22,8 @@ typedef struct stm32n6_spi {
 
   task_waitable_t waitq;
 
+  stm32_dma_instance_t rx_dma;
+  stm32_dma_instance_t tx_dma;
   uint16_t clkid;
   uint8_t eot;
   uint8_t fifo_size;
@@ -32,21 +36,23 @@ typedef struct stm32n6_spi {
 static const struct {
   uint32_t reg_base;
   uint16_t clkid;
+  uint8_t tx_dma;
+  uint8_t rx_dma;
   uint8_t irq;
   uint8_t fifo_size;
 } spi_config[] = {
-  { SPI1_BASE, CLK_SPI1, 153, 16 },
-  { SPI2_BASE, CLK_SPI2, 154, 16 },
-  { SPI3_BASE, CLK_SPI3, 155, 16 },
-  { SPI4_BASE, CLK_SPI4, 156, 8 },
-  { SPI5_BASE, CLK_SPI5, 157, 8 },
-  { SPI6_BASE, CLK_SPI6, 158, 8 },
+  { SPI1_BASE, CLK_SPI1, STM32N6_DMA_SPI1_TX, STM32N6_DMA_SPI1_RX, 153, 16 },
+  { SPI2_BASE, CLK_SPI2, STM32N6_DMA_SPI2_TX, STM32N6_DMA_SPI2_RX, 154, 16 },
+  { SPI3_BASE, CLK_SPI3, STM32N6_DMA_SPI3_TX, STM32N6_DMA_SPI3_RX, 155, 16 },
+  { SPI4_BASE, CLK_SPI4, STM32N6_DMA_SPI4_TX, STM32N6_DMA_SPI4_RX, 156, 8 },
+  { SPI5_BASE, CLK_SPI5, STM32N6_DMA_SPI5_TX, STM32N6_DMA_SPI5_RX, 157, 8 },
+  { SPI6_BASE, CLK_SPI6, STM32N6_DMA_SPI6_TX, STM32N6_DMA_SPI6_RX, 158, 8 },
 };
 
 
 static error_t
-spi_xfer(struct stm32n6_spi *spi, const uint8_t *tx, uint8_t *rx,
-         size_t len, uint32_t cfg1, uint32_t cfg2)
+spi_xfer_pio(struct stm32n6_spi *spi, const uint8_t *tx, uint8_t *rx,
+             size_t len, uint32_t cfg1, uint32_t cfg2)
 {
   reg_wr(spi->reg_base + SPI_CFG2,
          cfg2                 |
@@ -103,6 +109,81 @@ spi_xfer(struct stm32n6_spi *spi, const uint8_t *tx, uint8_t *rx,
     len -= xferlen;
   }
 
+  return 0;
+}
+
+
+static error_t
+spi_xfer(struct stm32n6_spi *spi, const uint8_t *tx, uint8_t *rx,
+         size_t len, uint32_t cfg1, uint32_t cfg2)
+{
+  // DMA requires buffers in AXISRAM1/2 (0x24000000 - 0x241FFFFF)
+  // AXISRAM3-6 (>= 0x24200000) are on the NPU interconnect, not DMA-accessible
+  #define ADDR_NOT_DMA(p) ((intptr_t)(p) < 0x24000000 || (intptr_t)(p) >= 0x24200000)
+
+  if(spi->rx_dma == STM32_DMA_INSTANCE_NONE ||
+     len < 4 ||
+     (tx && ADDR_NOT_DMA(tx)) ||
+     (rx && ((len & (CACHE_LINE_SIZE - 1)) ||
+             ADDR_NOT_DMA(rx) ||
+             ((intptr_t)rx & (CACHE_LINE_SIZE - 1))))) {
+    return spi_xfer_pio(spi, tx, rx, len, cfg1, cfg2);
+  }
+
+  reg_wr(spi->reg_base + SPI_CFG2,
+         cfg2                  |
+         (rx ? 0 : (1 << 17))  |
+         (tx ? 0 : (1 << 18))  |
+         0);
+
+  reg_wr(spi->reg_base + SPI_CR2, len);
+
+  // Set DMA enable bits in CFG1 BEFORE SPE — N6 SPI requires
+  // CFG1 to be written while SPI is disabled
+  if(rx) {
+    cfg1 |= 1 << 14; // RXDMAEN
+    dcache_op(rx, len, DCACHE_INVALIDATE);
+    stm32_dma_set_mem0(spi->rx_dma, rx);
+    stm32_dma_set_nitems(spi->rx_dma, len);
+    stm32_dma_start(spi->rx_dma);
+  }
+
+  if(tx) {
+    cfg1 |= 1 << 15; // TXDMAEN
+    dcache_op((void *)tx, len, DCACHE_CLEAN);
+    stm32_dma_set_mem0(spi->tx_dma, (void *)tx);
+    stm32_dma_set_nitems(spi->tx_dma, len);
+    stm32_dma_start(spi->tx_dma);
+  }
+
+  reg_wr(spi->reg_base + SPI_CFG1, cfg1);  // Write RXDMAEN/TXDMAEN while SPE=0
+  reg_wr(spi->reg_base + SPI_CR1, (1 << 0));  // Enable SPI (SPE=1)
+
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+
+  reg_wr(spi->reg_base + SPI_CR1,
+         (1 << 9) | // CSTART
+         (1 << 0) | // Enable
+         0);
+
+  reg_wr(spi->reg_base + SPI_IER, (1 << 3)); // End-of-transfer IE
+
+  while(!spi->eot) {
+    task_sleep_sched_locked(&spi->waitq);
+  }
+  spi->eot = 0;
+  irq_permit(q);
+
+  reg_wr(spi->reg_base + SPI_IER, 0);
+
+  if(rx)
+    stm32_dma_stop(spi->rx_dma);
+  if(tx)
+    stm32_dma_stop(spi->tx_dma);
+
+  reg_wr(spi->reg_base + SPI_CR1, 0);
+  reg_wr(spi->reg_base + SPI_CFG1, cfg1 & ~0xc000); // Clear RXDMAEN/TXDMAEN
+  reg_wr(spi->reg_base + SPI_IFCR, 0xffff);
   return 0;
 }
 
@@ -211,7 +292,6 @@ spi_get_config(spi_t *dev, int clock_flags, int baudrate)
 {
   struct stm32n6_spi *spi = (struct stm32n6_spi *)dev;
   int f = clk_get_freq(spi->clkid) / 2;
-  printf("f=%d\n", f);
   int mbr;
   for(mbr = 0; mbr < 7; mbr++) {
     if(baudrate >= f)
@@ -232,8 +312,23 @@ stm32n6_spi_irq(void *arg)
 }
 
 
+static void
+tx_dma_error(stm32_dma_instance_t instance, uint32_t status, void *arg)
+{
+  stm32n6_spi_t *spi = arg;
+  panic("%s: tx-dma error 0x%x", spi->name, status);
+}
+
+static void
+rx_dma_error(stm32_dma_instance_t instance, uint32_t status, void *arg)
+{
+  stm32n6_spi_t *spi = arg;
+  panic("%s: rx-dma error 0x%x", spi->name, status);
+}
+
+
 spi_t *
-stm32n6_spi_create_unit(unsigned int instance)
+stm32n6_spi_create_unit(unsigned int instance, int flags)
 {
   instance--;
 
@@ -249,6 +344,44 @@ stm32n6_spi_create_unit(unsigned int instance)
   spi->fifo_size = spi_config[instance].fifo_size;
   mutex_init(&spi->mutex, spi->name);
   task_waitable_init(&spi->waitq, spi->name);
+
+  if(flags & STM32N6_SPI_NO_DMA) {
+    spi->rx_dma = STM32_DMA_INSTANCE_NONE;
+    spi->tx_dma = STM32_DMA_INSTANCE_NONE;
+  } else {
+    spi->rx_dma = stm32_dma_alloc(spi_config[instance].rx_dma, "spirx");
+    stm32_dma_set_callback(spi->rx_dma, rx_dma_error, spi, IRQ_LEVEL_CLOCK,
+                           DMA_STATUS_XFER_ERROR);
+
+    spi->tx_dma = stm32_dma_alloc(spi_config[instance].tx_dma, "spitx");
+    stm32_dma_set_callback(spi->tx_dma, tx_dma_error, spi, IRQ_LEVEL_CLOCK,
+                           DMA_STATUS_XFER_ERROR);
+
+    stm32_dma_config_set_reg(spi->tx_dma,
+                             stm32_dma_config_make_reg(STM32_DMA_BURST_NONE,
+                                                       STM32_DMA_BURST_NONE,
+                                                       STM32_DMA_PRIO_LOW,
+                                                       STM32_DMA_8BIT,
+                                                       STM32_DMA_8BIT,
+                                                       STM32_DMA_INCREMENT,
+                                                       STM32_DMA_FIXED,
+                                                       STM32_DMA_SINGLE,
+                                                       STM32_DMA_M_TO_P));
+
+    stm32_dma_config_set_reg(spi->rx_dma,
+                             stm32_dma_config_make_reg(STM32_DMA_BURST_NONE,
+                                                       STM32_DMA_BURST_NONE,
+                                                       STM32_DMA_PRIO_LOW,
+                                                       STM32_DMA_8BIT,
+                                                       STM32_DMA_8BIT,
+                                                       STM32_DMA_INCREMENT,
+                                                       STM32_DMA_FIXED,
+                                                       STM32_DMA_SINGLE,
+                                                       STM32_DMA_P_TO_M));
+
+    stm32_dma_set_paddr(spi->rx_dma, spi->reg_base + SPI_RXDR);
+    stm32_dma_set_paddr(spi->tx_dma, spi->reg_base + SPI_TXDR);
+  }
 
   irq_enable_fn_arg(spi_config[instance].irq, IRQ_LEVEL_SCHED,
                     stm32n6_spi_irq, spi);

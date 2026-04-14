@@ -1,0 +1,38 @@
+#pragma once
+
+#include "platform/stm32/stm32_dma.h"
+
+// HPDMA1/GPDMA1 request IDs (REQSEL values)
+// These are identical for both controllers (RM0486 Table 87 / Table 99)
+
+#define STM32N6_DMA_SPI1_RX  79
+#define STM32N6_DMA_SPI1_TX  80
+#define STM32N6_DMA_SPI2_RX  81
+#define STM32N6_DMA_SPI2_TX  82
+#define STM32N6_DMA_SPI3_RX  83
+#define STM32N6_DMA_SPI3_TX  84
+#define STM32N6_DMA_SPI4_RX  85
+#define STM32N6_DMA_SPI4_TX  86
+#define STM32N6_DMA_SPI5_RX  87
+#define STM32N6_DMA_SPI5_TX  88
+#define STM32N6_DMA_SPI6_RX  89
+#define STM32N6_DMA_SPI6_TX  90
+
+#define STM32N6_DMA_I2C1_RX  95
+#define STM32N6_DMA_I2C1_TX  96
+#define STM32N6_DMA_I2C2_RX  97
+#define STM32N6_DMA_I2C2_TX  98
+#define STM32N6_DMA_I2C3_RX  99
+#define STM32N6_DMA_I2C3_TX  100
+#define STM32N6_DMA_I2C4_RX  101
+#define STM32N6_DMA_I2C4_TX  102
+
+#define STM32N6_DMA_USART1_RX 107
+#define STM32N6_DMA_USART1_TX 108
+#define STM32N6_DMA_USART2_RX 109
+#define STM32N6_DMA_USART2_TX 110
+#define STM32N6_DMA_USART3_RX 111
+#define STM32N6_DMA_USART3_TX 112
+
+#define STM32N6_DMA_ADC1       7
+#define STM32N6_DMA_ADC2       8

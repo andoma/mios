@@ -19,7 +19,9 @@
 #define SPI5_BASE 0x52005000
 #define SPI6_BASE 0x56001400
 
-spi_t *stm32n6_spi_create_unit(unsigned int instance);
+#define STM32N6_SPI_NO_DMA  (1 << 0)
+
+spi_t *stm32n6_spi_create_unit(unsigned int instance, int flags);
 
 extern int stm32n6_spi_invalid_af_for_pin; // never defined — link error on bad pin
 
@@ -92,6 +94,7 @@ stm32n6_spi_pin_af(unsigned int instance, gpio_t pin)
     break;
   case 5:
     switch(pin) {
+    case GPIO_PE(15):             // SCK
     case GPIO_PF(11):             // MOSI
     case GPIO_PF(12):             // MISO
     case GPIO_PF(13):             // NSS
@@ -143,5 +146,5 @@ stm32n6_spi_create(unsigned int instance, gpio_t clk, gpio_t miso,
                  GPIO_PUSH_PULL, speed, GPIO_PULL_NONE);
   gpio_conf_af(mosi, stm32n6_spi_pin_af(instance, mosi),
                GPIO_PUSH_PULL, speed, GPIO_PULL_NONE);
-  return stm32n6_spi_create_unit(instance);
+  return stm32n6_spi_create_unit(instance, 0);
 }
