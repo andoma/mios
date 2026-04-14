@@ -120,37 +120,32 @@ gpio_get_input(gpio_t gpio)
 }
 
 
-#if 0
+// EXTI — External Interrupt Controller
+// STM32N6 has individual IRQs per EXTI line (IRQ 20-35 for lines 0-15)
+// and separate rising/falling pending registers (RPR1/FPR1).
+
+#define EXTI_BASE        0x56025000  // AHB4
+
+#define EXTI_RTSR1       (EXTI_BASE + 0x00)
+#define EXTI_FTSR1       (EXTI_BASE + 0x04)
+#define EXTI_RPR1        (EXTI_BASE + 0x0C)
+#define EXTI_FPR1        (EXTI_BASE + 0x10)
+#define EXTI_EXTICR(x)   (EXTI_BASE + 0x60 + (4 * (x)))
+#define EXTI_IMR1        (EXTI_BASE + 0x80)
+
 typedef struct {
   void (*cb)(void *arg);
   void *arg;
 } gpio_irq_t;
 
 static gpio_irq_t gpio_irqs[16];
-static uint8_t gpio_irq_level[7];
-
-#define EXTI_BASE        0x58000000
-
-#define EXTI_RTSR1       (EXTI_BASE + 0x00)
-#define EXTI_FTSR1       (EXTI_BASE + 0x04)
-#define EXTI_CPUIMR1     (EXTI_BASE + 0x80)
-#define EXTI_CPUPR1      (EXTI_BASE + 0x88)
-
-#include "stm32n6_syscfg.h"
-
-#define SYSCFG_EXTICR(x) (SYSCFG_BASE + 0x60 + (4 * (x)))
 
 void
 gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
               gpio_edge_t edge, int level)
 {
-  clk_enable(CLK_SYSCFG);
-
   const int port = gpio >> 4;
   const int bit = gpio & 0xf;
-  const int icr = bit >> 2;
-  const int slice = bit & 3;
-
 
   if(gpio_irqs[bit].cb)
     panic("GPIO-IRQ for line %d already in use", bit);
@@ -162,6 +157,8 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   gpio_irqs[bit].cb  = cb;
   gpio_irqs[bit].arg = arg;
 
+  // Select GPIO port for this EXTI line (8-bit fields in EXTICR)
+  reg_set_bits(EXTI_EXTICR(bit >> 2), (bit & 3) * 8, 8, port);
 
   if(edge & GPIO_FALLING_EDGE)
     reg_set_bit(EXTI_FTSR1, bit);
@@ -173,94 +170,38 @@ gpio_conf_irq(gpio_t gpio, gpio_pull_t pull, void (*cb)(void *arg), void *arg,
   else
     reg_clr_bit(EXTI_RTSR1, bit);
 
-  reg_set_bit(EXTI_CPUIMR1, bit);
+  // Clear any pending and enable interrupt
+  reg_wr(EXTI_RPR1, 1 << bit);
+  reg_wr(EXTI_FPR1, 1 << bit);
+  reg_set_bit(EXTI_IMR1, bit);
 
-  reg_set_bits(SYSCFG_EXTICR(icr), slice * 4, 4, port);
-
-  int irq;
-  int group;
-  uint32_t group_bits = 1 << bit;
-  if(bit < 5) {
-    irq = bit + 6;
-    group = bit;
-  } else if(bit < 10) {
-    irq = 23;
-    group = 5;
-    group_bits = 0b1111100000;
-  } else {
-    irq = 40;
-    group = 6;
-    group_bits = 0b1111110000000000;
-  }
-
-  if(gpio_irq_level[group] && gpio_irq_level[group] != level) {
-    panic("IRQ level conflict for group %d", group);
-  }
-
-  if(!gpio_irq_level[group]) {
-    reg_wr(EXTI_CPUPR1, group_bits);
-    gpio_irq_level[group] = level;
-    irq_enable(irq, level);
-  }
+  irq_enable(20 + bit, level);
   irq_permit(q);
 }
-
 
 
 static void __attribute__((noinline))
 gpio_irq(int line)
 {
-  reg_wr(EXTI_CPUPR1, 1 << line);
+  uint32_t mask = 1 << line;
+  reg_wr(EXTI_RPR1, mask);
+  reg_wr(EXTI_FPR1, mask);
   gpio_irqs[line].cb(gpio_irqs[line].arg);
 }
 
-
-
-void
-irq_6(void)
-{
-  gpio_irq(0);
-}
-
-void
-irq_7(void)
-{
-  gpio_irq(1);
-}
-
-void
-irq_8(void)
-{
-  gpio_irq(2);
-}
-
-void
-irq_9(void)
-{
-  gpio_irq(3);
-}
-
-void
-irq_10(void)
-{
-  gpio_irq(4);
-}
-
-void
-irq_23(void)
-{
-  const uint32_t pr = reg_rd(EXTI_CPUPR1);
-  for(int i = 5; i <= 9; i++)
-    if((1 << i) & pr)
-      gpio_irq(i);
-}
-
-void
-irq_40(void)
-{
-  const uint32_t pr = reg_rd(EXTI_CPUPR1);
-  for(int i = 10; i <= 15; i++)
-    if((1 << i) & pr)
-      gpio_irq(i);
-}
-#endif
+void irq_20(void) { gpio_irq(0); }
+void irq_21(void) { gpio_irq(1); }
+void irq_22(void) { gpio_irq(2); }
+void irq_23(void) { gpio_irq(3); }
+void irq_24(void) { gpio_irq(4); }
+void irq_25(void) { gpio_irq(5); }
+void irq_26(void) { gpio_irq(6); }
+void irq_27(void) { gpio_irq(7); }
+void irq_28(void) { gpio_irq(8); }
+void irq_29(void) { gpio_irq(9); }
+void irq_30(void) { gpio_irq(10); }
+void irq_31(void) { gpio_irq(11); }
+void irq_32(void) { gpio_irq(12); }
+void irq_33(void) { gpio_irq(13); }
+void irq_34(void) { gpio_irq(14); }
+void irq_35(void) { gpio_irq(15); }
