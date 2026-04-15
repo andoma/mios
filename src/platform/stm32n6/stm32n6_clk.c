@@ -57,6 +57,8 @@ stm32n6_init_pll(unsigned int hse_freq)
   int divn = 50;
   //  int divp = 1;
 
+  reg_wr(RCC_PLLxCFGR2(1), 0);  // Clear fractional divider (FSBL leaves 0x800000)
+
   reg_wr(RCC_PLLxCFGR1(1),
          (0b010 << 28) | // Select HSE
          (divm  << 20) |
