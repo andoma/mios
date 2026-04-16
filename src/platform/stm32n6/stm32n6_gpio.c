@@ -186,6 +186,7 @@ gpio_irq(int line)
   uint32_t mask = 1 << line;
   reg_wr(EXTI_RPR1, mask);
   reg_wr(EXTI_FPR1, mask);
+  asm volatile("dsb");
   gpio_irqs[line].cb(gpio_irqs[line].arg);
 }
 

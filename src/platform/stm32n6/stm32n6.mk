@@ -2,8 +2,6 @@ P := ${SRC}/platform/stm32n6
 
 GLOBALDEPS += ${P}/stm32n6.mk
 
-ENABLE_TASK_ACCOUNTING ?= no
-
 CPPFLAGS += -iquote${P} -include ${P}/stm32n6.h
 
 LDSCRIPT ?= ${P}/stm32n6.ld
