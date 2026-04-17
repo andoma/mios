@@ -792,7 +792,7 @@ setup_rgmii_gpios(gpio_t mdio, gpio_t mdc)
 }
 
 
-void
+ether_netif_t *
 stm32n6_eth_init(gpio_t phyrst, gpio_t mdio, gpio_t mdc,
                  int phy_addr, ethphy_mode_t mode)
 {
@@ -804,6 +804,14 @@ stm32n6_eth_init(gpio_t phyrst, gpio_t mdio, gpio_t mdc,
   se->se_phyaddr = phy_addr;
 
   ether_netif_init(&se->se_eni, "eth0", &stm32n6_eth_device_class);
+
+#ifdef ENABLE_NET_PTP
+  // Install the clock class early so callers can take a pointer to
+  // pes_clock even before the worker thread completes hardware init.
+  // get_time() returns 0 until stm32n6_ptp_init() configures the
+  // timestamp unit.
+  se->se_eni.eni_ptp.pes_clock.clk_class = &stm32n6_clock_realtime_class;
+#endif
 
   setup_rgmii_gpios(mdio, mdc);
 
@@ -830,4 +838,5 @@ stm32n6_eth_init(gpio_t phyrst, gpio_t mdio, gpio_t mdc,
   }
 
   thread_createv(stm32n6_thread, 512, "eth", 0, 4, se, phyrst, mode);
+  return &se->se_eni;
 }
