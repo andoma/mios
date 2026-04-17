@@ -8,6 +8,7 @@
 #define RCC_SR            (RCC_BASE + 0x004)
 #define RCC_CFGR1         (RCC_BASE + 0x020)
 #define RCC_CFGR2         (RCC_BASE + 0x024)
+#define RCC_RSR           (RCC_BASE + 0x034)
 
 #define RCC_PLLxCFGR1(x)  (RCC_BASE + 0x70 + (x) * 0x10)
 #define RCC_PLLxCFGR2(x)  (RCC_BASE + 0x74 + (x) * 0x10)
