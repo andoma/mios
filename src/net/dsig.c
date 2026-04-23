@@ -77,34 +77,12 @@ dsig_filter_match(const struct dsig_filter *dof, uint32_t addr)
 }
 
 
-static void
-dsig_output_iface(uint32_t id, struct pbuf **pb, struct netif *ni)
-{
-  const struct dsig_filter *dof = ni->ni_dsig_output_filter;
-  uint32_t flags = 0;
-
-  if(dof != NULL) {
-    dof = dsig_filter_match(dof, id);
-    if(dof == NULL)
-      return;
-    flags = dof->flags;
-  }
-
-  pbuf_t *copy = pbuf_copy(*pb, 0);
-  if(copy == NULL)
-    return;
-
-  copy = ni->ni_dsig_output(ni, copy, id, flags);
-  if(copy != NULL)
-    pbuf_free(copy);
-}
-
-
 // Called on net thread for packets to be sent
 struct pbuf *
 dsig_output(uint32_t id, struct pbuf *pb, struct netif *exclude)
 {
-  struct netif *ni;
+  struct netif *ni, *to = NULL;
+  uint32_t to_flags = 0;
 
   // Local dispatch
   dsig_dispatch(id, pb);
@@ -112,7 +90,32 @@ dsig_output(uint32_t id, struct pbuf *pb, struct netif *exclude)
   SLIST_FOREACH(ni, &netifs, ni_global_link) {
     if(ni == exclude || ni->ni_dsig_output == NULL)
       continue;
-    dsig_output_iface(id, &pb, ni);
+
+    uint32_t flags = 0;
+
+    const struct dsig_filter *dof = ni->ni_dsig_output_filter;
+    if(dof != NULL) {
+      dof = dsig_filter_match(dof, id);
+      if(dof == NULL)
+        continue;
+      flags = dof->flags;
+    }
+
+    if(to != NULL) {
+      pbuf_t *copy = pbuf_copy(pb, 0);
+      if(copy != NULL) {
+        copy = to->ni_dsig_output(to, copy, id, to_flags);
+        if(copy != NULL)
+          pbuf_free(copy);
+      }
+    }
+
+    to = ni;
+    to_flags = flags;
+  }
+
+  if(to != NULL) {
+    return to->ni_dsig_output(to, pb, id, to_flags);
   }
   return pb;
 }
