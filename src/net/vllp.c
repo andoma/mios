@@ -82,7 +82,6 @@ struct vllp_channel {
   uint32_t tx_crc_IV;
   uint32_t rx_crc_IV;
 
-  uint8_t flags;
   uint8_t id;
   uint8_t state;
   uint8_t app_closed;
