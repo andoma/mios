@@ -44,6 +44,7 @@ typedef struct fdcan {
   uint32_t tx;
   uint32_t tx_drop;
   uint32_t recovery_attempts;
+  uint32_t nobufs;
 
   timer_t recovery_timer;
 } fdcan_t;
@@ -134,6 +135,8 @@ stm32_fdcan_irq0(void *arg)
         pb->pb_pktlen = len + 4;
         STAILQ_INSERT_TAIL(&fc->cni.cni_ni.ni_rx_queue, pb, pb_link);
         netif_wakeup(&fc->cni.cni_ni);
+      } else {
+        fc->nobufs++;
       }
       reg_wr(fc->reg_base + FDCAN_RXF0A, get_index);
       fc->rx_fifo0++;
@@ -162,8 +165,8 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
   uint32_t tec = ecr & 0xff;
   uint32_t psr = reg_rd(fc->reg_base + FDCAN_PSR);
 
-  stprintf(st, "Received packets, Fifo0:%u  Fifo1:%u\n",
-           fc->rx_fifo0, fc->rx_fifo1);
+  stprintf(st, "Received packets, Fifo0:%u  Fifo1:%u  NoPbufs:%u\n",
+           fc->rx_fifo0, fc->rx_fifo1, fc->nobufs);
   stprintf(st, "Transmitted packets:%u  Drops:%u\n",
            fc->tx, fc->tx_drop);
 
