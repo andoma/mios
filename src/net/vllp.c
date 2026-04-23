@@ -276,7 +276,7 @@ vllp_disconnect(vllp_t *v, const char *reason)
   timer_disarm(&v->rtx_timer);
   timer_disarm(&v->timeout_timer);
 
-  evlog(LOG_DEBUG, "VLLP: Disconnected -- %s", reason);
+  evlog(LOG_DEBUG, "VLLP: 0x%x:0x%x Disconnected -- %s", v->txid, v->rxid, reason);
 
   for(vc = LIST_FIRST(&v->channels); vc != NULL; vc = n) {
     n = LIST_NEXT(vc, link);
@@ -653,14 +653,17 @@ vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb, pbuf_t *reuse)
 static error_t
 vllp_tx_close(vllp_t *v, vllp_channel_t *vc)
 {
+  TAILQ_REMOVE(&v->established_channels, vc, qlink);
+  vc->state = VLLP_CHANNEL_STATE_CLOSED_SENT;
+
+  if(!v->connected)
+    return 0;
+
   pbuf_t *pb = pbuf_make(0, 0);
   if(pb == NULL)
     return ERR_NO_BUFFER;
 
   send_cmc_message(v, v->cmc, pb, VLLP_CMC_OPCODE_CLOSE, vc->id, 0);
-
-  TAILQ_REMOVE(&v->established_channels, vc, qlink);
-  vc->state = VLLP_CHANNEL_STATE_CLOSED_SENT;
   pb = pbuf_splice(&v->cmc->txq);
   vllp_channel_tx(v, v->cmc, pb, NULL);
   return 0;
