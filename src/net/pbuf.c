@@ -61,15 +61,23 @@ pbuf_pool_put(pbuf_pool_t *pp, void *item)
   pp->pp_avail++;
 }
 
+#include <stdlib.h>
+
 __attribute__((malloc, warn_unused_result))
 static void *
-pbuf_pool_get(pbuf_pool_t *pp, int wait)
+pbuf_pool_get(pbuf_pool_t *pp, int wait PBUF_ORIGIN_ARG_DECL)
 {
   if(!wait) {
-
-    // Always have some spare capacity for waiters
-    if(pp->pp_avail < 2)
+#if 0
+    if((rand() & 15) == 1) {
+      printf("Buffer drop (%s)\n", origin);
       return NULL;
+    }
+#endif
+    // Always have some spare capacity for waiters
+    if(pp->pp_avail < 2) {
+      return NULL;
+    }
 
     pbuf_item_t *pi = SLIST_FIRST(&pp->pp_items);
     SLIST_REMOVE_HEAD(&pp->pp_items, pi_link);
@@ -124,9 +132,9 @@ pbuf_data_add(void *start, void *end)
 }
 
 void *
-pbuf_data_get(int wait)
+pbuf_data_get0(int wait PBUF_ORIGIN_ARG_DECL)
 {
-  return pbuf_pool_get(&pbuf_datas, wait);
+  return pbuf_pool_get(&pbuf_datas, wait PBUF_ORIGIN_ARG_CALL);
 }
 
 void
@@ -144,9 +152,9 @@ pbuf_alloc(size_t count)
 }
 
 pbuf_t *
-pbuf_get(int wait)
+pbuf_get0(int wait PBUF_ORIGIN_ARG_DECL)
 {
-  return pbuf_pool_get(&pbufs, wait);
+  return pbuf_pool_get(&pbufs, wait PBUF_ORIGIN_ARG_CALL);
 }
 
 void
@@ -529,12 +537,12 @@ pbuf_reset(pbuf_t *pb, size_t header_size, size_t len)
 }
 
 pbuf_t *
-pbuf_make_irq_blocked(int offset, int wait)
+pbuf_make_irq_blocked0(int offset, int wait PBUF_ORIGIN_ARG_DECL)
 {
-  pbuf_t *pb = pbuf_get(wait);
+  pbuf_t *pb = pbuf_get0(wait PBUF_ORIGIN_ARG_CALL);
   if(pb != NULL) {
     pb->pb_next = NULL;
-    pb->pb_data = pbuf_data_get(wait);
+    pb->pb_data = pbuf_data_get0(wait PBUF_ORIGIN_ARG_CALL);
     if(pb->pb_data == NULL) {
       pbuf_put(pb);
     } else {
@@ -551,23 +559,23 @@ pbuf_make_irq_blocked(int offset, int wait)
 
 
 pbuf_t *
-pbuf_make(int offset, int wait)
+pbuf_make0(int offset, int wait PBUF_ORIGIN_ARG_DECL)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
-  pbuf_t *pb = pbuf_make_irq_blocked(offset, wait);
+  pbuf_t *pb = pbuf_make_irq_blocked0(offset, wait PBUF_ORIGIN_ARG_CALL);
   irq_permit(q);
   return pb;
 }
 
 
 pbuf_t *
-pbuf_copy(const pbuf_t *src, int wait)
+pbuf_copy0(const pbuf_t *src, int wait PBUF_ORIGIN_ARG_DECL)
 {
   int q = irq_forbid(IRQ_LEVEL_NET);
-  pbuf_t *dst = pbuf_get(wait);
+  pbuf_t *dst = pbuf_get0(wait PBUF_ORIGIN_ARG_CALL);
   if(dst != NULL) {
     dst->pb_next = NULL;
-    dst->pb_data = pbuf_data_get(wait);
+    dst->pb_data = pbuf_data_get0(wait PBUF_ORIGIN_ARG_CALL);
     if(dst->pb_data == NULL) {
       pbuf_put(dst);
     } else {

@@ -1,5 +1,7 @@
 #pragma once
 
+// #define PBUF_ORIGIN_TRACE
+
 #include <sys/queue.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -7,6 +9,15 @@
 #ifndef PBUF_DATA_SIZE
 #define PBUF_DATA_SIZE 512
 #endif
+
+#ifdef PBUF_ORIGIN_TRACE
+#define PBUF_ORIGIN_ARG_DECL , const char *origin
+#define PBUF_ORIGIN_ARG_CALL , origin
+#else
+#define PBUF_ORIGIN_ARG_DECL
+#define PBUF_ORIGIN_ARG_CALL
+#endif
+
 
 STAILQ_HEAD(pbuf_queue, pbuf);
 
@@ -78,10 +89,10 @@ size_t pbuf_pullup(pbuf_t *pb, size_t bytes);
 void pbuf_free(pbuf_t *pb);
 
 __attribute__((warn_unused_result))
-pbuf_t *pbuf_make(int offset, int wait);
+pbuf_t *pbuf_make0(int offset, int wait PBUF_ORIGIN_ARG_DECL);
 
 __attribute__((warn_unused_result))
-pbuf_t *pbuf_copy(const pbuf_t *src, int wait);
+pbuf_t *pbuf_copy0(const pbuf_t *src, int wait PBUF_ORIGIN_ARG_DECL);
 
 __attribute__((warn_unused_result))
 pbuf_t *pbuf_copy_pkt(const pbuf_t *src, int wait);
@@ -131,20 +142,35 @@ void pbuf_dump_stream(const char *prefix, const pbuf_t *pb, int full,
 void pbuf_data_add(void *start, void *end);
 
 __attribute__((warn_unused_result, malloc))
-void *pbuf_data_get(int wait);
+void *pbuf_data_get0(int wait PBUF_ORIGIN_ARG_DECL);
 
 void pbuf_data_put(void *ptr);
 
 void pbuf_alloc(size_t count);
 
 __attribute__((warn_unused_result,malloc))
-pbuf_t *pbuf_get(int wait);
+pbuf_t *pbuf_get0(int wait PBUF_ORIGIN_ARG_DECL);
 
 void pbuf_put(pbuf_t *pb);
 
 void pbuf_free_irq_blocked(pbuf_t *pb);
 
 __attribute__((warn_unused_result))
-pbuf_t *pbuf_make_irq_blocked(int offset, int wait);
+pbuf_t *pbuf_make_irq_blocked0(int offset, int wait PBUF_ORIGIN_ARG_DECL);
 
 void pbuf_free_queue_irq_blocked(struct pbuf_queue *pq);
+
+
+#ifdef PBUF_ORIGIN_TRACE
+#define pbuf_data_get(wait) pbuf_data_get0(wait, __FUNCTION__)
+#define pbuf_get(wait) pbuf_get0(wait, __FUNCTION__)
+#define pbuf_copy(src, wait) pbuf_copy0(src, wait, __FUNCTION__)
+#define pbuf_make(offset, wait) pbuf_make0(offset, wait, __FUNCTION__)
+#define pbuf_make_irq_blocked(offset, wait) pbuf_make_irq_blocked0(offset, wait, __FUNCTION__)
+#else
+#define pbuf_data_get(wait) pbuf_data_get0(wait)
+#define pbuf_get(wait) pbuf_get0(wait)
+#define pbuf_copy(src, wait) pbuf_copy0(src, wait)
+#define pbuf_make(offset, wait) pbuf_make0(offset, wait)
+#define pbuf_make_irq_blocked(offset, wait) pbuf_make_irq_blocked0(offset, wait)
+#endif
