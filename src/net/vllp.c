@@ -20,17 +20,22 @@
 
 #include "irq.h"
 
+LIST_HEAD(vllp_list, vllp);
 LIST_HEAD(vllp_channel_list, vllp_channel);
 TAILQ_HEAD(vllp_channel_queue, vllp_channel);
 
+static struct vllp_list vllps;
 
 typedef struct vllp {
+
+  LIST_ENTRY(vllp) link;
 
   struct vllp_channel_list channels;
   struct vllp_channel_queue established_channels;
 
   timer_t ack_timer;
   timer_t rtx_timer;
+  timer_t timeout_timer;
 
   pbuf_t *current_tx_buf;
   uint16_t current_tx_len;
@@ -38,6 +43,7 @@ typedef struct vllp {
 
   struct vllp_channel *cmc;
 
+  uint32_t rxid;
   uint32_t txid;
   uint32_t crc_IV;
   uint32_t channel_iv_cnt;
@@ -49,7 +55,7 @@ typedef struct vllp {
   uint8_t connected;
   uint8_t SE;
   uint8_t mtu;
-
+  uint8_t timeout;
 } vllp_t;
 
 
@@ -208,10 +214,18 @@ vllp_refresh_local_flow_status(vllp_t *v)
 }
 
 
-static void
-vllp_tx_ack(vllp_t *v)
+static pbuf_t *
+vllp_tx_ack(vllp_t *v, pbuf_t *pb)
 {
-  uint8_t pkt[7];
+  if(pb == NULL) {
+    pb = pbuf_make(4, 0); /* offset: 4 bytes for ID prefix in dsig.c */
+    if(pb == NULL)
+      return NULL;
+  } else {
+    pbuf_reset(pb, 4, 0);
+  }
+
+  uint8_t *pkt = pbuf_append(pb, 7);
   pkt[0] = v->SE | 0x1f;
   pkt[1] = v->local_flow_status;
   pkt[2] = v->local_flow_status >> 8;
@@ -219,9 +233,11 @@ vllp_tx_ack(vllp_t *v)
   v->transmitted_local_flow_status = v->local_flow_status;
 
   vllp_append_crc(v->crc_IV, pkt, 3);
-  dsig_emit(v->txid, pkt, sizeof(pkt));
+
+  dsig_emit_pbuf(v->txid, pb);
 
   net_timer_arm(&v->ack_timer, clock_get() + 1000000);
+  return NULL;
 }
 
 
@@ -259,6 +275,7 @@ vllp_disconnect(vllp_t *v, const char *reason)
 
   timer_disarm(&v->ack_timer);
   timer_disarm(&v->rtx_timer);
+  timer_disarm(&v->timeout_timer);
 
   evlog(LOG_DEBUG, "VLLP: Disconnected -- %s", reason);
 
@@ -280,16 +297,17 @@ vllp_disconnect(vllp_t *v, const char *reason)
 }
 
 
-static void
-vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len)
+static pbuf_t *
+vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len,
+                pbuf_t *pb)
 {
   if(len != 7)
-    return;
+    return pb;
 
   if(data[1] != VLLP_VERSION) {
     evlog(LOG_DEBUG, "VLLP: Got VLLP SYN for unsuppored version %d (expected %d)",
           data[1], VLLP_VERSION);
-    return;
+    return pb;
   }
 
   if(v->connected) {
@@ -305,7 +323,7 @@ vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len)
   v->cmc->tx_crc_IV = cmc_iv;
   v->cmc->rx_crc_IV = ~cmc_iv;
 
-  vllp_tx_ack(v);
+  return vllp_tx_ack(v, pb);
 }
 
 
@@ -544,14 +562,19 @@ fdcan_adapation_pad_ladder(int len)
 }
 
 
-static void
-vllp_tx(vllp_t *v)
+static pbuf_t *
+vllp_tx(vllp_t *v, pbuf_t *pb)
 {
   pbuf_t *src = v->current_tx_buf;
   if(src == NULL)
-    return;
+    return pb;
 
-  pbuf_t *pb = pbuf_make(4, 0); /* offset: 4 bytes for ID prefix in dsig.c */
+  if(pb == NULL) {
+    pb = pbuf_make(4, 0); /* offset: 4 bytes for ID prefix in dsig.c */
+  } else {
+    pbuf_reset(pb, 4, 0);
+  }
+
   if(pb != NULL) {
 
     pb->pb_pktlen = pb->pb_buflen = v->current_tx_len + 1;
@@ -582,27 +605,30 @@ vllp_tx(vllp_t *v)
     hdr[0] = v->SE | last | flow | channel;
 
     dsig_emit_pbuf(v->txid, pb);
+  } else {
+    // Tx-Drop - no bufs
   }
 
   // If we fail to allocate a packet, also arm timers as this is
   // equivivalent to a packet loss
   net_timer_arm(&v->rtx_timer, clock_get() + 25000);
   net_timer_arm(&v->ack_timer, clock_get() + 1000000);
+  return NULL;
 }
 
 
-static void
-vllp_fragment(vllp_t *v)
+static pbuf_t *
+vllp_fragment(vllp_t *v, pbuf_t *pb)
 {
   size_t payload_mtu = v->mtu - 1;
   v->current_tx_len = MIN(payload_mtu, v->current_tx_buf->pb_pktlen);
   v->SE ^= VLLP_HDR_S;
-  vllp_tx(v);
+  return vllp_tx(v, pb);
 }
 
 
-static void
-vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb)
+static pbuf_t *
+vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb, pbuf_t *reuse)
 {
   uint32_t crc32 = calc_crc32(pb, vc->tx_crc_IV);
   vc->tx_crc_IV++;
@@ -616,11 +642,12 @@ vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb)
   v->current_tx_buf = pb;
   v->current_tx_channel = vc->id;
 
-  vllp_fragment(v);
+  reuse = vllp_fragment(v, reuse);
 
   // Move to tail for round-robin scheduling
   TAILQ_REMOVE(&v->established_channels, vc, qlink);
   TAILQ_INSERT_TAIL(&v->established_channels, vc, qlink);
+  return reuse;
 }
 
 
@@ -636,20 +663,20 @@ vllp_tx_close(vllp_t *v, vllp_channel_t *vc)
   TAILQ_REMOVE(&v->established_channels, vc, qlink);
   vc->state = VLLP_CHANNEL_STATE_CLOSED_SENT;
   pb = pbuf_splice(&v->cmc->txq);
-  vllp_channel_tx(v, v->cmc, pb);
+  vllp_channel_tx(v, v->cmc, pb, NULL);
   return 0;
 }
 
 
-static void
-vllp_maybe_tx(vllp_t *v)
+static pbuf_t *
+vllp_maybe_tx(vllp_t *v, pbuf_t *reuse)
 {
   if(v->current_tx_buf)
-    return;
+    return reuse;
 
   vllp_channel_t *vc;
   TAILQ_FOREACH(vc, &v->established_channels, qlink) {
-    pbuf_t *pb;
+    pbuf_t *out;
     if(vc->pp.app != NULL) {
 
       if(vc->app_closed == 1) {
@@ -659,84 +686,79 @@ vllp_maybe_tx(vllp_t *v)
         // Ok we sent something
         vc->app_closed = 2;
         vllp_channel_maybe_destroy(v, vc);
-        return;
+        return reuse;
 
       } else {
 
         if(vc->net_closed)
           continue;
 
-        pb = vc->pp.app->pull(vc->pp.app_opaque);
+        out = vc->pp.app->pull(vc->pp.app_opaque);
       }
 
     } else {
-      pb = pbuf_splice(&vc->txq);
+      out = pbuf_splice(&vc->txq);
     }
 
-    if(pb == NULL)
+    if(out == NULL)
       continue;
-    vllp_channel_tx(v, vc, pb);
-    return;
+    return vllp_channel_tx(v, vc, out, reuse);
   }
 
-  if(v->transmitted_local_flow_status != v->local_flow_status)
-    vllp_tx_ack(v);
+  if(v->transmitted_local_flow_status != v->local_flow_status) {
+    return vllp_tx_ack(v, reuse);
+  }
+  return reuse;
 }
 
 
-static void
-vllp_ack_payload(vllp_t *v)
+static pbuf_t *
+vllp_ack_payload(vllp_t *v, pbuf_t *pb)
 {
   timer_disarm(&v->rtx_timer);
 
   v->current_tx_buf = pbuf_drop(v->current_tx_buf, v->current_tx_len, 1);
   if(v->current_tx_buf) {
-    vllp_fragment(v);
+    pb = vllp_fragment(v, pb);
   }
+  return pb;
 }
 
 
-static void
-vllp_dsig_rx(void *opaque, const struct pbuf *pb, uint32_t signal)
+static pbuf_t *
+vllp_rx(vllp_t *v, pbuf_t *pb)
 {
-  vllp_t *v = opaque;
-
+  net_timer_arm(&v->timeout_timer, clock_get() + v->timeout * 1000000);
   vllp_refresh_local_flow_status(v);
 
   size_t len = pb ? pb->pb_buflen : 0;
   const uint8_t *u8 = pb ? pbuf_cdata(pb, 0) : NULL;
 
-  if(u8 == NULL) {
-    // timeout
-    vllp_disconnect(v, "timeout");
-    return;
-  }
-
   if(len < 1)
-    return;
+    return pb;
 
   if(len > 8) {
     int pad = u8[len - 1];
     if(pad >= len) {
       vllp_disconnect(v, "invalid pad");
-      return;
+      return pb;
     }
     len -= pad;
   }
 
   uint8_t hdr = u8[0];
   if(hdr == VLLP_SYN) {
-    return vllp_accept_syn(v, u8, len);
+    return vllp_accept_syn(v, u8, len, pb);
   }
 
   if((u8[0] & 0x1f) == 0x1f) {
     // ACK packet
     if(~crc32(v->crc_IV, u8, len)) {
-      return;
+      return pb;
     }
 
     if(len != 7)
-      return;
+      return pb;
 
     v->remote_flow_status = u8[1] | (u8[2] << 8);
   }
@@ -748,7 +770,7 @@ vllp_dsig_rx(void *opaque, const struct pbuf *pb, uint32_t signal)
     !(u8[0] & VLLP_HDR_S) == !(v->SE & VLLP_HDR_E);
 
   if(!v->connected) {
-    return;
+    return pb;
   }
 
   int channel_id = u8[0] & 0xf;
@@ -772,10 +794,10 @@ vllp_dsig_rx(void *opaque, const struct pbuf *pb, uint32_t signal)
         break;
       case ERR_CHECKSUM_ERROR:
         vllp_disconnect(v, "Invalid CRC");
-        return;
+        return pb;
       case ERR_BAD_STATE:
         vllp_disconnect(v, "Bad state");
-        return;
+        return pb;
       default:
         panic("vllp_channel_receive");
       }
@@ -792,11 +814,11 @@ vllp_dsig_rx(void *opaque, const struct pbuf *pb, uint32_t signal)
     if(!peer_accepted) {
       net_timer_arm(&v->rtx_timer, clock_get() + 1000);
     } else {
-      vllp_ack_payload(v);
+      pb = vllp_ack_payload(v, pb);
     }
   }
 
-  vllp_maybe_tx(v);
+  return vllp_maybe_tx(v, pb);
 }
 
 
@@ -805,7 +827,7 @@ vllp_ack_timer(void *opaque, uint64_t expire)
 {
   vllp_t *v = opaque;
   vllp_refresh_local_flow_status(v);
-  vllp_tx_ack(v);
+  vllp_tx_ack(v, NULL);
 }
 
 static void
@@ -813,7 +835,7 @@ vllp_rtx_timer(void *opaque, uint64_t expire)
 {
   vllp_t *v = opaque;
   vllp_refresh_local_flow_status(v);
-  vllp_tx(v);
+  vllp_tx(v, NULL);
 }
 
 
@@ -831,10 +853,37 @@ vllp_channel_task_cb(net_task_t *nt, uint32_t signals)
   }
 
   if(vllp_refresh_local_flow_status(v)) {
-    vllp_tx_ack(v);
+    vllp_tx_ack(v, NULL);
   }
 
-  vllp_maybe_tx(v);
+  vllp_maybe_tx(v, NULL);
+}
+
+
+pbuf_t *
+vllp_input(uint32_t id, pbuf_t *pb)
+{
+  vllp_t *v;
+  LIST_FOREACH(v, &vllps, link) {
+    if(v->rxid == id) {
+      pb = vllp_rx(v, pb);
+      if(pb != NULL) {
+        // Passed buffer was not recycled, free it
+        pbuf_free(pb);
+      }
+      // Return NULL means we handled the packet
+      return NULL;
+    }
+  }
+  // No match, pass on to other dsig subscribers, tec
+  return pb;
+}
+
+static void
+vllp_timeout_timer(void *opaque, uint64_t now)
+{
+  vllp_t *v = opaque;
+  vllp_disconnect(v, "timeout");
 }
 
 
@@ -856,12 +905,13 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
   TAILQ_INIT(&v->established_channels);
   TAILQ_INSERT_TAIL(&v->established_channels, v->cmc, qlink);
 
+  v->rxid = rxid;
   v->txid = txid;
   if(mtu > 8)
     mtu--; // For FDCAN adaptation
 
   v->mtu = mtu;
-
+  v->timeout = timeout;
   v->rtx_timer.t_cb = vllp_rtx_timer;
   v->rtx_timer.t_opaque = v;
   v->rtx_timer.t_name = "vllprtx";
@@ -870,6 +920,10 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
   v->ack_timer.t_opaque = v;
   v->ack_timer.t_name = "vllprtx";
 
-  dsig_sub(rxid, -1, timeout * 1000, vllp_dsig_rx, v);
+  v->timeout_timer.t_cb = vllp_timeout_timer;
+  v->timeout_timer.t_opaque = v;
+  v->timeout_timer.t_name = "vllptimout";
+
+  LIST_INSERT_HEAD(&vllps, v, link);
   return v;
 }

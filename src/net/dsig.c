@@ -17,6 +17,8 @@
 
 #include <stdio.h>
 
+#include "vllp.h"
+
 static SLIST_HEAD(, dsig_sub) dsig_subs;
 static SLIST_HEAD(, dsig_sub) dsig_pending_subs;
 
@@ -132,6 +134,9 @@ dsig_input(uint32_t id, struct pbuf *pb, struct netif *ni)
     }
   }
   if(pbuf_pullup(pb, pb->pb_pktlen))
+    return pb;
+
+  if((pb = vllp_input(id, pb)) == NULL)
     return pb;
 
   // Forwarding
