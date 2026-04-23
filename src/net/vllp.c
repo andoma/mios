@@ -11,6 +11,7 @@
 #include <mios/timer.h>
 #include <mios/service.h>
 #include <mios/stream.h>
+#include <mios/cli.h>
 
 #include <sys/param.h>
 
@@ -929,3 +930,49 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
   LIST_INSERT_HEAD(&vllps, v, link);
   return v;
 }
+
+static const char vllp_channel_state_strtbl[] = {
+  "PENDING\0"
+  "OPEN_SENT\0"
+  "ESTABLISHED\0"
+  "CLOSED_SEND\0"
+  "\0"
+};
+
+static const char vllp_channel_app_closed_strtbl[] = {
+  "OPEN\0"
+  "APP_CLOSED\0"
+  "CLOSED_SENT\0"
+  "\0"
+};
+
+static const char vllp_channel_net_closed_strtbl[] = {
+  "OPEN\0"
+  "CLOSED\0"
+  "\0"
+};
+
+static error_t
+cmd_tcp(cli_t *cli, int argc, char **argv)
+{
+  vllp_t *v;
+  vllp_channel_t *vc;
+  LIST_FOREACH(v, &vllps, link) {
+    cli_printf(cli, "TX:0x%x  RX:0x%x %sonnected", v->txid, v->rxid,
+               v->connected ? "C" : "Disc");
+    cli_printf(cli, "  Flow status Local:0x%04x Remote:0x%04x\n",
+               v->local_flow_status, v->remote_flow_status);
+    cli_printf(cli, "  Channels:\n");
+    LIST_FOREACH(vc, &v->channels, link) {
+      cli_printf(cli, "    %2d : state:%s app:%s net:%s\n", vc->id,
+                 strtbl(vllp_channel_state_strtbl, vc->state),
+                 strtbl(vllp_channel_app_closed_strtbl, vc->app_closed),
+                 strtbl(vllp_channel_net_closed_strtbl, vc->net_closed));
+    }
+
+    cli_printf(cli, "\n");
+  }
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("show_vllp", cmd_tcp, NULL, "Show VLLP connections");
