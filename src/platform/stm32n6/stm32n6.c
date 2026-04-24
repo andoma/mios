@@ -38,12 +38,14 @@
 
 #define HEAP_DMA_END      PBUF_ARENA_BASE
 
-
-
+static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
 
 static void  __attribute__((constructor(120)))
 stm32n6_init(void)
 {
+  *DWT_CONTROL = 1;
+
+
   printf("\nSTM32N6\n");
 
   // Enable interleaving for AXISRAM3-6
