@@ -22,10 +22,11 @@
 #include <mios/cli.h>
 #include <mios/align.h>
 
-#define TCP_EVENT_CONNECT 0x1
-#define TCP_EVENT_CLOSE   0x2
-#define TCP_EVENT_EMIT    0x4
+#define TCP_EVENT_CONNECT  0x1
+#define TCP_EVENT_CLOSE    0x2
+#define TCP_EVENT_EMIT     0x4
 #define TCP_EVENT_WND_OPEN 0x8
+#define TCP_EVENT_FLUSH    0x10  // Drain TX FIFO immediately, bypassing Nagle
 /*
  * Based on these RFCs:
  *
@@ -78,11 +79,21 @@ typedef struct tcb {
 
   uint8_t fast_reject_limiter;
 
+  // RFC 7323 window scaling state, populated from the WSopt exchange at
+  // SYN time. wnd_shift is the peer's announced shift — applied to any
+  // wnd field we receive after the handshake. wnd_scale_ok means the
+  // peer offered WSopt in its SYN and we should include WSopt in our
+  // SYN-ACK. Both default to 0 so non-scaled connections behave exactly
+  // as before.
+  uint8_t tcb_wnd_scale_ok;
+  uint8_t tcb_snd_wnd_shift;
+
   struct {
     uint32_t wrptr; // Unsent (Enqueued by stream but not yet processed by TCP)
     uint32_t nxt;   // Next to send
     uint32_t una;   // Unacknowledged
-    uint16_t wnd;
+    uint32_t wnd;   // Peer's advertised window, already left-shifted by
+                    // snd_wnd_shift. Can exceed 64 KB when WS is active.
     uint16_t up;
     uint32_t wl1;
     uint32_t wl2;
@@ -314,7 +325,30 @@ tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
     opts[1] = 4;
     opts[2] = tcb->tcb_rcv.mss >> 8;
     opts[3] = tcb->tcb_rcv.mss;
-    th->off = ((sizeof(tcp_hdr_t) >> 2) + 1) << 4;
+    int opt_words = 1;
+
+    // Include RFC 7323 WSopt. For SYN-ACK we only include it if the
+    // peer's SYN also had one (tcb_wnd_scale_ok was set by
+    // tcp_parse_options). For a pure SYN (active open) we always
+    // include it — peer will mirror it if supported. Pad with a NOP to
+    // keep the options 4-byte aligned.
+    int send_wsopt;
+    if(th->flg & TCP_F_ACK)
+      send_wsopt = tcb->tcb_wnd_scale_ok;
+    else
+      send_wsopt = 1;
+
+    if(send_wsopt) {
+      uint8_t *ws = pbuf_append(pb, 4);
+      ws[0] = 1;   // NOP (4-byte alignment)
+      ws[1] = 3;   // kind = Window Scale
+      ws[2] = 3;   // length
+      ws[3] = 0;   // our shift — 0, since our RX FIFO is small enough
+                   // that the 16-bit wnd field covers it without scaling
+      opt_words++;
+    }
+
+    th->off = ((sizeof(tcp_hdr_t) >> 2) + opt_words) << 4;
   } else {
     th->off = (sizeof(tcp_hdr_t) >> 2) << 4;
   }
@@ -346,6 +380,17 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
   uint32_t bytes_in_fifo = tcb->tcb_snd.wrptr - seq;
+
+  // Honor the receiver's advertised send window. Only applies when
+  // we're sending fresh data (seq == snd.nxt); retransmits (seq ==
+  // snd.una) re-send data that was already inside the window when it
+  // was first transmitted and don't need re-checking.
+  if(seq == tcb->tcb_snd.nxt) {
+    uint32_t in_flight = tcb->tcb_snd.nxt - tcb->tcb_snd.una;
+    uint32_t wnd_room = tcb->tcb_snd.wnd > in_flight
+                          ? tcb->tcb_snd.wnd - in_flight : 0;
+    bytes_in_fifo = MIN(bytes_in_fifo, wnd_room);
+  }
 
   if(tcb->tcb_pending_syn) {
     // If we have a pending SYN it's the only thing we may send
@@ -523,6 +568,12 @@ tcp_ack(tcb_t *tcb, uint32_t count)
   tcb->tcb_pending_syn = 0;
   task_wakeup(&tcb->tcb_tx_waitq, 1);
   arm_rtx(tcb, tcb->tcb_last_rx);
+
+  // An ACK may have cleared the in-flight condition that caused the
+  // emit loop to hold a partial segment under Nagle. Re-trigger emit
+  // so the tail drains as soon as una catches up to nxt.
+  if(tcb->tcb_snd.wrptr != tcb->tcb_snd.nxt)
+    net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
 }
 
 
@@ -594,7 +645,8 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     }
   }
 
-  if(signals & TCP_EVENT_EMIT) {
+  if(signals & (TCP_EVENT_EMIT | TCP_EVENT_FLUSH)) {
+    const int force = !!(signals & TCP_EVENT_FLUSH);
     switch(tcb->tcb_state) {
     case TCP_STATE_ESTABLISHED:
     case TCP_STATE_FIN_WAIT1:
@@ -607,6 +659,26 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
       }
 
       while(tcb->tcb_snd.wrptr != tcb->tcb_snd.nxt) {
+        uint32_t unsent = tcb->tcb_snd.wrptr - tcb->tcb_snd.nxt;
+        uint32_t in_flight = tcb->tcb_snd.nxt - tcb->tcb_snd.una;
+        uint32_t wnd_room = tcb->tcb_snd.wnd > in_flight
+                              ? tcb->tcb_snd.wnd - in_flight : 0;
+
+        // Send window exhausted — stop. When the peer ACKs, tcp_ack
+        // re-raises TCP_EVENT_EMIT and we'll pick up here. (No zero-
+        // window probe yet; if the peer truly advertises win=0 and
+        // the subsequent window-update ACK is lost, we'd deadlock.)
+        if(wnd_room == 0)
+          break;
+
+        // Nagle: hold sub-MSS tails while there is still unACKed data
+        // in flight. A FLUSH event (explicit stream flush / close path)
+        // bypasses this and drains everything.
+        if(!force &&
+           unsent < tcb->tcb_max_segment_size &&
+           tcb->tcb_snd.una != tcb->tcb_snd.nxt)
+          break;
+
         if(tcp_emit(tcb, NULL, tcb->tcb_snd.nxt, 0, "event"))
           break;
       }
@@ -753,6 +825,17 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
     case 2:
       tcb->tcb_max_segment_size = buf[3] | (buf[2] << 8);
       break;
+    case 3:
+      // RFC 7323 Window Scale option. Length must be 3.
+      if(optlen == 3) {
+        uint8_t shift = buf[2];
+        // RFC caps shift at 14 to keep the maximum window under 2^30.
+        if(shift > 14)
+          shift = 14;
+        tcb->tcb_snd_wnd_shift = shift;
+        tcb->tcb_wnd_scale_ok = 1;
+      }
+      break;
     }
     buf += optlen;
     len -= optlen;
@@ -887,10 +970,17 @@ tcp_stream_writev(struct stream *s, struct iovec *iov, size_t iovcnt,
     }
   }
 
+  uint32_t unsent = tcb->tcb_snd.wrptr - tcb->tcb_snd.nxt;
+  int pipeline_idle = (tcb->tcb_snd.una == tcb->tcb_snd.nxt);
   irq_permit(q);
   mutex_unlock(&tcb->tcb_write_mutex);
 
-  if(flags & STREAM_WRITE_ALL)
+  // Nagle's algorithm: kick the TCP task to emit only if we either have
+  // a full segment's worth of unsent data, or the pipeline is empty (no
+  // unACKed data in flight — safe to send a small segment without
+  // starving the wire). Partial-segment tails on an active pipeline are
+  // held by the emit loop below and flushed when the next ACK arrives.
+  if(unsent >= tcb->tcb_max_segment_size || pipeline_idle)
     net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
 
   return written;
@@ -904,7 +994,7 @@ tcp_stream_write(stream_t *s, const void *buf, size_t size, int flags)
   struct iovec iov;
 
   if(buf == NULL) {
-    net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
+    net_task_raise(&tcb->tcb_task, TCP_EVENT_FLUSH);
     return 0;
   }
 
@@ -918,7 +1008,7 @@ static void
 tcp_stream_close(stream_t *s)
 {
   tcb_t *tcb = (tcb_t *)s;
-  net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
+  net_task_raise(&tcb->tcb_task, TCP_EVENT_FLUSH);
   net_task_raise(&tcb->tcb_task, TCP_EVENT_CLOSE);
 }
 
@@ -1125,7 +1215,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         "no service");
     }
 
-    tcb_t *tcb = tcb_create(svc->name, 4096, 2048);
+    tcb_t *tcb = tcb_create(svc->name, 65536 * 2, 2048);
     if(tcb == NULL) {
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
                         "no memory");
@@ -1308,12 +1398,16 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
   tcb->tcb_last_rx = clock_get();
 
+  // Scaled peer window. This is the first non-SYN segment (or later),
+  // so RFC 7323 says apply the shift negotiated at handshake time.
+  const uint32_t scaled_wnd = (uint32_t)wnd << tcb->tcb_snd_wnd_shift;
+
   switch(tcb->tcb_state) {
   case TCP_STATE_SYN_RECEIVED:
     if(una_ack >= 0 && ack_nxt <= 0) {
       tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
       tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
-      tcb->tcb_snd.wnd = wnd;
+      tcb->tcb_snd.wnd = scaled_wnd;
       tcb->tcb_snd.wl1 = seq;
       tcb->tcb_snd.wl2 = ack;
     } else {
@@ -1334,7 +1428,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       int wl2_ack = ack - tcb->tcb_snd.wl2;
 
       if(wl1_seq > 0 || (wl1_seq == 0 && wl2_ack >= 0)) {
-        tcb->tcb_snd.wnd = wnd;
+        tcb->tcb_snd.wnd = scaled_wnd;
         tcb->tcb_snd.wl1 = seq;
         tcb->tcb_snd.wl2 = ack;
       }
