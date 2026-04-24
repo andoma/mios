@@ -36,3 +36,6 @@
 
 #define STM32N6_DMA_ADC1       7
 #define STM32N6_DMA_ADC2       8
+
+#define STM32N6_DMA_TIM6_UP   45
+#define STM32N6_DMA_TIM7_UP   46
