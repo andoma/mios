@@ -16,6 +16,9 @@ hdc1080_create(i2c_t *i2c)
   uint8_t buf[3] = {0x02, 0x80, 0x00};
   i2c_rw(i2c, 0x40, buf, 3, NULL, 0);
 
+  // Soft-reset can take up to 15ms during which the device does not ACK
+  usleep(20000);
+
   // Acquire both temperature and humidity
   buf[1] = 0x10;
   int r = i2c_rw(i2c, 0x40, buf, 3, NULL, 0);
