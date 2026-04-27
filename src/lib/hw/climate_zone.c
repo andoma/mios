@@ -25,21 +25,21 @@ climate_zone_alert_message(const struct alert_source *as, struct stream *output)
   const char *del = "";
 
   if(as->as_code & CLIMATE_ZONE_OT_ERROR) {
-    stprintf(output, "%sOver-temperature error %.1f > %.1f",
+    stprintf(output, "%sHigh-temperature error %.1f > %.1f",
              del, T, czc->czc_over_temp_error);
     del = ", ";
   } else if(as->as_code & CLIMATE_ZONE_OT_WARNING) {
-    stprintf(output, "%sOver-temperature warning %.1f > %.1f",
+    stprintf(output, "%sHigh-temperature warning %.1f > %.1f",
              del, T, czc->czc_over_temp_warning);
     del = ", ";
   }
 
   if(as->as_code & CLIMATE_ZONE_UT_ERROR) {
-    stprintf(output, "%sUnder-temperature error %.1f < %.1f",
+    stprintf(output, "%sLow-temperature error %.1f < %.1f",
              del, T, czc->czc_under_temp_error);
     del = ", ";
   } else if(as->as_code & CLIMATE_ZONE_UT_WARNING) {
-    stprintf(output, "%sUnder-temperature warning %.1f < %.1f",
+    stprintf(output, "%sLow-temperature warning %.1f < %.1f",
              del, T, czc->czc_under_temp_warning);
     del = ", ";
   }
@@ -47,21 +47,21 @@ climate_zone_alert_message(const struct alert_source *as, struct stream *output)
   const float RH = cz->cz_measured_rh;
 
   if(as->as_code & CLIMATE_ZONE_ORH_ERROR) {
-    stprintf(output, "%sOver-humidity error %.1f > %.1f",
+    stprintf(output, "%sHigh-humidity error %.1f > %.1f",
              del, RH, czc->czc_over_rh_error);
     del = ", ";
   } else if(as->as_code & CLIMATE_ZONE_ORH_WARNING) {
-    stprintf(output, "%sOver-humidity warning %.1f > %.1f",
+    stprintf(output, "%sHigh-humidity warning %.1f > %.1f",
              del, RH, czc->czc_over_rh_warning);
     del = ", ";
   }
 
   if(as->as_code & CLIMATE_ZONE_URH_ERROR) {
-    stprintf(output, "%sUnder-humidity error %.1f < %.1f",
+    stprintf(output, "%sLow-humidity error %.1f < %.1f",
              del, RH, czc->czc_under_rh_error);
     del = ", ";
   } else if(as->as_code & CLIMATE_ZONE_URH_WARNING) {
-    stprintf(output, "%sUnder-humidity warning %.1f < %.1f",
+    stprintf(output, "%sLow-humidity warning %.1f < %.1f",
              del, RH, czc->czc_under_rh_warning);
     del = ", ";
   }
