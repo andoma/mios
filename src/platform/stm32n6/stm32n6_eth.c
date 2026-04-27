@@ -109,7 +109,7 @@ typedef struct {
 #define ETH_MACPPSCR     (ETH_BASE + 0xb70)
 
 
-#define ETH_TX_RING_SIZE 8
+#define ETH_TX_RING_SIZE 64
 #define ETH_TX_RING_MASK (ETH_TX_RING_SIZE - 1)
 
 #define ETH_RX_RING_SIZE 16
