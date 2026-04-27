@@ -942,7 +942,22 @@ http_accept(stream_t *s)
   return err;
 }
 
-SERVICE_DEF_STREAM("http", 80, http_accept);
+// HTTP TX/RX FIFO sizes (base-2 log of bytes). 0 falls back to the
+// TCP-layer default (4 KB / 2 KB), which is fine for serving short
+// responses but undersized for streaming WebSocket workloads. Apps
+// that push high-bandwidth WS traffic should override
+// HTTP_TX_FIFO_SIZE_LOG2 in their *_sys.h.
+#ifndef HTTP_TX_FIFO_SIZE_LOG2
+#define HTTP_TX_FIFO_SIZE_LOG2 0
+#endif
+#ifndef HTTP_RX_FIFO_SIZE_LOG2
+#define HTTP_RX_FIFO_SIZE_LOG2 0
+#endif
+
+SERVICE_DEF_STREAM_EX("http", 80,
+                      HTTP_TX_FIFO_SIZE_LOG2,
+                      HTTP_RX_FIFO_SIZE_LOG2,
+                      http_accept);
 
 
 static ssize_t
