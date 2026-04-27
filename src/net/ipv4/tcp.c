@@ -1215,7 +1215,11 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                         "no service");
     }
 
-    tcb_t *tcb = tcb_create(svc->name, 4096, 2048);
+    size_t txfifo_size =
+      svc->txfifo_size_log2 ? 1u << svc->txfifo_size_log2 : 4096;
+    size_t rxfifo_size =
+      svc->rxfifo_size_log2 ? 1u << svc->rxfifo_size_log2 : 2048;
+    tcb_t *tcb = tcb_create(svc->name, txfifo_size, rxfifo_size);
     if(tcb == NULL) {
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
                         "no memory");
