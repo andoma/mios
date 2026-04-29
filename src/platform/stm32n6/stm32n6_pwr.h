@@ -54,3 +54,11 @@ stm32n6_pwr_usb33_enable(void)
   reg_set_bit(PWR_SVMCR3, 10);   // USB33SV
   reg_set_bit(PWR_SVMCR3, 2);    // USB33VMEN
 }
+
+// Validate the VDDA18ADC analog-supply isolation. Setting this bit
+// is mandatory before any ADC use (RM0486 §13.6 / PWR_SVMCR3 ASV).
+static inline void
+stm32n6_pwr_vdda18adc_enable(void)
+{
+  reg_set_bit(PWR_SVMCR3, 12);   // ASV
+}

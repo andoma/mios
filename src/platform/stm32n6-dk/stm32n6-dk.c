@@ -12,6 +12,7 @@
 #include "stm32n6_usb.h"
 #include "stm32n6_eth.h"
 #include "stm32n6_uart.h"
+#include "stm32n6_adc.h"
 
 #include <usb/usb.h>
 
@@ -107,3 +108,59 @@ cmd_install_bootloader(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF("install-bootloader", cmd_install_bootloader);
+
+// ---------------------------------------------------------------
+// ADC bring-up + diag — VREFINT only for now (channel 17 of ADC1,
+// internally driven, no GPIO involved). Use this to validate the
+// stm32n6_adc driver end-to-end before adding any external pins.
+// ---------------------------------------------------------------
+
+static void __attribute__((constructor(900)))
+board_init_adc(void)
+{
+  // PCSEL bit isn't strictly required for internal channels per
+  // RM0486 §32.4.12 but we set it anyway so the same path works
+  // if external channels get added later.
+  stm32n6_adc_init(ADC1_BASE, 1u << 17, 0);
+
+  // Enable VREFINT analog source. Per RM Table 242, ADC1 VINP[17]
+  // is the VREFINT channel; CCR bit 22 (VREFEN) gates it on.
+  reg_set_bit(ADC12_CCR, 22);
+
+  // Slow sample time for VREFINT — datasheet typical T_S_TEMP/VREFINT
+  // is in the µs range, so use SMP=7 (255.5 cycles ≈ 5 µs at 50 MHz
+  // ADC clock) to be safe.
+  stm32n6_adc_set_smpr(ADC1_BASE, 17, 7);
+}
+
+static error_t
+cmd_adc(cli_t *cli, int argc, char **argv)
+{
+  cli_printf(cli, "ADC1 registers:\n");
+  cli_printf(cli, "  CR=0x%08x  ISR=0x%08x  CFGR1=0x%08x\n",
+             reg_rd(ADC1_BASE + ADCx_CR),
+             reg_rd(ADC1_BASE + ADCx_ISR),
+             reg_rd(ADC1_BASE + ADCx_CFGR1));
+  cli_printf(cli, "  PCSEL=0x%08x  DIFSEL=0x%08x  CALFACT=0x%08x\n",
+             reg_rd(ADC1_BASE + ADCx_PCSEL),
+             reg_rd(ADC1_BASE + ADCx_DIFSEL),
+             reg_rd(ADC1_BASE + ADCx_CALFACT));
+  cli_printf(cli, "  ADC12_CCR=0x%08x  VREFBUF_CSR=0x%08x\n",
+             reg_rd(ADC12_CCR),
+             reg_rd(0x56003C00));
+
+  // Sample VREFINT a few times via the blocking single-channel path.
+  // Expected: ~1500 raw with VREF+ = 3.3 V (VREFINT typ. 1.21 V).
+  // If we get something close to that, the whole driver chain works:
+  // VREFBUF clock enabled, VREFBUF in external mode (HIZ=1), ADC
+  // calibrated, channel mux switching.
+  cli_printf(cli, "VREFINT (ch17):\n");
+  for(int i = 0; i < 4; i++) {
+    int raw = stm32n6_adc_read_channel(ADC1_BASE, 17);
+    cli_printf(cli, "  raw=%4d  (~%d mV at VREF=3.3V/12-bit)\n",
+               raw, raw * 3300 / 4095);
+  }
+  return 0;
+}
+
+CLI_CMD_DEF("adc", cmd_adc);

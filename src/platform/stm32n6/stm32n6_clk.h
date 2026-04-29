@@ -16,6 +16,7 @@
 
 #define RCC_ICxCFGR(x)    (RCC_BASE + 0xc0 + (x) * 4)
 
+#define RCC_CCIPR1        (RCC_BASE + 0x144)
 #define RCC_CCIPR2        (RCC_BASE + 0x148)
 #define RCC_CCIPR6        (RCC_BASE + 0x158)
 
@@ -23,6 +24,7 @@
 #define RCC_BUSENR        (RCC_BASE + 0x244)
 #define RCC_MEMENR        (RCC_BASE + 0x24C)
 
+#define RCC_AHB1ENR       (RCC_BASE + 0x250)
 #define RCC_AHB4ENR       (RCC_BASE + 0x25c)
 #define RCC_AHB5ENR       (RCC_BASE + 0x260)
 #define RCC_APB1LENR      (RCC_BASE + 0x264)
@@ -64,6 +66,9 @@
 
 #define CLK_HPDMA1    CLK_ID(RCC_AHB5ENR, 0)
 #define CLK_GPDMA1    CLK_ID(RCC_AHB5ENR, 4)
+
+#define CLK_ADC12     CLK_ID(RCC_AHB1ENR, 5)
+#define CLK_VREFBUF   CLK_ID(RCC_APB4ENR1, 15)
 
 #define CLK_XSPI1     CLK_ID(RCC_AHB5ENR, 5)
 #define CLK_XSPI2     CLK_ID(RCC_AHB5ENR, 12)
