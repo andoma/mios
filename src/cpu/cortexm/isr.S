@@ -67,14 +67,6 @@ backtrace_print:
         push    {lr}
         push    {r1}
         push    {r0-r12}
-        mov     r1, r10
-        mov     r2, r11
-        mov     r3, r12
-        push    {r1-r3}
-        mov     r1, r9
-        mov     r2, r8
-        push    {r1-r2}
-        push    {r0-r7}
         mov     r1, sp
         mrs     r2, ipsr
         bl      backtrace_regs
