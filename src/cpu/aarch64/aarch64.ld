@@ -12,6 +12,8 @@ SECTIONS {
                 . = ALIGN(4096);
                 *(.text)
                 *(.text.*)
+                *(fastcode)
+                *(fastcode.*)
                 *(.rodata)
                 *(.rodata.*)
 

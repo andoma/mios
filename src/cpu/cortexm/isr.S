@@ -1,6 +1,6 @@
         .syntax unified
-        .text
 
+        .section fastcode, "ax", %progbits
         .thumb_func
 pendsv:
 #ifdef __thumb2__
@@ -41,6 +41,9 @@ pendsv:
 #ifdef __thumb2__
         .fnend
 #endif
+
+        .text
+
         .global cpu_softreset
         .thumb_func
 cpu_softreset:

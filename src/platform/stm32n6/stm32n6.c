@@ -43,12 +43,16 @@ static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
 
 // ITCM baseline is 64 KB at 0x00000000 (RM0486 §2.3 memory map). The first
 // 4 KB are deliberately left unmapped — combined with PRIVDEFENA=0 below,
-// any access there (read, write or fetch) traps. The remaining 60 KB are
-// mapped RO and toggled to RW by mpu_protect_code() while code / vector
-// table writes are in flight.
+// any access there (read, write or fetch) traps. The remaining 60 KB hold
+// the .fastcode segment (linker-placed, see stm32n6.ld) at the bottom and
+// the runtime ITCM heap on top. The whole 60 KB is one MPU region, mapped
+// RO by default and toggled to RW by mpu_protect_code() while code /
+// vector-table writes are in flight.
 #define ITCM_BASE       0x00000000
 #define ITCM_GUARD_END  0x00001000
 #define ITCM_END        0x00010000
+
+extern char _efastcode[];
 
 static int code_itcm_region;
 
@@ -88,16 +92,9 @@ stm32n6_init(void)
   heap_add_mem(NOCACHE_BASE, NOCACHE_END,
                MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
 
-  // ITCM has ECC; reading uninitialized words faults. Bootloader leaves
-  // ITCM untouched, so scrub the whole 64 KB before anything else uses it
-  // (heap metadata, MPU region setup, allocations).
-  for(volatile uint32_t *p = (volatile uint32_t *)ITCM_BASE;
-      p < (volatile uint32_t *)ITCM_END; p++) {
-    *p = 0;
-  }
-
-  // ITCM (code & vector-table heap, write-protected by default)
-  heap_add_mem(ITCM_GUARD_END, ITCM_END,
+  // ITCM heap above the linker-placed .fastcode segment. The bootloader
+  // pre-scrubs ITCM ECC so heap metadata writes don't fault.
+  heap_add_mem((long)_efastcode, ITCM_END,
                MEM_TYPE_CODE | MEM_TYPE_VECTOR_TABLE, 50);
 
   // We disable PRIVDEFENA below, so every range we expect to access has

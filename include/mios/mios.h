@@ -15,6 +15,11 @@ void dfu(void) __attribute__((noreturn));
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
 
+// Place a function in the "fastcode" linker section. On platforms with a
+// dedicated fast-code memory (e.g. STM32N6 ITCM) the linker script routes
+// this section there; on others it falls into the regular .text/FLASH.
+#define FAST __attribute__((section("fastcode")))
+
 #define MIOS_GLUE(a, b) a ## b
 #define MIOS_JOIN(a, b) MIOS_GLUE(a, b)
 

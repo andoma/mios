@@ -11,6 +11,8 @@ SECTIONS {
                 . = ALIGN(8);
                 *(.text)
                 *(.text.*)
+                *(fastcode)
+                *(fastcode.*)
                 _text_end = .;
                 *(.rodata)
                 *(.rodata.*)

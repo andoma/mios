@@ -6,6 +6,8 @@ SECTIONS {
                 KEEP(*(.vector_table))
                 *(.text)
                 *(.text.*)
+                *(fastcode)
+                *(fastcode.*)
                 *(.rodata)
                 *(.rodata.*)
 

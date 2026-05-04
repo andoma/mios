@@ -8,6 +8,9 @@ SECTIONS
   . = 0x80000000;
   .text : {
         *(.text)
+        *(.text.*)
+        *(fastcode)
+        *(fastcode.*)
          _etext = .;
          }
 

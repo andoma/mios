@@ -135,7 +135,7 @@ readyqueue_insert(cpu_t *cpu, task_t *t, const char *whom)
 }
 
 
-void *
+FAST void *
 task_switch(void *cur_sp)
 {
   cpu_t *cpu = curcpu();

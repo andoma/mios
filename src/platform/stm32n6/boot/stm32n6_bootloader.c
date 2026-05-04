@@ -533,6 +533,14 @@ bl_load_elf(const uint8_t *base)
 
   const Elf32_Phdr *phdr = (const Elf32_Phdr *)(base + ehdr->e_phoff);
 
+  // Pre-scrub ITCM with 32-bit zero stores so its ECC is valid before any
+  // segment is loaded there. bl_memcpy() below is byte-by-byte and would
+  // trip ECC read-modify-write faults on uninitialised words otherwise.
+  for(volatile uint32_t *p = (volatile uint32_t *)0x00000000;
+      p < (volatile uint32_t *)0x00010000; p++) {
+    *p = 0;
+  }
+
   for(int i = 0; i < ehdr->e_phnum; i++) {
     if(phdr[i].p_type != PT_LOAD)
       continue;
