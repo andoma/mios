@@ -92,8 +92,17 @@ stm32n6_init(void)
   heap_add_mem(NOCACHE_BASE, NOCACHE_END,
                MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
 
-  // ITCM heap above the linker-placed .fastcode segment. The bootloader
-  // pre-scrubs ITCM ECC so heap metadata writes don't fault.
+  // ITCM has ECC; reading uninitialised words faults. The .fastcode
+  // segment's bytes are loaded (and thus ECC-initialised) by the
+  // bootloader or by an stlink/JTAG direct loader, but everything above
+  // _efastcode is left uninitialised. Scrub that range with 32-bit zero
+  // stores before the heap touches it.
+  for(volatile uint32_t *p = (volatile uint32_t *)_efastcode;
+      p < (volatile uint32_t *)ITCM_END; p++) {
+    *p = 0;
+  }
+
+  // ITCM heap above the linker-placed .fastcode segment.
   heap_add_mem((long)_efastcode, ITCM_END,
                MEM_TYPE_CODE | MEM_TYPE_VECTOR_TABLE, 50);
 
