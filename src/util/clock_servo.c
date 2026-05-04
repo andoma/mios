@@ -101,7 +101,7 @@ clock_servo_adjust(clock_servo_t *cs, int64_t offset_ns, int update_interval)
   } else {
     clock_servo_slew(cs, offset_ns, update_interval);
   }
-  cs->cs_synchronized = 1;
+  cs->cs_clock->synchronized = 1;
 }
 
 

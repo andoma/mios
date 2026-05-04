@@ -205,7 +205,7 @@ int
 ptp_print_info(stream_t *st, struct ether_netif *eni)
 {
   const ptp_ether_state_t *pes = &eni->eni_ptp;
-  if(!pes->pes_servo.cs_synchronized) {
+  if(!pes->pes_clock.synchronized) {
     stprintf(st, "PTP: not synchronized\n");
     return 0;
   }

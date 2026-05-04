@@ -11,7 +11,6 @@ typedef struct clock_servo {
   int32_t cs_sorted[CLOCK_SERVO_MEDIAN_WINDOW];   // always sorted
   uint8_t cs_sample_count;
   uint8_t cs_sample_write;
-  uint8_t cs_synchronized;
 } clock_servo_t;
 
 void clock_servo_init(clock_servo_t *cs, clock_realtime_t *clk);
