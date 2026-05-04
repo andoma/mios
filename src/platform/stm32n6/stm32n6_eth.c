@@ -45,6 +45,10 @@ typedef struct {
 #define ETH_TDES3_OWN           0x80000000
 #define ETH_TDES3_FD            0x20000000
 #define ETH_TDES3_LD            0x10000000
+// CIC[1:0] in TDES3 bits[17:16]: 11 = full IP+TCP/UDP/ICMP checksum
+// insertion including pseudo-header (RFC compliant). Read by the MAC
+// from the FD descriptor of each packet; ignored on mid/LD descriptors.
+#define ETH_TDES3_CIC_FULL      0x00030000
 
 #define ETH_BASE 0x48036000
 
@@ -451,6 +455,12 @@ stm32n6_thread(stm32n6_eth_t *se, gpio_t phyrst, ethphy_mode_t miimode)
 
   se->se_eni.eni_output = stm32n6_eth_output;
 
+  se->se_eni.eni_ni.ni_flags |=
+    NETIF_F_TX_IPV4_CKSUM_OFFLOAD |
+    NETIF_F_TX_ICMP_CKSUM_OFFLOAD |
+    NETIF_F_TX_UDP_CKSUM_OFFLOAD |
+    NETIF_F_TX_TCP_CKSUM_OFFLOAD;
+
   se->se_periodic.t_cb = stm32n6_eth_periodic;
   se->se_periodic.t_opaque = se;
   net_timer_arm(&se->se_periodic, clock_get() + 100000);
@@ -661,7 +671,7 @@ stm32n6_eth_output(struct ether_netif *eni, pbuf_t *pb,
     tx->w1 = 0;
 
     uint32_t w2 = (1 << 31) | pb->pb_buflen;
-    uint32_t w3 = ETH_TDES3_OWN | pb->pb_pktlen;
+    uint32_t w3 = ETH_TDES3_OWN | ETH_TDES3_CIC_FULL | pb->pb_pktlen;
 
     if(pb->pb_flags & PBUF_SOP) {
       w3 |= ETH_TDES3_FD;
