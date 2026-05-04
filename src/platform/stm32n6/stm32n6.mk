@@ -30,6 +30,8 @@ SRCS += ${C}/systick.c \
 
 SRCS-${ENABLE_NET_IPV4} += ${P}/stm32n6_eth.c
 
+SRCS-${ENABLE_PROFILE} += ${P}/stm32n6_profile.c
+
 SRCS += ${P}/boot/isr.s \
 	${P}/boot/stm32n6_bootloader.c
 

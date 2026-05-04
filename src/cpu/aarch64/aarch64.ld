@@ -10,6 +10,7 @@ SECTIONS {
 
         .text (READONLY) : {
                 . = ALIGN(4096);
+                _stext = .;
                 *(.text)
                 *(.text.*)
                 *(fastcode)

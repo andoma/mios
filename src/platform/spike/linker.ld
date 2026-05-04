@@ -7,6 +7,7 @@ SECTIONS
 {
   . = 0x80000000;
   .text : {
+        _stext = .;
         *(.text)
         *(.text.*)
         *(fastcode)

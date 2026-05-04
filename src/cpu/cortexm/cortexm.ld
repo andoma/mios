@@ -9,6 +9,7 @@ SECTIONS {
 
         .text : {
                 . = ALIGN(8);
+                _stext = .;
                 *(.text)
                 *(.text.*)
                 *(fastcode)

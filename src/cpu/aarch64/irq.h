@@ -1,16 +1,12 @@
 #pragma once
 
 #define IRQ_LEVEL_ALL      1
-#define IRQ_LEVEL_HIGH     1
-
-#define IRQ_LEVEL_SCHED    2
-
+#define IRQ_LEVEL_PROFILE  1
+#define IRQ_LEVEL_HIGH     2
+#define IRQ_LEVEL_SCHED    3
 #define IRQ_LEVEL_CONSOLE  3
-
 #define IRQ_LEVEL_IO       4
-
 #define IRQ_LEVEL_NET      5
-
 #define IRQ_LEVEL_CLOCK    13
 #define IRQ_LEVEL_SWITCH   14
 

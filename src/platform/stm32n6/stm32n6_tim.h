@@ -6,6 +6,7 @@
 #define TIM5_BASE  0x40000c00
 #define TIM6_BASE  0x40001000
 #define TIM7_BASE  0x40001400
+#define TIM18_BASE 0x42003C00
 
 #define TIMx_CR1    0x0
 #define TIMx_CR2    0x4

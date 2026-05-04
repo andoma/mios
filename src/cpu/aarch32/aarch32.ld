@@ -4,6 +4,7 @@ SECTIONS {
         .text : {
                 . = ALIGN(4);
                 KEEP(*(.vector_table))
+                _stext = .;
                 *(.text)
                 *(.text.*)
                 *(fastcode)
