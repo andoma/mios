@@ -47,13 +47,16 @@ mpu_init(void)
 }
 
 
+// `limit` is the exclusive end of the region. PMSAv8-M's RLAR.LIMIT[31:5]
+// stores the inclusive last address with bits [4:0] implicitly = 0x1F, so
+// we subtract 1 to convert from exclusive end to inclusive last.
 void
 mpu_setup_region(int region, uint32_t base, uint32_t limit,
                  uint32_t rbar_flags, uint32_t rlar_flags)
 {
   *MPU_RNR  = region;
   *MPU_RBAR = (base & ~0x1f) | rbar_flags;
-  *MPU_RLAR = (limit & ~0x1f) | rlar_flags | 1; // EN=1
+  *MPU_RLAR = ((limit - 1) & ~0x1f) | rlar_flags | 1; // EN=1
 }
 
 

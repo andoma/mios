@@ -6,6 +6,7 @@
 
 #include <malloc.h>
 
+#include <mios/atomic.h>
 #include <mios/sys.h>
 
 #include <net/pbuf.h>
@@ -39,6 +40,17 @@
 #define HEAP_DMA_END      PBUF_ARENA_BASE
 
 static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
+
+// ITCM baseline is 64 KB at 0x00000000 (RM0486 §2.3 memory map). The first
+// 4 KB are deliberately left unmapped — combined with PRIVDEFENA=0 below,
+// any access there (read, write or fetch) traps. The remaining 60 KB are
+// mapped RO and toggled to RW by mpu_protect_code() while code / vector
+// table writes are in flight.
+#define ITCM_BASE       0x00000000
+#define ITCM_GUARD_END  0x00001000
+#define ITCM_END        0x00010000
+
+static int code_itcm_region;
 
 static void  __attribute__((constructor(120)))
 stm32n6_init(void)
@@ -75,11 +87,58 @@ stm32n6_init(void)
   // then MPU makes it non-cached for subsequent DMA use
   heap_add_mem(NOCACHE_BASE, NOCACHE_END,
                MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
+
+  // ITCM has ECC; reading uninitialized words faults. Bootloader leaves
+  // ITCM untouched, so scrub the whole 64 KB before anything else uses it
+  // (heap metadata, MPU region setup, allocations).
+  for(volatile uint32_t *p = (volatile uint32_t *)ITCM_BASE;
+      p < (volatile uint32_t *)ITCM_END; p++) {
+    *p = 0;
+  }
+
+  // ITCM (code & vector-table heap, write-protected by default)
+  heap_add_mem(ITCM_GUARD_END, ITCM_END,
+               MEM_TYPE_CODE | MEM_TYPE_VECTOR_TABLE, 50);
+
+  // We disable PRIVDEFENA below, so every range we expect to access has
+  // to be mapped here. The first 4 KB of ITCM is intentionally omitted
+  // so null-pointer reads/writes/execution all fault.
+  code_itcm_region =
+    mpu_add_region_v8(ITCM_GUARD_END, ITCM_END,
+                      MPU_V8_AP_RO | MPU_V8_SH_NONE,
+                      MPU_V8_ATTR_NORMAL_WB);
+
+  // DTCM (covers MSP stack at 0x20000000-0x200003FF and the local heap)
+  mpu_add_region_v8(0x20000000, 0x20020000,
+                    MPU_V8_XN | MPU_V8_AP_RW | MPU_V8_SH_NONE,
+                    MPU_V8_ATTR_NORMAL_WB);
+
+  // AXISRAM1+2 main: vector table, code, data, BSS, heap, pbuf arena
+  mpu_add_region_v8(0x24000000, NOCACHE_BASE,
+                    MPU_V8_AP_RW | MPU_V8_SH_NONE,
+                    MPU_V8_ATTR_NORMAL_WB);
+
+  // AXISRAM1+2 NOCACHE carveout (DMA descriptor rings)
   mpu_add_region_v8(NOCACHE_BASE, NOCACHE_END,
                     MPU_V8_XN | MPU_V8_AP_RW | MPU_V8_SH_NONE,
                     MPU_V8_ATTR_NORMAL_NC);
 
-  mpu_enable();
+  // AXISRAM3-6 (general heap, not DMA accessible)
+  mpu_add_region_v8(AXISRAM2_END, AXISRAM36_END,
+                    MPU_V8_XN | MPU_V8_AP_RW | MPU_V8_SH_NONE,
+                    MPU_V8_ATTR_NORMAL_WB);
+
+  // Peripherals: 0x40000000-0x5FFFFFFF (covers AHB/APB peripherals,
+  // RIF, BSEC scratch, RAMCFG, SYSCFG, RCC, IWDG, etc.)
+  mpu_add_region_v8(0x40000000, 0x60000000,
+                    MPU_V8_XN | MPU_V8_AP_RW | MPU_V8_SH_NONE,
+                    MPU_V8_ATTR_DEVICE);
+
+  // Enable MPU without PRIVDEFENA — anything outside the regions above
+  // (notably the first 4 KB of ITCM) faults on access.
+  asm volatile("dsb;isb");
+  *(volatile uint32_t *)0xE000ED94 = 1; // ENABLE only
+  asm volatile("dsb;isb");
 
   // Pbuf data arena (cache-line aligned, used by ethernet DMA)
   pbuf_data_add((void *)PBUF_ARENA_BASE, (void *)PBUF_ARENA_END);
@@ -92,6 +151,20 @@ stm32n6_init(void)
 
   // Open RISAF2 (AXISRAM1/2) for all CIDs
   stm32n6_risaf_open_base_region(RISAF2_BASE, 0xFF);
+}
+
+
+static atomic_t code_unprotect_counter;
+
+void
+mpu_protect_code(int on)
+{
+  int n = atomic_add_and_fetch(&code_unprotect_counter, on ? -1 : 1);
+  uint32_t ap = n ? MPU_V8_AP_RW : MPU_V8_AP_RO;
+  mpu_setup_region(code_itcm_region, ITCM_GUARD_END, ITCM_END,
+                   ap | MPU_V8_SH_NONE,
+                   MPU_V8_ATTR_NORMAL_WB);
+  asm volatile("dsb;isb");
 }
 
 
