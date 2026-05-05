@@ -323,7 +323,7 @@ ota_open_with_args(pushpull_t *pp,
 
   sa->sa_partition = partition;
   sa->sa_platform_upgrade = platform_upgrade;
-  sa->sa_blocksize = blocksize ?: pp->max_fragment_size;
+  sa->sa_blocksize = MIN(blocksize ?: pp->max_fragment_size, 128);
   sa->sa_skipped_kbytes = writeout_skip_kb;
 
   pbuf_t *pb = pbuf_make(0, 0);
