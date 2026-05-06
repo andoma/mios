@@ -137,7 +137,7 @@ board_init_early(void)
                0, 10);
 
   const cpubl_params_v2_t *cbp =
-    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
 
   const uint64_t sdram_end = cbp->sdram_base + cbp->sdram_size;
   printf("SDRAM from 0x%lx to 0x%lx\n", cbp->sdram_base, sdram_end);
@@ -215,7 +215,7 @@ sys_get_serial_number(void)
   }
 
   const cpubl_params_v2_t *cbp =
-    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
 
   memcpy(sn, cbp->eeprom.cvm + 74, 15);
   sn[15] = 0;
@@ -251,7 +251,7 @@ static error_t
 cmd_cvm(cli_t *cli, int argc, char **argv)
 {
   const cpubl_params_v2_t *cbp =
-    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
 
   hexdump("CVM", cbp->eeprom.cvm, 256);
   return 0;

@@ -179,7 +179,7 @@ static inline void *
 get_carveout_base(int id)
 {
   const cpubl_params_v2_t *cbp =
-    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
 
   return (void *)cbp->carveout_info[id].base;
 }

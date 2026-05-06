@@ -37,6 +37,19 @@ reg_rd64(uint64_t addr)
   return *ptr;
 }
 
+// For 64-bit MMIO reads where the address is only 4-byte aligned (e.g.
+// two adjacent 32-bit Tegra scratch registers read as one 64-bit value).
+// A single LDR X would alignment-fault on Device memory.
+static inline uint64_t
+reg_rd64_unaligned(uint64_t addr)
+{
+  volatile uint32_t *lo = (uint32_t *)addr;
+  volatile uint32_t *hi = (uint32_t *)(addr + 4);
+  uint32_t lo_val = *lo;
+  uint32_t hi_val = *hi;
+  return ((uint64_t)hi_val << 32) | lo_val;
+}
+
 static inline uint32_t
 reg_rd(uint64_t addr)
 {

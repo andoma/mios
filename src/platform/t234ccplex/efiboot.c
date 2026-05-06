@@ -399,7 +399,7 @@ static void *
 kernel_from_rcmblob(size_t *sizep)
 {
   const cpubl_params_v2_t *cbp =
-    (const void *)reg_rd64(SCRATCH_BLINFO_LOCATION_REGISTER);
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
 
   const struct rcmblob_header *rbh =
     (void *)cbp->carveout_info[CARVEOUT_RCM_BLOB].base;
