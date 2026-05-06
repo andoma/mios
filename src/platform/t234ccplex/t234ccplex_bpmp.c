@@ -64,6 +64,18 @@ typedef struct {
 static volatile ivc_ring_t *bpmp_tx = (volatile ivc_ring_t *)0x40070000;
 static volatile ivc_ring_t *bpmp_rx = (volatile ivc_ring_t *)0x40071000;
 
+// IVC ring is in Device-mapped shared SRAM. Multi-register loads/stores
+// (LDP/STP) alignment-fault on Device memory, so plain memcpy can't be
+// used here — copy byte-by-byte through volatile pointers instead.
+static void
+bpmp_ivc_copy(volatile void *dst, const volatile void *src, size_t n)
+{
+  volatile uint8_t *d = dst;
+  const volatile uint8_t *s = src;
+  while(n--)
+    *d++ = *s++;
+}
+
 __attribute__((unused))
 static uint16_t
 bpmp_crc(uint16_t crc, uint8_t *data, size_t size)
@@ -161,7 +173,7 @@ bpmp_doorbell_irq(void *arg)
   asm volatile("dmb ld");
   if(bpmp_rx->wr_ptr != bpmp_rx->rd_ptr) {
     if(d->wait_buf) {
-      memcpy(&d->buf, (void *)0x40071080, 128);
+      bpmp_ivc_copy(&d->buf, (void *)0x40071080, 128);
       d->wait_buf = 0;
       task_wakeup(&d->waitq, 0);
     } else {
@@ -260,7 +272,7 @@ bpmp_xfer(uint32_t mrq,
   mutex_lock(&d->mutex);
 
   bpmp_req_t *tx = (bpmp_req_t *)0x40070080;
-  memcpy(tx, &tmp, in_size + 8);
+  bpmp_ivc_copy(tx, &tmp, in_size + 8);
   int q = irq_forbid(IRQ_LEVEL_IO);
   d->wait_buf = 1;
 
