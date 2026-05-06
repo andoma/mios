@@ -34,10 +34,15 @@
 #define PT_AP_RW    (0ULL << 6)   // R/W at EL1, no access at EL0
 #define PT_SH_ISH   (3ULL << 8)   // Inner Shareable
 #define PT_AF       (1ULL << 10)  // Access Flag
+#define PT_PXN      (1ULL << 53)  // Privileged Execute Never
+#define PT_UXN      (1ULL << 54)  // Unprivileged Execute Never
 
 // Common attributes for the descriptors we generate. Matches what
 // entry.S puts in the initial L1 blocks (NS, EL1 R/W, Inner-Shareable,
-// AF, nG=0) so a block→table promotion preserves observable attrs.
+// AF, nG=0). NOT execute-never: the bootloader briefly executes from
+// TTBR0 identity mappings (entry.S → vstart, and efi_exec branching
+// into a freshly-loaded kernel image in SDRAM). Entries 0 and 1 (MMIO)
+// are XN'd in entry.S where it's safe to do so.
 #define PT_BLOCK_COMMON (PT_VALID | PT_NS | PT_AP_RW | PT_SH_ISH | PT_AF)
 
 #define GB              (1ULL << 30)

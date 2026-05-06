@@ -642,8 +642,29 @@ pagetablesetup:
 
         add x2, x8, 4096
         mov x1, #(1 << 30)
-        // Identity map bottom 512GB
-        mov x0, #0b11100100001
+        // Identity map bottom 512 GB.
+        // Block descriptor low attrs = 0x721 (Valid+Block, AttrIdx=0
+        //   Device-nGnRnE, NS, EL1 R/W, Inner-Shareable, AF).
+        //
+        // Entries 0 and 1 cover MMIO (0x0 - 0x7FFFFFFF). Mark them
+        // execute-never (PXN bit 53 | UXN bit 54): nothing executable
+        // lives there, and the architecture requires Device memory be
+        // XN to keep the front-end / branch predictor from
+        // speculatively fetching instructions out of MMIO.
+        //
+        // Entries 2+ (SDRAM) stay executable here so the brief
+        // post-MMU-enable path can keep fetching instructions from the
+        // bootloader's physical-address window before we branch into
+        // TTBR1 high VAs. pagetable.c's pt_set_gb re-issues those
+        // entries WITH PXN/UXN once we're firmly on TTBR1, locking
+        // down TTBR0 to data-only for the rest of runtime.
+        mov  x0, #0b11100100001
+        movk x0, #0x60, lsl #48     // PXN | UXN for entries 0, 1
+        str  x0, [x8], #8
+        add  x0, x0, x1
+        str  x0, [x8], #8
+        add  x0, x0, x1
+        movk x0, #0, lsl #48        // clear PXN/UXN for entries 2..511
 1:
         str x0, [x8], #8
         add x0, x0, x1
