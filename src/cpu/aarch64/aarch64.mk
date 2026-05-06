@@ -18,6 +18,7 @@ GDB ?= ${TOOLCHAIN}gdb
 SRCS += \
 	${C}/entry.s \
 	${C}/memcpy.s \
+	${C}/pagetable.c \
 	${C}/gicv3.c \
 	${C}/clock.c \
 	${C}/cache.c \
