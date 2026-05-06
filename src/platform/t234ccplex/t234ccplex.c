@@ -19,6 +19,7 @@
 
 #include "cache.h"
 #include "gicv3.h"
+#include "pagetable.h"
 
 pmem_t tegra_pmem;
 
@@ -90,13 +91,23 @@ tegra_init_pmem(const cpubl_params_v2_t *cbp)
     int type;
     switch(i) {
     case CARVEOUT_VM_ENCRYPT:
+      // Alias for BLANKET_NSDRAM — a marker covering the whole non-
+      // secure DRAM range; the underlying memory is already classified
+      // as Conventional/Cache-Coherent.
       continue;
     case CARVEOUT_UEFI:
     case CARVEOUT_RCM_BLOB:
       type = T234_PMEM_BOOT_SERVICES;
       break;
-    default:
+    case CARVEOUT_CCPLEX_INTERWORLD_SHMEM:
+      // Holds the cpubl_params (cbp) we read at boot. CPU must keep
+      // access; just don't allocate from it.
       type = T234_PMEM_UNUSABLE;
+      break;
+    default:
+      // Engine firmware / Secure-side / firewalled. CPU access — even
+      // speculative — fires a hardware abort; leave unmapped at EL1.
+      type = T234_PMEM_INACCESSIBLE;
       break;
     }
     pmem_set(&tegra_pmem, (uint64_t)cbp->carveout_info[i].base,
@@ -142,34 +153,45 @@ board_init_early(void)
   const uint64_t sdram_end = cbp->sdram_base + cbp->sdram_size;
   printf("SDRAM from 0x%lx to 0x%lx\n", cbp->sdram_base, sdram_end);
 
-  // Map SDRAM as follows
-  // First GB - Normal Non-Cacheable (0x80000000 - 0xbfffffff)
-  //   (Normal-NC instead of Device so unaligned access works for DMA
-  //   descriptor rings — packed hw descriptors store 64-bit pointers
-  //   at 4-aligned offsets, which alignment-faults on Device memory.)
-  // Reset of SDRAM - Cached         (0xc0000000 - 0x..........)
-  // After end of SDRAM, make invalid
-
-  uint64_t *ttbr0_el1;
-  asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0_el1));
-
-  ttbr0_el1[2] |= (2 << 2);  // AttrIndx = 2 (Normal-NC)
-
-  for(int i = 3; i < 512; i++) {
-    uint64_t paddr = (1ULL << 30) * i;
-    if(paddr >= sdram_end) {
-      ttbr0_el1[i] = 0;
-    } else {
-      ttbr0_el1[i] |= (1 << 2);
-    }
-  }
-
-  asm volatile("dsb sy;isb");
-  cache_op(ttbr0_el1, 512*8, DCACHE_CLEAN_INV);
-  asm volatile("dsb sy;isb");
-  asm volatile ("tlbi vmalle1; dsb ish; isb" ::: "memory");
-
   tegra_init_pmem(cbp);
+
+  // Two-phase TTBR0 setup. Cortex-A78AE on Tegra234 speculatively
+  // reaches into Device- and Normal-mapped PAs that the cluster
+  // shouldn't be touching (low MMIO null pages, BPMP/SCE/etc.
+  // firewalled carveouts). The speculative bus transaction hits a
+  // no-slave or carveout-firewall response and EL3 takes the core
+  // down via async RAS.
+  //
+  // Phase 1: install the L2/L3 unmaps that protect every firewalled
+  // PA range. At this point all 1 GB blocks are still the Device
+  // mapping set up by entry.S, so even if speculation sneaks into a
+  // not-yet-protected PA it goes through Device (architecturally
+  // un-speculatable) and any access to a now-invalid block faults at
+  // the MMU before reaching the bus.
+  pt_unmap(0, 2 * 1024 * 1024);
+  for(size_t i = 0; i < tegra_pmem.count; i++) {
+    const pmem_segment_t *s = &tegra_pmem.segments[i];
+    if(s->type == T234_PMEM_INACCESSIBLE)
+      pt_unmap(s->paddr, s->size);
+  }
+  pt_apply();
+
+  // Phase 2: now that the unmaps are in TLBs, switch SDRAM to the
+  // memory types we actually want. pt_set_gb preserves the invalids
+  // we just installed so the firewalled regions stay protected even
+  // after the rest of the GB becomes Normal-cached.
+  //   First GB: Normal-NC (DMA descriptor rings live here; Normal-NC
+  //             permits unaligned access — Device would alignment-
+  //             fault on packed-struct stores.)
+  //   Rest:     Normal-WB cacheable up to sdram_end.
+  pt_set_gb(2, PT_NORMAL_NC);
+  for(int gb = 3; gb < 512; gb++) {
+    if(((uint64_t)gb << 30) >= sdram_end)
+      pt_unmap_gb(gb);
+    else
+      pt_set_gb(gb, PT_NORMAL_WB);
+  }
+  pt_apply();
 
   // Generic boot-time memory we can use
   add_heap_from_pmem(&tegra_pmem, 128 * 1048576,
@@ -233,7 +255,9 @@ static const char pmemtypestr[] =
   "Cache-coherent\0"
   "Boot-services\0"
   "Runtime-services\0"
-  "Carveout/Unusable\0"
+  "Reserved\0"
+  "Loader\0"
+  "Inaccessible\0"
   "\0";
 
 static error_t
