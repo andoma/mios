@@ -28,6 +28,7 @@ SRCS += ${C}/entry-xip.s \
 	${P}/stm32h7_idle.c \
 	${P}/stm32h7_info.c \
 	${P}/stm32h7_flash.c \
+	${P}/stm32h7_wdog.c \
 
 SRCS-${ENABLE_NET_IPV4} += \
 	${P}/stm32h7_eth.c \
