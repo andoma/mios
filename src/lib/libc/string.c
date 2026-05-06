@@ -42,43 +42,17 @@ memcmp(const void *str1, const void *str2, size_t count)
   return 0;
 }
 
-__attribute__((weak))
+// TODO: temporary slow byte-copy. Replace with a non-recursive fast path
+// (the previous __builtin_memcpy version recursed into itself on aarch64).
+__attribute__((weak, optimize("no-tree-loop-distribute-patterns",
+                              "no-tree-loop-distribution")))
 void *
 memcpy(void *dest, const void *src, size_t n)
 {
   char *d = dest;
   const char *s = src;
-
-  if(((intptr_t)d | (intptr_t)s) % 4 == 0) {
-    // 4-byte aligned: hint to GCC so __builtin_memcpy can pair LDR/STR
-    // into LDRD/STRD on Cortex-M (or LDP/STP on aarch64).
-    char *da       = __builtin_assume_aligned(d, 4);
-    const char *sa = __builtin_assume_aligned(s, 4);
-    while(n >= 32) {
-      __builtin_memcpy(da, sa, 32);
-      da += 32; sa += 32; n -= 32;
-    }
-    while(n >= 4) {
-      __builtin_memcpy(da, sa, 4);
-      da += 4; sa += 4; n -= 4;
-    }
-    d = da; s = sa;
-  } else {
-    // Unaligned: GCC emits single-LDR/STR on Cortex-M3+, byte-copy on
-    // Cortex-M0/M0+.
-    while(n >= 32) {
-      __builtin_memcpy(d, s, 32);
-      d += 32; s += 32; n -= 32;
-    }
-    while(n >= 4) {
-      __builtin_memcpy(d, s, 4);
-      d += 4; s += 4; n -= 4;
-    }
-  }
-
   while(n--)
     *d++ = *s++;
-
   return dest;
 }
 
