@@ -11,6 +11,7 @@
 
 #include "t234_hsp.h"
 #include "t234_bootinfo.h"
+#include "t234_carveout_names.h"
 #include "t234_reset_reason.h"
 
 #include "t234ccplex_pmem.h"
@@ -273,6 +274,34 @@ cmd_pmem(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF_EXT("show_pmem", cmd_pmem, NULL, "Show physical memory map");
+
+
+static error_t
+cmd_show_carveouts(cli_t *cli, int argc, char **argv)
+{
+  const cpubl_params_v2_t *cbp =
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
+
+  cli_printf(cli, "cbp at 0x%016lx\n", (uint64_t)cbp);
+  cli_printf(cli, "SDRAM 0x%016lx + 0x%lx\n",
+             cbp->sdram_base, cbp->sdram_size);
+  for(int i = 0; i < CARVEOUT_OEM_COUNT; i++) {
+    const uint64_t base = (uint64_t)cbp->carveout_info[i].base;
+    const uint64_t size = cbp->carveout_info[i].size;
+    if(size == 0)
+      continue;
+    const int contains_cbp =
+      ((uint64_t)cbp >= base && (uint64_t)cbp < base + size);
+    cli_printf(cli, "  [%2d] %-26s 0x%010lx + 0x%010lx%s\n",
+               i, strtbl(t234_carveout_names, i),
+               base, size,
+               contains_cbp ? "  <-- contains cbp" : "");
+  }
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("show_carveouts", cmd_show_carveouts, NULL,
+                "Show CPU bootloader params and carveout layout");
 
 
 
