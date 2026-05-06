@@ -191,6 +191,7 @@ efi_boot_get_memory_map(unsigned long *map_size,
       attrib |= EFI_MEMORY_RUNTIME;
       break;
     case T234_PMEM_UNUSABLE:
+    case T234_PMEM_INACCESSIBLE:
       efi_type = EFI_UNUSABLE_MEMORY;
       break;
     case T234_PMEM_LOADER:
