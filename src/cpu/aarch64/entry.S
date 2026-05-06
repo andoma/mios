@@ -17,8 +17,9 @@ start:
         msr vbar_el2, x0
 
         // MAIR 0 - Device-nGnRnE memory
-        // MAIR 1 - Normal Memory
-        ldr x1, =0xff00
+        // MAIR 1 - Normal Memory (write-back cacheable)
+        // MAIR 2 - Normal Non-Cacheable (allows unaligned access)
+        ldr x1, =0x44ff00
         msr mair_el2, x1
 
         // 4kb page size, etc
@@ -43,8 +44,9 @@ start:
 el1_entry:
 
         // MAIR 0 - Device-nGnRnE memory
-        // MAIR 1 - Normal Memory
-        ldr x1, =0xff00
+        // MAIR 1 - Normal Memory (write-back cacheable)
+        // MAIR 2 - Normal Non-Cacheable (allows unaligned access)
+        ldr x1, =0x44ff00
         msr mair_el1, x1
 
         // 4kb page size, etc

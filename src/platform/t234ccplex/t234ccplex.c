@@ -143,12 +143,17 @@ board_init_early(void)
   printf("SDRAM from 0x%lx to 0x%lx\n", cbp->sdram_base, sdram_end);
 
   // Map SDRAM as follows
-  // First GB - Non-cached        (0x80000000 - 0xbfffffff)
-  // Reset of SDRAM - Cached      (0xc0000000 - 0x..........)
+  // First GB - Normal Non-Cacheable (0x80000000 - 0xbfffffff)
+  //   (Normal-NC instead of Device so unaligned access works for DMA
+  //   descriptor rings — packed hw descriptors store 64-bit pointers
+  //   at 4-aligned offsets, which alignment-faults on Device memory.)
+  // Reset of SDRAM - Cached         (0xc0000000 - 0x..........)
   // After end of SDRAM, make invalid
 
   uint64_t *ttbr0_el1;
   asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0_el1));
+
+  ttbr0_el1[2] |= (2 << 2);  // AttrIndx = 2 (Normal-NC)
 
   for(int i = 3; i < 512; i++) {
     uint64_t paddr = (1ULL << 30) * i;
