@@ -72,6 +72,7 @@
 #define CLK_GPIOK     CLK_GPIO(10)
 
 #define CLK_CRC       CLK_ID(RCC_AHB4ENR, 19)
+#define CLK_BDMA      CLK_ID(RCC_AHB4ENR, 21)
 #define CLK_ADC3      CLK_ID(RCC_AHB4ENR, 24)
 
 #define CLK_TIM1    CLK_ID(RCC_APB2ENR,  0)
