@@ -731,7 +731,8 @@ vllp_ack_payload(vllp_t *v, pbuf_t *pb)
 static pbuf_t *
 vllp_rx(vllp_t *v, pbuf_t *pb)
 {
-  net_timer_arm(&v->timeout_timer, clock_get() + v->timeout * 1000000);
+  if(v->timeout)
+    net_timer_arm(&v->timeout_timer, clock_get() + v->timeout * 1000000);
   vllp_refresh_local_flow_status(v);
 
   size_t len = pb ? pb->pb_buflen : 0;
