@@ -358,7 +358,7 @@ static void
 vllp_send_syn(vllp_t *v)
 {
 #ifdef __linux__
-  if(getrandom(&v->crc_IV, sizeof(v->crc_IV), 0) != sizeof(v->crc_IV))
+  if(getrandom(&v->crc_IV, sizeof(v->crc_IV), GRND_INSECURE) != sizeof(v->crc_IV))
     return;
 #else
   v->crc_IV_ = rand() ^ time(NULL);
