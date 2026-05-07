@@ -1498,6 +1498,13 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
           pthread_mutex_unlock(&v->mutex);
           *data = NULL;
           *lenp = 0;
+
+          // If we abandon a read due to timeout we should treat the channel
+          // as permanently closed. Future reads might get the data this read
+          // was waiting on (which that read did not expect).
+          // In general it will confuse things. In particular on RPC channels
+          vc->is_closed = 1;
+          vc->closed_status = VLLP_ERR_TIMEOUT;
           return VLLP_ERR_TIMEOUT;
         }
         continue;
