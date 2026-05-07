@@ -478,6 +478,29 @@ t234_bootflash_install(block_iface_t *bi)
 }
 
 
+// Erase the named partition from default_partition_table. Useful for
+// deliberately corrupting a partition (e.g. testing bootchain fallback).
+error_t
+t234_bootflash_erase_partition(struct block_iface *bi, const char *name)
+{
+  for(size_t i = 0; i + 1 < ARRAYSIZE(default_partition_table); i++) {
+    const partition_info_t *p = &default_partition_table[i];
+    if(p->name == NULL || strcmp(p->name, name))
+      continue;
+
+    const partition_info_t *next = &default_partition_table[i + 1];
+    const uint32_t lba   = p->start_lba;
+    const uint32_t count = next->start_lba - p->start_lba;
+
+    error_t err = block_erase(bi, lba, count);
+    if(!err)
+      err = block_ctrl(bi, BLOCK_SYNC);
+    return err;
+  }
+  return ERR_NOT_FOUND;
+}
+
+
 error_t
 t234_bootflash_set_chain(struct block_iface *bi, int chain)
 {

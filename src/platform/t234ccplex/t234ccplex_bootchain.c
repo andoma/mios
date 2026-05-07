@@ -151,3 +151,36 @@ cmd_bootflash_setchain(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF_EXT("bootflash_setchain", cmd_bootflash_setchain,
                 "a|b", "Select active bootchain");
+
+
+static error_t
+cmd_bootflash_corruptchain(cli_t *cli, int argc, char **argv)
+{
+  if(argc != 2)
+    return ERR_INVALID_ARGS;
+
+  const char *partition;
+  switch(argv[1][0]) {
+  case 'a':
+  case 'A':
+    partition = "A_cpu-bootloader";
+    break;
+  case 'b':
+  case 'B':
+    partition = "B_cpu-bootloader";
+    break;
+  default:
+    return ERR_INVALID_ARGS;
+  }
+
+  error_t err = t234_bootflash_erase_partition(bootflash, partition);
+  if(err) {
+    cli_printf(cli, "Erase failed: %s\n", error_to_string(err));
+    return err;
+  }
+  cli_printf(cli, "Erased %s — chain corrupted\n", partition);
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("bootflash_corruptchain", cmd_bootflash_corruptchain,
+                "a|b", "Corrupt a bootchain by erasing its cpu-bootloader");
