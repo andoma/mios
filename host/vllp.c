@@ -355,6 +355,19 @@ vllp_gen_channel_crc(vllp_t *v)
 
 
 static void
+drain_rxq(vllp_t *v)
+{
+  vllp_pkt_t *vp, *n;
+  vllp_logf(v, LOG_DEBUG, "Draining RXQ");
+  for(vp = TAILQ_FIRST(&v->rxq); vp != NULL; vp = n) {
+    vllp_logf(v, LOG_DEBUG, "Draining RXQ %p", vp);
+    n = TAILQ_NEXT(vp, link);
+    free(vp);
+  }
+  TAILQ_INIT(&v->rxq);
+}
+
+static void
 vllp_send_syn(vllp_t *v)
 {
 #ifdef __linux__
@@ -363,6 +376,10 @@ vllp_send_syn(vllp_t *v)
 #else
   v->crc_IV_ = rand() ^ time(NULL);
 #endif
+
+  // We've generated a new SYN (and CRC), nothing will match in the
+  // rxq anyway, so just drain it. Avoid spurious log messages
+  drain_rxq(v);
 
   v->channel_iv_cnt = 0;
   uint32_t cmc_iv = vllp_gen_channel_crc(v);
@@ -1317,11 +1334,8 @@ vllp_release(vllp_t *v)
   assert(TAILQ_FIRST(&v->pending_open) == NULL);
   assert(TAILQ_FIRST(&v->active_channels) == NULL);
 
-  vllp_pkt_t *vp, *n;
-  for(vp = TAILQ_FIRST(&v->rxq); vp != NULL; vp = n) {
-    n = TAILQ_NEXT(vp, link);
-    free(vp);
-  }
+  drain_rxq(v);
+
   free(v->current_tx);
   free(v);
 }
