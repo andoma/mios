@@ -114,13 +114,15 @@ stm32h7_init(void)
     // SRAM2
     mpu_add_region((void *)0x30004000, 14,
                    MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
-    heap_add_mem(0x30004000, 0x30008000,
+    extern uint8_t _esram2[];
+    heap_add_mem((long)_esram2, 0x30008000,
                  MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 30);
 
     // SRAM4
     mpu_add_region((void *)0x38000000, 14,
                    MPU_NORMAL_NON_SHARED_NON_CACHED | MPU_AP_RW | MPU_XN);
-    heap_add_mem(0x38000000, CRASHLOG_ADDR,
+    extern uint8_t _esram4[];
+    heap_add_mem((long)_esram4, CRASHLOG_ADDR,
                  MEM_TYPE_DMA | MEM_TYPE_NO_CACHE, 40);
     break;
   }

@@ -17,4 +17,5 @@ SECTIONS {
         } >BOOT
 }
 
+INCLUDE platform/stm32h7/stm32h7_sram.ld
 INCLUDE cpu/cortexm/cortexm.ld

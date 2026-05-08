@@ -4,4 +4,5 @@ MEMORY {
          RAM   (xrw): ORIGIN = 0x20000400, LENGTH = 128K
 }
 
+INCLUDE platform/stm32h7/stm32h7_sram.ld
 INCLUDE cpu/cortexm/cortexm.ld
