@@ -121,6 +121,7 @@
 #define CLK_SAI1      CLK_ID(RCC_APB2ENR, 22)
 #define CLK_SAI2      CLK_ID(RCC_APB2ENR, 23)
 #define CLK_SAI3      CLK_ID(RCC_APB2ENR, 24)
+#define CLK_SAI4      CLK_ID(RCC_APB4ENR, 21)
 
 
 
