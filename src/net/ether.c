@@ -19,6 +19,10 @@
 #include "ipv4/ipv4.h"
 #include "ipv4/dhcpv4.h"
 
+#ifdef ENABLE_NET_DSIG_UDP
+#include "dsig_udp.h"
+#endif
+
 struct ether_netif_list ether_netifs;
 
 static const uint8_t ether_bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
@@ -318,6 +322,11 @@ ether_netif_attach(ether_netif_t *eni)
   eni->eni_ni.ni_output_ipv4 = ether_ipv4_output;
   eni->eni_ni.ni_input = ether_input;
   eni->eni_ni.ni_status_change = ether_status_change;
+
+#ifdef ENABLE_NET_DSIG_UDP
+  eni->eni_ni.ni_dsig_output = dsig_udp_output;
+  eni->eni_ni.ni_dsig_output_filter = NULL;
+#endif
 
   netif_attach(&eni->eni_ni);
 

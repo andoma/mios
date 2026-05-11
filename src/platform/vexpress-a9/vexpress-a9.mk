@@ -1,6 +1,7 @@
 
 ENABLE_TASK_DEBUG := yes
 ENABLE_NET_IPV4 := yes
+ENABLE_NET_DSIG_UDP := yes
 ENABLE_PL011 := yes
 
 PLATFORM := vexpress-a9

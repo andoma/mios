@@ -9,12 +9,21 @@ ENABLE_NET := $(findstring yes,\
 	${ENABLE_NET_IPV4})
 
 ENABLE_NET_ETHER := $(call OR, ${ENABLE_NET_IPV4})
-ENABLE_NET_DSIG := $(call OR, ${ENABLE_NET_MBUS} ${ENABLE_NET_CAN})
+ENABLE_NET_DSIG := $(call OR, ${ENABLE_NET_MBUS} ${ENABLE_NET_CAN} ${ENABLE_NET_DSIG_UDP})
+
+ifeq (${ENABLE_NET_DSIG_UDP},yes)
+ifneq (${ENABLE_NET_IPV4},yes)
+$(error ENABLE_NET_DSIG_UDP requires ENABLE_NET_IPV4)
+endif
+endif
 
 SRCS-${ENABLE_NET_DSIG} += \
 	${SRC}/net/dsig.c \
 	${SRC}/net/vllp.c \
 	${SRC}/net/pushpull.c \
+
+SRCS-${ENABLE_NET_DSIG_UDP} += \
+	${SRC}/net/dsig_udp.c \
 
 SRCS-${ENABLE_NET_MBUS} += \
 	${SRC}/net/mbus/mbus.c \
