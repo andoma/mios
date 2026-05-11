@@ -379,7 +379,7 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
 
   vc->state = VLLP_CHANNEL_STATE_ESTABLISHED;
 
-  vc->pp.max_fragment_size = PBUF_DATA_SIZE;
+  vc->pp.max_fragment_size = PBUF_DATA_SIZE - 4; // Make place for CRC32
   vc->pp.preferred_offset = 0;
   vc->pp.net = &vllp_net_fn;
   vc->pp.net_opaque = vc;
