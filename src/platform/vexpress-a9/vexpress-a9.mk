@@ -22,6 +22,7 @@ CPPFLAGS += -I${PE}
 
 SRCS += ${P}/vexpress-a9.c \
 	${P}/lan9118.c \
+	${P}/main.c \
 
 SRCS += ${PE}/entry.s \
 	${PE}/irq.c \
@@ -32,7 +33,9 @@ ${PE}/%.o : CFLAGS += ${NOFPU}
 
 
 run: ${O}/build.elf
-	qemu-system-arm -M vexpress-a9 -m 32M -nographic -kernel $<
+	qemu-system-arm -M vexpress-a9 -m 32M -nographic -kernel $< \
+		-net nic,model=lan9118 \
+		-net user,hostfwd=udp::54550-:54550
 
 qemu:
 	qemu-system-arm -S -s -M vexpress-a9 -m 32M -nographic

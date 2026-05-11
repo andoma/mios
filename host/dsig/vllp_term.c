@@ -33,7 +33,8 @@ vllp_terminal(vllp_t *v, const char *name)
 {
   g_name = name;
   pthread_mutex_lock(&g_mtx);
-  g_vc = vllp_channel_create(v, g_name, 0, vllp_term_rx, vllp_term_eof, v);
+  g_vc = vllp_channel_create(v, g_name, 0, vllp_term_rx, vllp_term_eof,
+                             NULL, v);
   pthread_mutex_unlock(&g_mtx);
 
 
