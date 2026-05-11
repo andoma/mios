@@ -310,6 +310,12 @@ vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len,
     return pb;
   }
 
+  if(data[2] != v->mtu) {
+    evlog(LOG_WARNING, "VLLP: 0x%x:0x%x Got VLLP SYN with MTU %d (expected %d)",
+          v->txid, v->rxid, data[2], v->mtu);
+    return pb;
+  }
+
   if(v->connected) {
     vllp_disconnect(v, "reconnected");
   }
