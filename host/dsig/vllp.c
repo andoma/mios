@@ -358,9 +358,7 @@ static void
 drain_rxq(vllp_t *v)
 {
   vllp_pkt_t *vp, *n;
-  vllp_logf(v, LOG_DEBUG, "Draining RXQ");
   for(vp = TAILQ_FIRST(&v->rxq); vp != NULL; vp = n) {
-    vllp_logf(v, LOG_DEBUG, "Draining RXQ %p", vp);
     n = TAILQ_NEXT(vp, link);
     free(vp);
   }
