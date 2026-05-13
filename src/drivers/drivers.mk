@@ -10,6 +10,12 @@ SRCS-${ENABLE_MPU9250} += \
 SRCS-${ENABLE_BMI120} += \
 	${SRC}/drivers/bmi120.c
 
+SRCS-${ENABLE_A3G4250D} += \
+	${SRC}/drivers/a3g4250d.c
+
+SRCS-${ENABLE_AIS2IH} += \
+	${SRC}/drivers/ais2ih.c
+
 SRCS-${ENABLE_HDC1080} += \
 	${SRC}/drivers/hdc1080.c
 
