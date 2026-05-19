@@ -10,6 +10,9 @@
 
 #define FLASH_OPTCR        (FLASH_BASE + 0x18)
 
+#define FLASH_OPTSR_CUR    (FLASH_BASE + 0x1c)
+#define FLASH_OPTSR_PRG    (FLASH_BASE + 0x20)
+
 #define FLASH_OPTSR2_CUR   (FLASH_BASE + 0x70)
 #define FLASH_OPTSR2_PRG   (FLASH_BASE + 0x74)
 
