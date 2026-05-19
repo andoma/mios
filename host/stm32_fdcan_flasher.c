@@ -15,6 +15,10 @@ typedef int (can_tx_t)(void *opaque,
                        const void *buf,
                        size_t len);
 
+// rx is expected to compare against the received CAN id masked with 0xff.
+// This is because the H7 FDCAN bootloader replies ACK on the bare command
+// id (e.g. 0x11) but NACK on the host's TX id (base | cmd, e.g. 0x511),
+// and we need to receive both.
 typedef int (can_rx_t)(void *opaque,
                        uint32_t can_id,
                        void *buf,
@@ -122,6 +126,82 @@ stm32_write_mem(stm32_fdcan_ctx_t *ctx, uint32_t addr, const void *buf, size_t l
   }
 
   return stm32_wait_ack(ctx, 0x31, 500, "write-mem-complete");
+}
+
+
+int
+stm32_get(stm32_fdcan_ctx_t *ctx, uint8_t *cmds, int cmds_max,
+          int *n_cmds_out, int *proto_ver_out)
+{
+  int r;
+
+  r = ctx->tx(ctx->opaque, ctx->base | 0x0, NULL, 0);
+  if(r < 0) {
+    snprintf(ctx->errbuf, ctx->errlen,
+             "get: Failed to send (%s)", strerror(-r));
+    return -1;
+  }
+
+  if(stm32_wait_ack(ctx, 0x0, 500, "get"))
+    return -1;
+
+  uint8_t b;
+  r = ctx->rx(ctx->opaque, 0x0, &b, 1, 500);
+  if(r != 1) {
+    snprintf(ctx->errbuf, ctx->errlen,
+             "get: Failed to read count (%d)", r);
+    return -1;
+  }
+  int n_cmds = b;
+
+  r = ctx->rx(ctx->opaque, 0x0, &b, 1, 500);
+  if(r != 1) {
+    snprintf(ctx->errbuf, ctx->errlen,
+             "get: Failed to read protocol version (%d)", r);
+    return -1;
+  }
+  if(proto_ver_out)
+    *proto_ver_out = b;
+
+  for(int i = 0; i < n_cmds; i++) {
+    r = ctx->rx(ctx->opaque, 0x0, &b, 1, 500);
+    if(r != 1) {
+      snprintf(ctx->errbuf, ctx->errlen,
+               "get: Failed to read opcode %d (%d)", i, r);
+      return -1;
+    }
+    if(i < cmds_max)
+      cmds[i] = b;
+  }
+
+  if(stm32_wait_ack(ctx, 0x0, 500, "get-complete"))
+    return -1;
+
+  *n_cmds_out = n_cmds;
+  return 0;
+}
+
+
+static int
+stm32_readout_unprotect(stm32_fdcan_ctx_t *ctx)
+{
+  int r;
+
+  r = ctx->tx(ctx->opaque, ctx->base | 0x92, NULL, 0);
+  if(r < 0) {
+    snprintf(ctx->errbuf, ctx->errlen,
+             "readout-unprotect: Failed to send (%s)", strerror(-r));
+    return -1;
+  }
+
+  if(stm32_wait_ack(ctx, 0x92, 500, "readout-unprotect-start"))
+    return -1;
+
+  // Mass erase + OBL launch can easily take 20+ seconds on H7
+  if(stm32_wait_ack(ctx, 0x92, 30000, "readout-unprotect-complete"))
+    return -1;
+
+  return 0;
 }
 
 
@@ -239,8 +319,49 @@ stm32_fdcan_flasher(const struct mios_image *mi,
     return -1;
   }
 
-  if(stm32_read_mem(&ctx, mi->buildid_paddr, buildid, 20))
+  // Log bootloader protocol version + command count (informational).
+  // Note: the H7 FDCAN bootloader advertises the full command set in the
+  // Get response regardless of RDP state, so we can't use it to detect
+  // read protection. We fall back to a timeout-based check below.
+  uint8_t cmds[16];
+  int n_cmds = 0;
+  int proto_ver = 0;
+  if(stm32_get(&ctx, cmds, sizeof(cmds), &n_cmds, &proto_ver))
     return -1;
+
+  snprintf(msgbuf, sizeof(msgbuf),
+           "Bootloader proto 0x%02x, %d commands", proto_ver, n_cmds);
+  log(opaque, msgbuf);
+
+  if(stm32_read_mem(&ctx, mi->buildid_paddr, buildid, 20)) {
+    // Read Memory failed. On STM32H7 under RDP != 0xAA the bootloader
+    // silently bus-errors on user-flash reads -- no NACK, just no reply.
+    // Confirm the bootloader is still responsive by re-issuing Get ID; if
+    // it answers, the failure is read-protection and we recover by issuing
+    // Readout Unprotect (0x92). If it doesn't answer, the link is broken
+    // and we propagate the original read-mem error.
+    char saved_err[256];
+    snprintf(saved_err, sizeof(saved_err), "%s", errbuf);
+
+    log(opaque, "Read Memory failed -- probing whether bootloader is alive");
+    if(stm32_get_id(&ctx) < 0) {
+      snprintf(errbuf, errlen, "%s", saved_err);
+      return -1;
+    }
+
+    log(opaque, "Bootloader is alive -- chip is read-protected. "
+                "Sending Readout Unprotect (full flash mass erase, "
+                "may take up to 30s)");
+    if(stm32_readout_unprotect(&ctx))
+      return -1;
+
+    // RDP is now 0xAA and the chip has OBL-launched (system reset). The
+    // caller's retry loop reboots us into the bootloader on a fresh,
+    // unprotected chip and the next pass flashes normally.
+    snprintf(errbuf, errlen,
+             "Chip was read-protected; RDP cleared, retry to flash");
+    return -1;
+  }
 
   snprintf(msgbuf, sizeof(msgbuf),
            "BuildId: Running:%02x%02x%02x%02x... Image:%02x%02x%02x%02x...",
