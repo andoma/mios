@@ -64,16 +64,26 @@ void
 dsig_cansock_tx(void *opaque, uint32_t signal, const void *data, size_t len)
 {
   dsig_cansock_t *t = opaque;
-  struct canfd_frame frame;
-  memset(&frame, 0, sizeof(frame));
-  frame.can_id = signal;
-  if(len > sizeof(frame.data))
-    len = sizeof(frame.data);
-  frame.len = len;
-  if(len)
+  if(len > CANFD_MAX_DLEN)
+    len = CANFD_MAX_DLEN;
+  if(len <= CAN_MAX_DLEN) {
+    struct can_frame frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.can_id = signal;
+    frame.can_dlc = len;
+    if(len)
+      memcpy(frame.data, data, len);
+    ssize_t r = write(t->fd, &frame, sizeof(frame));
+    (void)r;
+  } else {
+    struct canfd_frame frame;
+    memset(&frame, 0, sizeof(frame));
+    frame.can_id = signal;
+    frame.len = len;
     memcpy(frame.data, data, len);
-  ssize_t r = write(t->fd, &frame, sizeof(frame));
-  (void)r;
+    ssize_t r = write(t->fd, &frame, sizeof(frame));
+    (void)r;
+  }
 }
 
 static void *
