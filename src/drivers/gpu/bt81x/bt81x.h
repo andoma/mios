@@ -52,3 +52,6 @@ struct gfx_display *bt81x_create(spi_t *spi, gpio_t ncs, gpio_t pd, gpio_t irq,
 void bt81x_enable(struct gfx_display *, int enabled);
 
 void bt81x_backlight(struct gfx_display *, uint8_t backlight);
+
+uint32_t bt81x_touch_xy(struct gfx_display *gd);
+
