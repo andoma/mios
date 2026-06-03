@@ -1039,6 +1039,23 @@ cmc_handle_open_response(vllp_t *v, int target_channel,
   int16_t err = u8[0] | (u8[1] << 8);
 
   if(!err) {
+    // A RECONNECT channel reopening after a peer reset carries stale read-side
+    // state from the previous session: the disconnect EOF (and possibly other
+    // packets) sit in its rxq, and a synchronous reader may have latched
+    // is_closed. Clear it so vllp_channel_read / vllp_rpc work again on the
+    // fresh session. (No-op on a first-time open: rxq is empty, is_closed
+    // unset.) Without this, an RPC channel never recovers from a peer reset.
+    if(vc->flags & VLLP_CHANNEL_RECONNECT) {
+      vllp_pkt_t *stale;
+      while((stale = TAILQ_FIRST(&vc->rxq)) != NULL) {
+        TAILQ_REMOVE(&vc->rxq, stale, link);
+        free(stale);
+      }
+      vc->rxlen = 0;
+      vc->is_closed = 0;
+      vc->closed_status = 0;
+    }
+
     channel_enq_rx_meta(vc, 0, VLLP_PKT_RDY);
     if(TAILQ_FIRST(&vc->mtxq) != NULL) {
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_ACTIVE);
