@@ -54,3 +54,17 @@ stm32n6_pwr_usb33_enable(void)
   reg_set_bit(PWR_SVMCR3, 10);   // USB33SV
   reg_set_bit(PWR_SVMCR3, 2);    // USB33VMEN
 }
+
+// VDDA18ADC (ADC analog supply) is electrically isolated by default. Enable
+// the analog voltage monitor, wait until it reports the supply present, then
+// remove the isolation so the ADC analog core is powered.
+static inline void
+stm32n6_pwr_vdda_enable(void)
+{
+  reg_set_bit(PWR_SVMCR3, 4);    // AVMEN
+  for(int i = 0; i < 100000; i++) {
+    if(reg_get_bit(PWR_SVMCR3, 20)) // ARDY
+      break;
+  }
+  reg_set_bit(PWR_SVMCR3, 12);   // ASV: remove VDDA18ADC power isolation
+}

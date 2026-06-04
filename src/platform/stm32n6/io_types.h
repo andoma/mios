@@ -32,3 +32,5 @@ void gpio_conf_af(gpio_t gpio, int af, gpio_output_type_t type,
                   gpio_output_speed_t speed, gpio_pull_t pull);
 
 void gpio_conf_standby(gpio_t gpio, gpio_pull_t pull);
+
+void stm32n6_gpio_set_secure(gpio_t gpio, int secure);

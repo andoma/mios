@@ -15,12 +15,28 @@
 #define GPIO_LCKR(x)    (GPIO_PORT_ADDR(x) + 0x1c)
 #define GPIO_AFRL(x)    (GPIO_PORT_ADDR(x) + 0x20)
 #define GPIO_AFRH(x)    (GPIO_PORT_ADDR(x) + 0x24)
+#define GPIO_SECCFGR(x) (GPIO_PORT_ADDR(x) + 0x30)
 
 
 void
 gpio_disconnect(gpio_t gpio)
 {
   gpio_conf_input(gpio, GPIO_PULL_NONE);
+}
+
+
+// GPIO pins reset to secure (GPIOx_SECCFGR = 0xFFFF). Used to mark a pin
+// non-secure so a non-secure peripheral (e.g. the ADC's I/O analog switch)
+// can drive it; otherwise the switch is forced open.
+void
+stm32n6_gpio_set_secure(gpio_t gpio, int secure)
+{
+  const int port = gpio >> 4;
+  const int bit = gpio & 0xf;
+  clk_enable(CLK_GPIO(port));
+  int s = irq_forbid(IRQ_LEVEL_IO);
+  reg_set_bits(GPIO_SECCFGR(port), bit, 1, secure);
+  irq_permit(s);
 }
 
 
