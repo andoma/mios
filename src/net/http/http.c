@@ -998,7 +998,7 @@ websocket_output_close(stream_t *s)
 
   websocket_send_fragment(hc, hc->hc_output_buffer,
                           hc->hc_output_buffer_used, 1,
-                          hc->hc_ws_tx_opcode, STREAM_WRITE_ALL);
+                          hc->hc_ws_tx_opcode, 0);
   hc->hc_output_buffer_used = 0;
   hc->hc_ws_tx_opcode = 0;
 }
