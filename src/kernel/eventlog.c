@@ -6,6 +6,7 @@
 #include <mios/mios.h>
 #include <mios/service.h>
 #include <mios/datetime.h>
+#include <mios/eventlog_follower.h>
 
 #include <sys/param.h>
 
@@ -19,28 +20,14 @@
 #include <malloc.h>
 #include <string.h>
 
-#define EVENTLOG_MASK (EVENTLOG_SIZE - 1)
 
-typedef struct follower {
-  LIST_ENTRY(follower) link;
-  void (*cb)(struct follower *f);
-  uint16_t ptr;
-  uint16_t drops;
-} follower_t;
+static evlog_fifo_t ef0;
 
-typedef struct {
-  int64_t ts_tail;
-  int64_t ts_head;
-  mutex_t mutex;
-  LIST_HEAD(, follower) followers;
-  uint16_t head;
-  uint16_t tail;
-  uint32_t seq_tail;
-  uint8_t data[EVENTLOG_SIZE];
-} evlogfifo_t;
-
-static evlogfifo_t ef0;
-
+evlog_fifo_t *
+evfifo_get(void)
+{
+  return &ef0;
+}
 
 static void __attribute__((constructor(400)))
 evlog_init_globals(void)
@@ -61,21 +48,21 @@ evlog_init_globals(void)
  */
 
 static uint16_t
-evl_used(const evlogfifo_t *ef)
+evl_used(const evlog_fifo_t *ef)
 {
   return ef->head - ef->tail;
 }
 
 
 static size_t
-evl_avail(const evlogfifo_t *ef)
+evl_avail(const evlog_fifo_t *ef)
 {
   return EVENTLOG_SIZE - evl_used(ef);
 }
 
 
-static int64_t
-evl_read_delta_ts(evlogfifo_t *ef, uint16_t ptr)
+int64_t
+evfifo_read_delta_ts(evlog_fifo_t *ef, uint16_t ptr)
 {
   const int len = ef->data[ptr & EVENTLOG_MASK];
   const int tlen = (ef->data[(ptr + 1) & EVENTLOG_MASK] >> 3) & 7;
@@ -90,14 +77,14 @@ evl_read_delta_ts(evlogfifo_t *ef, uint16_t ptr)
 
 
 static void
-evl_erase_tail(evlogfifo_t *ef)
+evl_erase_tail(evlog_fifo_t *ef)
 {
   if(ef->head == ef->tail)
     return;
-  ef->ts_tail += evl_read_delta_ts(ef, ef->tail);
+  ef->ts_tail += evfifo_read_delta_ts(ef, ef->tail);
   ef->seq_tail++;
   int len = ef->data[ef->tail & EVENTLOG_MASK];
-  follower_t *f;
+  evlog_follower_t *f;
   LIST_FOREACH(f, &ef->followers, link) {
     if(f->ptr == ef->tail) {
       f->ptr += len;
@@ -109,7 +96,7 @@ evl_erase_tail(evlogfifo_t *ef)
 
 
 static void
-evl_ensure(evlogfifo_t *ef, size_t size)
+evl_ensure(evlog_fifo_t *ef, size_t size)
 {
   while(evl_avail(ef) < size) {
     evl_erase_tail(ef);
@@ -120,7 +107,7 @@ evl_ensure(evlogfifo_t *ef, size_t size)
 static size_t
 evl_fmt_cb(void *aux, const char *s, size_t len)
 {
-  evlogfifo_t *ef = aux;
+  evlog_fifo_t *ef = aux;
 
   const int head = ef->head;
   const int curlen = ef->data[head & EVENTLOG_MASK];
@@ -137,7 +124,7 @@ evl_fmt_cb(void *aux, const char *s, size_t len)
 }
 
 static void
-evlog_msg_done(evlogfifo_t *ef, event_level_t level, int64_t now)
+evlog_msg_done(evlog_fifo_t *ef, event_level_t level, int64_t now)
 {
   int head = ef->head;
   int msg_len = ef->data[(head + 0) & EVENTLOG_MASK];
@@ -163,7 +150,7 @@ evlog_msg_done(evlogfifo_t *ef, event_level_t level, int64_t now)
   ef->data[(head + 1) & EVENTLOG_MASK] = level | (ts_len << 3);
   ef->head += msg_len + ts_len;
 
-  follower_t *f;
+  evlog_follower_t *f;
   LIST_FOREACH(f, &ef->followers, link) {
     f->cb(f);
   }
@@ -174,7 +161,7 @@ evlog_msg_done(evlogfifo_t *ef, event_level_t level, int64_t now)
 void
 evlog(event_level_t level, const char *fmt, ...)
 {
-  evlogfifo_t *ef = &ef0;
+  evlog_fifo_t *ef = &ef0;
   int64_t now = clock_get();
   va_list ap;
   va_start(ap, fmt);
@@ -213,7 +200,7 @@ evlog(event_level_t level, const char *fmt, ...)
 static ssize_t
 stream_to_log_write(struct stream *s, const void *buf, size_t size, int flags)
 {
-  evlogfifo_t *ef = &ef0;
+  evlog_fifo_t *ef = &ef0;
   evl_fmt_cb(ef, buf, size);
   return size;
 }
@@ -231,7 +218,7 @@ static stream_t stream_to_log = {
 struct stream *
 evlog_stream_begin(void)
 {
-  evlogfifo_t *ef = &ef0;
+  evlog_fifo_t *ef = &ef0;
   int64_t now = clock_get();
 
   mutex_lock(&ef->mutex);
@@ -252,7 +239,7 @@ evlog_stream_begin(void)
 void
 evlog_stream_end(event_level_t level)
 {
-  evlogfifo_t *ef = &ef0;
+  evlog_fifo_t *ef = &ef0;
   evlog_msg_done(ef, level, clock_get());
 }
 
@@ -270,12 +257,12 @@ const char level2str[8][7] = {
 
 
 typedef struct stream_follower {
-  follower_t f;
+  evlog_follower_t f;
   cond_t c;
 } stream_follower_t;
 
 static void
-stream_follower_wakeup(follower_t *f)
+stream_follower_wakeup(evlog_follower_t *f)
 {
   stream_follower_t *st = (stream_follower_t *)f;
   cond_signal(&st->c);
@@ -318,7 +305,7 @@ print_timestamp_to_stream(stream_t *st, int64_t ts)
 
 
 static error_t
-stream_log(evlogfifo_t *ef, stream_t *st, int follow)
+stream_log(evlog_fifo_t *ef, stream_t *st, int follow)
 {
   if(st->vtable->read == NULL)
     follow = 0;
@@ -360,7 +347,7 @@ stream_log(evlogfifo_t *ef, stream_t *st, int follow)
     const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
     const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
 
-    ts += evl_read_delta_ts(ef, ptr);
+    ts += evfifo_read_delta_ts(ef, ptr);
 
     void *copy = xalloc(msglen, 0, MEM_MAY_FAIL);
     if(copy == NULL) {
@@ -419,9 +406,8 @@ CLI_CMD_DEF_EXT("mark", cmd_mark, "...", "Write to system log");
 
 
 typedef struct {
-  follower_t f;
+  evlog_follower_t f;
   uint64_t ts;
-  uint32_t seq;
 
   pushpull_t *p;
 
@@ -449,7 +435,7 @@ static pbuf_t *
 evlog_svc_pull(void *opaque)
 {
   evlog_svc_follower_t *esf = opaque;
-  evlogfifo_t *ef = &ef0;
+  evlog_fifo_t *ef = &ef0;
 
   pbuf_t *pb = NULL;
   mutex_lock(&ef->mutex);
@@ -475,7 +461,7 @@ evlog_svc_pull(void *opaque)
     const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
     const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
 
-    ts += evl_read_delta_ts(ef, ptr);
+    ts += evfifo_read_delta_ts(ef, ptr);
     uint64_t ms_ago = (clock_get() - ts) / 1000;
 
     uint8_t tsbuf[8];
@@ -519,7 +505,7 @@ evlog_svc_pull(void *opaque)
 
 
 static void
-evlog_svc_wakeup(follower_t *f)
+evlog_svc_wakeup(evlog_follower_t *f)
 {
   evlog_svc_follower_t *svc = (evlog_svc_follower_t *)f;
   svc->p->net->event(svc->p->net_opaque, PUSHPULL_EVENT_PULL);
@@ -531,12 +517,7 @@ static void
 evlog_svc_close(void *opaque, const char *errmsg)
 {
   evlog_svc_follower_t *esf = opaque;
-  evlogfifo_t *ef = &ef0;
-
-  mutex_lock(&ef->mutex);
-  LIST_REMOVE(&esf->f, link);
-  mutex_unlock(&ef->mutex);
-
+  evfifo_follower_unregister(&esf->f);
   esf->p->net->event(esf->p->net_opaque, PUSHPULL_EVENT_CLOSE);
   free(esf);
 }
@@ -560,14 +541,9 @@ evlog_svc_open(pushpull_t *p)
   esf->p->app = &evlog_app_fn;
   esf->p->app_opaque = esf;
 
-  evlogfifo_t *ef = &ef0;
-
-  mutex_lock(&ef->mutex);
-  esf->f.ptr = ef->tail;
   esf->f.cb = evlog_svc_wakeup;
-  LIST_INSERT_HEAD(&ef->followers, &esf->f, link);
-  mutex_unlock(&ef->mutex);
 
+  evfifo_follower_register(&esf->f);
   return 0;
 }
 
@@ -625,7 +601,7 @@ eventlog_to_fs_thread(void *arg)
 {
   fs_mkdir("log");
   fs_file_t *f = NULL;
-  evlogfifo_t *ef = &ef0;
+  evlog_fifo_t *ef = &ef0;
   mutex_lock(&ef->mutex);
 
   static stream_follower_t sf;
@@ -671,7 +647,7 @@ eventlog_to_fs_thread(void *arg)
     uint16_t msglen = len - 2 - tlen;
     const uint16_t msgstart = (ptr + 2) & EVENTLOG_MASK;
 
-    ts += evl_read_delta_ts(ef, ptr);
+    ts += evfifo_read_delta_ts(ef, ptr);
 
     size_t buflen = 0;
     buflen += print_timestamp_to_buf(linebuf, sizeof(linebuf), ts);
@@ -730,5 +706,28 @@ eventlog_to_fs(size_t max_file_size)
   int flags = TASK_DETACHED | TASK_NO_FPU | TASK_NO_DMA_STACK;
   thread_create(eventlog_to_fs_thread, NULL, 2048, "fslog", flags, 4);
 }
+
+
+void
+evfifo_follower_register(evlog_follower_t *f)
+{
+  evlog_fifo_t *ef = &ef0;
+
+  mutex_lock(&ef->mutex);
+  f->ptr = ef->tail;
+  LIST_INSERT_HEAD(&ef->followers, f, link);
+  mutex_unlock(&ef->mutex);
+}
+
+void
+evfifo_follower_unregister(evlog_follower_t *f)
+{
+  evlog_fifo_t *ef = &ef0;
+
+  mutex_lock(&ef->mutex);
+  LIST_REMOVE(f, link);
+  mutex_unlock(&ef->mutex);
+}
+
 
 #endif
