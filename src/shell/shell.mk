@@ -6,6 +6,8 @@ SRCS +=	${SRC}/shell/cli.c \
 	${SRC}/shell/cmd_gpio.c \
 	${SRC}/shell/cmd_i2c.c \
 	${SRC}/shell/history.c \
+
+SRCS-${ENABLE_PERFTEST} += \
 	${SRC}/shell/perf.c \
 
 ${MOS}/shell/cli.o : CFLAGS += ${NOFPU}
