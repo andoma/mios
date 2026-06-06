@@ -185,9 +185,19 @@ tool_cli(mcp_context_t *ctx, const cJSON *params, const char **errstr)
   output[out_len] = '\0';
 
   cJSON *result;
-  if(error_code && out_len == 0) {
+  if(error_code) {
+    // The command reported an error. The device prints a human-readable
+    // "! Error: <reason>" line into the output; surface that (plus the
+    // numeric code) and let the framework flag isError.
+    while(out_len && (output[out_len - 1] == '\n' || output[out_len - 1] == '\r'))
+      output[--out_len] = '\0';
+    static char buf[512];
+    if(out_len)
+      snprintf(buf, sizeof(buf), "%s (error code %d)", output, error_code);
+    else
+      snprintf(buf, sizeof(buf), "Command failed (error code %d)", error_code);
     free(output);
-    *errstr = "Command failed";
+    *errstr = buf;
     return NULL;
   }
 
