@@ -2,7 +2,16 @@ GLOBALDEPS += ${SRC}/net/net.mk
 
 SRCS += ${SRC}/net/pbuf.c
 
+# Any net at all (core thread, timers, netif management)
 ENABLE_NET := $(findstring yes,\
+	${ENABLE_NET_CORE}\
+	${ENABLE_NET_MBUS}\
+	${ENABLE_NET_CAN}\
+	${ENABLE_NET_BLE}\
+	${ENABLE_NET_IPV4})
+
+# A real transport is present -> pull in the service/socket stack
+ENABLE_NET_STACK := $(findstring yes,\
 	${ENABLE_NET_MBUS}\
 	${ENABLE_NET_CAN}\
 	${ENABLE_NET_BLE}\
@@ -73,8 +82,10 @@ SRCS-${ENABLE_NET_BLE} += \
 	${SRC}/net/ble/l2cap.c
 
 SRCS-${ENABLE_NET} += \
+	${SRC}/net/net_core.c \
+
+SRCS-${ENABLE_NET_STACK} += \
 	${SRC}/net/service.c \
-	${SRC}/net/net_main.c \
 	${SRC}/net/net_log.c \
 	${SRC}/net/service/svc_echo.c \
 	${SRC}/net/service/svc_shell.c \
