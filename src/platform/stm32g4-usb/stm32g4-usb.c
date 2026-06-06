@@ -25,6 +25,8 @@ board_setup_late(void)
   STAILQ_INIT(&q);
 
   usb_cdc_create_shell(&q);
+  usb_dfu_runtime_create(&q);
+  usb_mcp_create(&q, 0x01);
 
   stm32g4_usb_create(0x6666, 0x0010, "Lonelycoder", "stm32g4", &q);
 }
