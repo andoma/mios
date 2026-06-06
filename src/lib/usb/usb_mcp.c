@@ -194,10 +194,14 @@ mcp_thread(void *arg)
       error_t err = cli_dispatch(&cli, cmdline);
       mcp_flush_output(um);
 
-      // Send completion
+      // Send completion. Serialize the error as a fixed-width int32 (the
+      // host reads 4 bytes); error_t is an enum and may be 1 byte with
+      // -fshort-enums, so memcpy(&err, sizeof(err)) would leave the upper
+      // bytes as stack garbage.
+      int32_t err32 = err;
       uint8_t pkt[5];
       pkt[0] = MCP_CLI_COMPLETE;
-      memcpy(pkt + 1, &err, sizeof(err));
+      memcpy(pkt + 1, &err32, sizeof(err32));
       mcp_send_packet(um, pkt, sizeof(pkt));
       break;
     }
