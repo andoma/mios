@@ -14,6 +14,31 @@
 
 #define USB_CLASS_VENDOR    0xff
 
+// Names for error_t codes (negative). Index = -code.
+// Mirrors the enum in include/mios/error.h and errmsg[] in
+// src/shell/cli.c; keep in sync when error codes are added.
+static const char *const err_names[] = {
+  "OK", "NOT_IMPLEMENTED", "TIMEOUT", "OPERATION_FAILED", "TX_FAULT",
+  "RX_FAULT", "NOT_READY", "NO_BUFFER", "MTU_EXCEEDED", "INVALID_ID",
+  "DMAXFER", "BUS_ERR", "ARBITRATION_LOST", "BAD_STATE", "INVALID_ADDRESS",
+  "NO_DEVICE", "MISMATCH", "NOT_FOUND", "CHECKSUM_ERR", "MALFORMED",
+  "INVALID_RPC_ID", "INVALID_RPC_ARGS", "NO_FLASH_SPACE", "INVALID_ARGS",
+  "INVALID_LENGTH", "NOT_IDLE", "BAD_CONFIG", "FLASH_HW_ERR", "FLASH_TIMEOUT",
+  "NO_MEMORY", "READ_PROT", "WRITE_PROT", "AGAIN", "NOT_CONNECTED",
+  "BAD_PKT_SIZ", "EXISTS", "CORRUPT", "NOT_DIR", "IS_DIR", "NOT_EMPTY",
+  "BADF", "TOOBIG", "INVALID_PARAMETER", "NOTATTR", "TOOLONG", "IO",
+  "FS", "DMAFIFO", "INTERRUPTED", "QUEUE_FULL", "NO_ROUTE",
+};
+
+static const char *
+cli_error_name(int32_t code)
+{
+  int idx = -code;
+  if(idx < 0 || idx >= (int)(sizeof(err_names) / sizeof(err_names[0])))
+    return "UNKNOWN";
+  return err_names[idx];
+}
+
 // Find the MCP vendor interface on a MIOS device.
 // Returns 0 on success, -1 if not found.
 static int
@@ -186,16 +211,18 @@ tool_cli(mcp_context_t *ctx, const cJSON *params, const char **errstr)
 
   cJSON *result;
   if(error_code) {
-    // The command reported an error. The device prints a human-readable
-    // "! Error: <reason>" line into the output; surface that (plus the
-    // numeric code) and let the framework flag isError.
+    // The command reported a non-zero error_t. Render the code as a name
+    // (plus any partial output the command produced) and let the framework
+    // flag isError.
     while(out_len && (output[out_len - 1] == '\n' || output[out_len - 1] == '\r'))
       output[--out_len] = '\0';
     static char buf[512];
     if(out_len)
-      snprintf(buf, sizeof(buf), "%s (error code %d)", output, error_code);
+      snprintf(buf, sizeof(buf), "%s: %s (error %d)",
+               output, cli_error_name(error_code), error_code);
     else
-      snprintf(buf, sizeof(buf), "Command failed (error code %d)", error_code);
+      snprintf(buf, sizeof(buf), "%s (error %d)",
+               cli_error_name(error_code), error_code);
     free(output);
     *errstr = buf;
     return NULL;

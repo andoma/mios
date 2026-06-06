@@ -1,7 +1,6 @@
 #include <mios/stream.h>
 #include <mios/task.h>
 #include <mios/cli.h>
-#include <mios/error.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -193,8 +192,6 @@ mcp_thread(void *arg)
       um->tx_offset = 1;
 
       error_t err = cli_dispatch(&cli, cmdline);
-      if(err)
-        cli_printf(&cli, "! Error: %s\n", error_to_string(err));
       mcp_flush_output(um);
 
       // Send completion. Serialize the error as a fixed-width int32 (the
