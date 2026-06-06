@@ -51,6 +51,9 @@ cmd_gpio_conf(cli_t *cli, int argc, char **argv)
   } else if(!strcmp(argv[3], "out")) {
     gpio_conf_output(GPIO(port, pin), GPIO_PUSH_PULL,
 			  GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  } else if(!strcmp(argv[3], "out-od")) {
+    gpio_conf_output(GPIO(port, pin), GPIO_OPEN_DRAIN,
+			  GPIO_SPEED_LOW, GPIO_PULL_NONE);
   } else {
     return ERR_INVALID_ARGS;
   }
@@ -65,7 +68,7 @@ CLI_CMD_DEF_EXT("gpio_set", cmd_gpio_write,
                 "<block> <pin> <value>", "Write GPIO output");
 
 CLI_CMD_DEF_EXT("gpio_conf", cmd_gpio_conf,
-                "<block> <pin> <in/out>",
+                "<block> <pin> <in/out/out-od>",
                 "Configure GPIO direction");
 
 #endif
