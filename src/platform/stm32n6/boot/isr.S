@@ -5,24 +5,26 @@
         .global     bl_start
         .thumb_func
 bl_start:
-        // Boot ROM passes boot context address in r0.
-        // Don't touch r0 — it becomes the argument to bl_main(ctx).
+        // Boot ROM passes the boot context address in r0 — it becomes the
+        // argument to bl_main(ctx). Don't touch r0.
 
-        // Set MSP to just below our code (stack grows down)
-        ldr r1, =bl_start
+        // Stack: place MSP high in the AXISRAM2 download buffer, above our
+        // loaded image (.boot + parked payload end ~0x341A_xxxx). bl_start
+        // (0x34180400) would grow down into the ROM's header region at
+        // 0x34180000, which the ROM keeps protected in serial boot.
+        ldr r1, =0x341C0000
         msr msp, r1
 
-        // Open debug access port (BSEC_AP_UNLOCK = 0xB4)
+        // Open debug access port so SWD can attach after the ROM branches
+        // (BSEC_AP_UNLOCK = 0xB4, BSEC_DBGCR = 0xB451B400).
         ldr r1, = 0x56009E90
         mov r2, #0xB4
         str r2, [r1]
-
-        // Enable non-secure/secure debug (BSEC_DBGCR = 0xB451B400)
         ldr r1, = 0x56009E8C
         ldr r2, = 0xB451B400
         str r2, [r1]
 
-        // Clear stack limits
+        // Clear stack limits inherited from the ROM.
         mov r1, #0
         msr msplim, r1
         msr psplim, r1

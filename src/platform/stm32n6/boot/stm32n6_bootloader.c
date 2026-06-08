@@ -116,17 +116,39 @@ gpio_set_output(gpio_t gpio, int on)
 #define USART_SR     0x1c
 #define USART_TDR    0x28
 
+// RCC_CCIPR13.USART1SEL[2:0] kernel-clock mux: 000 = pclk2, 110 = hsi_div_ck.
+#define RCC_CCIPR13     (RCC_BASE + 0x174)
+#define RCC_HSICFGR     (RCC_BASE + 0x48)
+#define USART1SEL_PCLK2  0b000
+#define USART1SEL_HSI    0b110
+
 static void __attribute__((unused)) BL
-bl_uart_init(int apb_freq)
+bl_uart_init(void)
 {
-  reg_set_bit(RCC_APB2ENR, 4); // USART1 clock
+  reg_set_bit(RCC_APB2ENR, 4); // USART1 bus clock (register access)
+
+  // Clock the USART1 *kernel* (baud generator) from hsi_div_ck, not the APB
+  // bus. HSI is a fixed 64 MHz RC, so the baud is independent of the bus
+  // clock — which the boot ROM leaves in an unpredictable state in USB
+  // serial boot (a PLL is locked for the USB PHY). HSIDIV (RCC_HSICFGR[8:7])
+  // divides HSI; it is 0 (=64 MHz) after reset.
+  reg_set_bits(RCC_CCIPR13, 0, 3, USART1SEL_HSI);
+  uint32_t hsi = 64000000u >> ((reg_rd(RCC_HSICFGR) >> 7) & 3);
 
   gpio_conf_af(GPIO_PE(5), 7, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_conf_af(GPIO_PE(6), 7, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
   reg_wr(USART1_BASE + USART_CR1, 0);
-  reg_wr(USART1_BASE + USART_BRR, apb_freq / 115200);
+  reg_wr(USART1_BASE + USART_BRR, hsi / 115200);
   reg_wr(USART1_BASE + USART_CR1, (1 << 0) | (1 << 2) | (1 << 3));
+}
+
+// Restore the USART1 kernel clock to pclk2 before handing off to mios,
+// whose UART driver assumes pclk2.
+static void __attribute__((unused)) BL
+bl_uart_deinit(void)
+{
+  reg_set_bits(RCC_CCIPR13, 0, 3, USART1SEL_PCLK2);
 }
 
 static void BL
@@ -406,6 +428,143 @@ bl_xspi_mmap_enable(uint32_t base)
 }
 
 // =====================================================================
+// XSPI1 indirect NOR write (1-bit SPI), used to provision NOR over DFU.
+// All FSBL/app/selector offsets are < 16 MB, so 24-bit addressing is fine.
+// =====================================================================
+
+#define XSPI_SR_TCF    (1 << 1)   // transfer complete
+#define XSPI_SR_FTF    (1 << 2)   // FIFO threshold (room to write)
+
+#define NOR_CMD_WREN   0x06
+#define NOR_CMD_RDSR   0x05
+#define NOR_CMD_PP     0x02       // page program, 24-bit address
+#define NOR_CMD_SE     0x20       // 4 KB sector erase, 24-bit address
+#define NOR_PAGE_SIZE  256
+#define NOR_SECTOR     4096
+
+// Single instruction, no address or data (e.g. write-enable).
+static void BL
+bl_nor_cmd(uint8_t cmd)
+{
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1); // FMODE=WRITE, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, 0);
+  reg_wr(XSPI1_BASE + XSPI_CCR, (0b001 << 0));    // instruction, 1 line
+  reg_wr(XSPI1_BASE + XSPI_IR, cmd);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+}
+
+static uint8_t BL
+bl_nor_status(void)
+{
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b01 << 28) | 1); // FMODE=READ, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, 0);               // one byte
+  reg_wr(XSPI1_BASE + XSPI_CCR, (0b001 << 24) | (0b001 << 0));
+  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_RDSR);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  uint8_t st = reg_rd8(XSPI1_BASE + XSPI_DR);
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+  return st;
+}
+
+// Read the 3-byte JEDEC ID (diagnostic): nonzero/non-0xff => NOR responds.
+static uint32_t BL
+bl_nor_rdid(void)
+{
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b01 << 28) | 1); // FMODE=READ, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, 2);               // 3 bytes
+  reg_wr(XSPI1_BASE + XSPI_CCR, (0b001 << 24) | (0b001 << 0));
+  reg_wr(XSPI1_BASE + XSPI_IR, 0x9F);             // RDID
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  uint32_t id = reg_rd(XSPI1_BASE + XSPI_DR);
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+  return id;
+}
+
+// Read 4 bytes at addr (1-bit fast-read 0x03), TCF-based (diagnostic).
+static uint32_t BL
+bl_nor_read32(uint32_t addr)
+{
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b01 << 28) | 1); // FMODE=READ, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, 3);               // 4 bytes
+  reg_wr(XSPI1_BASE + XSPI_CCR,
+         (0b001 << 24) | (0b10 << 12) | (0b001 << 8) | (0b001 << 0));
+  reg_wr(XSPI1_BASE + XSPI_IR, 0x03);
+  reg_wr(XSPI1_BASE + XSPI_AR, addr);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  uint32_t v = reg_rd(XSPI1_BASE + XSPI_DR);
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+  return v;
+}
+
+// Spin until the write-in-progress bit clears, kicking the watchdog.
+static void BL
+bl_nor_wait_wip(void)
+{
+  while(bl_nor_status() & 1)
+    bl_wdog_kick();
+}
+
+static void BL
+bl_nor_erase_sector(uint32_t addr)
+{
+  bl_nor_cmd(NOR_CMD_WREN);
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1);
+  reg_wr(XSPI1_BASE + XSPI_DLR, 0);
+  reg_wr(XSPI1_BASE + XSPI_CCR,
+         (0b000 << 24) |   // no data
+         (0b10 << 12) |    // 24-bit address
+         (0b001 << 8) |    // address, 1 line
+         (0b001 << 0));    // instruction, 1 line
+  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_SE);
+  reg_wr(XSPI1_BASE + XSPI_AR, addr);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+  bl_nor_wait_wip();
+}
+
+// Program up to one page (<= 256 bytes, not crossing a page boundary).
+static void BL
+bl_nor_program_page(uint32_t addr, const uint8_t *src, uint32_t len)
+{
+  bl_nor_cmd(NOR_CMD_WREN);
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1); // FMODE=WRITE, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, len - 1);
+  reg_wr(XSPI1_BASE + XSPI_CCR,
+         (0b001 << 24) |   // data, 1 line
+         (0b10 << 12) |    // 24-bit address
+         (0b001 << 8) |    // address, 1 line
+         (0b001 << 0));    // instruction, 1 line
+  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_PP);
+  reg_wr(XSPI1_BASE + XSPI_AR, addr);
+  for(uint32_t i = 0; i < len; i++) {
+    while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_FTF)) {}
+    reg_wr8(XSPI1_BASE + XSPI_DR, src[i]);
+  }
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+  bl_nor_wait_wip();
+}
+
+// Erase the sectors spanning [addr, addr+len) and program src over them.
+static void BL
+bl_nor_write(uint32_t addr, const uint8_t *src, uint32_t len)
+{
+  for(uint32_t a = addr & ~(NOR_SECTOR - 1); a < addr + len; a += NOR_SECTOR)
+    bl_nor_erase_sector(a);
+
+  while(len) {
+    uint32_t chunk = NOR_PAGE_SIZE - (addr & (NOR_PAGE_SIZE - 1));
+    if(chunk > len)
+      chunk = len;
+    bl_nor_program_page(addr, src, chunk);
+    addr += chunk;
+    src += chunk;
+    len -= chunk;
+  }
+}
+
+// =====================================================================
 // ELF loader
 // =====================================================================
 
@@ -444,6 +603,8 @@ typedef struct {
 } Elf32_Phdr;
 
 // Flash partition offsets (must match stm32n6_flash.c)
+#define FSBL1_OFFSET        0x000000
+#define FSBL2_OFFSET        0x040000
 #define BOOTSELECTOR_OFFSET 0x080000
 #define APP_A_OFFSET        0x100000
 #define APP_B_OFFSET        0x300000
@@ -594,6 +755,116 @@ struct boot_context {
   uint32_t auth_status;       // 0=none, 1=failed, 2=success
 } __attribute__((packed));
 
+// End of the .boot section in the loaded image (linker symbol). The host
+// parks the mIAP-wrapped mios ELF immediately after .boot, 32-byte aligned.
+extern char _boot_end[];
+
+#include "stm32n6_bootstatus.h"
+
+#define DL_BUFFER_BASE  0x34180000u   // ROM download buffer (secure alias)
+#define BOOT_BASE       0x34180400u   // .boot lands here (= _boot_start)
+
+// Erase+program a NOR region, then read back and verify the leading magic
+// word. Verbose so a one-shot provisioning is legible on the console.
+static int BL
+bl_nor_region(const char *name, uint32_t off, const uint8_t *src,
+              uint32_t len, uint32_t magic)
+{
+  BL_STR(s_at, " @0x");
+  BL_STR(s_len, " len 0x");
+  BL_STR(s_wr, " writing...");
+  BL_STR(s_ok, " OK\n");
+  BL_STR(s_bad, " VERIFY FAILED, got 0x");
+  BL_STR(s_nl, "\n");
+
+  bl_puts(name);
+  bl_puts(s_at);  bl_puthex(off);
+  bl_puts(s_len); bl_puthex(len);
+  bl_puts(s_wr);
+
+  bl_nor_write(off, src, len);
+
+  uint32_t got = bl_nor_read32(off);
+  if(got == magic) {
+    bl_puts(s_ok);
+    return 0;
+  }
+  bl_puts(s_bad);
+  bl_puthex(got);
+  bl_puts(s_nl);
+  return -1;
+}
+
+// Provision NOR from the just-downloaded image in SRAM. The download buffer
+// at 0x34180000 holds [STM2 header 0x400][.boot @ 0x400][parked mIAP app].
+// Write the FSBL (header + .boot) to both FSBL slots and the parked app to
+// both app slots, set the boot selector, and verify each region. The FSBL
+// header is the v2.3 image we booted from, re-scoped so image_length and
+// checksum cover .boot only (measured from the 0x240 header+ext end, so it
+// includes the zero align gap before .boot).
+static void BL
+bl_provision_nor(void)
+{
+  BL_STR(m_start, "Provisioning NOR via XSPI1 (1-bit SPI)\n");
+  bl_puts(m_start);
+
+  // Route XSPI1 -> Port 2 (the NOR): XSPIM swapped mode, and configure the
+  // Port-2 pins (CS/CLK/IO0/IO1). The boot ROM does both for cold boot, but
+  // not for USB serial boot.
+  clk_enable(CLK_XSPIM);
+  reg_wr(XSPIM_BASE, 0x02);  // MUXEN=0, MODE=1 (swapped): XSPI1 <-> Port 2
+  gpio_conf_af(GPIO_PN(1), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_PN(2), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_PN(3), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  gpio_conf_af(GPIO_PN(6), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+  bl_xspi_init();
+
+  BL_STR(m_id, "  JEDEC ID 0x");
+  BL_STR(m_nl, "\n");
+  bl_puts(m_id);
+  bl_puthex(bl_nor_rdid());
+  bl_puts(m_nl);
+
+  // Re-scope the in-RAM STM2 header for the FSBL slot (.boot only).
+  uint32_t boot_padded = (((uint32_t)_boot_end - BOOT_BASE) + 31) & ~31u;
+  uint8_t *hdr = (uint8_t *)DL_BUFFER_BASE;
+  *(volatile uint32_t *)(hdr + 0x6c) = (0x400 - 0x240) + boot_padded;
+  uint32_t sum = 0;
+  const uint8_t *boot = (const uint8_t *)BOOT_BASE;
+  for(uint32_t i = 0; i < boot_padded; i++)
+    sum += boot[i];
+  *(volatile uint32_t *)(hdr + 0x64) = sum;
+  uint32_t fsbl_len = 0x400 + boot_padded;
+
+  // Parked mIAP app right after .boot; byte length = mIAP length field
+  // (elf_len + 12) + the 8-byte magic+length prefix.
+  const uint8_t *parked = (const uint8_t *)(((uint32_t)_boot_end + 31) & ~31u);
+  uint32_t app_len = *(const uint32_t *)(parked + 4) + 8;
+
+  BL_STR(n_fsbl1, "  FSBL1");
+  BL_STR(n_fsbl2, "  FSBL2");
+  BL_STR(n_appa, "  App A");
+  BL_STR(n_appb, "  App B");
+  int bad = 0;
+  bad |= bl_nor_region(n_fsbl1, FSBL1_OFFSET, hdr, fsbl_len, 0x324d5453);
+  bad |= bl_nor_region(n_fsbl2, FSBL2_OFFSET, hdr, fsbl_len, 0x324d5453);
+  bad |= bl_nor_region(n_appa, APP_A_OFFSET, parked, app_len, MIOS_APP_MAGIC);
+  bad |= bl_nor_region(n_appb, APP_B_OFFSET, parked, app_len, MIOS_APP_MAGIC);
+
+  // Boot selector: 'A'.
+  uint8_t sel = 'A';
+  bl_nor_write(BOOTSELECTOR_OFFSET, &sel, 1);
+  BL_STR(m_sel, "  Selector 'A' @0x080000\n");
+  bl_puts(m_sel);
+
+  // Clean boot status so the cold boot starts fresh.
+  reg_wr(BSEC_SCRATCH0, 0);
+
+  BL_STR(m_ok, "NOR provisioning complete\n");
+  BL_STR(m_fail, "NOR provisioning FAILED verification\n");
+  bl_puts(bad ? m_fail : m_ok);
+}
+
 // =====================================================================
 // Entry point
 // =====================================================================
@@ -601,23 +872,15 @@ struct boot_context {
 void __attribute__((noreturn)) BL
 bl_main(void *ctx_arg)
 {
-  // Start watchdog — resets if FSBL or app startup hangs
+  // Start the watchdog: resets the chip if FSBL or app startup hangs.
   bl_wdog_init();
 
-  // Blink LED to show we're alive
-  gpio_conf_output(GPIO_PG(10), GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  for(int n = 0; n < 6; n++) {
-    gpio_set_output(GPIO_PG(10), n & 1);
-    bl_delay(200000);
-  }
-
-  // Auto-detect clock: if PLL1 is running (nominal), APB2=150MHz, else 32MHz
-  int apb2_freq = (reg_rd(RCC_SR) & (1 << 8)) ? 150000000 : 32000000;
-  bl_uart_init(apb2_freq);
+  // Bring up the UART for the boot log (clocked from HSI, see bl_uart_init).
+  bl_uart_init();
 
   bl_setup_vtor();
 
-  BL_STR(msg_banner, "\nMIOS FSBL v1\n");
+  BL_STR(msg_banner, "MIOS FSBL v1\n");
   bl_puts(msg_banner);
 
   BL_STR(msg_nl2, "\n");
@@ -630,10 +893,49 @@ bl_main(void *ctx_arg)
 
   // Record which FSBL slot ran
   uint32_t ctx_addr = (uint32_t)ctx_arg;
+  uint16_t boot_if = 0;
   if(ctx_addr == 0x24100000 || ctx_addr == 0x34100000) {
     const struct boot_context *ctx = ctx_arg;
     if(ctx->boot_partition == 2)
       bootstatus |= BOOTSTATUS_FSBL_SLOT_B;
+    boot_if = ctx->boot_interface;
+  }
+
+  // Serial boot (boot_interface 5=UART, 6=USB): the ROM downloaded our
+  // bootstrap image into SRAM. Provision NOR from it, then drop straight
+  // into the freshly-downloaded mios from RAM. NOR is now provisioned, so
+  // the next cold boot (BOOT pins -> NOR) runs from flash and OTA takes over.
+  // Resetting here would only re-enter the DFU ROM (BOOT0 is still held for
+  // DFU), so jump to RAM instead — leaving a running system behind.
+  if(boot_if == 5 || boot_if == 6) {
+    BL_STR(msg_serial, "Serial boot: provisioning NOR from RAM\n");
+    bl_puts(msg_serial);
+    bl_provision_nor();
+
+    const uint8_t *parked =
+      (const uint8_t *)(((uint32_t)_boot_end + 31) & ~31u);
+    int entry = bl_load_elf(parked);
+    if(entry > 0) {
+      // Reset XSPI and switch to MODE=0 for MIOS (uses XSPI2)
+      reg_wr(XSPI1_BASE + XSPI_CR, 0);
+      rst_assert(CLK_XSPI1);
+      rst_assert(CLK_XSPI2);
+      rst_assert(CLK_XSPIM);
+      for(volatile int i = 0; i < 100; i++) {}
+      rst_deassert(CLK_XSPI1);
+      rst_deassert(CLK_XSPI2);
+      rst_deassert(CLK_XSPIM);
+      reg_wr(XSPIM_BASE, 0x00); // MODE=0: XSPI2->P2
+
+      BL_STR(msg_run, "Booting mios from RAM\n");
+      bl_puts(msg_run);
+      bl_uart_deinit();
+      ((void (*)(void))entry)();
+    }
+
+    BL_STR(msg_bad, "Parked image load failed, halting.\n");
+    bl_puts(msg_bad);
+    while(1) {}
   }
 
   // Initialize XSPI and switch to memory-mapped mode
@@ -727,6 +1029,7 @@ bl_main(void *ctx_arg)
   reg_wr(XSPIM_BASE, 0x00); // MODE=0: XSPI2→P2
 
   // Jump to application
+  bl_uart_deinit();
   typedef void (*app_entry_t)(void);
   app_entry_t app = (app_entry_t)entry;
   app();

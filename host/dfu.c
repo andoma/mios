@@ -738,28 +738,379 @@ dfu_open(libusb_context *ctx)
 }
 
 
+// ========================================================================
+// STM32N6 boot-ROM provisioning
+//
+// The STM32N6 has no internal flash. Its boot ROM is also 0483:df11, but
+// presents an "@FSBL" DFU interface (vs "@Internal Flash"); it downloads an
+// image into AXISRAM2 and branches to it. We build a bootstrap image
+//
+//   [STM2 header (0x400)] [.boot FSBL @ 0x400] [parked mIAP mios ELF]
+//
+// in the v2.3 format the ROM accepts (UM3234 / AN5275), download it over
+// plain DFU 1.1, and detach so the ROM authenticates and branches to our
+// FSBL; the FSBL's serial-boot branch then rescues the parked mios ELF from
+// SRAM. No signing tool or crypto is needed: the open (CLOSED_UNLOCKED)
+// chip does not verify the (zero) signature.
+// ========================================================================
+
+#define N6_FSBL_HEADER_TOTAL  0x400
+#define N6_POST_HEADER_LENGTH 0x1a0
+#define N6_BOOT_PADDR_LO      0x34180400u
+#define N6_BOOT_PADDR_HI      0x34200000u
+#define N6_DOWNLOAD_MAX       (512 * 1024)
+#define N6_XFER_SIZE          1024
+#define MIOS_APP_MAGIC        0x5041496d
+#define MIOS_IMG_TRAILER      "mI0sIMG1"
+#define PT_LOAD               1
+
+// mios crc32 (byte-identical to src/util/crc32.c)
+static uint32_t
+n6_crc32_for_byte(uint32_t r)
+{
+  for(int j = 0; j < 8; j++)
+    r = (r & 1 ? 0 : 0xEDB88320u) ^ (r >> 1);
+  return r ^ 0xFF000000u;
+}
+
+static uint32_t
+n6_crc32(const void *data, size_t n)
+{
+  static uint32_t tbl[256];
+  static int init;
+
+  if(!init) {
+    for(int i = 0; i < 256; i++)
+      tbl[i] = n6_crc32_for_byte(i);
+    init = 1;
+  }
+
+  uint32_t crc = 0;
+  const uint8_t *d = data;
+  for(size_t i = 0; i < n; i++)
+    crc = tbl[(uint8_t)crc ^ d[i]] ^ (crc >> 8);
+  return crc;
+}
+
+typedef struct {
+  uint8_t  e_ident[16];
+  uint16_t e_type;
+  uint16_t e_machine;
+  uint32_t e_version;
+  uint32_t e_entry;
+  uint32_t e_phoff;
+  uint32_t e_shoff;
+  uint32_t e_flags;
+  uint16_t e_ehsize;
+  uint16_t e_phentsize;
+  uint16_t e_phnum;
+  uint16_t e_shentsize;
+  uint16_t e_shnum;
+  uint16_t e_shstrndx;
+} Elf32_Ehdr;
+
+typedef struct {
+  uint32_t p_type;
+  uint32_t p_offset;
+  uint32_t p_vaddr;
+  uint32_t p_paddr;
+  uint32_t p_filesz;
+  uint32_t p_memsz;
+  uint32_t p_flags;
+  uint32_t p_align;
+} Elf32_Phdr;
+
+// STM32N6 FSBL "STM2" header (UM3234 Table 32; mirrors stm32n6_flash.c).
+struct stm32n6_fsbl_header {
+  uint8_t  magic[4];
+  uint8_t  signature[96];
+  uint32_t image_checksum;
+  uint32_t header_version;
+  uint32_t image_length;
+  uint32_t entry_point;
+  uint32_t reserved1;
+  uint32_t load_address;
+  uint32_t reserved2;
+  uint32_t version_number;
+  uint32_t extension_flags;
+  uint32_t post_header_length;
+  uint32_t binary_type;
+  uint8_t  pad[8];
+  uint32_t ns_payload_length;
+  uint32_t ns_payload_hash;
+};
+
+// Build the bootstrap image from a mios ELF. The STM2 header is the v2.3
+// format STM32_SigningTool_CLI -hv 2.3 -align emits for an open chip: a 0xa0
+// base header + a 0x1a0 padding extension + zero fill out to 0x400, so the
+// FSBL code lands at 0x34180400 (= entry_point). The signature is left zero
+// and the padding extension content is don't-care. image_length is measured
+// from the end of header+extensions (0x240), so it includes the zero align
+// gap before the code. The parked image is the whole ELF in the mios
+// on-flash app format ([magic][length][ELF][~crc32][trailer]), placed right
+// after .boot for the FSBL's serial-boot branch to rescue from SRAM.
+static uint8_t *
+n6_build_image(const char *elf_path, size_t *out_len)
+{
+  FILE *f = fopen(elf_path, "rb");
+  if(f == NULL) {
+    printf("Cannot open %s\n", elf_path);
+    return NULL;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long elf_len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  uint8_t *elf = malloc(elf_len);
+  if(fread(elf, 1, elf_len, f) != (size_t)elf_len) {
+    fclose(f);
+    free(elf);
+    return NULL;
+  }
+  fclose(f);
+
+  if(memcmp(elf, "\x7f""ELF", 4)) {
+    printf("Not an ELF: %s\n", elf_path);
+    free(elf);
+    return NULL;
+  }
+  const Elf32_Ehdr *eh = (const Elf32_Ehdr *)elf;
+
+  // Locate the .boot PT_LOAD (paddr in the download-buffer FSBL range).
+  uint32_t boot_off = 0;
+  uint32_t boot_sz = 0;
+  for(int i = 0; i < eh->e_phnum; i++) {
+    const Elf32_Phdr *ph =
+      (const Elf32_Phdr *)(elf + eh->e_phoff + i * eh->e_phentsize);
+    if(ph->p_type == PT_LOAD &&
+       ph->p_paddr >= N6_BOOT_PADDR_LO && ph->p_paddr < N6_BOOT_PADDR_HI) {
+      boot_off = ph->p_offset;
+      boot_sz = ph->p_filesz;
+    }
+  }
+  if(boot_sz == 0) {
+    printf("No .boot segment (paddr 0x%x) in %s\n",
+           N6_BOOT_PADDR_LO, elf_path);
+    free(elf);
+    return NULL;
+  }
+
+  uint32_t boot_padded = (boot_sz + 31) & ~31u;
+  uint32_t stored_crc = ~n6_crc32(elf, elf_len);
+  size_t miap_len = 8 + elf_len + 4 + 8;
+  size_t payload = (boot_padded + miap_len + 31) & ~31u;
+  size_t total = N6_FSBL_HEADER_TOTAL + payload;
+
+  if(total > N6_DOWNLOAD_MAX) {
+    printf("Bootstrap image %zu bytes exceeds %d KB download buffer\n",
+           total, N6_DOWNLOAD_MAX / 1024);
+    free(elf);
+    return NULL;
+  }
+
+  uint8_t *blob = calloc(1, total);
+
+  struct stm32n6_fsbl_header *hd = (struct stm32n6_fsbl_header *)blob;
+  hd->magic[0] = 'S';
+  hd->magic[1] = 'T';
+  hd->magic[2] = 'M';
+  hd->magic[3] = 0x32;
+  hd->header_version = 0x00020300;
+  hd->image_length =
+    (N6_FSBL_HEADER_TOTAL - sizeof(*hd) - N6_POST_HEADER_LENGTH) + payload;
+  hd->entry_point = N6_BOOT_PADDR_LO + 1;   // .boot, +1 for Thumb
+  hd->load_address = 0xFFFFFFFF;            // run in place in the buffer
+  hd->extension_flags = 0x80000000;         // padding extension present
+  hd->post_header_length = N6_POST_HEADER_LENGTH;
+  hd->binary_type = 0x10;                   // FSBL
+
+  // Padding extension at 0xa0 (type 'S','T',0xFF,0xFF).
+  uint8_t *pext = blob + sizeof(*hd);
+  pext[0] = 'S';
+  pext[1] = 'T';
+  pext[2] = 0xFF;
+  pext[3] = 0xFF;
+  uint32_t pext_len = N6_POST_HEADER_LENGTH;
+  memcpy(pext + 4, &pext_len, 4);
+
+  // FSBL .boot at file offset 0x400 -> SRAM 0x34180400.
+  memcpy(blob + N6_FSBL_HEADER_TOTAL, elf + boot_off, boot_sz);
+
+  // Parked mIAP image right after the 32-byte-padded .boot.
+  uint8_t *p = blob + N6_FSBL_HEADER_TOTAL + boot_padded;
+  uint32_t magic = MIOS_APP_MAGIC;
+  uint32_t length = elf_len + 12;
+  memcpy(p, &magic, 4);
+  memcpy(p + 4, &length, 4);
+  memcpy(p + 8, elf, elf_len);
+  memcpy(p + 8 + elf_len, &stored_crc, 4);
+  memcpy(p + 8 + elf_len + 4, MIOS_IMG_TRAILER, 8);
+
+  // Byte-sum checksum over the image region. The align gap is zero, so this
+  // equals the sum over the payload.
+  uint32_t sum = 0;
+  for(size_t i = 0; i < payload; i++)
+    sum += blob[N6_FSBL_HEADER_TOTAL + i];
+  hd->image_checksum = sum;
+
+  printf("N6 bootstrap image: %zu bytes (.boot %u + parked mIAP %zu)\n",
+         total, boot_sz, miap_len);
+  free(elf);
+  *out_len = total;
+  return blob;
+}
+
+// Wait out dfuDNBUSY after a DNLOAD. Returns 0 on idle with status OK, 1 if
+// the ROM stopped ACKing (it auto-completed at header+image_length), or -1.
+static int
+n6_wait_idle(libusb_device_handle *h)
+{
+  for(int i = 0; i < 1000; i++) {
+    struct dfu_status st;
+    int r = libusb_control_transfer(h, CTRL_IN, DFU_GETSTATUS, 0, INTERFACE,
+                                    (uint8_t *)&st, sizeof(st), 5000);
+    if(r == LIBUSB_ERROR_TIMEOUT)
+      return 1;
+    if(r != (int)sizeof(st))
+      return -1;
+    if(st.bState == DFU_STATE_dfuDNBUSY) {
+      usleep(get_poll_timeout(&st) * 1000);
+      continue;
+    }
+    if(st.bStatus != DFU_STATUS_OK) {
+      printf("DFU error: %s (state=%s)\n",
+             dfu_status_str(st.bStatus), dfu_state_str(st.bState));
+      return -1;
+    }
+    return 0;
+  }
+  return -1;
+}
+
+// Download the bootstrap image to the FSBL phase and branch to it. Plain
+// DFU 1.1: sequential blocks from 0, zero-length DNLOAD to finish, then
+// DFU_DETACH and poll GETSTATUS until the device stops ACKing. That
+// disconnect is the ROM authenticating and branching to the FSBL (matching
+// STM32CubeProgrammer's DfuDetach: no host USB reset, no alt switch).
+static int
+n6_download(libusb_device_handle *h, const uint8_t *blob, size_t len)
+{
+  struct dfu_status st;
+
+  if(dfu_getstatus(h, &st) == 0 && st.bState == DFU_STATE_dfuERROR)
+    dfu_clrstatus(h);
+  ctrl_out(h, DFU_ABORT, 0, NULL, 0);
+
+  // Select the @FSBL phase (alt 0); this also resets the DFU block counter.
+  if(libusb_set_interface_alt_setting(h, INTERFACE, 0)) {
+    printf("Failed to select FSBL phase (alt 0)\n");
+    return -1;
+  }
+
+  printf("Downloading %zu bytes...\n", len);
+  size_t off = 0;
+  uint16_t block = 0;
+  while(off < len) {
+    int chunk = len - off < N6_XFER_SIZE ? (int)(len - off) : N6_XFER_SIZE;
+    int r = libusb_control_transfer(h, CTRL_OUT, DFU_DNLOAD, block, INTERFACE,
+                                    (uint8_t *)blob + off, chunk, 5000);
+    if(r != chunk) {
+      printf("DNLOAD block %u failed: %s\n", block,
+             r < 0 ? libusb_error_name(r) : "short");
+      return -1;
+    }
+    int w = n6_wait_idle(h);
+    if(w < 0)
+      return -1;
+    off += chunk;
+    block++;
+    if(w == 1)  // ROM auto-completed at header+image_length
+      break;
+  }
+
+  // End-of-download: zero-length DNLOAD, then poll manifestation to idle.
+  libusb_control_transfer(h, CTRL_OUT, DFU_DNLOAD, block, INTERFACE,
+                          NULL, 0, 2000);
+  for(int i = 0; i < 50; i++) {
+    if(dfu_getstatus(h, &st))
+      break;
+    if(st.bState == DFU_STATE_dfuIDLE)
+      break;
+    usleep(get_poll_timeout(&st) * 1000 + 20000);
+  }
+
+  libusb_control_transfer(h, CTRL_OUT, DFU_DETACH, 1000, INTERFACE,
+                          NULL, 0, 2000);
+  for(int i = 0; i < 60; i++) {
+    int r = libusb_control_transfer(h, CTRL_IN, DFU_GETSTATUS, 0, INTERFACE,
+                                    (uint8_t *)&st, sizeof(st), 500);
+    if(r < 0) {
+      printf("Branched to FSBL (device detached)\n");
+      return 0;
+    }
+    usleep(50000);
+  }
+  printf("Device still in DFU after detach; image rejected?\n");
+  return -1;
+}
+
+static const char *
+n6_provision(libusb_device_handle *h, const char *elf_path)
+{
+  printf("\nSTM32N6 boot ROM detected; provisioning via ROM DFU\n\n");
+
+  size_t len;
+  uint8_t *blob = n6_build_image(elf_path, &len);
+  if(blob == NULL)
+    return "Failed to build STM32N6 bootstrap image";
+
+  libusb_set_auto_detach_kernel_driver(h, 1);
+  if(libusb_claim_interface(h, INTERFACE)) {
+    free(blob);
+    return "Failed to claim STM32N6 DFU interface";
+  }
+
+  int r = n6_download(h, blob, len);
+  libusb_release_interface(h, INTERFACE);
+  free(blob);
+  return r ? "STM32N6 ROM DFU download failed" : NULL;
+}
+
+
 // Load an ELF file and flash it via DFU.
 // Returns NULL on success, or a static error string on failure.
 static const char *
 dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash)
 {
+  libusb_device_handle *h = dfu_open(ctx);
+  if(h == NULL)
+    return "No DFU device found (neither bootloader nor runtime)";
+
+  // Autodetect the flash mechanism from the DFU interface string: "@FSBL"
+  // is the STM32N6 boot ROM (no internal flash), anything else is a normal
+  // STM32 DFU bootloader writing internal flash.
+  char iface_str[128] = "";
+  int xfer_size = 0;
+  get_dfu_interface_string(h, iface_str, sizeof(iface_str), &xfer_size);
+
+  if(!strncmp(iface_str, "@FSBL", 5)) {
+    const char *err = n6_provision(h, elf_path);
+    libusb_close(h);
+    return err;
+  }
+
   const char *err;
   mios_image_t *mi = mios_image_from_elf_file(elf_path, 0, 0, &err);
-  if(mi == NULL)
+  if(mi == NULL) {
+    libusb_close(h);
     return err;
+  }
 
   printf("\nLoaded application: %s\n\n", mi->appname);
 
-  libusb_device_handle *h = dfu_open(ctx);
-  if(h == NULL) {
-    free(mi);
-    return "No DFU device found (neither bootloader nor runtime)";
-  }
-
   libusb_claim_interface(h, 0);
-
   int r = stm32_dfu_flasher(mi, h, force_flash);
-
   libusb_release_interface(h, 0);
   libusb_close(h);
   free(mi);
