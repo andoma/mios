@@ -11,6 +11,10 @@ typedef struct mios_image {
   uint64_t buildid_paddr;   // Physical address of buildid on chip
 
   uint64_t load_addr;       // Where to start writing image to flash
+
+  uint32_t cmdline_addr;    // RAM address to deposit a boot cmdline (0 = n/a)
+  uint32_t cmdline_size;    // Max cmdline string length the firmware accepts
+
   size_t image_size;        // Number of bytes in image[]
   uint8_t image[0];         // Actual bytes
 } mios_image_t;

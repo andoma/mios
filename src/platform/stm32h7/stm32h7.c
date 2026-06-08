@@ -6,6 +6,7 @@
 #include <mios/sys.h>
 #include <mios/cli.h>
 #include <mios/atomic.h>
+#include <mios/cmdline.h>
 
 #include <net/pbuf.h>
 
@@ -17,6 +18,11 @@
 
 #define CRASHLOG_SIZE  512
 #define CRASHLOG_ADDR  (0x38004000 - CRASHLOG_SIZE)
+
+#define CMDLINE_SIZE   192
+#define CMDLINE_ADDR   0x1000
+
+CMDLINE_AT(CMDLINE_ADDR, CMDLINE_SIZE);
 
 static void
 get_crashlog_stream_prep(void)
@@ -69,6 +75,13 @@ stm32h7_init(void)
 
   crashlog_recover();
 
+  // DTCM
+  void *DTCM_end   = (void *)0x20000000 + 128 * 1024;
+  heap_add_mem(HEAP_START_EBSS, (long)DTCM_end,
+               MEM_TYPE_LOCAL, 10);
+
+  cmdline_init(mios_cmdline_info.addr, mios_cmdline_info.size);
+
   long axi_sram_size = 0;
 
   switch(line_id) {
@@ -97,11 +110,6 @@ stm32h7_init(void)
   if(axi_sram_size)
     heap_add_mem(0x24000000, 0x24000000 + axi_sram_size * 1024,
                  MEM_TYPE_DMA, 20);
-
-  // DTCM
-  void *DTCM_end   = (void *)0x20000000 + 128 * 1024;
-  heap_add_mem(HEAP_START_EBSS, (long)DTCM_end,
-               MEM_TYPE_LOCAL, 10);
 
   switch(line_id) {
   case 0x48373233: // STM32H723

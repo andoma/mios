@@ -90,6 +90,11 @@ SECTIONS {
                 KEEP(*(.note.gnu.build-id))
         } >FLASH
 
+        .cmdline_info : {
+                . = ALIGN(4);
+                KEEP(*(cmdline_info))
+        } >FLASH
+
         .bss : {
                 . = ALIGN(4);
                 _sbss = .;

@@ -48,8 +48,9 @@ ${O}/dfu: ${DFU_DEPS} ${ALLDEPS}
 # top-level Makefile): the STM32N6 path embeds the whole ELF as the parked
 # image, so it must be compact. Loadable segments, the build-id note and
 # app/version sections are preserved, so the internal-flash path is fine.
+# Optionally deposit a boot cmdline in RAM: make dfu CMDLINE='usb.vid=0x1234 ...'
 dfu: ${O}/stripped-build.elf ${O}/dfu
-	${O}/dfu ${O}/stripped-build.elf
+	${O}/dfu ${O}/stripped-build.elf $(if $(CMDLINE),"$(CMDLINE)")
 
 sysdfu: ${O}/build.bin
 	dfu-util -a 0 -D $< -s 0x08000000:leave

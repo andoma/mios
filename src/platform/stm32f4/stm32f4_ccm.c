@@ -20,15 +20,20 @@ get_crashlog_stream_prep(void)
 
 #include "lib/sys/crashlog.c"
 
-static void  __attribute__((constructor(200)))
+// Runs before stm32f4_init() (constructor 120). CCM is not cleared on reset
+// and its first bytes hold cpu_t (hardwired via the curcpu() macro in
+// stm32f4_ccm.h). Clear it here so sched.current reads as NULL and
+// thread_current() does not return garbage before cpu_init() (constructor
+// 150) sets it up -- this makes evlog() safe for early callers such as
+// crashlog_recover() and cmdline_init(). The crashlog lives at the end of
+// CCM and is left intact. CCMDATARAMEN is enabled out of reset, but enable
+// it explicitly too.
+static void  __attribute__((constructor(118)))
 stm32f4_ccm_init(void)
 {
-  // CCM
-  // Note: First bytes of CCM are reserved for cpu_t and hardwired to
-  // this address via the curcpu() macro in stm32f4_ccm.h
-  // Last 256 bytes are used as panic-buffer as CCM is not cleared on reset
-
   clk_enable(CLK_CCMDATARAMEN);
+  memset(curcpu(), 0, sizeof(cpu_t));
+
   heap_add_mem(0x10000000 + sizeof(cpu_t), CRASHLOG_ADDR,
                MEM_TYPE_LOCAL, 5);
 

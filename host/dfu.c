@@ -485,10 +485,53 @@ parse_geometry(libusb_device_handle *h, uint32_t *base,
 
 
 
+// Defined further down (byte-identical to mios src/util/crc32.c).
+static uint32_t crc32(const void *data, size_t n);
+
+// Build a cmdline blob and deposit it in device RAM at 'addr' via the DFU
+// bootloader. Layout matches mios <mios/cmdline.h>:
+//   [u32 magic][u32 length][string][u32 ~crc32(header+string)]
+static int
+write_cmdline(libusb_device_handle *h, uint32_t addr, uint32_t maxlen,
+              const char *cmdline)
+{
+  size_t len = strlen(cmdline);
+  if(len > maxlen) {
+    printf("cmdline too long: %zu bytes (firmware max %u)\n", len, maxlen);
+    return -1;
+  }
+
+  size_t total = 8 + len + 4;
+  uint8_t *blob = calloc(1, total);
+  uint32_t magic = 0x6c646d63; // CMDLINE_MAGIC ('cmdl')
+  uint32_t length = len;
+  memcpy(blob + 0, &magic, 4);
+  memcpy(blob + 4, &length, 4);
+  memcpy(blob + 8, cmdline, len);
+  uint32_t crc = ~crc32(blob, 8 + len);
+  memcpy(blob + 8 + len, &crc, 4);
+
+  // ABORT + SET_ADDRESS_POINTER, then a single data block (block 2 writes
+  // at the address pointer); the blob is far smaller than a transfer block.
+  if(ctrl_out(h, DFU_ABORT, 0, NULL, 0) || set_address_pointer(h, addr) < 0) {
+    free(blob);
+    return -1;
+  }
+
+  int r = ctrl_out(h, DFU_DNLOAD, 2, blob, total);
+  free(blob);
+  if(r < 0 || dfu_wait_while_busy(h))
+    return -1;
+
+  printf("Wrote cmdline to 0x%08x: \"%s\"\n", addr, cmdline);
+  return 0;
+}
+
 static int
 stm32_dfu_flasher(const struct mios_image *mi,
                   libusb_device_handle *h,
-                  int force_flash)
+                  int force_flash,
+                  const char *cmdline)
 {
   uint8_t buildid[20] = {};
   struct dfu_status st;
@@ -573,6 +616,17 @@ stm32_dfu_flasher(const struct mios_image *mi,
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
     printf("Unable to reset DFU statemachine\n");
     return -1;
+  }
+
+  if(cmdline != NULL) {
+    if(mi->cmdline_addr == 0) {
+      printf("Firmware does not export a cmdline region; ignoring cmdline\n");
+    } else if(write_cmdline(h, mi->cmdline_addr, mi->cmdline_size, cmdline)) {
+      return -1;
+    } else if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
+      printf("Unable to reset DFU statemachine\n");
+      return -1;
+    }
   }
 
   if(set_address_pointer(h, mi->load_addr) < 0) {
@@ -766,7 +820,7 @@ dfu_open(libusb_context *ctx)
 
 // mios crc32 (byte-identical to src/util/crc32.c)
 static uint32_t
-n6_crc32_for_byte(uint32_t r)
+crc32_for_byte(uint32_t r)
 {
   for(int j = 0; j < 8; j++)
     r = (r & 1 ? 0 : 0xEDB88320u) ^ (r >> 1);
@@ -774,14 +828,14 @@ n6_crc32_for_byte(uint32_t r)
 }
 
 static uint32_t
-n6_crc32(const void *data, size_t n)
+crc32(const void *data, size_t n)
 {
   static uint32_t tbl[256];
   static int init;
 
   if(!init) {
     for(int i = 0; i < 256; i++)
-      tbl[i] = n6_crc32_for_byte(i);
+      tbl[i] = crc32_for_byte(i);
     init = 1;
   }
 
@@ -897,7 +951,7 @@ n6_build_image(const char *elf_path, size_t *out_len)
   }
 
   uint32_t boot_padded = (boot_sz + 31) & ~31u;
-  uint32_t stored_crc = ~n6_crc32(elf, elf_len);
+  uint32_t stored_crc = ~crc32(elf, elf_len);
   size_t miap_len = 8 + elf_len + 4 + 8;
   size_t payload = (boot_padded + miap_len + 31) & ~31u;
   size_t total = N6_FSBL_HEADER_TOTAL + payload;
@@ -1081,7 +1135,8 @@ n6_provision(libusb_device_handle *h, const char *elf_path)
 // Load an ELF file and flash it via DFU.
 // Returns NULL on success, or a static error string on failure.
 static const char *
-dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash)
+dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash,
+              const char *cmdline)
 {
   libusb_device_handle *h = dfu_open(ctx);
   if(h == NULL)
@@ -1095,6 +1150,8 @@ dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash)
   get_dfu_interface_string(h, iface_str, sizeof(iface_str), &xfer_size);
 
   if(!strncmp(iface_str, "@FSBL", 5)) {
+    if(cmdline != NULL)
+      printf("cmdline not supported on STM32N6 ROM path; ignoring\n");
     const char *err = n6_provision(h, elf_path);
     libusb_close(h);
     return err;
@@ -1110,7 +1167,7 @@ dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash)
   printf("\nLoaded application: %s\n\n", mi->appname);
 
   libusb_claim_interface(h, 0);
-  int r = stm32_dfu_flasher(mi, h, force_flash);
+  int r = stm32_dfu_flasher(mi, h, force_flash, cmdline);
   libusb_release_interface(h, 0);
   libusb_close(h);
   free(mi);

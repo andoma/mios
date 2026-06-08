@@ -220,6 +220,13 @@ mios_image_from_elf_mem32(const void *elf, size_t elfsize,
     if(!strcmp(nam, ".appname")) {
       mi->appname = (const char *)mi->image + shdr->addr - image_begin;
     }
+
+    if(!strcmp(nam, ".cmdline_info")) {
+      uint32_t info[2];
+      memcpy(info, elf + shdr->offset, sizeof(info));
+      mi->cmdline_addr = info[0];
+      mi->cmdline_size = info[1];
+    }
   }
   return mi;
 }
@@ -339,6 +346,13 @@ mios_image_from_elf_mem64(const void *elf, size_t elfsize,
       uint64_t paddr = vtop64(elf, shdr->addr);
       if(paddr != 0)
         mi->appname = (const char *)mi->image + paddr - image_begin;
+    }
+
+    if(!strcmp(nam, ".cmdline_info")) {
+      uint32_t info[2];
+      memcpy(info, elf + shdr->offset, sizeof(info));
+      mi->cmdline_addr = info[0];
+      mi->cmdline_size = info[1];
     }
   }
   return mi;

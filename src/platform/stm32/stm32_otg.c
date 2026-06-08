@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <stdio.h>
 
+#include <mios/cmdline.h>
 #include <mios/io.h>
 #include <mios/device.h>
 #include <mios/task.h>
@@ -1133,8 +1134,9 @@ stm32_otg_create(uint16_t vid, uint16_t pid,
 
   uc->uc_manufacturer = manfacturer_string;
   uc->uc_product = product_string;
-  uc->uc_desc.idVendor = vid;
-  uc->uc_desc.idProduct = pid;
+  // The boot cmdline may override the USB ids (e.g. to present DFU ids).
+  uc->uc_desc.idVendor = cmdline_get_int("usb.vid", vid);
+  uc->uc_desc.idProduct = cmdline_get_int("usb.pid", pid);
 
   init_interfaces(uc);
 
