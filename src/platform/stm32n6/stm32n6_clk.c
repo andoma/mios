@@ -109,6 +109,13 @@ stm32n6_init_pll(unsigned int hse_freq)
   // OTGPHY2SEL == 2 (ic15_ck)
   reg_set_bits(RCC_CCIPR6, 20, 2, 2);
 
+  // Force XSPI1's kernel clock to hclk5 (200 MHz), the source the NOR driver's
+  // prescaler assumes. On a cold boot XSPI1SEL comes up as per_ck (measured =1)
+  // instead of hclk5, so without this the NOR runs at the wrong rate and reads
+  // back corrupt; a serial/DFU boot already leaves it on hclk5 (=0).
+  // (RCC_CCIPR6 XSPI1SEL[1:0]: 00 = hclk5, 01 = per_ck, 10 = ic3, 11 = ic4.)
+  reg_set_bits(RCC_CCIPR6, 0, 2, 0);
+
   // Enable all peripheral clocks during sleep mode (LPENR registers).
   // Without this, WFI stops peripheral clocks and interrupts can't fire.
   for(int i = 0; i < 14; i++)

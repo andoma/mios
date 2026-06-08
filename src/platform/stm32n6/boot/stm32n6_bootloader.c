@@ -375,9 +375,9 @@ bl_xspi_init(void)
   reg_set_bit(PWR_SVMCR3, 9);  // VDDIO3SV
   reg_set_bit(PWR_SVMCR3, 1);  // VDDIO3VMEN
 
-  // Boot ROM used XSPI1 (MODE=1) to load us. Use it to reset the flash
-  // before switching to XSPI2, in case CubeProgrammer left it in a
-  // non-standard mode that persists across NRST.
+  // Boot ROM used XSPI1 (MODE=1, swapped: XSPI1 -> Port 2) to load us, and we
+  // keep that config all the way through to mios. Send a flash software reset
+  // first, in case the NOR was left in a non-standard mode across NRST.
   clk_enable(CLK_XSPI1);
   clk_enable(CLK_XSPIM);
 
@@ -916,16 +916,12 @@ bl_main(void *ctx_arg)
       (const uint8_t *)(((uint32_t)_boot_end + 31) & ~31u);
     int entry = bl_load_elf(parked);
     if(entry > 0) {
-      // Reset XSPI and switch to MODE=0 for MIOS (uses XSPI2)
+      // Reset the XSPI1 controller so mios starts clean. Leave the XSPIM mux
+      // at MODE=1 (XSPI1 -> Port 2); mios uses XSPI1 too.
       reg_wr(XSPI1_BASE + XSPI_CR, 0);
       rst_assert(CLK_XSPI1);
-      rst_assert(CLK_XSPI2);
-      rst_assert(CLK_XSPIM);
       for(volatile int i = 0; i < 100; i++) {}
       rst_deassert(CLK_XSPI1);
-      rst_deassert(CLK_XSPI2);
-      rst_deassert(CLK_XSPIM);
-      reg_wr(XSPIM_BASE, 0x00); // MODE=0: XSPI2->P2
 
       BL_STR(msg_run, "Booting mios from RAM\n");
       bl_puts(msg_run);
@@ -1017,16 +1013,12 @@ bl_main(void *ctx_arg)
   // VTOR is typically at the start of the first PT_LOAD segment)
   // The application's startup code will set VTOR itself.
 
-  // Reset XSPI and switch to MODE=0 for MIOS (uses XSPI2)
+  // Reset the XSPI1 controller so mios starts clean. Leave the XSPIM mux at
+  // MODE=1 (XSPI1 -> Port 2, the ROM's config); mios uses XSPI1 too.
   reg_wr(XSPI1_BASE + XSPI_CR, 0);
   rst_assert(CLK_XSPI1);
-  rst_assert(CLK_XSPI2);
-  rst_assert(CLK_XSPIM);
   for(volatile int i = 0; i < 100; i++) {}
   rst_deassert(CLK_XSPI1);
-  rst_deassert(CLK_XSPI2);
-  rst_deassert(CLK_XSPIM);
-  reg_wr(XSPIM_BASE, 0x00); // MODE=0: XSPI2→P2
 
   // Jump to application
   bl_uart_deinit();

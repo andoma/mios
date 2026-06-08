@@ -16,6 +16,7 @@
 
 #define XSPI1_BASE 0x58025000
 #define XSPI2_BASE 0x5802A000
+#define XSPIM_BASE 0x5802b400  // XSPI I/O manager
 
 #define XSPI_CR   0x000
 #define XSPI_DCR1 0x008
@@ -441,20 +442,32 @@ xspi_norflash_create(void)
   if(xs == NULL)
     return NULL;
 
+  // NOR flash is on XSPIM Port 2, reached via XSPI1 in swapped mode
+  // (XSPIM_CR MODE=1: XSPI1 -> Port 2). Configure the mux here rather than
+  // trusting the FSBL handoff — an older field FSBL may leave it in direct
+  // mode (MODE=0, the reset default). Per RM0486 29.4.3 the XSPIM config can
+  // only change while all XSPIs are disabled, so gate the controllers off
+  // first. Writing XSPI1 DCR/CCR during SFDP probing relaunches the HS
+  // interface calibration for the newly-selected XSPI (RM0486 29.5.4).
+  clk_enable(CLK_XSPI1);
   clk_enable(CLK_XSPI2);
+  clk_enable(CLK_XSPIM);
+  reg_wr(XSPI1_BASE + XSPI_CR, 0);
+  reg_wr(XSPI2_BASE + XSPI_CR, 0);
+  reg_wr(XSPIM_BASE, 0x02); // MUXEN=0, MODE=1 (swapped): XSPI1 <-> Port 2
 
   gpio_conf_af(GPIO_PN(1), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_conf_af(GPIO_PN(2), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_conf_af(GPIO_PN(3), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
   gpio_conf_af(GPIO_PN(6), 9, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
 
-  xs->base = XSPI2_BASE;
+  xs->base = XSPI1_BASE;
   xs->devsize = 31; // Default for SFDP probing
 
   mutex_init(&xs->mutex, "xspi");
   task_waitable_init(&xs->waitq, "xspi");
 
-  irq_enable_fn_arg(171, IRQ_LEVEL_SCHED, xspi_irq, xs);
+  irq_enable_fn_arg(170, IRQ_LEVEL_SCHED, xspi_irq, xs); // XSPI1 (RM0486 t.135)
 
   printf("xspi%d: ", xs->base == XSPI1_BASE ? 1 : 2);
 
@@ -532,7 +545,7 @@ xspi_norflash_create(void)
   }
 
   // Compute prescaler for ~50MHz target SPI clock
-  unsigned int clk = clk_get_freq(CLK_XSPI2);
+  unsigned int clk = clk_get_freq(CLK_XSPI1);
   xs->prescaler = clk / 50000000;
   if(xs->prescaler > 0)
     xs->prescaler--;
