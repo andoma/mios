@@ -108,7 +108,7 @@ climate_zone_alert_message(const struct alert_source *as, struct stream *output)
 }
 
 
-static event_level_t
+static alert_level_t
 climate_zone_alert_level(const struct alert_source *as)
 {
   if(as->as_code & (CLIMATE_ZONE_OT_ERROR |
@@ -120,8 +120,8 @@ climate_zone_alert_level(const struct alert_source *as)
                     CLIMATE_ZONE_TEMP_SENSE_ERROR |
                     CLIMATE_ZONE_RH_SENSE_ERROR |
                     CLIMATE_ZONE_FAN_SENSE_ERROR))
-    return LOG_ERR;
-  return LOG_WARNING;
+    return ALERT_LEVEL_ERROR;
+  return ALERT_LEVEL_WARNING;
 }
 
 __attribute__((always_inline))

@@ -6,6 +6,15 @@
 
 #include "eventlog.h"
 
+// Alert severity, independent of the event-log levels. Ordered by
+// ascending severity: ATTENTION sits between WARNING and ERROR.
+typedef enum {
+  ALERT_LEVEL_NOTICE,
+  ALERT_LEVEL_WARNING,
+  ALERT_LEVEL_ATTENTION,
+  ALERT_LEVEL_ERROR,
+} alert_level_t;
+
 typedef struct alert_source {
   SLIST_ENTRY(alert_source) as_link;
   const struct alert_class *as_class;
@@ -16,7 +25,7 @@ typedef struct alert_source {
 
 typedef struct alert_class {
   void (*ac_message)(const struct alert_source *as, struct stream *output);
-  event_level_t (*ac_level)(const struct alert_source *as);
+  alert_level_t (*ac_level)(const struct alert_source *as);
   void (*ac_refcount)(struct alert_source *as, int value);
 } alert_class_t;
 
@@ -30,4 +39,4 @@ int alert_set(alert_source_t *as, int code);
 
 alert_source_t *alert_get_next(alert_source_t *as);
 
-const char *alert_level_to_string(event_level_t level);
+const char *alert_level_to_string(alert_level_t level);
