@@ -8,7 +8,16 @@ PLATFORM ?= lm3s811evb
 
 O ?= build.${PLATFORM}
 
-.DEFAULT_GOAL := ${O}/build.elf
+# Base name for build artifacts. Apps set APPNAME so their outputs are
+# self-describing (e.g. lynxpdu.elf / lynxpdu.debug / lynxpdu.bin); the
+# bare kernel build falls back to "mios".
+ifdef APPNAME
+ARTIFACT := ${APPNAME}
+else
+ARTIFACT := mios
+endif
+
+.DEFAULT_GOAL := ${O}/${ARTIFACT}.elf
 
 include $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/mk/$(shell uname).mk
 
@@ -111,7 +120,9 @@ OBJS :=  ${OBJS:%.s=${O}/%.o}
 DEPS +=  ${OBJS:%.o=%.d}
 
 
-${O}/build.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT} ${MIOSVER} ${APPVER}
+# Full link, with symbols and debug info. Intermediate: not shipped, but
+# kept (.PRECIOUS) so the debug sidecar and crc/img steps can feed off it.
+${O}/${ARTIFACT}.full.elf: ${OBJS} ${GLOBALDEPS} ${LDSCRIPT} ${MIOSVER} ${APPVER}
 	@mkdir -p $(dir $@)
 	@echo "\tLINK\t$@"
 	${TOOLCHAIN}gcc -Wl,-T${LDSCRIPT} ${OBJS} -o $@ ${LDFLAGS}
@@ -120,11 +131,20 @@ ifdef APPNAME
 	${TOOLCHAIN}objcopy --update-section .appversion=${APPVER} $@
 endif
 
-${O}/stripped-build.elf: ${O}/build.elf
+# Detached debug symbols. Lives next to the stripped .elf; gdb/objdump
+# resolve it via the .gnu_debuglink section embedded below.
+${O}/${ARTIFACT}.debug: ${O}/${ARTIFACT}.full.elf
+	@echo "\tDEBUG\t$@"
+	${TOOLCHAIN}objcopy --only-keep-debug $< $@
+
+# Default deliverable: fully stripped (no symtab, no DWARF), with a
+# debuglink pointing back to the .debug sidecar by basename only.
+${O}/${ARTIFACT}.elf: ${O}/${ARTIFACT}.full.elf ${O}/${ARTIFACT}.debug
 	@echo "\tSTRIP\t$@"
 	${TOOLCHAIN}strip -s -o $@ $<
+	${TOOLCHAIN}objcopy --add-gnu-debuglink=${O}/${ARTIFACT}.debug $@
 
-${O}/build.bin: ${O}/stripped-build.elf
+${O}/${ARTIFACT}.bin: ${O}/${ARTIFACT}.elf
 	@echo "\tBIN\t$@"
 	${TOOLCHAIN}objcopy -O binary $< $@
 
@@ -152,7 +172,7 @@ ${CONFIG_H}: ${GLOBALDEPS}
 clean::
 	rm -rf "${O}" build.host
 
-bin: ${O}/build.bin
+bin: ${O}/${ARTIFACT}.bin
 
 toolchain:
 	@which >/dev/null ${TOOLCHAIN}gcc || \
@@ -175,7 +195,7 @@ cli_run: build.host/cli_test
 
 include ${SRC}/platform/platforms.mk
 
-.PRECIOUS: ${O}/stripped-build.elf
+.PRECIOUS: ${O}/${ARTIFACT}.full.elf ${O}/${ARTIFACT}.debug
 
 -include ${DEPS}
 

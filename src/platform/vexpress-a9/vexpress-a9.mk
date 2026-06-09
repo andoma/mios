@@ -32,7 +32,7 @@ ${P}/%.o : CFLAGS += ${NOFPU}
 ${PE}/%.o : CFLAGS += ${NOFPU}
 
 
-run: ${O}/build.elf
+run: ${O}/${ARTIFACT}.elf
 	qemu-system-arm -M vexpress-a9 -m 32M -nographic -kernel $< \
 		-net nic,model=lan9118 \
 		-net user,hostfwd=udp::54550-:54550
@@ -40,5 +40,5 @@ run: ${O}/build.elf
 qemu:
 	qemu-system-arm -S -s -M vexpress-a9 -m 32M -nographic
 
-gdb: ${O}/build.elf
-	${GDB} -ex "target extended-remote localhost:1234" ${O}/build.elf
+gdb: ${O}/${ARTIFACT}.elf
+	${GDB} -ex "target extended-remote localhost:1234" ${O}/${ARTIFACT}.elf

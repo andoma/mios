@@ -19,6 +19,6 @@ SRCS += ${C}/entry-xip.s \
 	${P}/console.c \
 
 
-run: ${O}/build.elf
+run: ${O}/${ARTIFACT}.elf
 	qemu-system-arm -nographic -serial mon:stdio -machine lm3s811evb -cpu cortex-m4 -kernel $<
 

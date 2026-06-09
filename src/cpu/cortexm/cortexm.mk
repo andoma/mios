@@ -29,7 +29,7 @@ ${MOS}/cpu/cortexm/%.o : CFLAGS += ${NOFPU}
 GDB_PORT ?= 3333
 GDB_HOST ?= 127.0.0.1
 
-stlink: ${O}/build.elf
+stlink: ${O}/${ARTIFACT}.elf
 	${GDB} -ex "target extended-remote ${GDB_HOST}:${GDB_PORT}" -x ${T}/gdb/macros $<
 
 DFU_SRC = \
@@ -44,13 +44,14 @@ ${O}/dfu: ${DFU_DEPS} ${ALLDEPS}
 	@mkdir -p $(dir $@)
 	$(CC) -I${T}/host -Og -ggdb -Wall -Werror -o $@ ${DFU_SRC} $(shell pkg-config --libs --cflags libusb-1.0)
 
-# Feed the tool the stripped ELF (stripped-build.elf is defined in the
+# Feed the tool the stripped ELF (${ARTIFACT}.elf is defined in the
 # top-level Makefile): the STM32N6 path embeds the whole ELF as the parked
-# image, so it must be compact. Loadable segments, the build-id note and
-# app/version sections are preserved, so the internal-flash path is fine.
+# image, so it must be compact. Loadable segments and app/version sections
+# are preserved, so the internal-flash path is fine. The .gnu_debuglink
+# section is non-loadable and tiny, so it doesn't bloat the parked image.
 # Optionally deposit a boot cmdline in RAM: make dfu CMDLINE='usb.vid=0x1234 ...'
-dfu: ${O}/stripped-build.elf ${O}/dfu
-	${O}/dfu ${O}/stripped-build.elf $(if $(CMDLINE),"$(CMDLINE)")
+dfu: ${O}/${ARTIFACT}.elf ${O}/dfu
+	${O}/dfu ${O}/${ARTIFACT}.elf $(if $(CMDLINE),"$(CMDLINE)")
 
-sysdfu: ${O}/build.bin
+sysdfu: ${O}/${ARTIFACT}.bin
 	dfu-util -a 0 -D $< -s 0x08000000:leave
