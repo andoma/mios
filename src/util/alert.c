@@ -47,6 +47,21 @@ alert_unregister(alert_source_t *as)
   alert_source_refcount(as, -1);
 }
 
+// Map an alert severity onto the event-log level used when the alert
+// is written into the system log. ATTENTION has no distinct event-log
+// slot, so it logs as WARNING.
+static event_level_t
+alert_level_to_event_level(alert_level_t level)
+{
+  switch(level) {
+  case ALERT_LEVEL_NOTICE:    return LOG_NOTICE;
+  case ALERT_LEVEL_WARNING:   return LOG_WARNING;
+  case ALERT_LEVEL_ATTENTION: return LOG_WARNING;
+  case ALERT_LEVEL_ERROR:     return LOG_ERR;
+  }
+  return LOG_WARNING;
+}
+
 int
 alert_set(alert_source_t *as, int code)
 {
@@ -62,7 +77,7 @@ alert_set(alert_source_t *as, int code)
     stprintf(st, "Alert raised [%s] -- ", as->as_key);
     const alert_class_t *ac = as->as_class;
     ac->ac_message(as, st);
-    evlog_stream_end(ac->ac_level(as));
+    evlog_stream_end(alert_level_to_event_level(ac->ac_level(as)));
   }
 
   ghook_invoke(GHOOK_ALERT_UPDATED);
@@ -89,12 +104,12 @@ alert_get_next(alert_source_t *cur)
   return as;
 }
 
-#define LEVELTBL "EMERG\0ALERT\0CRIT\0ERROR\0WARNING\0NOTICE\0INFO\0DEBUG\0\0"
+#define LEVELTBL "NOTICE\0WARNING\0ATTENTION\0ERROR\0\0"
 
 const char *
-alert_level_to_string(event_level_t level)
+alert_level_to_string(alert_level_t level)
 {
-  return strtbl(LEVELTBL, level & 7);
+  return strtbl(LEVELTBL, level & 3);
 }
 
 
@@ -112,10 +127,10 @@ fake_alert_message(const struct alert_source *as, struct stream *output)
 }
 
 
-static event_level_t
+static alert_level_t
 fake_alert_level(const struct alert_source *as)
 {
-  return LOG_WARNING;
+  return ALERT_LEVEL_WARNING;
 }
 
 static void
@@ -166,7 +181,7 @@ cmd_alert(cli_t *cli, int argc, char **argv)
     return raise_fake_alert(cli, argv[2]);
   }
 
-  cli_printf(cli, "Name                 Severity Details\n");
+  cli_printf(cli, "Name                 Severity  Details\n");
   cli_printf(cli, "========================================================\n");
 
   while((as = alert_get_next(as)) != NULL) {
@@ -177,7 +192,7 @@ cmd_alert(cli_t *cli, int argc, char **argv)
       continue;
     }
 
-    cli_printf(cli, "%-8s ",
+    cli_printf(cli, "%-9s ",
                alert_level_to_string(as->as_class->ac_level(as)));
     as->as_class->ac_message(as, cli->cl_stream);
     cli_printf(cli, "\n");

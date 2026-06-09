@@ -107,7 +107,7 @@ power_rail_alert_message(const struct alert_source *as, struct stream *output)
 }
 
 
-static event_level_t
+static alert_level_t
 power_rail_alert_level(const struct alert_source *as)
 {
   if(as->as_code & (POWER_RAIL_TEMP_CRIT |
@@ -117,8 +117,8 @@ power_rail_alert_level(const struct alert_source *as)
                     POWER_RAIL_OC_ALERT |
                     POWER_RAIL_UC_ALERT |
                     POWER_RAIL_FAULT))
-    return LOG_ALERT;
-  return LOG_WARNING;
+    return ALERT_LEVEL_ERROR;
+  return ALERT_LEVEL_WARNING;
 }
 
 
