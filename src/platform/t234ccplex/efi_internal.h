@@ -98,6 +98,13 @@ typedef struct {
 
 typedef void *efi_event_t;
 typedef void (*efi_event_notify_t)(efi_event_t, void *);
+
+struct efi_generic_dev_path {
+  uint8_t type;
+  uint8_t sub_type;
+  uint16_t length;
+};
+
 typedef struct efi_generic_dev_path efi_device_path_protocol_t;
 
 typedef enum {

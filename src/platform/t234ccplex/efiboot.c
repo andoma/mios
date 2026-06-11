@@ -91,6 +91,128 @@ static const uint8_t guid_rng[16] = {
   0x86, 0x2e, 0xc0, 0x1c, 0xdc, 0x29, 0x1f, 0x44
 };
 
+// EFI_LOAD_FILE2_PROTOCOL_GUID
+// {4006c0c1-fcb3-403e-996d-4a6c8724e06d}
+static const uint8_t guid_load_file2[16] = {
+  0xc1, 0xc0, 0x06, 0x40, 0xb3, 0xfc, 0x3e, 0x40,
+  0x99, 0x6d, 0x4a, 0x6c, 0x87, 0x24, 0xe0, 0x6d
+};
+
+// LINUX_EFI_INITRD_MEDIA_GUID
+// {5568e427-68fc-4f3d-ac74-ca555231cc68}
+static const uint8_t guid_initrd_media[16] = {
+  0x27, 0xe4, 0x68, 0x55, 0xfc, 0x68, 0x3d, 0x4f,
+  0xac, 0x74, 0xca, 0x55, 0x52, 0x31, 0xcc, 0x68
+};
+
+
+/**
+ * Unified Kernel Image (UKI) support
+ *
+ * A UKI is a PE/COFF file carrying the kernel, initrd and command line as
+ * sections (.linux / .initrd / .cmdline). We boot the kernel from .linux
+ * directly (the arm64 Image is itself a PE) and serve .initrd to the kernel's
+ * EFI stub via EFI_LOAD_FILE2_PROTOCOL on the Linux initrd media device path
+ * -- the stub's preferred initrd source since Linux 5.7. No external EFI stub
+ * (shim) is involved.
+ */
+
+typedef struct efi_load_file2 {
+  efi_status_t (*load_file)(struct efi_load_file2 *this,
+                            efi_device_path_protocol_t *path,
+                            bool boot_policy,
+                            unsigned long *buffer_size,
+                            void *buffer);
+} efi_load_file2_t;
+
+static efi_status_t initrd_load_file(efi_load_file2_t *this,
+                                     efi_device_path_protocol_t *path,
+                                     bool boot_policy,
+                                     unsigned long *buffer_size,
+                                     void *buffer);
+
+// Doubles as the efi_handle_t returned by locate_device_path, so
+// handle_protocol can recognize it and load_file's `this` finds the data.
+static struct {
+  efi_load_file2_t lf2;
+  const void *data;
+  size_t size;
+} g_initrd = {
+  .lf2 = { .load_file = initrd_load_file },
+};
+
+static efi_status_t
+initrd_load_file(efi_load_file2_t *this, efi_device_path_protocol_t *path,
+                 bool boot_policy, unsigned long *buffer_size, void *buffer)
+{
+  if(boot_policy)
+    return EFI_UNSUPPORTED;
+  if(buffer_size == NULL)
+    return EFI_INVALID_PARAMETER;
+  if(g_initrd.data == NULL)
+    return EFI_NOT_FOUND;
+
+  if(buffer == NULL || *buffer_size < g_initrd.size) {
+    *buffer_size = g_initrd.size;
+    return EFI_BUFFER_TOO_SMALL;
+  }
+  memcpy(buffer, g_initrd.data, g_initrd.size);
+  *buffer_size = g_initrd.size;
+  return 0;
+}
+
+
+/**
+ * Locate a PE/COFF section by name in a raw (on-disk/downloaded) image.
+ * Offsets come from PointerToRawData since the file has not been mapped;
+ * length is clamped to VirtualSize so FileAlignment padding is not included.
+ */
+static int
+pe_find_section(const void *bin, size_t size, const char *name,
+                const void **out_data, size_t *out_size)
+{
+  const uint8_t *buf = bin;
+
+  if(buf == NULL || size < 0x40)
+    return -1;
+
+  uint32_t pe_off;
+  memcpy(&pe_off, buf + 0x3c, 4);
+  if((size_t)pe_off + 4 + 20 > size || memcmp(buf + pe_off, "PE\0\0", 4))
+    return -1;
+
+  const uint8_t *coff = buf + pe_off + 4;
+  uint16_t nsec, optsz;
+  memcpy(&nsec, coff + 2, 2);
+  memcpy(&optsz, coff + 16, 2);
+  const uint8_t *sec = coff + 20 + optsz;
+
+  size_t namelen = strlen(name);
+
+  for(uint16_t i = 0; i < nsec; i++) {
+    const uint8_t *s = sec + (size_t)i * 40;
+    if(s + 40 > buf + size)
+      return -1;
+
+    if(memcmp(s, name, namelen) || (namelen < 8 && s[namelen]))
+      continue;
+
+    uint32_t vsize, rawsize, rawptr;
+    memcpy(&vsize, s + 8, 4);
+    memcpy(&rawsize, s + 16, 4);
+    memcpy(&rawptr, s + 20, 4);
+    uint32_t len = vsize && vsize < rawsize ? vsize : rawsize;
+
+    if((size_t)rawptr + len > size)
+      return -1;
+
+    *out_data = buf + rawptr;
+    *out_size = len;
+    return 0;
+  }
+  return -1;
+}
+
 
 static efi_status_t
 efi_boot_allocate_pages(int allocation_type, int memory_type,
@@ -270,6 +392,13 @@ static efi_status_t
 efi_boot_handle_protocol(efi_handle_t H,
                          efi_guid_t *guid, void **result)
 {
+  if(!memcmp(guid, guid_load_file2, 16)) {
+    if(H != &g_initrd)
+      return EFI_UNSUPPORTED;
+    *result = &g_initrd.lf2;
+    return 0;
+  }
+
   efi_image_handle_t *h = H;
   if(!memcmp(guid, guid_loaded_image, 16)) {
     *result = &h->loaded_image;
@@ -288,11 +417,26 @@ efi_boot_locate_handle(int, efi_guid_t *guid,
 
 
 static efi_status_t
-efi_boot_locate_device_path(efi_guid_t *,
-                            efi_device_path_protocol_t **,
-                            efi_handle_t *)
+efi_boot_locate_device_path(efi_guid_t *guid,
+                            efi_device_path_protocol_t **dp,
+                            efi_handle_t *handle)
 {
-  return EFI_UNSUPPORTED;
+  // The kernel EFI stub locates its initrd by asking for the handle that
+  // carries EFI_LOAD_FILE2_PROTOCOL on the Linux initrd vendor media path.
+  if(!memcmp(guid, guid_load_file2, 16) &&
+     dp != NULL && *dp != NULL && handle != NULL && g_initrd.data != NULL) {
+
+    const efi_device_path_protocol_t *node = *dp;
+    if(node->type == 4 && node->sub_type == 3 && node->length == 20 &&
+       !memcmp((const uint8_t *)node + 4, guid_initrd_media, 16)) {
+
+      // Advance past the matched vendor node to the end-of-path node
+      *dp = (efi_device_path_protocol_t *)((void *)*dp + node->length);
+      *handle = &g_initrd;
+      return 0;
+    }
+  }
+  return EFI_NOT_FOUND;
 }
 
 static efi_status_t
@@ -485,6 +629,46 @@ prep_exit_boot_services(void)
 error_t
 efi_exec(const void *bin, size_t size, const char *cmdline)
 {
+  char *uki_cmdline = NULL;
+  const void *sec;
+  size_t seclen;
+
+  if(!pe_find_section(bin, size, ".linux", &sec, &seclen)) {
+    // Unified Kernel Image: boot the kernel carried in the .linux section
+    // and serve .initrd to its EFI stub via EFI_LOAD_FILE2_PROTOCOL. The
+    // caller-supplied command line (platform defaults + any CLI extras) is
+    // used as-is; if the image carries a .cmdline it is appended.
+
+    const void *kernel = sec;
+    size_t kernel_size = seclen;
+
+    if(!pe_find_section(bin, size, ".initrd", &sec, &seclen)) {
+      g_initrd.data = sec;
+      g_initrd.size = seclen;
+    }
+
+    if(!pe_find_section(bin, size, ".cmdline", &sec, &seclen) && seclen > 0) {
+      const char *base = cmdline ? cmdline : "";
+      size_t baselen = strlen(base);
+      uki_cmdline = malloc(baselen + 1 + seclen + 1);
+      if(uki_cmdline == NULL) {
+        g_initrd.data = NULL;
+        return ERR_NO_MEMORY;
+      }
+      memcpy(uki_cmdline, base, baselen);
+      uki_cmdline[baselen] = ' ';
+      memcpy(uki_cmdline + baselen + 1, sec, seclen);
+      uki_cmdline[baselen + 1 + seclen] = 0;
+      cmdline = uki_cmdline;
+    }
+
+    printf("UKI: kernel %zd bytes, initrd %zd bytes\n",
+           kernel_size, g_initrd.size);
+
+    bin = kernel;
+    size = kernel_size;
+  }
+
   const struct pe_header *pe = bin;
 
   // TODO: Check that we have a reasonable pe_header
@@ -493,6 +677,8 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
                                  0, MEM_TYPE_CHAINLOADER |
                                  MEM_MAY_FAIL | MEM_CLEAR);
   if(h == NULL) {
+    g_initrd.data = NULL;
+    free(uki_cmdline);
     return ERR_NO_MEMORY;
   }
 
@@ -528,6 +714,8 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
                               T234_PMEM_CONVENTIONAL, T234_PMEM_LOADER,
                               kalign);
   if(paddr == 0) {
+    g_initrd.data = NULL;
+    free(uki_cmdline);
     free(h);
     return ERR_NO_MEMORY;
   }
@@ -557,11 +745,13 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   thread_join(t);
 
   // If we come back the kernel failed to launch, so clean up
+  g_initrd.data = NULL;
   pmem_set(&tegra_pmem,
            (uint64_t)h->loaded_image.image_base,
            memsiz, EFI_CONVENTIONAL_MEMORY, 0);
 
   free(h->loaded_image.load_options);
+  free(uki_cmdline);
   free(h);
   return 0;
 }
