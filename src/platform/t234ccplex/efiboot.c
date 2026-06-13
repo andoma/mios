@@ -709,7 +709,14 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   relocate_runtime_services(h);
 
   size_t kalign = 65536; // TODO: Read from PE header
-  size_t memsiz = (pe->code_size + pe->initialized_data_size + kalign) & ~kalign;
+  size_t memsiz = (pe->code_size + pe->initialized_data_size + kalign - 1) &
+    ~(kalign - 1);
+  // The PE size fields describe the mapped image, but we memcpy the whole
+  // on-disk `size` below. For a malformed/oversized image (e.g. headers that
+  // under-report, or a non-kernel served to us) memsiz can be far smaller than
+  // size; never allocate less than we copy or the memcpy corrupts the heap.
+  if(memsiz < size)
+    memsiz = size;
   uint64_t paddr = pmem_alloc(&tegra_pmem, memsiz + 16 * 1024 * 1024,
                               T234_PMEM_CONVENTIONAL, T234_PMEM_LOADER,
                               kalign);
