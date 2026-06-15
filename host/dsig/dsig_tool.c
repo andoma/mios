@@ -27,7 +27,9 @@
  *   -T SECONDS    vllp timeout         (default 3)
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "dsig.h"
 #include "dsig_cansock.h"
 #include "dsig_udp.h"
