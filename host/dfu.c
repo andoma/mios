@@ -904,7 +904,7 @@ struct stm32n6_fsbl_header {
 // on-flash app format ([magic][length][ELF][~crc32][trailer]), placed right
 // after .boot for the FSBL's serial-boot branch to rescue from SRAM.
 static uint8_t *
-n6_build_image(const char *elf_path, size_t *out_len)
+n6_build_image(const char *elf_path, const char *cmdline, size_t *out_len)
 {
   FILE *f = fopen(elf_path, "rb");
   if(f == NULL) {
@@ -953,7 +953,16 @@ n6_build_image(const char *elf_path, size_t *out_len)
   uint32_t boot_padded = (boot_sz + 31) & ~31u;
   uint32_t stored_crc = ~crc32(elf, elf_len);
   size_t miap_len = 8 + elf_len + 4 + 8;
-  size_t payload = (boot_padded + miap_len + 31) & ~31u;
+
+  // Boot cmdline blob ([magic][len][str][~crc32]), 32-byte aligned after the
+  // parked mIAP app. The FSBL relocates it to the reserved RAM region.
+  size_t cmd_len = cmdline ? strlen(cmdline) : 0;
+  size_t cmdline_total = 8 + cmd_len + 4;
+  size_t cmdline_off =
+    (N6_FSBL_HEADER_TOTAL + boot_padded + miap_len + 31) & ~31u;
+
+  size_t payload =
+    ((cmdline_off - N6_FSBL_HEADER_TOTAL) + cmdline_total + 31) & ~31u;
   size_t total = N6_FSBL_HEADER_TOTAL + payload;
 
   if(total > N6_DOWNLOAD_MAX) {
@@ -1001,15 +1010,27 @@ n6_build_image(const char *elf_path, size_t *out_len)
   memcpy(p + 8 + elf_len, &stored_crc, 4);
   memcpy(p + 8 + elf_len + 4, MIOS_IMG_TRAILER, 8);
 
-  // Byte-sum checksum over the image region. The align gap is zero, so this
+  // Boot cmdline blob (see cmdline_off above). An empty string still yields a
+  // valid blob; mios cmdline_init rejects length 0 as "no cmdline".
+  uint8_t *c = blob + cmdline_off;
+  uint32_t cmd_magic = 0x6c646d63; // CMDLINE_MAGIC ('cmdl')
+  uint32_t cmd_length = cmd_len;
+  memcpy(c + 0, &cmd_magic, 4);
+  memcpy(c + 4, &cmd_length, 4);
+  if(cmd_len)
+    memcpy(c + 8, cmdline, cmd_len);
+  uint32_t cmd_crc = ~crc32(c, 8 + cmd_len);
+  memcpy(c + 8 + cmd_len, &cmd_crc, 4);
+
+  // Byte-sum checksum over the image region. The align gaps are zero, so this
   // equals the sum over the payload.
   uint32_t sum = 0;
   for(size_t i = 0; i < payload; i++)
     sum += blob[N6_FSBL_HEADER_TOTAL + i];
   hd->image_checksum = sum;
 
-  printf("N6 bootstrap image: %zu bytes (.boot %u + parked mIAP %zu)\n",
-         total, boot_sz, miap_len);
+  printf("N6 bootstrap image: %zu bytes (.boot %u + parked mIAP %zu + cmdline %zu)\n",
+         total, boot_sz, miap_len, cmdline_total);
   free(elf);
   *out_len = total;
   return blob;
@@ -1110,12 +1131,12 @@ n6_download(libusb_device_handle *h, const uint8_t *blob, size_t len)
 }
 
 static const char *
-n6_provision(libusb_device_handle *h, const char *elf_path)
+n6_provision(libusb_device_handle *h, const char *elf_path, const char *cmdline)
 {
   printf("\nSTM32N6 boot ROM detected; provisioning via ROM DFU\n\n");
 
   size_t len;
-  uint8_t *blob = n6_build_image(elf_path, &len);
+  uint8_t *blob = n6_build_image(elf_path, cmdline, &len);
   if(blob == NULL)
     return "Failed to build STM32N6 bootstrap image";
 
@@ -1150,9 +1171,7 @@ dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash,
   get_dfu_interface_string(h, iface_str, sizeof(iface_str), &xfer_size);
 
   if(!strncmp(iface_str, "@FSBL", 5)) {
-    if(cmdline != NULL)
-      printf("cmdline not supported on STM32N6 ROM path; ignoring\n");
-    const char *err = n6_provision(h, elf_path);
+    const char *err = n6_provision(h, elf_path, cmdline);
     libusb_close(h);
     return err;
   }

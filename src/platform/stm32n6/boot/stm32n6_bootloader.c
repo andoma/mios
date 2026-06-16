@@ -3,6 +3,7 @@
 
 #include "stm32n6_reg.h"
 #include "stm32n6_clk.h"
+#include "stm32n6_cmdline.h"
 
 // =====================================================================
 // Section attributes
@@ -866,6 +867,44 @@ bl_provision_nor(void)
 }
 
 // =====================================================================
+// Boot cmdline relocation
+//
+// The host appends a cmdline blob ([u32 'cmdl'][u32 len][str][u32 ~crc32])
+// right after the parked mIAP app, 32-byte aligned. On serial boot we copy
+// a valid blob to the reserved DTCM region (STM32N6_CMDLINE_ADDR) where
+// mios cmdline_init() reads it. Cold boot has no such blob. mios revalidates
+// the CRC, so this only needs magic + bounds; we verify the CRC anyway to
+// avoid depositing junk into the reserved region.
+// =====================================================================
+
+#define CMDLINE_MAGIC 0x6c646d63u // "cmdl"
+
+static void BL
+bl_relocate_cmdline(const uint8_t *parked)
+{
+  // app_len = mIAP length field (elf_len + 12) + the 8-byte magic+length
+  // prefix; the cmdline blob follows, 32-byte aligned.
+  uint32_t app_len = *(const uint32_t *)(parked + 4) + 8;
+  const uint8_t *cmd = (const uint8_t *)(((uint32_t)parked + app_len + 31) & ~31u);
+
+  if(*(const uint32_t *)cmd != CMDLINE_MAGIC)
+    return;
+
+  uint32_t len = *(const uint32_t *)(cmd + 4);
+  if(len == 0 || len > STM32N6_CMDLINE_SIZE)
+    return;
+
+  uint32_t total = 8 + len + 4;
+  if(~bl_crc32(cmd, total) != 0)
+    return;
+
+  bl_memcpy((void *)STM32N6_CMDLINE_ADDR, cmd, total);
+
+  BL_STR(msg, "  cmdline relocated\n");
+  bl_puts(msg);
+}
+
+// =====================================================================
 // Entry point
 // =====================================================================
 
@@ -914,6 +953,10 @@ bl_main(void *ctx_arg)
 
     const uint8_t *parked =
       (const uint8_t *)(((uint32_t)_boot_end + 31) & ~31u);
+
+    // Deposit the boot cmdline (if any) before booting mios from RAM.
+    bl_relocate_cmdline(parked);
+
     int entry = bl_load_elf(parked);
     if(entry > 0) {
       // Reset the XSPI1 controller so mios starts clean. Leave the XSPIM mux

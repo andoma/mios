@@ -3,10 +3,12 @@
 #include "stm32n6_rif.h"
 #include "stm32n6_syscfg.h"
 #include "stm32n6_bootstatus.h"
+#include "stm32n6_cmdline.h"
 
 #include <malloc.h>
 
 #include <mios/atomic.h>
+#include <mios/cmdline.h>
 #include <mios/sys.h>
 
 #include <net/pbuf.h>
@@ -76,12 +78,25 @@ stm32n6_init(void)
   }
   asm volatile("dsb");
 
-  // AXISRAM1+2 DMA heap (below carveouts)
+  // AXISRAM3-6 general heap (not DMA accessible). Added before the cmdline
+  // ingest below so cmdline_init has a heap to copy into while AXISRAM1+2
+  // (which holds the blob) is still out of the heap.
+  heap_add_mem(AXISRAM2_END, AXISRAM36_END, 0, 15);
+
+  // Ingest the boot cmdline the FSBL deposited in the top page of AXISRAM1+2
+  // (serial boot only; cold boot leaves garbage and this is a no-op). Done
+  // before AXISRAM1+2 joins the heap: cmdline_init copies the string out
+  // (allocating from AXISRAM3-6) and the page is then reused as normal heap.
+  // DTCM can't carry it -- stm32n6_entry.S poisons all of DTCM for ECC init.
+  _Static_assert(STM32N6_CMDLINE_ADDR >= 0x24000000 &&
+                 STM32N6_CMDLINE_ADDR + 8 + STM32N6_CMDLINE_SIZE + 4 <= HEAP_DMA_END,
+                 "cmdline region must lie in the AXISRAM1+2 heap");
+  cmdline_init(STM32N6_CMDLINE_ADDR, STM32N6_CMDLINE_SIZE);
+
+  // AXISRAM1+2 DMA heap (below carveouts; the cmdline page at the top is now
+  // free for reuse).
   heap_add_mem(HEAP_START_EBSS, HEAP_DMA_END,
                MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE | MEM_TYPE_CODE, 20);
-
-  // AXISRAM3-6 general heap (not DMA accessible)
-  heap_add_mem(AXISRAM2_END, AXISRAM36_END, 0, 15);
 
   // DTCM (128 KB, minus 1 KB for MSP stack)
   heap_add_mem(0x20000400, 0x20020000, MEM_TYPE_LOCAL, 30);
