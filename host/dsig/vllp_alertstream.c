@@ -85,7 +85,7 @@ vllp_alertstream_t *
 vllp_alertstream_create(vllp_t *v, void *opaque,
                         void (*mark)(void *opaque),
                         void (*raise)(void *opaque, const char *key,
-                                      int level, const char *msg),
+                                      alert_level_t level, const char *msg),
                         void (*sweep)(void *opaque))
 {
   vllp_alertstream_t *va = calloc(1, sizeof(vllp_alertstream_t));
