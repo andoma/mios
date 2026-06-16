@@ -17,7 +17,7 @@ typedef struct vllp_alertstream {
   void *opaque;
   void (*mark)(void *opaque);
   void (*raise)(void *opaque,
-                const char *key, int level, const char *msg);
+                const char *key, alert_level_t level, const char *msg);
   void (*sweep)(void *opaque);
 } vllp_alertstream_t;
 
