@@ -306,7 +306,7 @@ dp83869_fiber_link_poll(struct ether_netif *eni)
       current_up = 0;
       net_task_raise(&eni->eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
     }
-    usleep(100000);
+    ethphy_poll_sleep(eni, 100000);
   }
 }
 

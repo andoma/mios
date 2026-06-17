@@ -245,6 +245,8 @@ typedef struct lan743x {
 
   bool is_7431;  // true for 7431, false for 7430
 
+  thread_t *phy_thread;
+
 } lan743x_t;
 
 
@@ -547,6 +549,24 @@ lan743x_disable(struct device *dev)
   return 0;
 }
 
+static error_t
+lan743x_shutdown(struct device *dev)
+{
+  lan743x_t *l = (lan743x_t *)dev;
+
+  // Stop the PHY link-poll thread and wait for it to exit before the PCIe
+  // controller behind us is powergated by the parent's shutdown. Otherwise
+  // its periodic MDIO access would hit an unclocked block and raise an
+  // (imprecise) SError that traps to EL3.
+  ethphy_poll_stop(&l->eni);
+  if(l->phy_thread != NULL)
+    thread_join(l->phy_thread);
+
+  // No further MMIO sources: silence the interrupt.
+  irq_disable(l->irq);
+  return 0;
+}
+
 static void
 lan743x_dtor(struct device *dev)
 {
@@ -571,6 +591,7 @@ static const ethmac_device_class_t lan743x_device_class = {
     .dc_class_name = "LAN743x",
     .dc_print_info = lan7431_print_info,
     .dc_disable = lan743x_disable,
+    .dc_shutdown = lan743x_shutdown,
     .dc_dtor = lan743x_dtor,
   },
   .edc_mii_read = edc_mii_read,
@@ -761,8 +782,8 @@ lan743x_init(pci_dev_t *pd)
 
   ether_netif_attach(&l->eni);
 
-  thread_create(lan743x_phy_thread, l, 0, "phy",
-                TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
+  l->phy_thread = thread_create(lan743x_phy_thread, l, 0, "phy",
+                                TASK_NO_FPU | TASK_NO_DMA_STACK, 4);
 
   return 0;
 }

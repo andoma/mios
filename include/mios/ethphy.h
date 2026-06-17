@@ -43,4 +43,20 @@ error_t ethphy_mii_write(struct ether_netif *eni, uint16_t reg, uint16_t value);
  */
 void ethphy_link_poll(struct ether_netif *eni) __attribute__((noreturn));
 
+/**
+ * Sleep inside a PHY link-poll loop for up to `useconds`, waking early if a
+ * shutdown has been requested via ethphy_poll_stop(). If shutdown was
+ * requested, this terminates the calling thread (thread_exit) and does not
+ * return -- this is how a noreturn link-poll loop is unwound cleanly.
+ */
+void ethphy_poll_sleep(struct ether_netif *eni, int useconds);
+
+/**
+ * Request the PHY link-poll thread for `eni` to terminate, and wake it so it
+ * exits immediately rather than after its next poll interval. Pair with
+ * thread_join() on the poll thread to ensure no further MII/MMIO access
+ * happens (e.g. before powergating the controller).
+ */
+void ethphy_poll_stop(struct ether_netif *eni);
+
 void ethphy_print_status(struct ether_netif *eni, struct stream *s);

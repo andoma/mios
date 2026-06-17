@@ -57,6 +57,10 @@ typedef struct ether_netif {
   struct device *eni_phy;
   mutex_t eni_phy_ext_mutex;
 
+  // PHY link-poll thread shutdown control
+  task_waitable_t eni_phy_waitq;
+  uint8_t eni_phy_stop;
+
 #ifdef ENABLE_NET_PTP
   ptp_ether_state_t eni_ptp;
 #endif

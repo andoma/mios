@@ -93,6 +93,27 @@ ethphy_mii_write(ether_netif_t *eni, uint16_t reg, uint16_t val)
 
 
 void
+ethphy_poll_sleep(ether_netif_t *eni, int useconds)
+{
+  if(!eni->eni_phy_stop) {
+    if(task_sleep_delta(&eni->eni_phy_waitq, useconds)) {
+      // Timed out; fall through to re-check the stop flag.
+    }
+  }
+  if(eni->eni_phy_stop)
+    thread_exit(NULL);
+}
+
+
+void
+ethphy_poll_stop(ether_netif_t *eni)
+{
+  eni->eni_phy_stop = 1;
+  task_wakeup(&eni->eni_phy_waitq, 1);
+}
+
+
+void
 ethphy_link_poll(ether_netif_t *eni)
 {
   // Check if PHY provides a custom link poll
@@ -155,7 +176,7 @@ ethphy_link_poll(ether_netif_t *eni)
       current_up = 0;
       net_task_raise(&eni->eni_ni.ni_task, NETIF_TASK_STATUS_DOWN);
     }
-    usleep(100000);
+    ethphy_poll_sleep(eni, 100000);
   }
 }
 

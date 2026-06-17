@@ -314,6 +314,7 @@ ether_netif_init(ether_netif_t *eni,
                  const ethmac_device_class_t *edc)
 {
   netif_init(&eni->eni_ni, name, &edc->dc);
+  task_waitable_init(&eni->eni_phy_waitq, "phypoll");
 }
 
 void
