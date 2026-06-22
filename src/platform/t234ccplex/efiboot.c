@@ -61,8 +61,16 @@ set_cmdline(efi_loaded_image_t *li, const char *str)
 }
 
 
+static long
+efi_console_unimpl(void)
+{
+  panic("EFI: unimplemented con_out method called (reset/test_string)");
+}
+
 static efi_simple_text_output_protocol_t efi_console_output = {
+  .reset = (void *)efi_console_unimpl,
   .output_string = efi_output_string,
+  .test_string = (void *)efi_console_unimpl,
 };
 
 
@@ -439,10 +447,44 @@ efi_boot_locate_device_path(efi_guid_t *guid,
   return EFI_NOT_FOUND;
 }
 
+// The image whose system table install_configuration_table mutates. Only one
+// kernel is launched at a time (efi_exec thread_joins), so a single pointer
+// set at launch is sufficient.
+static efi_image_handle_t *g_efi_image;
+
+// InstallConfigurationTable per UEFI spec: update the entry if the GUID is
+// already present, remove it if table==NULL, otherwise append. The kernel's
+// EFI stub uses this to hand us the initrd (LINUX_EFI_INITRD_MEDIA_GUID),
+// rng-seed and memreserve tables; dropping them silently (as the previous
+// no-op did) loses the initrd, so the kernel finds no rootfs.
 static efi_status_t
-efi_boot_install_configuration_table(efi_guid_t *,
-                                     void *)
+efi_boot_install_configuration_table(efi_guid_t *guid, void *table)
 {
+  efi_image_handle_t *h = g_efi_image;
+  efi_config_table_t *t = h->system_table.tables;
+  uint64_t n = h->system_table.nr_tables;
+
+  for(uint64_t i = 0; i < n; i++) {
+    if(!memcmp(&t[i].guid, guid, 16)) {
+      if(table == NULL) {
+        memmove(&t[i], &t[i + 1], (n - i - 1) * sizeof(t[0]));
+        h->system_table.nr_tables = n - 1;
+      } else {
+        t[i].table = table;
+      }
+      return 0;
+    }
+  }
+
+  if(table == NULL)
+    return EFI_NOT_FOUND;
+
+  if(n >= sizeof(h->config_tables) / sizeof(h->config_tables[0]))
+    return EFI_OUT_OF_RESOURCES;
+
+  memcpy(&t[n].guid, guid, 16);
+  t[n].table = table;
+  h->system_table.nr_tables = n + 1;
   return 0;
 }
 
@@ -515,9 +557,87 @@ efi_boot_locate_protocol(efi_guid_t *guid, void *, void **result)
 
 
 
+// Default handler for every EFI boot service we don't implement. The service
+// table lives in zeroed (MEM_CLEAR) memory, so an unpopulated slot is a call
+// through NULL -- a silent branch to address 0. Point each unused slot at a
+// named stub instead: if the kernel's EFI stub reaches for something we don't
+// provide we get told exactly what, rather than a bare exception at PC 0.
+#define EFI_UNIMPL(name)                                                \
+  static efi_status_t efi_unimpl_##name(void)                           \
+  { panic("EFI: unimplemented boot service called: " #name); }
+
+EFI_UNIMPL(raise_tpl)
+EFI_UNIMPL(restore_tpl)
+EFI_UNIMPL(signal_event)
+EFI_UNIMPL(check_event)
+EFI_UNIMPL(install_protocol_interface)
+EFI_UNIMPL(reinstall_protocol_interface)
+EFI_UNIMPL(uninstall_protocol_interface)
+EFI_UNIMPL(register_protocol_notify)
+EFI_UNIMPL(load_image)
+EFI_UNIMPL(start_image)
+EFI_UNIMPL(unload_image)
+EFI_UNIMPL(get_next_monotonic_count)
+EFI_UNIMPL(set_watchdog_timer)
+EFI_UNIMPL(connect_controller)
+EFI_UNIMPL(open_protocol)
+EFI_UNIMPL(close_protocol)
+EFI_UNIMPL(open_protocol_information)
+EFI_UNIMPL(protocols_per_handle)
+EFI_UNIMPL(locate_handle_buffer)
+EFI_UNIMPL(install_multiple_protocol_interfaces)
+EFI_UNIMPL(uninstall_multiple_protocol_interfaces)
+EFI_UNIMPL(calculate_crc32)
+EFI_UNIMPL(create_event_ex)
+
+// EFI_BOOT_SERVICES.CopyMem / SetMem return void and CopyMem must tolerate
+// overlapping regions (memmove semantics).
+static void
+efi_boot_copy_mem(void *dst, const void *src, unsigned long len)
+{
+  memmove(dst, src, len);
+}
+
+static void
+efi_boot_set_mem(void *buf, unsigned long size, uint8_t value)
+{
+  memset(buf, value, size);
+}
+
 static void
 efi_init_boot_services(efi_boot_services_t *bs)
 {
+  // Trap any unimplemented service by name instead of branching to NULL.
+  bs->raise_tpl = (void *)efi_unimpl_raise_tpl;
+  bs->restore_tpl = (void *)efi_unimpl_restore_tpl;
+  bs->signal_event = (void *)efi_unimpl_signal_event;
+  bs->check_event = (void *)efi_unimpl_check_event;
+  bs->install_protocol_interface = (void *)efi_unimpl_install_protocol_interface;
+  bs->reinstall_protocol_interface =
+    (void *)efi_unimpl_reinstall_protocol_interface;
+  bs->uninstall_protocol_interface =
+    (void *)efi_unimpl_uninstall_protocol_interface;
+  bs->register_protocol_notify = (void *)efi_unimpl_register_protocol_notify;
+  bs->load_image = (void *)efi_unimpl_load_image;
+  bs->start_image = (void *)efi_unimpl_start_image;
+  bs->unload_image = (void *)efi_unimpl_unload_image;
+  bs->get_next_monotonic_count = (void *)efi_unimpl_get_next_monotonic_count;
+  bs->set_watchdog_timer = (void *)efi_unimpl_set_watchdog_timer;
+  bs->connect_controller = (void *)efi_unimpl_connect_controller;
+  bs->open_protocol = (void *)efi_unimpl_open_protocol;
+  bs->close_protocol = (void *)efi_unimpl_close_protocol;
+  bs->open_protocol_information = (void *)efi_unimpl_open_protocol_information;
+  bs->protocols_per_handle = (void *)efi_unimpl_protocols_per_handle;
+  bs->locate_handle_buffer = (void *)efi_unimpl_locate_handle_buffer;
+  bs->install_multiple_protocol_interfaces =
+    (void *)efi_unimpl_install_multiple_protocol_interfaces;
+  bs->uninstall_multiple_protocol_interfaces =
+    (void *)efi_unimpl_uninstall_multiple_protocol_interfaces;
+  bs->calculate_crc32 = (void *)efi_unimpl_calculate_crc32;
+  bs->copy_mem = (void *)efi_boot_copy_mem;
+  bs->set_mem = (void *)efi_boot_set_mem;
+  bs->create_event_ex = (void *)efi_unimpl_create_event_ex;
+
   bs->allocate_pages = efi_boot_allocate_pages;
   bs->free_pages = efi_boot_free_pages;
   bs->get_memory_map = efi_boot_get_memory_map;
@@ -704,6 +824,8 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   h->system_table.runtime = &h->runtime_services;
   h->system_table.nr_tables = 3;
   h->system_table.tables = h->config_tables;
+
+  g_efi_image = h; // target for install_configuration_table
 
   efi_init_boot_services(&h->boot_services);
   relocate_runtime_services(h);

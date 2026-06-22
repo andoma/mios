@@ -286,7 +286,10 @@ typedef struct efi_image_handle {
   efi_system_table_t system_table;
   efi_boot_services_t boot_services;
   efi_runtime_services_t runtime_services;
-  efi_config_table_t config_tables[3];
+  // Pre-populated with DT, RT-properties and SMBIOS3; the kernel's EFI stub
+  // installs more at runtime via install_configuration_table (initrd via
+  // LINUX_EFI_INITRD_MEDIA_GUID, rng-seed, memreserve), so leave headroom.
+  efi_config_table_t config_tables[16];
   efi_loaded_image_t loaded_image;
   int (*prep_exit_boot_services)(void);
   uint16_t fw_vendor[5];
