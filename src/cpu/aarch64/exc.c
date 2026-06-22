@@ -13,7 +13,7 @@ trap(const char *what)
 }
 
 void
-curr_el_sp0_sync(void)
+curr_el_sp0_sync(void *lr)
 {
   void *elr;
   asm volatile ("mrs %0, elr_el1\n\t" : "=r" (elr));
@@ -24,9 +24,17 @@ curr_el_sp0_sync(void)
   void *far;
   asm volatile ("mrs %0, far_el1\n\t" : "=r" (far));
 
-  uint32_t inst = *(uint32_t *)elr;
-  panic("Synchronous Exception @ SP0. ELR:%p (*ELR:0x%x) ESR:0x%08x FAR:%p SPSR:%x",
-        elr, inst, esr, far, spsr_el1);
+  // Don't fetch the faulting instruction blindly: for an instruction abort
+  // (EC 0x20/0x21) ELR points at unfetchable memory by definition, and a
+  // branch to a bad address (e.g. NULL) lands here with ELR unmapped. The
+  // load would re-trap and we'd report this handler's double fault instead
+  // of the real one. Only read *ELR when the first fault was a data abort.
+  uint32_t ec = esr >> 26;
+  uint32_t inst = 0;
+  if(ec != 0x20 && ec != 0x21 && elr != 0)
+    inst = *(uint32_t *)elr;
+  panic("Synchronous Exception @ SP0. ELR:%p (*ELR:0x%x) ESR:0x%08x FAR:%p SPSR:%x LR:%p",
+        elr, inst, esr, far, spsr_el1, lr);
 }
 
 void

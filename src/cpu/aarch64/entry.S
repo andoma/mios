@@ -518,6 +518,10 @@ cpu_task_switch:
         .balign 0x800
 vectors_el1:
         // curr_el_sp0_sync
+        // Capture the faulting link register before the bl clobbers x30, and
+        // pass it as the first argument so the handler can report the caller
+        // (e.g. the call site of a branch through a NULL/garbage pointer).
+        mov x0, x30
         bl curr_el_sp0_sync
         eret
         .pool
