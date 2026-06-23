@@ -22,11 +22,19 @@ typedef struct sigcapture_desc {
   sigcapture_unit_t unit;
 } sigcapture_desc_t;
 
+// Create a USB-streamed sigcapture instance (bulk IN endpoint).
 sigcapture_t *sigcapture_create(size_t depth_power_of_2, size_t channels,
                                 const sigcapture_desc_t channel_descriptors[],
                                 uint32_t nominal_frequency,
                                 struct usb_interface_queue *q,
                                 uint8_t usb_iface_subtype);
+
+// Create a sigcapture instance streamed over the VLLP "sigcapture" service
+// (CAN/dsig). Only one VLLP instance may exist at a time; returns NULL if one
+// already exists or on out-of-memory. Requires ENABLE_SIGCAPTURE_VLLP.
+sigcapture_t *sigcapture_create_vllp(size_t depth_power_of_2, size_t channels,
+                                     const sigcapture_desc_t channel_descriptors[],
+                                     uint32_t nominal_frequency);
 
 int16_t *sigcapture_wrptr(sigcapture_t *sc);
 

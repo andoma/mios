@@ -12,64 +12,19 @@
 
 #include "irq.h"
 
-typedef enum {
-  STATE_RUN,
-  STATE_READOUT,
-} sigcapture_state_t;
-
-
-typedef struct sc_usb_pkt_preamble {
-  uint8_t pkt_type;
-  uint8_t channels;
-  uint16_t depth;
-  uint32_t nominal_frequency;
-  int16_t trig_offset;
-} sc_usb_pkt_preamble_t;
-
-
-typedef struct sc_usb_pkt_channel {
-  uint8_t pkt_type;
-  uint8_t unit;
-  char name[14];
-  float scale;
-} sc_usb_pkt_channel_t;
-
-
-struct sigcapture {
-  int16_t *storage;
-  uint16_t wrptr;
-  uint16_t depth;
-  sigcapture_state_t state;
-  size_t trig_countdown;
-
-  uint8_t usb_iface_subtype;
-  uint8_t columns_per_xfer;
-  uint32_t softirq;
-  struct usb_interface *usb_iface;
-
-  size_t channels;
-
-  uint32_t send_index;
-  uint32_t xfer_rows;
-  sc_usb_pkt_preamble_t pkt_preamble;
-  int16_t pkt_data[32];
-
-  uint8_t pkt_trailer;
-
-  sc_usb_pkt_channel_t pkt_channels[0];
-};
+#include "sigcapture_internal.h"
 
 
 int16_t *
 sigcapture_wrptr(sigcapture_t *sc)
 {
-  if(sc->state != STATE_RUN)
+  if(sc->state != SIGCAPTURE_STATE_RUN)
     return NULL;
 
   if(sc->trig_countdown) {
     sc->trig_countdown--;
     if(sc->trig_countdown == 0) {
-      sc->state = STATE_READOUT;
+      sc->state = SIGCAPTURE_STATE_READOUT;
       softirq_raise(sc->softirq);
     }
   }
@@ -92,54 +47,71 @@ sigcapture_trig(sigcapture_t *sc, size_t leading_samples)
   if(leading_samples == 0)
     leading_samples = sc->depth / 2;
 
-  if(sc->state == STATE_READOUT || sc->trig_countdown)
+  if(sc->state == SIGCAPTURE_STATE_READOUT || sc->trig_countdown)
     return;
   sc->pkt_preamble.trig_offset = leading_samples;
   sc->trig_countdown = sc->depth - leading_samples;
 }
 
 
-static void
-sigcapture_send(sigcapture_t *sc)
+void
+sigcapture_reset(sigcapture_t *sc)
 {
-  usb_ep_t *ue = &sc->usb_iface->ui_endpoints[0];
-  const void *data;
-  size_t len;
-  if(unlikely(sc->send_index == 0)) {
+  sc->state = SIGCAPTURE_STATE_RUN;
+  sc->wrptr = 0;
+}
+
+
+// Transport-neutral readout state machine. Emits, in order: preamble (0xff),
+// one descriptor per channel, the captured data columns, then the trailer
+// (0xfe). After the trailer it hands the buffer back to the sampler and reports
+// completion. The wire format is shared verbatim by the USB and VLLP
+// transports.
+int
+sigcapture_readout_next(sigcapture_t *sc, const void **data, size_t *len)
+{
+  if(sc->send_index == 0) {
 
     if(sc->wrptr & sc->depth) {
-      // Wrapped
+      // Wrapped -- the whole ring is valid.
       sc->xfer_rows = sc->depth;
-
     } else {
-      // Not full fill
-
+      // Partially filled -- only [0, wrptr) is valid.
       sc->pkt_preamble.trig_offset -= (sc->depth - sc->wrptr);
-
       sc->xfer_rows = sc->wrptr;
       sc->wrptr = 0;
     }
     sc->pkt_preamble.depth = sc->xfer_rows;
 
-    data = &sc->pkt_preamble;
-    len = sizeof(sc->pkt_preamble);
+    *data = &sc->pkt_preamble;
+    *len = sizeof(sc->pkt_preamble);
 
     sc->send_index = 0x100;
-  } else if(unlikely(sc->send_index == 1)) {
-    data = &sc->pkt_trailer;
-    len = sizeof(sc->pkt_trailer);
+    return 1;
+
+  } else if(sc->send_index == (uint32_t)-1) {
+    // Trailer was already emitted; readout complete.
+    sigcapture_reset(sc);
+    return 0;
+
+  } else if(sc->send_index == 1) {
+    *data = &sc->pkt_trailer;
+    *len = sizeof(sc->pkt_trailer);
 
     sc->send_index = -1;
-  } else if(unlikely(sc->send_index < 0x10000)) {
+    return 1;
+
+  } else if(sc->send_index < 0x10000) {
     const int ch = sc->send_index & 0xff;
-    data = &sc->pkt_channels[ch];
-    len = sizeof(sc_usb_pkt_channel_t);
+    *data = &sc->pkt_channels[ch];
+    *len = sizeof(sc_pkt_channel_t);
 
     if(ch == sc->channels - 1) {
       sc->send_index = 0x10000;
     } else {
       sc->send_index++;
     }
+    return 1;
 
   } else {
     uint32_t column = sc->send_index & 0xffff;
@@ -160,19 +132,99 @@ sigcapture_send(sigcapture_t *sc)
       sc->send_index += sc->columns_per_xfer;
     }
 
-    data = &sc->pkt_data;
-    len = sizeof(sc->pkt_data);
+    *data = &sc->pkt_data;
+    *len = sizeof(sc->pkt_data);
+    return 1;
   }
-
-  ue->ue_vtable->write(ue->ue_dev, ue, data, len);
 }
 
 
 static void
-sigcapture_reset(sigcapture_t *sc)
+sigcapture_softirq(void *arg)
 {
-  sc->state = STATE_RUN;
-  sc->wrptr = 0;
+  sigcapture_t *sc = arg;
+  if(sc->on_complete)
+    sc->on_complete(sc->on_complete_opaque);
+}
+
+
+sigcapture_t *
+sigcapture_alloc(size_t depth_power_of_2, size_t channels,
+                 const sigcapture_desc_t channel_descriptors[],
+                 uint32_t nominal_frequency)
+{
+  if(depth_power_of_2 < 5)
+    return NULL; // Too short, makes no sense
+
+  const size_t depth = 1 << depth_power_of_2;
+
+  if(channels > 16)
+    return NULL;
+
+  int16_t *storage = xalloc(depth * channels * sizeof(int16_t), 0,
+                            MEM_MAY_FAIL);
+  if(storage == NULL)
+    return NULL;
+
+  sigcapture_t *sc = calloc(1, sizeof(sigcapture_t) +
+                            sizeof(sc_pkt_channel_t) * channels);
+  sc->depth = depth;
+  sc->channels = channels;
+  sc->storage = storage;
+  sc->columns_per_xfer = 32 / channels;
+
+  sc->pkt_preamble.pkt_type = 0xff;
+  sc->pkt_preamble.channels = channels;
+  sc->pkt_preamble.depth = depth;
+  sc->pkt_preamble.nominal_frequency = nominal_frequency;
+
+  sc->pkt_trailer = 0xfe;
+
+  for(size_t i = 0; i < channels; i++) {
+    sc_pkt_channel_t *c = &sc->pkt_channels[i];
+    c->pkt_type = i;
+    c->unit = channel_descriptors[i].unit;
+    strlcpy(c->name, channel_descriptors[i].name, sizeof(c->name));
+    c->scale = channel_descriptors[i].scale;
+  }
+
+  sc->softirq = softirq_alloc(sigcapture_softirq, sc);
+  return sc;
+}
+
+
+// --- USB transport ----------------------------------------------------------
+
+static void
+sigcapture_usb_send(sigcapture_t *sc)
+{
+  const void *data;
+  size_t len;
+  if(!sigcapture_readout_next(sc, &data, &len))
+    return; // Readout complete (buffer already handed back to the sampler).
+
+  usb_ep_t *ue = &sc->usb_iface->ui_endpoints[0];
+  ue->ue_vtable->write(ue->ue_dev, ue, data, len);
+}
+
+
+// Completion hook for the USB transport. Runs from the sigcapture softirq.
+static void
+sigcapture_usb_kick(void *opaque)
+{
+  sigcapture_t *sc = opaque;
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+
+  usb_ep_t *ue = &sc->usb_iface->ui_endpoints[0]; // IN
+  if(ue->ue_running) {
+    sc->send_index = 0;
+    sigcapture_usb_send(sc);
+  } else {
+    // USB-interface is not active, just start over
+    sigcapture_reset(sc);
+  }
+  irq_permit(q);
 }
 
 
@@ -180,11 +232,9 @@ static void
 sigcapture_txco(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
 {
   sigcapture_t *sc = ue->ue_iface_aux;
-  if(sc->send_index == -1) {
-    sigcapture_reset(sc);
-    return;
-  }
-  sigcapture_send(sc);
+  // When the readout is complete, sigcapture_usb_send() resets and writes
+  // nothing, ending the transmit chain.
+  sigcapture_usb_send(sc);
 }
 
 static void
@@ -192,26 +242,6 @@ sigcapture_tx_reset(device_t *d, usb_ep_t *ue)
 {
   sigcapture_t *sc = ue->ue_iface_aux;
   sigcapture_reset(sc);
-}
-
-
-static void
-sigcapture_irq(void *arg)
-{
-  sigcapture_t *sc = arg;
-
-  int q = irq_forbid(IRQ_LEVEL_NET);
-
-  usb_ep_t *ue = &sc->usb_iface->ui_endpoints[0]; // IN
-  if(ue->ue_running) {
-    sc->send_index = 0;
-    sigcapture_send(sc);
-  } else {
-    // USB-interface is not active, just start over
-    sigcapture_reset(sc);
-  }
-  irq_permit(q);
-
 }
 
 
@@ -229,44 +259,15 @@ sigcapture_create(size_t depth_power_of_2, size_t channels,
                   struct usb_interface_queue *q,
                   uint8_t usb_iface_subtype)
 {
-  if(depth_power_of_2 < 5)
-    return NULL; // Too short, makes no sense
-
-  const size_t depth = 1 << depth_power_of_2;
-
-  if(channels > 16)
+  sigcapture_t *sc = sigcapture_alloc(depth_power_of_2, channels,
+                                      channel_descriptors, nominal_frequency);
+  if(sc == NULL)
     return NULL;
-
-  int16_t *storage = xalloc(depth * channels * sizeof(int16_t), 0,
-                            MEM_MAY_FAIL);
-  if(storage == NULL)
-    return NULL;
-
-  sigcapture_t *sc = calloc(1, sizeof(sigcapture_t) +
-                            sizeof(sc_usb_pkt_channel_t) * channels);
-  sc->depth = depth;
-  sc->channels = channels;
-  sc->storage = storage;
-  sc->columns_per_xfer = 32 / channels;
-
-  sc->pkt_preamble.pkt_type = 0xff;
-  sc->pkt_preamble.channels = channels;
-  sc->pkt_preamble.depth = depth;
-  sc->pkt_preamble.nominal_frequency = nominal_frequency;
-
-  sc->pkt_trailer = 0xfe;
 
   sc->usb_iface_subtype = usb_iface_subtype;
+  sc->on_complete = sigcapture_usb_kick;
+  sc->on_complete_opaque = sc;
 
-  for(size_t i = 0; i < channels; i++) {
-    sc_usb_pkt_channel_t *c = &sc->pkt_channels[i];
-    c->pkt_type = i;
-    c->unit = channel_descriptors[i].unit;
-    strlcpy(c->name, channel_descriptors[i].name, sizeof(c->name));
-    c->scale = channel_descriptors[i].scale;
-  }
-
-  sc->softirq = softirq_alloc(sigcapture_irq, sc);
   sc->usb_iface = usb_alloc_interface(q, sigcapture_gen_desc, sc, 1,
                                       "sigcapture");
   usb_init_endpoint(&sc->usb_iface->ui_endpoints[0],
