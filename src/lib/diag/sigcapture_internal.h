@@ -45,6 +45,13 @@ struct sigcapture {
   size_t channels;
   uint8_t columns_per_xfer;
 
+  // Decimation: store 1 of every `decimation` samples (>=1), to capture slow
+  // phenomena over a longer window. base_frequency is the full-rate frequency;
+  // the preamble reports base_frequency / decimation.
+  uint16_t decimation;
+  uint16_t decim_phase;
+  uint32_t base_frequency;
+
   // Readout cursor + frame staging (only touched during READOUT).
   uint32_t send_index;
   uint32_t xfer_rows;

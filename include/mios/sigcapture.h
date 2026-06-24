@@ -36,6 +36,10 @@ sigcapture_t *sigcapture_create_vllp(size_t depth_power_of_2, size_t channels,
                                      const sigcapture_desc_t channel_descriptors[],
                                      uint32_t nominal_frequency);
 
+// Store only 1 of every `n` samples (n>=1, 1 = full rate), to capture slow
+// phenomena over a longer time window at reduced time resolution.
+void sigcapture_set_decimation(sigcapture_t *sc, unsigned int n);
+
 int16_t *sigcapture_wrptr(sigcapture_t *sc);
 
 void sigcapture_trig(sigcapture_t *sc, size_t leading_samples);

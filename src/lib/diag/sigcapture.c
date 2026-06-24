@@ -21,6 +21,12 @@ sigcapture_wrptr(sigcapture_t *sc)
   if(sc->state != SIGCAPTURE_STATE_RUN)
     return NULL;
 
+  if(sc->decimation > 1) {
+    if(++sc->decim_phase < sc->decimation)
+      return NULL;  // skip this sample
+    sc->decim_phase = 0;
+  }
+
   if(sc->trig_countdown) {
     sc->trig_countdown--;
     if(sc->trig_countdown == 0) {
@@ -59,6 +65,17 @@ sigcapture_reset(sigcapture_t *sc)
 {
   sc->state = SIGCAPTURE_STATE_RUN;
   sc->wrptr = 0;
+}
+
+
+void
+sigcapture_set_decimation(sigcapture_t *sc, unsigned int n)
+{
+  if(n < 1)
+    n = 1;
+  sc->decimation = n;
+  sc->decim_phase = 0;
+  sc->pkt_preamble.nominal_frequency = sc->base_frequency / n;
 }
 
 
@@ -172,6 +189,8 @@ sigcapture_alloc(size_t depth_power_of_2, size_t channels,
   sc->channels = channels;
   sc->storage = storage;
   sc->columns_per_xfer = 32 / channels;
+  sc->decimation = 1;
+  sc->base_frequency = nominal_frequency;
 
   sc->pkt_preamble.pkt_type = 0xff;
   sc->pkt_preamble.channels = channels;
