@@ -30,6 +30,8 @@ SRCS += ${P}/t234ccplex.c \
 SRCS += ${T234}/t234_bootflash.c \
 	${T234}/t234_i2c.c \
 
+SRCS-${ENABLE_TEGRA_MGBE} += ${P}/t234ccplex_mgbe.c
+
 ENABLE_TASK_ACCOUNTING := no
 ENABLE_NET_IPV4 := yes
 ENABLE_NET_HTTP := yes
