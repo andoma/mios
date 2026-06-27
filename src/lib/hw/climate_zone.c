@@ -196,6 +196,7 @@ static const alert_class_t climate_zone_alert_class = {
   .ac_message = climate_zone_alert_message,
   .ac_level = climate_zone_alert_level,
   .ac_refcount = climate_zone_alert_refcount,
+  .ac_group = "climate",
 };
 
 

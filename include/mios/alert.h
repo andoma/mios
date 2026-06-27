@@ -27,11 +27,24 @@ typedef struct alert_class {
   void (*ac_message)(const struct alert_source *as, struct stream *output);
   alert_level_t (*ac_level)(const struct alert_source *as);
   void (*ac_refcount)(struct alert_source *as, int value);
+
+  // Optional group prefix, prepended (with a separator) to the alert key
+  // wherever the full identifier is emitted: the wire protocol, the event
+  // log, etc. NULL means no group. Lets a whole class of alerts share a
+  // namespace (e.g. "climate") without storing it per source.
+  const char *ac_group;
 } alert_class_t;
 
 
 void alert_register(alert_source_t *as, const alert_class_t *ac,
                     const char *key);
+
+// Emit the full alert identifier (group prefix + key) to a stream, and
+// the number of bytes that emits. Kept together so every emitter composes
+// the identifier identically.
+struct stream;
+size_t alert_key_length(const alert_source_t *as);
+void alert_key_print(const alert_source_t *as, struct stream *st);
 
 void alert_unregister(alert_source_t *as);
 

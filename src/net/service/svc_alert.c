@@ -82,12 +82,11 @@ alert_pub_raise(alert_pub_t *ap, const alert_source_t *as)
   mutex_unlock(&alert_pub_mutex);
   stp.pb = pbuf_make(ap->ap_pp->preferred_offset, 1);
   uint8_t *u8 = pbuf_append(stp.pb, 3);
-  const size_t keylen = strlen(as->as_key);
 
   u8[0] = ALERT_PUB_RAISE;
   u8[1] = as->as_class->ac_level(as);
-  u8[2] = keylen;
-  stp.pb = pbuf_write(stp.pb, as->as_key, keylen, ap->ap_pp, 1);
+  u8[2] = alert_key_length(as);
+  alert_key_print(as, &stp.s);
   as->as_class->ac_message(as, &stp.s);
   alert_pub_send(ap, stp.pb);
 }

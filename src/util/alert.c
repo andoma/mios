@@ -3,6 +3,7 @@
 #include <mios/ghook.h>
 #include <mios/cli.h>
 #include <mios/atomic.h>
+#include <mios/stream.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,28 @@ alert_register(alert_source_t *as, const alert_class_t *ac, const char *key)
   mutex_lock(&alert_mutex);
   SLIST_INSERT_SORTED(&alerts, as, as_link, alert_cmp);
   mutex_unlock(&alert_mutex);
+}
+
+// Separator between an alert's group prefix and its key.
+#define ALERT_GROUP_SEP "_"
+
+size_t
+alert_key_length(const alert_source_t *as)
+{
+  const char *group = as->as_class->ac_group;
+  size_t len = strlen(as->as_key);
+  if(group)
+    len += strlen(group) + strlen(ALERT_GROUP_SEP);
+  return len;
+}
+
+void
+alert_key_print(const alert_source_t *as, stream_t *st)
+{
+  const char *group = as->as_class->ac_group;
+  if(group)
+    stprintf(st, "%s%s", group, ALERT_GROUP_SEP);
+  stprintf(st, "%s", as->as_key);
 }
 
 void
@@ -71,10 +94,16 @@ alert_set(alert_source_t *as, int code)
   as->as_code = code;
 
   if(!code) {
-    evlog(LOG_INFO, "Alert cleared [%s]", as->as_key);
+    stream_t *st = evlog_stream_begin();
+    stprintf(st, "Alert cleared [");
+    alert_key_print(as, st);
+    stprintf(st, "]");
+    evlog_stream_end(LOG_INFO);
   } else {
     stream_t *st = evlog_stream_begin();
-    stprintf(st, "Alert raised [%s] -- ", as->as_key);
+    stprintf(st, "Alert raised [");
+    alert_key_print(as, st);
+    stprintf(st, "] -- ");
     const alert_class_t *ac = as->as_class;
     ac->ac_message(as, st);
     evlog_stream_end(alert_level_to_event_level(ac->ac_level(as)));
