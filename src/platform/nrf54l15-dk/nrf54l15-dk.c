@@ -1,10 +1,6 @@
-#include <unistd.h>
 #include <stdio.h>
 
 #include <mios/io.h>
-#include <mios/mios.h>
-#include <mios/task.h>
-#include <mios/cli.h>
 #include <mios/mcp.h>
 #include <mios/type_macros.h>
 
@@ -37,33 +33,12 @@ board_init_console(void)
 }
 
 
-__attribute__((noreturn))
-static void *
-blinker(void *arg)
-{
-  // Knight-Rider style sweep across the four LEDs
-  int i = 0;
-  int dir = 1;
-  while(1) {
-    for(size_t j = 0; j < ARRAYSIZE(leds); j++)
-      gpio_set_output(leds[j], j == (size_t)i);
-
-    usleep(120000);
-
-    i += dir;
-    if(i == ARRAYSIZE(leds) - 1 || i == 0)
-      dir = -dir;
-  }
-}
-
-
 static void __attribute__((constructor(800)))
 board_init_late(void)
 {
+  // Drive the LEDs as outputs (off); no animation.
   for(size_t i = 0; i < ARRAYSIZE(leds); i++)
     gpio_conf_output(leds[i], GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-
-  thread_create(blinker, NULL, 512, "blinker", 0, 0);
 
   // MCP (structured, HDLC-framed) on the other VCOM (UARTE30, P0.00/P0.01).
   stream_t *mcp = nrf54l_uart_init(UARTE30_BASE, SERIAL30_IRQ, 115200,
