@@ -33,7 +33,7 @@ Output goes to `build.${PLATFORM}/` (e.g., `build.stm32h7-nucleo144/build.elf`).
 
 ## Supported Platforms
 
-lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144. Additional platforms (aarch64-virt, spike, t234 variants, nrf52, stm32wb55-nucleo64) exist but are not in the `allplatforms` CI target.
+lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144, nrf54l15-dk. Additional platforms (aarch64-virt, spike, t234 variants, nrf52, stm32wb55-nucleo64) exist but are not in the `allplatforms` CI target.
 
 ## Compiler Flags
 
