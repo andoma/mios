@@ -7,13 +7,19 @@
 #include <unistd.h>
 #include <termios.h>
 #include <errno.h>
+#include <glob.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
+#include <sys/file.h>
 #include <time.h>
 #include <zlib.h>
 #include <libusb.h>
 
 #define USB_CLASS_VENDOR 0xff
 #define SERIAL_MAX_FRAME 256
+
+#define MCP_HELLO        0x06
+#define MCP_HELLO_MAGIC  "MIOS-MCP"
 
 struct mcp_xport {
   int is_serial;
@@ -122,6 +128,13 @@ serial_open(const char *path)
   cfsetospeed(&t, B115200);
   tcsetattr(fd, TCSANOW, &t);
   tcflush(fd, TCIOFLUSH);
+
+  // Exclusive access, matching sterm: TIOCEXCL blocks further opens at the
+  // tty layer; flock is the advisory lock cooperating tools (sterm) honor.
+  if(ioctl(fd, TIOCEXCL) || flock(fd, LOCK_EX | LOCK_NB)) {
+    close(fd);
+    return -1;
+  }
   return fd;
 }
 
@@ -162,35 +175,32 @@ serial_send(int fd, const uint8_t *msg, size_t len)
   return 0;
 }
 
-// Try to pull one complete, CRC-valid frame out of x->rxbuf.
-// Returns payload length (copied into buf) or -1 if none yet.
+// Try to pull one complete, CRC-valid frame out of an accumulation buffer.
+// Returns payload length (copied into out) or -1 if none yet.
 static int
-serial_deframe(mcp_xport_t *x, uint8_t *buf, size_t cap)
+hdlc_deframe(uint8_t *rx, size_t *rxlen, uint8_t *out, size_t cap)
 {
   size_t start = 0;
-  while(start < x->rxlen && x->rxbuf[start] != 0x7e)
+  while(start < *rxlen && rx[start] != 0x7e)
     start++;
-  // drop leading garbage
-  if(start) {
-    memmove(x->rxbuf, x->rxbuf + start, x->rxlen - start);
-    x->rxlen -= start;
+  if(start) {                       // drop leading garbage
+    memmove(rx, rx + start, *rxlen - start);
+    *rxlen -= start;
   }
-  if(x->rxlen < 2)
+  if(*rxlen < 2)
     return -1;
 
-  // find closing flag (after the opening one at index 0)
-  size_t end = 1;
-  while(end < x->rxlen && x->rxbuf[end] != 0x7e)
+  size_t end = 1;                   // closing flag after the opening one
+  while(end < *rxlen && rx[end] != 0x7e)
     end++;
-  if(end >= x->rxlen)
-    return -1; // incomplete
+  if(end >= *rxlen)
+    return -1;                      // incomplete
 
-  // unescape rxbuf[1..end)
   uint8_t frame[SERIAL_MAX_FRAME + 4];
   size_t flen = 0;
   int esc = 0;
   for(size_t i = 1; i < end; i++) {
-    uint8_t b = x->rxbuf[i];
+    uint8_t b = rx[i];
     if(esc) {
       if(flen < sizeof(frame)) frame[flen++] = b ^ 0x20;
       esc = 0;
@@ -201,19 +211,102 @@ serial_deframe(mcp_xport_t *x, uint8_t *buf, size_t cap)
     }
   }
 
-  // consume up to and including the closing flag
   size_t consumed = end + 1;
-  memmove(x->rxbuf, x->rxbuf + consumed, x->rxlen - consumed);
-  x->rxlen -= consumed;
+  memmove(rx, rx + consumed, *rxlen - consumed);
+  *rxlen -= consumed;
 
   if(flen >= 5 && crc32(0, frame, flen) == 0xffffffff) {
     size_t plen = flen - 4;
     if(plen > cap)
       plen = cap;
-    memcpy(buf, frame, plen);
+    memcpy(out, frame, plen);
     return plen;
   }
-  return -1; // bad/empty frame, caller will read more
+  return -1;                        // bad/empty frame, caller reads more
+}
+
+static int
+serial_deframe(mcp_xport_t *x, uint8_t *buf, size_t cap)
+{
+  return hdlc_deframe(x->rxbuf, &x->rxlen, buf, cap);
+}
+
+
+// Open a port and listen briefly for an MCP hello beacon. Returns 1 if the
+// port speaks MCP. Ports held by another program (flock) are skipped.
+static int
+serial_probe(const char *path, int timeout_ms)
+{
+  int fd = serial_open(path);
+  if(fd < 0)
+    return 0;
+
+  uint8_t rx[1024];
+  size_t rxlen = 0;
+  struct timespec t0;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+  int found = 0;
+
+  while(!found) {
+    uint8_t msg[SERIAL_MAX_FRAME];
+    int r = hdlc_deframe(rx, &rxlen, msg, sizeof(msg));
+    if(r >= 1) {
+      if(msg[0] == MCP_HELLO &&
+         r - 1 >= (int)strlen(MCP_HELLO_MAGIC) &&
+         !memcmp(msg + 1, MCP_HELLO_MAGIC, strlen(MCP_HELLO_MAGIC)))
+        found = 1;
+      continue;
+    }
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed = (now.tv_sec - t0.tv_sec) * 1000 +
+                   (now.tv_nsec - t0.tv_nsec) / 1000000;
+    if(elapsed >= timeout_ms)
+      break;
+
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+    struct timeval tv = { 0, 100000 };
+    if(select(fd + 1, &rfds, NULL, NULL, &tv) > 0 && rxlen < sizeof(rx)) {
+      ssize_t n = read(fd, rx + rxlen, sizeof(rx) - rxlen);
+      if(n > 0)
+        rxlen += n;
+    }
+  }
+
+  close(fd);
+  return found;
+}
+
+int
+mcp_serial_scan(char (*paths)[256], int max)
+{
+  glob_t g;
+  memset(&g, 0, sizeof(g));
+  glob("/dev/ttyACM*", 0, NULL, &g);
+  glob("/dev/ttyUSB*", GLOB_APPEND, NULL, &g);
+
+  int n = 0;
+  for(size_t i = 0; i < g.gl_pathc && n < max; i++) {
+    // Beacon is ~1/s, so 1500 ms is enough to catch one.
+    if(serial_probe(g.gl_pathv[i], 1500)) {
+      snprintf(paths[n], 256, "%s", g.gl_pathv[i]);
+      n++;
+    }
+  }
+  globfree(&g);
+  return n;
+}
+
+static char *
+serial_resolve_auto(void)
+{
+  char paths[1][256];
+  if(mcp_serial_scan(paths, 1) >= 1)
+    return strdup(paths[0]);
+  return NULL;
 }
 
 static int
@@ -256,39 +349,89 @@ serial_recv(mcp_xport_t *x, uint8_t *buf, size_t cap, int timeout_ms)
 
 // ---------------- Public API ----------------
 
+static int
+xport_open_serial_path(mcp_xport_t *x, const char *path, const char **errstr)
+{
+  x->fd = serial_open(path);
+  if(x->fd < 0) {
+    *errstr = "Failed to open serial port (busy or missing)";
+    return -1;
+  }
+  x->is_serial = 1;
+  x->max_payload = SERIAL_MAX_FRAME - 1;
+  return 0;
+}
+
+// USB is found by enumeration (vendor id), so it is stable and needs no
+// beacon scan. Returns 0 on success.
+static int
+xport_open_usb(mcp_xport_t *x, mcp_context_t *ctx, uint8_t subclass)
+{
+  if(find_mcp_interface(ctx->usb, ctx->usb_vid, ctx->usb_pid, subclass,
+                        &x->h, &x->iface, &x->ep_out, &x->ep_in))
+    return -1;
+  libusb_detach_kernel_driver(x->h, x->iface);
+  if(libusb_claim_interface(x->h, x->iface)) {
+    libusb_close(x->h);
+    return -1;
+  }
+  x->max_payload = 63; // one 64-byte bulk packet, minus the type byte
+  return 0;
+}
+
+// Resolve "auto"/fallback serial: scan for the hello beacon once and cache.
+// Drops the cache if the cached port can no longer be opened.
+static int
+xport_open_serial_auto(mcp_xport_t *x, mcp_context_t *ctx, const char **errstr)
+{
+  if(!ctx->serial_resolved)
+    ctx->serial_resolved = serial_resolve_auto();
+  if(!ctx->serial_resolved)
+    return -1;
+  if(xport_open_serial_path(x, ctx->serial_resolved, errstr)) {
+    free(ctx->serial_resolved);
+    ctx->serial_resolved = NULL;
+    return -1;
+  }
+  return 0;
+}
+
 mcp_xport_t *
 mcp_xport_open(mcp_context_t *ctx, uint8_t subclass, const char **errstr)
 {
   mcp_xport_t *x = calloc(1, sizeof(*x));
 
-  if(ctx->serial && ctx->serial[0]) {
-    x->is_serial = 1;
-    x->fd = serial_open(ctx->serial);
-    if(x->fd < 0) {
-      *errstr = "Failed to open serial port";
+  // Explicit serial device path
+  if(ctx->serial && ctx->serial[0] && strcmp(ctx->serial, "auto")) {
+    if(xport_open_serial_path(x, ctx->serial, errstr)) {
       free(x);
       return NULL;
     }
-    x->max_payload = SERIAL_MAX_FRAME - 1;
     return x;
   }
 
-  if(find_mcp_interface(ctx->usb, ctx->usb_vid, ctx->usb_pid, subclass,
-                        &x->h, &x->iface, &x->ep_out, &x->ep_in)) {
-    *errstr = "No MIOS device with MCP interface found";
-    free(x);
-    return NULL;
+  // Explicit "auto": serial only, detected via the beacon
+  if(ctx->serial && !strcmp(ctx->serial, "auto")) {
+    if(xport_open_serial_auto(x, ctx, errstr)) {
+      if(!ctx->serial_resolved)
+        *errstr = "No MCP serial port detected (no hello beacon found)";
+      free(x);
+      return NULL;
+    }
+    return x;
   }
 
-  libusb_detach_kernel_driver(x->h, x->iface);
-  if(libusb_claim_interface(x->h, x->iface)) {
-    libusb_close(x->h);
-    *errstr = "Failed to claim MCP USB interface";
-    free(x);
-    return NULL;
-  }
-  x->max_payload = 63; // one 64-byte bulk packet, minus the type byte
-  return x;
+  // Default: USB first (stable, enumerated by vendor id), then fall back to
+  // serial auto-detect for devices without USB.
+  if(xport_open_usb(x, ctx, subclass) == 0)
+    return x;
+
+  if(xport_open_serial_auto(x, ctx, errstr) == 0)
+    return x;
+
+  *errstr = "No MIOS device found (USB, or serial with an MCP beacon)";
+  free(x);
+  return NULL;
 }
 
 size_t

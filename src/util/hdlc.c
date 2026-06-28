@@ -65,8 +65,13 @@ hdlc_read(stream_t *s,
 
 
 
-void
-hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
+// When escape_ctrl is set, all bytes < 0x20 are escaped in addition to the
+// flag/escape octets. The resulting frame contains no control characters, so
+// it won't disturb a terminal that opens the port by mistake. The receiver
+// needs no change: hdlc_read_to_buf already reverses any 0x7d-escaped byte.
+static void
+hdlc_write_rawv_ex(stream_t *s, struct iovec *iov, size_t count,
+                   int escape_ctrl)
 {
   const uint8_t byte_7e = 0x7e;
   uint8_t esc[2] = {0x7d, 0};
@@ -79,7 +84,7 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
     const size_t len = iov[v].iov_len;
     size_t i, b = 0;
     for(i = 0; i < len; i++) {
-      if(buf[i] == 0x7e || buf[i] == 0x7d) {
+      if(buf[i] == 0x7e || buf[i] == 0x7d || (escape_ctrl && buf[i] < 0x20)) {
 
         if(i - b)
           stream_write(s, buf + b, i - b, 0);
@@ -99,7 +104,14 @@ hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
 
 
 void
-hdlc_send(stream_t *s, const void *data, size_t len)
+hdlc_write_rawv(stream_t *s, struct iovec *iov, size_t count)
+{
+  hdlc_write_rawv_ex(s, iov, count, 0);
+}
+
+
+static void
+hdlc_send_ex(stream_t *s, const void *data, size_t len, int escape_ctrl)
 {
   uint32_t crc = ~crc32(0, data, len);
 
@@ -112,7 +124,21 @@ hdlc_send(stream_t *s, const void *data, size_t len)
     }
   };
 
-  hdlc_write_rawv(s, vec, 2);
+  hdlc_write_rawv_ex(s, vec, 2, escape_ctrl);
+}
+
+
+void
+hdlc_send(stream_t *s, const void *data, size_t len)
+{
+  hdlc_send_ex(s, data, len, 0);
+}
+
+
+void
+hdlc_send_printable(stream_t *s, const void *data, size_t len)
+{
+  hdlc_send_ex(s, data, len, 1);
 }
 
 void

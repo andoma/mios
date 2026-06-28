@@ -19,6 +19,10 @@ int hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size,
 
 void hdlc_send(stream_t *s, const void *data, size_t len);
 
+// Like hdlc_send, but also escapes all bytes < 0x20 so the frame contains
+// no control characters (safe if a terminal opens the port by mistake).
+void hdlc_send_printable(stream_t *s, const void *data, size_t len);
+
 void hdlc_sendv(stream_t *s, struct iovec *iov, size_t count);
 
 

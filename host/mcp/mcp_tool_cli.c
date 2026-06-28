@@ -173,8 +173,12 @@ tool_read_memory(mcp_context_t *ctx, const cJSON *params, const char **errstr)
     return NULL;
   }
 
+  // Skip unrelated frames (e.g. the periodic hello beacon) until the reply.
   uint8_t resp[512];
-  int resp_len = mcp_xport_recv(x, resp, sizeof(resp), 5000);
+  int resp_len;
+  do {
+    resp_len = mcp_xport_recv(x, resp, sizeof(resp), 5000);
+  } while(resp_len >= 1 && resp[0] != MCP_MEM_READ_RESP);
   mcp_xport_close(x);
 
   if(resp_len < 1 || resp[0] != MCP_MEM_READ_RESP) {
@@ -196,8 +200,36 @@ tool_read_memory(mcp_context_t *ctx, const cJSON *params, const char **errstr)
 }
 
 
+static cJSON *
+tool_scan(mcp_context_t *ctx, const cJSON *params, const char **errstr)
+{
+  (void)ctx;
+  (void)params;
+  (void)errstr;
+
+  char paths[16][256];
+  int n = mcp_serial_scan(paths, 16);
+
+  if(n == 0)
+    return mcp_text_result("No MCP serial ports found (no hello beacon "
+                           "seen on any /dev/ttyACM*//dev/ttyUSB*).");
+
+  size_t cap = 64 + n * 280;
+  char *out = malloc(cap);
+  int pos = snprintf(out, cap, "Found %d MCP serial port%s:\n",
+                     n, n == 1 ? "" : "s");
+  for(int i = 0; i < n; i++)
+    pos += snprintf(out + pos, cap - pos, "  %s\n", paths[i]);
+
+  cJSON *r = mcp_text_result(out);
+  free(out);
+  return r;
+}
+
+
 static cJSON *cli_schema;
 static cJSON *mem_schema;
+static cJSON *scan_schema;
 
 void
 mcp_tool_cli_init(mcp_context_t *ctx)
@@ -271,4 +303,17 @@ mcp_tool_cli_init(mcp_context_t *ctx)
   };
   mem_tool.input_schema = mem_schema;
   mcp_register_tool(&mem_tool);
+
+  scan_schema = cJSON_Parse(
+    "{ \"type\": \"object\", \"properties\": {} }");
+
+  static mcp_tool_t scan_tool = {
+    .name = "scan",
+    .description = "Scan serial ports (/dev/ttyACM*, /dev/ttyUSB*) for MIOS "
+      "devices emitting an MCP hello beacon. Returns matching device paths; "
+      "use one with configure(serial: ...), or configure(serial: \"auto\").",
+    .handler = tool_scan,
+  };
+  scan_tool.input_schema = scan_schema;
+  mcp_register_tool(&scan_tool);
 }

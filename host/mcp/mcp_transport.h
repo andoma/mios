@@ -29,3 +29,7 @@ int mcp_xport_send(mcp_xport_t *x, const uint8_t *msg, size_t len);
 int mcp_xport_recv(mcp_xport_t *x, uint8_t *buf, size_t cap, int timeout_ms);
 
 void mcp_xport_close(mcp_xport_t *x);
+
+// Scan /dev/ttyACM*//dev/ttyUSB* for ports emitting an MCP hello beacon.
+// Fills up to `max` device paths and returns the count.
+int mcp_serial_scan(char (*paths)[256], int max);

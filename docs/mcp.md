@@ -9,9 +9,21 @@ The `cli` and `read_memory` tools work over either transport:
 - **USB**: a vendor-class bulk interface (default).
 - **Serial**: HDLC framing with CRC32 over a UART, for devices without USB
   (e.g. nRF54L). Each request/response is one HDLC frame; the message
-  format is identical to USB. Select it with the `serial` parameter of
-  `configure`, the `--serial <dev>` argument, or the `MIOS_MCP_SERIAL`
-  environment variable.
+  format is identical to USB.
+
+By default no configuration is needed: the server uses USB if a device is
+present (found by vendor id, so stable across reconnects), and otherwise
+falls back to auto-detecting a serial MCP port. To force a specific
+transport use the `serial` parameter of `configure`, the `--serial <dev>`
+/ `--serial auto` argument, or the `MIOS_MCP_SERIAL` environment variable.
+The `scan` tool lists serial candidates.
+
+Serial auto-detection relies on a periodic, printable "hello" beacon the
+device emits on the MCP UART. The beacon is only used for serial; USB is
+never beacon-scanned. The beacon also harmlessly identifies the port if
+opened in a terminal by mistake. Serial ports are opened exclusively
+(TIOCEXCL + flock), so the MCP server and a terminal (e.g. sterm) cannot
+fight over the same port.
 
 ## Device-side setup
 
@@ -83,7 +95,17 @@ port. Affects all subsequent tool calls. Default VID is 0x6666, PID is 0
 ```
 configure(vid: 0x1234, pid: 0x5678)
 configure(serial: "/dev/ttyACM4")   # route cli/read_memory over UART
+configure(serial: "auto")           # auto-detect via the hello beacon
 configure(serial: "")               # revert to USB
+```
+
+### scan
+
+List serial ports (`/dev/ttyACM*`, `/dev/ttyUSB*`) that are emitting an
+MCP hello beacon. Use the result with `configure(serial: ...)`.
+
+```
+scan()
 ```
 
 ### cli

@@ -3,6 +3,7 @@
 #include <mios/task.h>
 #include <mios/cli.h>
 
+#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -14,6 +15,11 @@
 #define MCP_CLI_COMPLETE    0x03
 #define MCP_MEM_READ        0x04
 #define MCP_MEM_READ_RESP   0x05
+#define MCP_HELLO           0x06
+
+// Identifies an MCP serial endpoint so the host can auto-detect the port.
+#define MCP_HELLO_MAGIC     "MIOS-MCP"
+#define MCP_HELLO_PERIOD_US 1000000
 
 // HDLC frames are arbitrary length, so we are not limited to USB's 64 bytes.
 #define MCP_MAX_FRAME       256
@@ -25,6 +31,8 @@ typedef struct mcp_uart {
 
   stream_t *uart;        // underlying HDLC-framed byte stream
 
+  mutex_t tx_mutex;      // serializes frames from the command and hello paths
+
   uint16_t txoff;        // fill level of txbuf (byte 0 = message type)
 
   uint8_t txbuf[MCP_MAX_FRAME];
@@ -33,12 +41,23 @@ typedef struct mcp_uart {
 } mcp_uart_t;
 
 
+// Send one complete frame, serialized against the hello beacon so frames
+// never interleave on the wire.
+static void
+mcp_send_frame(mcp_uart_t *m, const void *data, size_t len)
+{
+  mutex_lock(&m->tx_mutex);
+  hdlc_send(m->uart, data, len);
+  mutex_unlock(&m->tx_mutex);
+}
+
+
 // Send the currently accumulated CLI output as one MCP_CLI_RESPONSE frame
 static void
 mcp_flush_output(mcp_uart_t *m)
 {
   if(m->txoff > 1) {
-    hdlc_send(m->uart, m->txbuf, m->txoff);
+    mcp_send_frame(m, m->txbuf, m->txoff);
     m->txoff = 1;
   }
 }
@@ -103,7 +122,7 @@ mcp_handle(mcp_uart_t *m, uint8_t *cmd, int len)
     uint8_t pkt[5];
     pkt[0] = MCP_CLI_COMPLETE;
     memcpy(pkt + 1, &err32, sizeof(err32));
-    hdlc_send(m->uart, pkt, sizeof(pkt));
+    mcp_send_frame(m, pkt, sizeof(pkt));
     break;
   }
 
@@ -118,7 +137,7 @@ mcp_handle(mcp_uart_t *m, uint8_t *cmd, int len)
 
     m->txbuf[0] = MCP_MEM_READ_RESP;
     memcpy(m->txbuf + 1, (const void *)(uintptr_t)addr, length);
-    hdlc_send(m->uart, m->txbuf, 1 + length);
+    mcp_send_frame(m, m->txbuf, 1 + length);
     break;
   }
   }
@@ -139,6 +158,24 @@ mcp_uart_thread(void *arg)
 }
 
 
+// Periodic beacon: lets the host auto-detect the MCP port, and (being
+// printable) harmlessly identifies the port if opened in a terminal.
+__attribute__((noreturn))
+static void *
+mcp_hello_thread(void *arg)
+{
+  mcp_uart_t *m = arg;
+  static const uint8_t hello[] = { MCP_HELLO, 'M','I','O','S','-','M','C','P' };
+
+  while(1) {
+    usleep(MCP_HELLO_PERIOD_US);
+    mutex_lock(&m->tx_mutex);
+    hdlc_send_printable(m->uart, hello, sizeof(hello));
+    mutex_unlock(&m->tx_mutex);
+  }
+}
+
+
 void
 mcp_uart_create(stream_t *s)
 {
@@ -146,6 +183,8 @@ mcp_uart_create(stream_t *s)
   m->stream.vtable = &mcp_stream_vtable;
   m->uart = s;
   m->txoff = 1;
+  mutex_init(&m->tx_mutex, "mcptx");
 
   thread_create_shell(mcp_uart_thread, m, "mcp-uart", &m->stream);
+  thread_create(mcp_hello_thread, m, 512, "mcp-hello", 0, 0);
 }
