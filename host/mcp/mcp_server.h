@@ -8,6 +8,7 @@ typedef struct mcp_context {
   libusb_context *usb;
   uint16_t usb_vid;
   uint16_t usb_pid;  // 0 = match any
+  char *serial;      // serial device path; if set, cli/read_memory use it
 } mcp_context_t;
 
 // Tool handler function type.

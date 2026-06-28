@@ -58,8 +58,16 @@ tool_configure(mcp_context_t *ctx, const cJSON *params, const char **errstr)
   if(cJSON_IsNumber(p))
     ctx->usb_pid = (uint16_t)p->valuedouble;
 
-  return mcp_text_resultf("Configured: VID=0x%04x PID=0x%04x",
-                          ctx->usb_vid, ctx->usb_pid);
+  const cJSON *s = cJSON_GetObjectItem(params, "serial");
+  if(cJSON_IsString(s)) {
+    free(ctx->serial);
+    ctx->serial = s->valuestring[0] ? strdup(s->valuestring) : NULL;
+  }
+
+  return mcp_text_resultf("Configured: VID=0x%04x PID=0x%04x transport=%s%s",
+                          ctx->usb_vid, ctx->usb_pid,
+                          ctx->serial ? "serial " : "usb",
+                          ctx->serial ? ctx->serial : "");
 }
 
 // --- JSON-RPC helpers ---
@@ -232,6 +240,16 @@ main(int argc, char **argv)
     .usb_pid = 0,
   };
 
+  // Default transport can be set from the environment or argv so the server
+  // can be pointed at a serial port without an explicit configure() call.
+  const char *env_serial = getenv("MIOS_MCP_SERIAL");
+  for(int i = 1; i < argc; i++) {
+    if(!strcmp(argv[i], "--serial") && i + 1 < argc)
+      env_serial = argv[++i];
+  }
+  if(env_serial && env_serial[0])
+    ctx.serial = strdup(env_serial);
+
   if(libusb_init(&ctx.usb)) {
     fprintf(stderr, "libusb_init failed\n");
     return 1;
@@ -250,6 +268,11 @@ main(int argc, char **argv)
     "    \"pid\": {"
     "      \"type\": \"integer\","
     "      \"description\": \"USB Product ID in hex (0 = match any)\""
+    "    },"
+    "    \"serial\": {"
+    "      \"type\": \"string\","
+    "      \"description\": \"Serial device path (e.g. /dev/ttyACM4) for "
+    "HDLC-framed MCP over UART. Empty string reverts to USB.\""
     "    }"
     "  }"
     "}");

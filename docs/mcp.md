@@ -1,8 +1,17 @@
 # MIOS MCP Server
 
 MCP (Model Context Protocol) server that allows AI assistants to interact
-with MIOS devices over USB. Supports CLI command execution, memory reads,
-firmware flashing (DFU and ST-Link), and signal capture.
+with MIOS devices over USB or a serial port. Supports CLI command
+execution, memory reads, firmware flashing (DFU and ST-Link), and signal
+capture.
+
+The `cli` and `read_memory` tools work over either transport:
+- **USB**: a vendor-class bulk interface (default).
+- **Serial**: HDLC framing with CRC32 over a UART, for devices without USB
+  (e.g. nRF54L). Each request/response is one HDLC frame; the message
+  format is identical to USB. Select it with the `serial` parameter of
+  `configure`, the `--serial <dev>` argument, or the `MIOS_MCP_SERIAL`
+  environment variable.
 
 ## Device-side setup
 
@@ -24,7 +33,21 @@ your_platform_usb_create(vid, pid, manufacturer, product, &q);
 The MCP command interface uses USB vendor class (0xFF) with subclass
 0x01. Sigcapture uses subclass 192. These are separate USB interfaces.
 
+For a device without USB, run the MCP endpoint over a dedicated UART
+instead. Give it a raw byte stream (not a CLI console) and call:
+
+```c
+#include <mios/mcp.h>
+
+stream_t *s = my_uart_init(...);   // a plain UART stream
+mcp_uart_create(s);                // HDLC-framed MCP endpoint + thread
+```
+
 Rebuild and flash your firmware.
+
+To point the host server at it, configure the serial device path (see the
+`configure` tool below) or start the server with `--serial /dev/ttyACMx`.
+Find the right `/dev/ttyACMx` under `/dev/serial/by-id/`.
 
 ## Building the MCP server
 
@@ -53,11 +76,14 @@ Restart Claude Code. The following tools become available:
 
 ### configure
 
-Set the USB VID/PID used to find the MIOS device. Affects all
-subsequent tool calls. Default VID is 0x6666, PID is 0 (match any).
+Set the USB VID/PID used to find the MIOS device, or select a serial
+port. Affects all subsequent tool calls. Default VID is 0x6666, PID is 0
+(match any).
 
 ```
 configure(vid: 0x1234, pid: 0x5678)
+configure(serial: "/dev/ttyACM4")   # route cli/read_memory over UART
+configure(serial: "")               # revert to USB
 ```
 
 ### cli
@@ -136,6 +162,11 @@ The MCP command interface (`usb_mcp_create`, subclass 0x01) uses
 
 CLI flow: host sends 0x01, device sends N x 0x02 packets with output
 text, then 0x03 with the error code.
+
+Over the serial transport the same messages are exchanged, but each is
+wrapped in one HDLC frame (flag 0x7e, escape 0x7d, CRC32) instead of a
+USB bulk transfer. Frames are not limited to 64 bytes, so serial memory
+reads can return up to 255 bytes.
 
 ## Sigcapture protocol
 

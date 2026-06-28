@@ -1,5 +1,6 @@
 MCP_SRC = \
 	mcp_server.c \
+	mcp_transport.c \
 	mcp_tool_dfu.c \
 	mcp_tool_stlink.c \
 	mcp_tool_cli.c \
@@ -12,7 +13,7 @@ mios-mcp: ${MCP_SRC}
 	cc -I.. -I. \
 		-D_GNU_SOURCE -O2 -Wall -Werror \
 		-o $@ ${MCP_SRC} \
-		$$(pkg-config --libs --cflags libusb-1.0) -lpthread
+		$$(pkg-config --libs --cflags libusb-1.0) -lpthread -lz
 
 clean:
 	rm -f mios-mcp

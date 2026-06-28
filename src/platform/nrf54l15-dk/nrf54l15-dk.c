@@ -5,6 +5,7 @@
 #include <mios/mios.h>
 #include <mios/task.h>
 #include <mios/cli.h>
+#include <mios/mcp.h>
 #include <mios/type_macros.h>
 
 #include "nrf54l_uart.h"
@@ -56,15 +57,6 @@ blinker(void *arg)
 }
 
 
-__attribute__((noreturn))
-static void *
-cli_thread(void *arg)
-{
-  while(1)
-    cli_on_stream((stream_t *)arg, '>');
-}
-
-
 static void __attribute__((constructor(800)))
 board_init_late(void)
 {
@@ -73,8 +65,8 @@ board_init_late(void)
 
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
 
-  // Second CLI on the other VCOM (UARTE30, P0.00/P0.01).
-  stream_t *cli0 = nrf54l_uart_init(UARTE30_BASE, SERIAL30_IRQ, 115200,
-                                    GPIO_P0(0), GPIO_P0(1), 0);
-  thread_create_shell(cli_thread, cli0, "cli0", cli0);
+  // MCP (structured, HDLC-framed) on the other VCOM (UARTE30, P0.00/P0.01).
+  stream_t *mcp = nrf54l_uart_init(UARTE30_BASE, SERIAL30_IRQ, 115200,
+                                   GPIO_P0(0), GPIO_P0(1), 0);
+  mcp_uart_create(mcp);
 }

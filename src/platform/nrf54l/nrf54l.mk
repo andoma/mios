@@ -15,5 +15,6 @@ SRCS += ${C}/entry-xip.s \
 	${P}/nrf54l.c \
 	${P}/nrf54l_uart.c \
 	${P}/nrf54l_gpio.c \
+	${SRC}/shell/mcp_uart.c \
 
 ${MOS}/platform/nrf54l/%.o : CFLAGS += ${NOFPU}
