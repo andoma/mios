@@ -10,6 +10,9 @@ SRCS +=	${SRC}/shell/cli.c \
 SRCS-${ENABLE_PERFTEST} += \
 	${SRC}/shell/perf.c \
 
+SRCS-${ENABLE_VCON} += \
+	${SRC}/shell/cmd_vcon.c \
+
 ${MOS}/shell/cli.o : CFLAGS += ${NOFPU}
 ${MOS}/shell/cli_edit.o : CFLAGS += ${NOFPU}
 ${MOS}/shell/monitor.o : CFLAGS += ${NOFPU}

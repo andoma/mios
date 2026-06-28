@@ -23,4 +23,6 @@ SRCS += ${SRC}/util/alert.c \
 	${SRC}/util/block_stream.c \
 	${SRC}/util/clock_servo.c \
 
+SRCS-${ENABLE_VCON} += ${SRC}/util/vcon.c
+
 ${MOS}/util/%.o : CFLAGS += ${NOFPU}
