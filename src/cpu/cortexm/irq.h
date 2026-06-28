@@ -160,7 +160,7 @@ inline void  __attribute__((always_inline))
 irq_ack(int irq)
 {
   volatile unsigned int * const NVIC_ICPR = (unsigned int *)0xe000e280;
-  NVIC_ICPR[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
+  NVIC_ICPR[(irq >> 5) & 0xf] |= 1 << (irq & 0x1f);
 }
 
 void softreset(unsigned int vtor) __attribute__((noreturn));

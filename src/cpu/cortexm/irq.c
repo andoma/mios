@@ -38,17 +38,18 @@ irq_enable(int irq, int level)
 #ifdef HAVE_BASEPRI
   NVIC_IPR[irq] = IRQ_LEVEL_TO_PRI(level);
 #endif
-  NVIC_ISER[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
+  NVIC_ISER[(irq >> 5) & 0xf] |= 1 << (irq & 0x1f);
 }
 
 void
 irq_disable(int irq)
 {
-  NVIC_ICER[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
+  NVIC_ICER[(irq >> 5) & 0xf] |= 1 << (irq & 0x1f);
 }
 
 #define VECTOR_COUNT (16 + CORTEXM_IRQ_COUNT)
-#define VECTOR_ALIGN (VECTOR_COUNT >= 128 ? 0x400 : 0x200)
+// VTOR requires the table aligned to a power of two >= its byte size.
+#define VECTOR_ALIGN (VECTOR_COUNT > 256 ? 0x800 : VECTOR_COUNT >= 128 ? 0x400 : 0x200)
 
 void
 irq_enable_fn(int irq, int level, void (*fn)(void))
@@ -73,7 +74,7 @@ irq_enable_fn(int irq, int level, void (*fn)(void))
 #ifdef HAVE_BASEPRI
   NVIC_IPR[irq] = IRQ_LEVEL_TO_PRI(level);
 #endif
-  NVIC_ISER[(irq >> 5) & 7] |= 1 << (irq & 0x1f);
+  NVIC_ISER[(irq >> 5) & 0xf] |= 1 << (irq & 0x1f);
 
   dcache_op(vtable, VECTOR_COUNT * sizeof(void *), DCACHE_CLEAN);
   icache_invalidate();
