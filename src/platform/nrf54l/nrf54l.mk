@@ -11,10 +11,11 @@ ENTRYPOINT ?= start
 include ${SRC}/cpu/cortexm/cortexm33.mk
 
 SRCS += ${C}/entry-xip.s \
-	${C}/systick.c \
 	${P}/nrf54l.c \
 	${P}/nrf54l_uart.c \
 	${P}/nrf54l_gpio.c \
+	${P}/nrf54l_systim.c \
+	${P}/nrf54l_wdt.c \
 	${SRC}/shell/mcp_uart.c \
 
 ${MOS}/platform/nrf54l/%.o : CFLAGS += ${NOFPU}
