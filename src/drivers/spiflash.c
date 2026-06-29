@@ -33,6 +33,7 @@ typedef struct spiflash {
   gpio_t cs;
   uint8_t state;
   uint8_t block_shift;
+  uint8_t id; // electronic id (0xAB), captured awake; used to detect wake
 
   uint8_t tx[9];
   uint8_t rx[9];
@@ -101,11 +102,24 @@ spiflash_wait_ready(spiflash_t *sf)
     return ERR_FLASH_TIMEOUT;
 
   case SPIFLASH_STATE_PD:
-    status = spiflash_id(sf);
-    if(status < 0)
-      return status;
-    sf->state = SPIFLASH_STATE_IDLE;
-    return 0;
+    // Wake from deep-power-down. The release command (0xAB, sent by
+    // spiflash_id) needs a device-specific recovery time (tRES) before the
+    // part responds to further commands; tRES is in the datasheet (tens of
+    // microseconds), not in SFDP, so it can't be read from the device. Rather
+    // than hardcode a worst-case delay, poll the device id until it reads back
+    // the value captured while awake: until the part wakes the bus reads as
+    // 0x00/0xff and won't match, so this self-times to the actual tRES.
+    for(int i = 0; i < 200; i++) {
+      status = spiflash_id(sf);
+      if(status < 0)
+        return status;
+      if(status == sf->id) {
+        sf->state = SPIFLASH_STATE_IDLE;
+        return 0;
+      }
+      usleep(10);
+    }
+    return ERR_FLASH_TIMEOUT;
   default:
     panic("spiflash: Bad state");
   }
@@ -445,6 +459,10 @@ spiflash_create(spi_t *spi, gpio_t cs)
     sf->erase_commands[2].cmd4 = 0xff;
     sf->erase_commands[3].cmd4 = 0xff;
   }
+
+  // Capture the electronic id now (device awake, bus warm) as the reference
+  // the deep-power-down wake polls against.
+  sf->id = spiflash_id(sf);
 
   mutex_init(&sf->mutex, "spiflash");
   sf->iface.erase = spiflash_erase;
