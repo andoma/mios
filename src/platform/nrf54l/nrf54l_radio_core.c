@@ -42,8 +42,12 @@ nrf54l_radio_use_ble(void)
          (1 << 8)  | // S0LEN: 1 byte (the PDU header)
          (0 << 16)); // S1LEN: none
 
+  // MAXLEN must not exceed the RX pbuf payload (PBUF_DATA_SIZE), or a received
+  // packet's EasyDMA write overruns the pbuf into the heap. LLMTU is exactly
+  // that bound (PBUF_DATA_SIZE - 2); the BLE link-layer never sends/expects
+  // more in a single PDU.
   reg_wr(RADIO_PCNF1,
-         (255 << 0) | // MAXLEN
+         ((PBUF_DATA_SIZE - 2) << 0) | // MAXLEN = LLMTU
          (0 << 8)   | // STATLEN
          (3 << 16)  | // BALEN = 4 (3 + 1)
          (1 << 25)); // enable whitening
@@ -68,5 +72,5 @@ nrf54l_radio_use_154(void)
   // Continuous RX: start after ramp, auto-restart after each frame, sample RSSI.
   reg_wr(RADIO_SHORTS, RADIO_SHORT_READY_START | RADIO_SHORT_END_START |
                        RADIO_SHORT_ADDRESS_RSSISTART);
-  reg_wr(RADIO_INTENCLR00, RADIO_INT_END); // 15.4 client polls (for now)
+  reg_wr(RADIO_INTENSET00, RADIO_INT_END); // arbiter dispatches END to the owner
 }

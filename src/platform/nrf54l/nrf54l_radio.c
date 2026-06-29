@@ -28,6 +28,7 @@
 
 #include "irq.h"
 #include "nrf54l_radio_core.h" // RADIO register map + HFXO + PHY presets
+#include "nrf54l_radio_arb.h"  // time-division arbiter (BLE vs 802.15.4)
 
 // --- TIMER10 (same register layout as the nRF52 TIMER) ---------------------
 #define TIMER_BASE 0x50085000
@@ -325,6 +326,7 @@ conn_disconnect(nrf54l_radio_t *nr, uint32_t now)
 
   nr->nr_ll_state = LL_IDLE;
   reg_wr(TIMER_BASE + TIMER_TASKS_STOP, 1);
+  nrf54l_radio_arb_release(); // connection gone: lend radio to 802.15.4
 }
 
 
@@ -689,6 +691,7 @@ conn_tx_done(nrf54l_radio_t *nr)
     reg_wr(RADIO_TASKS_RXEN, 1);
   } else {
     nr->nr_ll_state = LL_CONNECTED_IDLE;
+    nrf54l_radio_arb_release(); // idle until next anchor: lend radio to 802.15.4
   }
 }
 
@@ -719,6 +722,7 @@ conn_open_window(nrf54l_radio_t *nr)
     con->pending_chmask_valid = 0;
   }
 
+  nrf54l_radio_arb_acquire(); // take the radio from 802.15.4 for this event
   conn_hop(nr, con);
 
   nr->nr_ll_state = LL_CONNECTED_RX_1;
@@ -744,15 +748,16 @@ conn_close_window(nrf54l_radio_t *nr)
     con->window_open_offset = 1000;
     arm_timer3(con->next_anchor_point - con->window_open_offset);
     nr->nr_ll_state = LL_CONNECTED_IDLE;
+    nrf54l_radio_arb_release(); // idle until next anchor: lend radio to 802.15.4
   } else {
     conn_open_window(nr);
   }
 }
 
 
-// RADIO END interrupt (RADIO_0)
-void
-irq_138(void)
+// RADIO END interrupt, dispatched by the arbiter when BLE owns the radio.
+static void
+ble_radio_irq(void)
 {
   nrf54l_radio_t *nr = &g_radio;
 
@@ -908,8 +913,13 @@ buffers_avail(struct netif *ni)
 static void
 adv_start(nrf54l_radio_t *nr)
 {
+  nrf54l_radio_arb_acquire(); // take the radio from 802.15.4 for this burst
   radio_setup_for_adv(nr);
   memcpy(pbuf_data(nr->nr_pbuf, 0), nr->nr_adv_pkt, 2 + nr->nr_adv_pkt[1]);
+
+  // 802.15.4 left PACKETPTR pointing at its own RX buffer; point it back at
+  // the advertising PDU before transmitting.
+  reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
 
   reg_wr(TIMER_BASE + TIMER_TASKS_CLEAR, 1);
   reg_wr(TIMER_BASE + TIMER_TASKS_START, 1);
@@ -946,6 +956,7 @@ radio_slow_timer_cb(void *opaque, uint64_t now)
 
     nr->nr_ll_state = LL_IDLE;
     reg_wr(TIMER_BASE + TIMER_TASKS_STOP, 1);
+    nrf54l_radio_arb_release(); // adv burst done: lend radio to 802.15.4
     break;
 
   default:
@@ -998,7 +1009,11 @@ nrf54l_radio_ble_init(const char *name)
 
   radio_timer_init(nr);
 
-  irq_enable(RADIO_IRQ, IRQ_LEVEL_NET);
+  // The radio interrupt is owned by the arbiter, which dispatches it to BLE
+  // while BLE holds the radio.
+  static const radio_client_t ble_client = { .irq = ble_radio_irq };
+  nrf54l_radio_arb_init();
+  nrf54l_radio_arb_set_ble(&ble_client);
 
   radio_init_ble();
 
