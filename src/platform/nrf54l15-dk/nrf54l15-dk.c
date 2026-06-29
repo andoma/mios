@@ -11,6 +11,7 @@
 
 #include "nrf54l_uart.h"
 #include "nrf54l_spi.h"
+#include "nrf54l_radio.h"
 
 // nRF54L15 DK onboard debugger virtual serial ports (HW User Guide v1.0),
 // both exposed as host ACM ports:
@@ -50,6 +51,8 @@ board_init_late(void)
   stream_t *mcp = nrf54l_uart_init(UARTE30_BASE, SERIAL30_IRQ, 115200,
                                    GPIO_P0(0), GPIO_P0(1), 0);
   mcp_uart_create(mcp);
+
+  nrf54l_radio_ble_adv_init("mios-nrf54l");
 }
 
 
