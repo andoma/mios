@@ -3,6 +3,8 @@
 // how to configure it for each protocol, so a client can re-assert its PHY
 // after another client borrowed the radio.
 
+#include <mios/device.h>
+
 #include "nrf54l_reg.h"
 #include "nrf54l_radio_core.h"
 
@@ -11,6 +13,26 @@
 #define CLOCK_EVENTS_XOSTARTED (CLOCK_BASE + 0x100)
 
 static uint8_t hfxo_running;
+
+static const device_class_t radio_device_class = {
+  .dc_class_name = "radio",
+};
+
+static device_t radio_dev;
+static uint8_t radio_dev_registered;
+
+
+struct device *
+nrf54l_radio_parent(void)
+{
+  if(!radio_dev_registered) {
+    radio_dev.d_name = "radio";
+    radio_dev.d_class = &radio_device_class;
+    device_register(&radio_dev);
+    radio_dev_registered = 1;
+  }
+  return &radio_dev;
+}
 
 
 void

@@ -1022,6 +1022,7 @@ nrf54l_radio_ble_init(const char *name)
   nr->nr_slow_timer.t_name = "radio";
 
   netif_init(&nr->nr_bn, "ble", &nrf54l_ble_device_class);
+  nr->nr_bn.ni_dev.d_parent = nrf54l_radio_parent(); // child of the radio
   netif_attach(&nr->nr_bn);
   printf("BLE radio initialized (%02x:%02x:%02x:%02x:%02x:%02x)\n",
          nr->nr_addr[5], nr->nr_addr[4], nr->nr_addr[3],

@@ -136,8 +136,9 @@ nrf54l_154_init(void)
 {
   nrf54l_radio_arb_set_background(&client);
 
-  ieee154_dev.d_name = "154";
+  ieee154_dev.d_name = "ieee802154";
   ieee154_dev.d_class = &ieee154_device_class;
+  ieee154_dev.d_parent = nrf54l_radio_parent();
   device_register(&ieee154_dev);
 
   printf("802.15.4 background RX on ch %d\n", CH154);
