@@ -27,49 +27,7 @@
 #include <stdio.h>
 
 #include "irq.h"
-
-// --- HFXO ------------------------------------------------------------------
-#define CLOCK_BASE             0x5010e000
-#define CLOCK_TASKS_XOSTART    (CLOCK_BASE + 0x000)
-#define CLOCK_EVENTS_XOSTARTED (CLOCK_BASE + 0x100)
-
-// --- RADIO (modern Nordic radio IP) ----------------------------------------
-#define RADIO_BASE 0x5008a000
-
-#define RADIO_TASKS_TXEN      (RADIO_BASE + 0x000)
-#define RADIO_TASKS_RXEN      (RADIO_BASE + 0x004)
-#define RADIO_TASKS_DISABLE   (RADIO_BASE + 0x010)
-#define RADIO_SUBSCRIBE_TXEN  (RADIO_BASE + 0x100)
-#define RADIO_EVENTS_ADDRESS  (RADIO_BASE + 0x20c)
-#define RADIO_EVENTS_END      (RADIO_BASE + 0x218)
-#define RADIO_EVENTS_DISABLED (RADIO_BASE + 0x220)
-#define RADIO_EVENTS_CRCOK    (RADIO_BASE + 0x22c)
-#define RADIO_PUBLISH_ADDRESS (RADIO_BASE + 0x30c)
-#define RADIO_PUBLISH_END     (RADIO_BASE + 0x318)
-#define RADIO_SHORTS          (RADIO_BASE + 0x400)
-#define RADIO_INTENSET00      (RADIO_BASE + 0x488)
-#define RADIO_MODE            (RADIO_BASE + 0x500)
-#define RADIO_DATAWHITE       (RADIO_BASE + 0x540)
-#define RADIO_FREQUENCY       (RADIO_BASE + 0x708)
-#define RADIO_TXPOWER         (RADIO_BASE + 0x710)
-#define RADIO_RSSISAMPLE      (RADIO_BASE + 0x718)
-#define RADIO_CRCSTATUS       (RADIO_BASE + 0xe0c)
-#define RADIO_PCNF0           (RADIO_BASE + 0xe20)
-#define RADIO_PCNF1           (RADIO_BASE + 0xe28)
-#define RADIO_BASE0           (RADIO_BASE + 0xe2c)
-#define RADIO_PREFIX0         (RADIO_BASE + 0xe34)
-#define RADIO_TXADDRESS       (RADIO_BASE + 0xe3c)
-#define RADIO_RXADDRESSES     (RADIO_BASE + 0xe40)
-#define RADIO_CRCCNF          (RADIO_BASE + 0xe44)
-#define RADIO_CRCPOLY         (RADIO_BASE + 0xe48)
-#define RADIO_CRCINIT         (RADIO_BASE + 0xe4c)
-#define RADIO_PACKETPTR       (RADIO_BASE + 0xed0)
-
-#define RADIO_IRQ             138 // RADIO_0
-
-#define RADIO_SHORT_READY_START   (1 << 0)
-#define RADIO_SHORT_PHYEND_DISABLE (1 << 19) // the new radio has no END_DISABLE
-#define RADIO_INT_END             (1 << 6)   // INTENSET00.END
+#include "nrf54l_radio_core.h" // RADIO register map + HFXO + PHY presets
 
 // --- TIMER10 (same register layout as the nRF52 TIMER) ---------------------
 #define TIMER_BASE 0x50085000
@@ -251,40 +209,9 @@ select_channel(int channel, uint32_t crc_init, uint32_t access_addr)
 static void
 radio_init_ble(void)
 {
-  reg_wr(RADIO_MODE, 3); // 1Mbit/s BLE
-  reg_wr(RADIO_CRCPOLY, 0x65b);
-  reg_wr(RADIO_CRCCNF,
-         (1 << 8) | // Skip Address in CRC
-         (3 << 0)); // 3 byte CRC
-
-  reg_wr(RADIO_RXADDRESSES, 0x1); // logical address 0
-  reg_wr(RADIO_TXADDRESS, 0);
-
-  const int lflen = 8;
-  const int s0len = 1;
-  const int s1len = 0;
-
-  reg_wr(RADIO_PCNF0,
-         (lflen << 0)  | // Length of LEN in bits
-         (s0len << 8)  | // Length of S0 in bytes
-         (s1len << 16) | // Length of S1 in bytes
-         0);
-
-  const int maxlen = LLMTU;
-  const int statlen = 0;
-  reg_wr(RADIO_PCNF1,
-         (maxlen << 0) |
-         (statlen << 8) |
-         (3 << 16) | // balen = 4 (3 + 1)
-         (1 << 25)); // Enable whitening
-
-  reg_wr(RADIO_INTENSET00, RADIO_INT_END);
-
-  reg_wr(RADIO_SHORTS,
-         RADIO_SHORT_READY_START |
-         RADIO_SHORT_PHYEND_DISABLE);
-
-  reg_wr(RADIO_TXPOWER, 0x18); // 0 dBm
+  // The BLE PHY preset now lives in radio-core so the radio can be re-asserted
+  // for BLE after another protocol (15.4) has borrowed it.
+  nrf54l_radio_use_ble();
 }
 
 
@@ -1067,9 +994,7 @@ nrf54l_radio_ble_init(const char *name)
   nr->nr_announce_interval = 250000;
 
   // The radio needs the HFXO; keep it running while the stack is up.
-  reg_wr(CLOCK_EVENTS_XOSTARTED, 0);
-  reg_wr(CLOCK_TASKS_XOSTART, 1);
-  while(!reg_rd(CLOCK_EVENTS_XOSTARTED)) {}
+  nrf54l_hfxo_start();
 
   radio_timer_init(nr);
 
