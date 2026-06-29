@@ -14,10 +14,12 @@ SRCS += ${C}/entry-xip.s \
 	${P}/nrf54l.c \
 	${P}/nrf54l_uart.c \
 	${P}/nrf54l_gpio.c \
-	${P}/nrf54l_radio.c \
 	${P}/nrf54l_spi.c \
 	${P}/nrf54l_systim.c \
 	${P}/nrf54l_wdt.c \
 	${SRC}/shell/mcp_uart.c \
+
+SRCS-${ENABLE_NET_BLE} += \
+	${P}/nrf54l_radio.c \
 
 ${MOS}/platform/nrf54l/%.o : CFLAGS += ${NOFPU}

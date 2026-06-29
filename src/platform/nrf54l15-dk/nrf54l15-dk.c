@@ -52,7 +52,7 @@ board_init_late(void)
                                    GPIO_P0(0), GPIO_P0(1), 0);
   mcp_uart_create(mcp);
 
-  nrf54l_radio_ble_adv_init("mios-nrf54l");
+  nrf54l_radio_ble_init("mios-nrf54l");
 }
 
 

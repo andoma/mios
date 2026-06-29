@@ -13,3 +13,6 @@
 #define PBUF_DATA_SIZE 64
 
 #define PBUF_DEFAULT_COUNT 64
+
+// Software interrupts (used by the BLE radio driver to defer adv re-entry)
+#define NUM_SOFTIRQ 4

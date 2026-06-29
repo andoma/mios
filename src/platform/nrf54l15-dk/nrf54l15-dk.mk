@@ -7,6 +7,7 @@ GLOBALDEPS += ${B}/${BOARDNAME}.mk
 CPPFLAGS += -I${B} -include ${BOARDNAME}.h
 
 ENABLE_LITTLEFS := yes
+ENABLE_NET_BLE := yes
 
 include ${SRC}/platform/nrf54l/nrf54l.mk
 
