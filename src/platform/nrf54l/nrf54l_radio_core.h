@@ -52,13 +52,6 @@
 
 #define RADIO_INT_END               (1 << 6) // INTENSET00.END
 
-struct device;
-
-// The single physical radio, registered as one device. The BLE and 802.15.4
-// clients parent their devices to it so 'dev' shows them as children. Lazily
-// registered on first call.
-struct device *nrf54l_radio_parent(void);
-
 // Start the HFXO (the radio needs the crystal for an accurate carrier). Safe to
 // call more than once.
 void nrf54l_hfxo_start(void);

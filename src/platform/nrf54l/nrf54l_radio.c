@@ -29,6 +29,7 @@
 #include "irq.h"
 #include "nrf54l_radio_core.h" // RADIO register map + HFXO + PHY presets
 #include "nrf54l_radio_arb.h"  // time-division arbiter (BLE vs 802.15.4)
+#include "nrf54l_154.h"        // 15.4 stats for the shared 'radio' device info
 
 // --- TIMER10 (same register layout as the nRF52 TIMER) ---------------------
 #define TIMER_BASE 0x50085000
@@ -756,8 +757,8 @@ conn_close_window(nrf54l_radio_t *nr)
 
 
 // RADIO END interrupt, dispatched by the arbiter when BLE owns the radio.
-static void
-ble_radio_irq(void)
+void
+nrf54l_ble_radio_irq(void)
 {
   nrf54l_radio_t *nr = &g_radio;
 
@@ -837,36 +838,36 @@ static void
 nrf54l_radio_print_info(struct device *dev, struct stream *st)
 {
   nrf54l_radio_t *nr = (nrf54l_radio_t *)dev;
-  stprintf(st, "Addr: %02x:%02x:%02x:%02x:%02x:%02x  State: %s\n",
+
+  stprintf(st, "BLE: %02x:%02x:%02x:%02x:%02x:%02x  State: %s\n",
            nr->nr_addr[5], nr->nr_addr[4], nr->nr_addr[3],
            nr->nr_addr[2], nr->nr_addr[1], nr->nr_addr[0],
            state2str[nr->nr_ll_state]);
 
-  if(nr->nr_ll_state < LL_CONNECTED_IDLE)
-    return;
+  if(nr->nr_ll_state >= LL_CONNECTED_IDLE) {
+    connection_t *con = &nr->nr_con;
 
-  connection_t *con = &nr->nr_con;
+    stprintf(st, "  Peer: %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d\n",
+             con->addr[5], con->addr[4], con->addr[3],
+             con->addr[2], con->addr[1], con->addr[0], -con->rssi);
+    stprintf(st, "  interval: %d  timeout: %d\n",
+             con->connInterval, con->timeout);
+    stprintf(st, "  RX:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
+             con->stat.rx, con->stat.rx_bad_seq, con->stat.rx_silent,
+             con->stat.rx_crc, con->stat.rx_qdrops);
+    stprintf(st, "  TX:%d  Retransmissions:%d  Qdepth:%d\n",
+             con->stat.tx, con->stat.tx_retransmissions,
+             con->l2c.l2c_tx_queue_len);
+    l2cap_print(&con->l2c, st);
+  }
 
-  stprintf(st, "Peer: %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d\n",
-           con->addr[5], con->addr[4], con->addr[3],
-           con->addr[2], con->addr[1], con->addr[0], -con->rssi);
-
-  stprintf(st, "windowSize: %d  interval: %d  timeout: %d\n",
-           con->transmitWindowSize, con->connInterval, con->timeout);
-
-  stprintf(st, "RX frames:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
-           con->stat.rx, con->stat.rx_bad_seq, con->stat.rx_silent,
-           con->stat.rx_crc, con->stat.rx_qdrops);
-  stprintf(st, "TX frames:%d  Retransmissions:%d Qdepth:%d\n",
-           con->stat.tx, con->stat.tx_retransmissions,
-           con->l2c.l2c_tx_queue_len);
-
-  l2cap_print(&con->l2c, st);
+  // The other half of the shared radio.
+  nrf54l_154_print(st);
 }
 
 
 static const device_class_t nrf54l_ble_device_class = {
-  .dc_class_name = "ble",
+  .dc_class_name = "radio",
   .dc_print_info = nrf54l_radio_print_info,
 };
 
@@ -1010,10 +1011,8 @@ nrf54l_radio_ble_init(const char *name)
   radio_timer_init(nr);
 
   // The radio interrupt is owned by the arbiter, which dispatches it to BLE
-  // while BLE holds the radio.
-  static const radio_client_t ble_client = { .irq = ble_radio_irq };
+  // (nrf54l_ble_radio_irq) while BLE holds the radio.
   nrf54l_radio_arb_init();
-  nrf54l_radio_arb_set_ble(&ble_client);
 
   radio_init_ble();
 
@@ -1021,8 +1020,7 @@ nrf54l_radio_ble_init(const char *name)
   nr->nr_slow_timer.t_opaque = nr;
   nr->nr_slow_timer.t_name = "radio";
 
-  netif_init(&nr->nr_bn, "ble", &nrf54l_ble_device_class);
-  nr->nr_bn.ni_dev.d_parent = nrf54l_radio_parent(); // child of the radio
+  netif_init(&nr->nr_bn, "radio", &nrf54l_ble_device_class);
   netif_attach(&nr->nr_bn);
   printf("BLE radio initialized (%02x:%02x:%02x:%02x:%02x:%02x)\n",
          nr->nr_addr[5], nr->nr_addr[4], nr->nr_addr[3],
