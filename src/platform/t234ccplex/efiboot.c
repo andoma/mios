@@ -839,7 +839,8 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   // size; never allocate less than we copy or the memcpy corrupts the heap.
   if(memsiz < size)
     memsiz = size;
-  uint64_t paddr = pmem_alloc(&tegra_pmem, memsiz + 16 * 1024 * 1024,
+  size_t allocsiz = memsiz + 16 * 1024 * 1024;
+  uint64_t paddr = pmem_alloc(&tegra_pmem, allocsiz,
                               T234_PMEM_CONVENTIONAL, T234_PMEM_LOADER,
                               kalign);
   if(paddr == 0) {
@@ -854,6 +855,12 @@ efi_exec(const void *bin, size_t size, const char *cmdline)
   printf("cmdline: %s\n", cmdline);
   set_cmdline(&h->loaded_image, cmdline);
 
+  // Zero the whole allocation before copying the on-disk sections. A real PE
+  // (the EFI zboot kernel, vmlinuz.efi) keeps its decompressor heap and globals
+  // in .bss, which has no on-disk bytes and must read as zero on entry; the
+  // flat copy below only brings in the mapped sections. The arm64 Image carries
+  // no .bss, so this is just headroom-clearing for it.
+  memset(h->loaded_image.image_base, 0, allocsiz);
   memcpy(h->loaded_image.image_base, bin, size);
 
   cache_op(h->loaded_image.image_base, size, ICACHE_FLUSH);
