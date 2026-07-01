@@ -217,7 +217,10 @@ alert_open(pushpull_t *pp)
   ap->ap_pp = pp;
   cond_init(&ap->ap_cond, "alert");
 
-  thread_create(alert_pub_thread, ap, 0, "alertpub", TASK_DETACHED, 5);
+  if(!thread_create(alert_pub_thread, ap, 0, "alertpub", TASK_DETACHED, 5)) {
+    free(ap);
+    return ERR_NO_MEMORY;
+  }
 
   mutex_lock(&alert_pub_mutex);
   LIST_INSERT_HEAD(&pubs, ap, ap_link);
