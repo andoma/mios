@@ -129,6 +129,14 @@ alert_pub_thread(void *arg)
       alert_pub_raise(ap, as);
     }
 
+    // If we were stopped while publishing, alert_pub_send() may have
+    // returned with a pbuf still pending in ap_pbuf (it bails on stop
+    // without the pbuf being consumed). Issuing another send here would
+    // trip the assert(ap->ap_pbuf == NULL) in alert_pub_send(). Break to
+    // the exit path instead, which frees any pending pbuf.
+    if(ap->ap_stop)
+      break;
+
     if(alert_pub_send_cmd(ap, ALERT_PUB_END))
       break;
   }
