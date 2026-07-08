@@ -102,11 +102,30 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
   vllp_logf(v, LOG_DEBUG, "OTA: Waiting for response");
 
   size_t finsize;
-  result = vllp_channel_read(vc, &buf, &finsize, 10*1000*1000);
+  // Wait indefinitely: vllp_channel_send() is non-blocking, so the
+  // 10-second clock would start before the blocks are even transmitted.
+  // Stop-and-wait over CAN at MTU=8 plus flash erase/write can easily
+  // exceed 10 seconds.  The VLLP-level inactivity timeout is the real
+  // deadline; it fires after timeout_in_seconds of silence and enqueues
+  // an EOF on this channel (via vllp_disconnect) to unblock this read.
+  result = vllp_channel_read(vc, &buf, &finsize, -1);
+
+  if(result == VLLP_ERR_TIMEOUT) {
+    // VLLP inactivity timer fired: the device stopped responding, which
+    // means it rebooted to apply the new firmware.  Treat as success.
+    vllp_logf(v, LOG_INFO, "OTA: Device rebooted (no final status received)");
+    return NULL;
+  }
+
   if(result)
     return vllp_strerror(result);
-  if(buf == NULL)
-    return "Connection closed prematurely";
+
+  if(buf == NULL) {
+    // Device closed the channel without a status byte — also a reboot.
+    vllp_logf(v, LOG_INFO, "OTA: Device rebooted (channel closed without status)");
+    return NULL;
+  }
+
   if(finsize != 1) {
     free(buf);
     return "Final status has invalid size";

@@ -302,6 +302,9 @@ vllp_disconnect(vllp_t *v, int error)
         vllp_channel_retain(vc, "disconnect-need-reconnect");
         continue;
       }
+      // Wake up any vllp_channel_read(-1) blocked on this channel so it
+      // does not wait forever now that the link has gone down.
+      channel_enq_rx_meta(vc, error, VLLP_PKT_EOF);
       break;
 
     case VLLP_CHANNEL_STATE_CLOSE_SENT:
