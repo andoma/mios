@@ -106,7 +106,6 @@ bt81x_rd32(bt81x_t *b, uint32_t addr)
 }
 
 
-
 static void
 bt81x_cmd(bt81x_t *b, uint8_t command, uint8_t param)
 {
@@ -788,6 +787,14 @@ bt81x_backlight(gfx_display_t *gd, uint8_t backlight)
 }
 
 
+uint32_t
+bt81x_touch_xy(gfx_display_t *gd)
+{
+  bt81x_t *b = (bt81x_t *)gd;
+  return bt81x_rd32(b, EVE_REG_CTOUCH_TOUCH0_XY);
+}
+
+
 /************************************************************************
  *
  * GUI draw primitives
@@ -1285,3 +1292,4 @@ cmd_gpu_info(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF("gpu_info", cmd_gpu_info);
 #endif
+
