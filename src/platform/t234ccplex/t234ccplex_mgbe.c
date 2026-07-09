@@ -1053,13 +1053,16 @@ mgbe_init(t234_mgbe_t *me, uint64_t mac_base, uint64_t xpcs_base,
 
   ether_netif_init(&me->me_eni, name, &mgbe_device_class);
 
-  /* Locally-administered MAC. TODO(hw): read from board EEPROM/fuse. */
-  me->me_eni.eni_addr[0] = 0x02;
-  me->me_eni.eni_addr[1] = 0x00;
-  me->me_eni.eni_addr[2] = 0x4d; /* 'M' */
-  me->me_eni.eni_addr[3] = 0x47; /* 'G' */
-  me->me_eni.eni_addr[4] = 0x42; /* 'B' */
-  me->me_eni.eni_addr[5] = 0x00;
+  /* Use the module's assigned MAC (index 0) from the CVM EEPROM. Fall back to a
+   * locally-administered address if the EEPROM has no customer block. */
+  if(t234_eeprom_mac_address(0, me->me_eni.eni_addr)) {
+    me->me_eni.eni_addr[0] = 0x02;
+    me->me_eni.eni_addr[1] = 0x00;
+    me->me_eni.eni_addr[2] = 0x4d; /* 'M' */
+    me->me_eni.eni_addr[3] = 0x47; /* 'G' */
+    me->me_eni.eni_addr[4] = 0x42; /* 'B' */
+    me->me_eni.eni_addr[5] = 0x00;
+  }
 
   /* Rings live in the Normal-NC heap (type NO_CACHE only). On t234ccplex
    * heaps are split by type and a request must be a subset of one heap's

@@ -250,6 +250,46 @@ sys_get_serial_number(void)
   return serial;
 }
 
+
+int
+t234_eeprom_mac_address(unsigned int index, unsigned char mac[6])
+{
+  const cpubl_params_v2_t *cbp =
+    (const void *)reg_rd64_unaligned(SCRATCH_BLINFO_LOCATION_REGISTER);
+  const uint8_t *cvm = cbp->eeprom.cvm;
+  const size_t size = sizeof(cbp->eeprom.cvm);
+
+  /*
+   * Locate the "NVCB" customer block. Within it the Ethernet MAC
+   * (StartingMACAddress) is 6 bytes at +0x16 stored least-significant-byte
+   * first, and the number of consecutive addresses the module owns is at +0x1c.
+   */
+  for(size_t i = 0; i + 0x1d <= size; i++) {
+    if(cvm[i] != 'N' || cvm[i + 1] != 'V' ||
+       cvm[i + 2] != 'C' || cvm[i + 3] != 'B')
+      continue;
+
+    const uint8_t *p = cvm + i + 0x16;
+    if(index >= cvm[i + 0x1c])
+      return -1;
+
+    uint64_t addr = 0;
+    for(int b = 0; b < 6; b++)
+      addr = (addr << 8) | p[5 - b];
+    addr += index;
+
+    for(int b = 0; b < 6; b++)
+      mac[b] = (addr >> (40 - 8 * b)) & 0xff;
+
+    /* Reject a multicast or all-zero result. */
+    if((mac[0] & 1) ||
+       (mac[0] | mac[1] | mac[2] | mac[3] | mac[4] | mac[5]) == 0)
+      return -1;
+    return 0;
+  }
+  return -1;
+}
+
 static const char pmemtypestr[] =
   "???\0"
   "Conventional\0"

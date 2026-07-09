@@ -145,6 +145,24 @@ fdt_init(void)
     fdt_set_property(&fdt, key, "serial-number", sn.data, sn.len);
   }
 
+  // Inject the MGBE MAC (from the module CVM EEPROM) into
+  // /chosen/nvidia,ether-mac0 as an "xx:xx:xx:xx:xx:xx" string, the way UEFI
+  // would; nvethernet reads it from there. Fall back to the same
+  // locally-administered address the cpubl MGBE driver uses if the EEPROM has
+  // no customer block.
+  unsigned char mac[6];
+  if(t234_eeprom_mac_address(0, mac)) {
+    static const unsigned char fallback[6] = {0x02, 0x00, 0x4d, 0x47, 0x42, 0x00};
+    memcpy(mac, fallback, sizeof(mac));
+  }
+  char macstr[18];
+  snprintf(macstr, sizeof(macstr), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  key = fdt_find_next_node(&fdt, 0, "/chosen", NULL);
+  if(key) {
+    fdt_set_property(&fdt, key, "nvidia,ether-mac0", macstr, strlen(macstr) + 1);
+  }
+
   FDT = fdt.buffer;
 }
 
