@@ -112,7 +112,15 @@ sc_vllp_close(void *opaque, const char *reason)
   if(scv->sc->state == SIGCAPTURE_STATE_READOUT)
     sigcapture_reset(scv->sc);
 
-  scv->pp = NULL;
+  // Complete the close handshake: signal the network side so it sends
+  // the close-response and destroys the channel. Without this the peer's
+  // close-and-wait never completes (the host hung in its channel
+  // destructor) and the channel object leaks on our side.
+  if(scv->pp != NULL) {
+    pushpull_t *pp = scv->pp;
+    scv->pp = NULL;
+    pp->net->event(pp->net_opaque, PUSHPULL_EVENT_CLOSE);
+  }
 }
 
 
