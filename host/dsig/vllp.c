@@ -1464,8 +1464,30 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
   }
 
   if(wait) {
-    while(vc->state != VLLP_CHANNEL_STATE_CLOSED) {
-      pthread_cond_wait(&vc->state_cond, &v->mutex);
+    // Bounded wait: a peer that never sends the close-response (reset or
+    // wedged MCU) must not hang the caller forever -- this is a destructor
+    // path on the host. On timeout, force the close locally: mirror the
+    // close-response bookkeeping (state, id pool, unlink) so no further
+    // rx/eof dispatch can reach the channel and the id is not leaked.
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += 3;
+    int timed_out = 0;
+    while(vc->state != VLLP_CHANNEL_STATE_CLOSED && !timed_out) {
+      if(pthread_cond_timedwait(&vc->state_cond, &v->mutex, &deadline) ==
+         ETIMEDOUT)
+        timed_out = 1;
+    }
+    if(vc->state != VLLP_CHANNEL_STATE_CLOSED) {
+      fprintf(stderr,
+              "vllp: channel %d: no close-response from peer, "
+              "forcing local close\n",
+              vc->id);
+      vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
+      if(is_client(v))
+        v->available_channel_ids |= (1 << vc->id);
+      LIST_REMOVE(vc, link);
+      vllp_channel_release(vc, "close-timeout");
     }
   }
 
