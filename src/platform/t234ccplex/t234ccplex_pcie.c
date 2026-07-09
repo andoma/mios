@@ -329,7 +329,10 @@ pci_device_probe(pci_dev_t *pd, uint64_t mem_base)
 
       b++;
     } else {
-      panic("32bit BAR not implemented");
+      // 32bit memory BAR. The cpubl has no need to access devices that use
+      // them, and the kernel assigns BARs itself, so leave it unmapped.
+      evlog(LOG_WARNING, "%s: BAR%d is a 32bit BAR; leaving it unmapped",
+            pd->pd_dev.d_name, b);
     }
   }
 
