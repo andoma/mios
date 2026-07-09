@@ -554,10 +554,38 @@ mgbe_print_info(struct device *dev, struct stream *st)
   ether_print((ether_netif_t *)dev, st);
 }
 
+/*
+ * Quiesce MGBE before the cpubl hands control to the kernel (device_shutdown()
+ * in efiboot.c). We ran the DMA engine for netboot with descriptors pointing at
+ * cpubl memory; once the kernel reclaims those pages a still-running MGBE would
+ * DMA into them and corrupt the kernel (seen as mgbeawr MC VPR/route-sanity
+ * violations + a random early-boot oops). Stop RX/TX at both the MAC and the
+ * DMA channel and mask the interrupt so the block is idle at handoff; the
+ * kernel's nvethernet driver resets and reinitialises it from scratch.
+ */
+static error_t
+mgbe_shutdown(struct device *dev)
+{
+  t234_mgbe_t *me = (t234_mgbe_t *)dev;
+  const int ch = MGBE_CHAN;
+
+  mac_wr(me, MGBE_MAC_RMCR, mac_rd(me, MGBE_MAC_RMCR) & ~MGBE_MAC_RMCR_RE);
+  mac_wr(me, MGBE_MAC_TMCR, mac_rd(me, MGBE_MAC_TMCR) & ~MGBE_MAC_TMCR_TE);
+  mac_wr(me, MGBE_DMA_CHX_RX_CTRL(ch),
+         mac_rd(me, MGBE_DMA_CHX_RX_CTRL(ch)) & ~MGBE_DMA_CHX_RX_CTRL_SR);
+  mac_wr(me, MGBE_DMA_CHX_TX_CTRL(ch),
+         mac_rd(me, MGBE_DMA_CHX_TX_CTRL(ch)) & ~MGBE_DMA_CHX_TX_CTRL_ST);
+  mac_wr(me, MGBE_DMA_CHX_INTR_ENA(ch), 0);
+  mac_wr(me, MGBE_VIRT_INTR_CHX_CNTRL(ch), 0);
+  asm volatile("dsb sy");
+  return 0;
+}
+
 static const ethmac_device_class_t mgbe_device_class = {
   .dc = {
     .dc_class_name = MAC_NAME,
     .dc_print_info = mgbe_print_info,
+    .dc_shutdown = mgbe_shutdown,
   },
   .edc_mii_read = edc_mii_read,
   .edc_mii_write = edc_mii_write,
