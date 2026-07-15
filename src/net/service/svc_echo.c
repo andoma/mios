@@ -114,6 +114,7 @@ static const service_t svc_echo
 __attribute__ ((used, section("servicedef"))) = {
   .name = "echo",
   .ip_port = 7,
+  .ble_psm = 7, // reachable over BLE L2CAP CoC at PSM 0x87
   .open_stream = echo_open_stream,
   .open_pushpull = echo_open_pushpull,
 };
