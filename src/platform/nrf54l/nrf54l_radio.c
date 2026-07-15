@@ -156,6 +156,8 @@ typedef struct nrf54l_radio {
 
   uint32_t nr_announce_interval;
 
+  uint8_t nr_adv_chans_left; // channels remaining in the current adv event
+
   uint8_t nr_addr[6];
 
   uint8_t nr_adv_pkt[2 + 6 + 31];
@@ -177,11 +179,16 @@ build_adv_pkt(nrf54l_radio_t *nr, const char *name)
 
   uint8_t *p = nr->nr_adv_pkt;
   p[0] = ADV_IND | ADV_TXADD; // Random address
-  p[1] = 6 + namelen + 2;
+  p[1] = 6 + 3 + namelen + 2;
   memcpy(p + 2, nr->nr_addr, 6);
-  p[8] = namelen + 1;
-  p[9] = 9; // Complete Local Name
-  memcpy(p + 10, name, namelen);
+  // Flags AD is mandatory for hosts to treat us as discoverable: BlueZ hides
+  // devices that advertise without it (iOS scanners do not care).
+  p[8] = 2;
+  p[9] = 1;    // Flags
+  p[10] = 6;   // LE General Discoverable, BR/EDR not supported
+  p[11] = namelen + 1;
+  p[12] = 9;   // Complete Local Name
+  memcpy(p + 13, name, namelen);
 }
 
 
@@ -908,13 +915,12 @@ buffers_avail(struct netif *ni)
 }
 
 
-// Begin one advertising burst: HFXO is already running, so set up the channel,
-// fire the radio, and arm the slow timer to close the burst (this is the work
-// the nRF52 driver deferred to its xtal-ready callback).
+// Transmit the advertising PDU on the next channel of the current event and
+// listen briefly for a CONNECT_IND / scan request. HFXO is already running.
 static void
 adv_start(nrf54l_radio_t *nr)
 {
-  nrf54l_radio_arb_acquire(); // take the radio from 802.15.4 for this burst
+  nrf54l_radio_arb_acquire(); // take the radio from 802.15.4 for this event
   radio_setup_for_adv(nr);
   memcpy(pbuf_data(nr->nr_pbuf, 0), nr->nr_adv_pkt, 2 + nr->nr_adv_pkt[1]);
 
@@ -927,7 +933,7 @@ adv_start(nrf54l_radio_t *nr)
 
   reg_wr(RADIO_TASKS_TXEN, 1);
   nr->nr_ll_state = LL_ADV_TX;
-  timer_arm_abs(&nr->nr_slow_timer, clock_get_irq_blocked() + 4000);
+  timer_arm_abs(&nr->nr_slow_timer, clock_get_irq_blocked() + 2000);
 }
 
 
@@ -940,13 +946,28 @@ radio_slow_timer_cb(void *opaque, uint64_t now)
   switch(nr->nr_ll_state) {
 
   case LL_IDLE:
-    if(nr->nr_pbuf)
+    if(nr->nr_pbuf) {
+      // A proper advertising event sends the PDU on all three advertising
+      // channels back-to-back; scanners rotate their listening channel and
+      // are much slower to find a device that hits one channel per event.
+      nr->nr_adv_chans_left = 3;
       adv_start(nr);
+    }
     break;
 
   case LL_ADV_TX:
   case LL_ADV_RX:
+    reg_wr(RADIO_EVENTS_DISABLED, 0);
     reg_wr(RADIO_TASKS_DISABLE, 1);
+
+    if(--nr->nr_adv_chans_left > 0) {
+      // Next channel of the same advertising event. Bounded wait: if the
+      // radio had already auto-disabled (PHYEND_DISABLE short) the event may
+      // never fire, and this runs at IRQ level.
+      for(int i = 0; i < 1000 && !reg_rd(RADIO_EVENTS_DISABLED); i++) {}
+      adv_start(nr);
+      break;
+    }
 
     if(nr->nr_announce_interval < 500000)
       nr->nr_announce_interval += 100;
@@ -957,7 +978,7 @@ radio_slow_timer_cb(void *opaque, uint64_t now)
 
     nr->nr_ll_state = LL_IDLE;
     reg_wr(TIMER_BASE + TIMER_TASKS_STOP, 1);
-    nrf54l_radio_arb_release(); // adv burst done: lend radio to 802.15.4
+    nrf54l_radio_arb_release(); // adv event done: lend radio to 802.15.4
     break;
 
   default:
@@ -1026,3 +1047,4 @@ nrf54l_radio_ble_init(const char *name)
          nr->nr_addr[5], nr->nr_addr[4], nr->nr_addr[3],
          nr->nr_addr[2], nr->nr_addr[1], nr->nr_addr[0]);
 }
+

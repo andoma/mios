@@ -7,12 +7,19 @@
 #define FICR_BASE        0x00ffc000
 #define FICR_TRIMCNF     (FICR_BASE + 0x400) // 64 x {ADDR, DATA}
 #define FICR_TRIMCNF_CNT 64
+#define FICR_XOSC32MTRIM (FICR_BASE + 0x620) // SLOPE[8:0] (s9), OFFSET[22:13]
 
 // OSCILLATORS (secure)
 #define OSC_BASE         0x50120000
+#define OSC_XOSC32M_INTCAP (OSC_BASE + 0x71c)
 #define OSC_PLL_FREQ     (OSC_BASE + 0x800)
 #define OSC_PLL_FREQ_CK128M 1
 #define OSC_PLL_FREQ_CK64M  3
+
+// HFXO internal load capacitance in quarter-pF units. The nRF54L15-DK's
+// 32 MHz crystal expects CL = 15.0 pF from the chip-internal capacitors.
+// Boards using external capacitors should define this to 0.
+#define HFXO_INTCAP_QUARTER_PF (15 * 4)
 
 // RAM is 256 kB, contiguous from 0x20000000
 #define RAM_END          0x20040000
@@ -72,6 +79,20 @@ nrf54l_soc_init(void)
   // Engineering-sample device configuration (from SystemInit)
   if(reg_rd(0x50120440) == 0)
     reg_wr(0x50120440, 0xc8);
+
+  // Program the HFXO internal load capacitors (must happen before XOSTART).
+  // An unloaded crystal runs tens of ppm off-nominal, which shifts the
+  // 2.4 GHz carrier enough that some BLE receivers reject our packets.
+  // Datasheet 5.5.1: INTCAP = ((C-5.5pF)*(SLOPE+791) + OFFSET*4) / 256, with
+  // SLOPE/OFFSET factory trims from FICR->XOSC32MTRIM.
+  if(HFXO_INTCAP_QUARTER_PF) {
+    uint32_t trim = reg_rd(FICR_XOSC32MTRIM);
+    int32_t slope = ((int32_t)(trim << 23)) >> 23; // [8:0] two's complement
+    uint32_t offset = (trim >> 13) & 0x3ff;        // [22:13]
+    uint32_t intcap =
+      ((HFXO_INTCAP_QUARTER_PF - 22) * (slope + 791) + offset * 16) / 1024;
+    reg_wr(OSC_XOSC32M_INTCAP, intcap);
+  }
 
   // Set MCU power domain (CPU) clock to 128 MHz
   reg_wr(OSC_PLL_FREQ, OSC_PLL_FREQ_CK128M);
