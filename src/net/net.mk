@@ -29,7 +29,6 @@ endif
 SRCS-${ENABLE_NET_DSIG} += \
 	${SRC}/net/dsig.c \
 	${SRC}/net/vllp.c \
-	${SRC}/net/pushpull.c \
 
 SRCS-${ENABLE_NET_DSIG_UDP} += \
 	${SRC}/net/dsig_udp.c \
@@ -85,6 +84,7 @@ SRCS-${ENABLE_NET} += \
 	${SRC}/net/net_core.c \
 
 SRCS-${ENABLE_NET_STACK} += \
+	${SRC}/net/pushpull.c \
 	${SRC}/net/service.c \
 	${SRC}/net/net_log.c \
 	${SRC}/net/service/svc_echo.c \

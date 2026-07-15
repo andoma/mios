@@ -29,4 +29,9 @@ shell_open(stream_t *s)
   return 0;
 }
 
-SERVICE_DEF_STREAM("shell", 0, shell_open);
+static const service_t svc_shell
+__attribute__ ((used, section("servicedef"))) = {
+  .name = "shell",
+  .ble_psm = 23, // BLE L2CAP CoC: PSM 0x97 (packet) / 0xd7 (stream reframing)
+  .open_stream = shell_open,
+};

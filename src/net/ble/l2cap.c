@@ -462,7 +462,9 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   lc->lc_pushpull.net_opaque = lc;
   lc->lc_pushpull.net = &l2cap_fns;
 
-  if(s->open_pushpull(&lc->lc_pushpull)) {
+  // service_open_pushpull() also bridges stream-only services (e.g. shell)
+  // onto the pushpull interface.
+  if(service_open_pushpull(s, &lc->lc_pushpull)) {
     free(lc);
     return handle_le_credit_based_connection_fail(l2c, pb, "Unable to setup",
                                                   L2CAP_CON_NO_RESOURCES);
