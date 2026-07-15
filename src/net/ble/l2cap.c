@@ -487,6 +487,11 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   lc->lc_credit_threshold = 2;
   lc->lc_local_credits = rsp->initial_credits;
 
+  // Start the TX pump: the peer's initial credits arrive in the connection
+  // request itself, so a pure-source service (nothing to receive, no app
+  // events) would otherwise never get pulled.
+  net_task_raise(&lc->lc_task, PUSHPULL_EVENT_PULL);
+
   return l2cap_output(l2c, pb, L2CAP_CID_LE_SIGNALING);
 }
 
