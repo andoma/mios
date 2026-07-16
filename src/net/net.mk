@@ -18,7 +18,7 @@ ENABLE_NET_STACK := $(findstring yes,\
 	${ENABLE_NET_IPV4})
 
 ENABLE_NET_ETHER := $(call OR, ${ENABLE_NET_IPV4})
-ENABLE_NET_DSIG := $(call OR, ${ENABLE_NET_MBUS} ${ENABLE_NET_CAN} ${ENABLE_NET_DSIG_UDP})
+ENABLE_NET_DSIG := $(call OR, ${ENABLE_NET_DSIG} ${ENABLE_NET_MBUS} ${ENABLE_NET_CAN} ${ENABLE_NET_DSIG_UDP})
 
 ifeq (${ENABLE_NET_DSIG_UDP},yes)
 ifneq (${ENABLE_NET_IPV4},yes)
@@ -79,6 +79,11 @@ SRCS-${ENABLE_NET_MBUS_GW} += \
 
 SRCS-${ENABLE_NET_BLE} += \
 	${SRC}/net/ble/l2cap.c
+
+# dsig endpoint over a BLE CoC channel (the "dsig" named service)
+ifeq (${ENABLE_NET_BLE}${ENABLE_NET_DSIG},yesyes)
+SRCS += ${SRC}/net/ble/ble_dsig.c
+endif
 
 SRCS-${ENABLE_NET} += \
 	${SRC}/net/net_core.c \

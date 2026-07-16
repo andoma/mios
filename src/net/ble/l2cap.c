@@ -467,8 +467,13 @@ broker_push(void *opaque, struct pbuf *pb)
     status = L2CAP_NAMED_STATUS_NO_ROUTE; // VLLP forwarding not yet built
   } else if((s = service_find_by_namelen(name, len)) == NULL) {
     status = L2CAP_NAMED_STATUS_NOT_FOUND;
+  } else if(service_open_pushpull(s, &lc->lc_pushpull)) {
+    // The service TX pump is only kicked after the status byte below, so
+    // opening before answering cannot reorder service output ahead of it.
+    status = L2CAP_NAMED_STATUS_NO_RESOURCES;
   } else {
     status = L2CAP_NAMED_STATUS_OK;
+    lc->lc_name = s->name;
   }
 
   evlog(LOG_INFO, "l2cap: Open \"%.*s\" -- %s",
@@ -478,12 +483,6 @@ broker_push(void *opaque, struct pbuf *pb)
   broker_send_status(lc, status);
 
   if(status == L2CAP_NAMED_STATUS_OK) {
-    if(service_open_pushpull(s, &lc->lc_pushpull)) {
-      // Too late to change the already-sent status; just drop the channel
-      net_task_raise(&lc->lc_task, PUSHPULL_EVENT_CLOSE);
-      return 0;
-    }
-    lc->lc_name = s->name;
     // Start the service's TX pump
     net_task_raise(&lc->lc_task, PUSHPULL_EVENT_PULL);
   }
