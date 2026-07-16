@@ -40,6 +40,7 @@ typedef struct svc_ota {
   pbuf_t *sa_info;
   uint8_t sa_blocksize;
   uint8_t sa_shutdown;
+  uint8_t sa_rebooting;
   uint8_t sa_skipped_kbytes;
 
   thread_t *sa_thread;
@@ -194,6 +195,24 @@ ota_perform(svc_ota_t *sa)
   ota_send_final_status(sa, 0);
   evlog(LOG_NOTICE, "OTA: Transfer OK");
   printf("\n\t*** Reboot to OTA\n");
+
+  // Close the channel properly so the peer is not left waiting for a
+  // close-response that never comes. The close must not be requested
+  // until the status byte has been pulled into the tx path: an
+  // app-closed channel stops pulling app data, which would drop the
+  // status. Bounded wait: the reboot must not hinge on the peer.
+  // sa_rebooting makes ota_close() a no-op: it normally joins this
+  // thread, which never exits on this path — the join would freeze the
+  // net thread mid-rx and block the close from ever being sent.
+  const uint64_t deadline = clock_get() + 100000;
+  mutex_lock(&sa->sa_mutex);
+  sa->sa_rebooting = 1;
+  while(sa->sa_info != NULL) {
+    if(cond_wait_timeout(&sa->sa_cond, &sa->sa_mutex, deadline))
+      break;
+  }
+  mutex_unlock(&sa->sa_mutex);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
   usleep(100000);
 
   irq_forbid(IRQ_LEVEL_ALL);
@@ -220,8 +239,11 @@ static struct pbuf *
 ota_pull(void *opaque)
 {
   svc_ota_t *sa = opaque;
+  mutex_lock(&sa->sa_mutex);
   pbuf_t *pb = sa->sa_info;
   sa->sa_info = NULL;
+  cond_signal(&sa->sa_cond);
+  mutex_unlock(&sa->sa_mutex);
   return pb;
 }
 
@@ -279,8 +301,15 @@ ota_close(void *opaque, const char *reason)
 
   mutex_lock(&sa->sa_mutex);
   sa->sa_shutdown = 1;
+  int rebooting = sa->sa_rebooting;
   cond_signal(&sa->sa_cond);
   mutex_unlock(&sa->sa_mutex);
+
+  // Upgrade accepted, reboot imminent: sa_thread never exits, so the
+  // join below would deadlock the net thread. Skip teardown (sa leaks
+  // for the ~100 ms that remain) so the close handshake can complete.
+  if(rebooting)
+    return;
 
   if(sa->sa_thread)
     thread_join(sa->sa_thread);
