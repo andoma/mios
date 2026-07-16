@@ -54,7 +54,7 @@ nrf54l_radio_use_ble(void)
 
   reg_wr(RADIO_INTENSET00, RADIO_INT_END);
   reg_wr(RADIO_SHORTS, RADIO_SHORT_READY_START | RADIO_SHORT_PHYEND_DISABLE);
-  reg_wr(RADIO_TXPOWER, 0x3f); // +8 dBm
+  reg_wr(RADIO_TXPOWER, 0x18); // 0 dBm (higher settings may need extra PA/regulator config)
 }
 
 
