@@ -422,6 +422,106 @@ static const pushpull_net_fn_t l2cap_fns = {
 };
 
 
+// --- Named service broker ---------------------------------------------------
+// Connections to PSM id 0x3f (0xBF packet flavor, 0xFF stream flavor) select
+// the service by name instead of by PSM: the first SDU on the channel is the
+// service name, answered with a single status byte before the channel is
+// spliced to the service. "name@node" is reserved for forwarding the session
+// over VLLP to another node.
+
+#define L2CAP_NAMED_PSM_ID 0x3f
+
+#define L2CAP_NAMED_STATUS_OK           0
+#define L2CAP_NAMED_STATUS_NOT_FOUND    1
+#define L2CAP_NAMED_STATUS_NO_RESOURCES 2
+#define L2CAP_NAMED_STATUS_NO_ROUTE     3 // @node forwarding not available
+
+static void
+broker_send_status(l2cap_connection_t *lc, uint8_t status)
+{
+  pbuf_t *pb = pbuf_make(lc->lc_pushpull.preferred_offset, 0);
+  if(pb == NULL)
+    return;
+  uint8_t *b = pbuf_append(pb, 1);
+  *b = status;
+  con_output(lc, pb);
+}
+
+
+static uint32_t
+broker_push(void *opaque, struct pbuf *pb)
+{
+  l2cap_connection_t *lc = opaque;
+
+  const char *name = pbuf_cdata(pb, 0);
+  const size_t len = pb->pb_pktlen;
+  uint8_t status;
+  const service_t *s = NULL;
+  int remote = 0;
+
+  for(size_t i = 0; i < len; i++)
+    if(name[i] == '@')
+      remote = 1;
+
+  if(remote) {
+    status = L2CAP_NAMED_STATUS_NO_ROUTE; // VLLP forwarding not yet built
+  } else if((s = service_find_by_namelen(name, len)) == NULL) {
+    status = L2CAP_NAMED_STATUS_NOT_FOUND;
+  } else {
+    status = L2CAP_NAMED_STATUS_OK;
+  }
+
+  evlog(LOG_INFO, "l2cap: Open \"%.*s\" -- %s",
+        (int)len, name, status ? "failed" : "OK");
+  pbuf_free(pb);
+
+  broker_send_status(lc, status);
+
+  if(status == L2CAP_NAMED_STATUS_OK) {
+    if(service_open_pushpull(s, &lc->lc_pushpull)) {
+      // Too late to change the already-sent status; just drop the channel
+      net_task_raise(&lc->lc_task, PUSHPULL_EVENT_CLOSE);
+      return 0;
+    }
+    lc->lc_name = s->name;
+    // Start the service's TX pump
+    net_task_raise(&lc->lc_task, PUSHPULL_EVENT_PULL);
+  }
+  // On failure the channel stays in broker mode: closing here races the
+  // status SDU (the peer purges undelivered data on disconnect), and keeping
+  // it open lets the client retry with another name.
+  return 0;
+}
+
+
+static int
+broker_may_push(void *opaque)
+{
+  return 1;
+}
+
+
+static pbuf_t *
+broker_pull(void *opaque)
+{
+  return NULL;
+}
+
+
+static void
+broker_close(void *opaque, const char *reason)
+{
+}
+
+
+static const pushpull_app_fn_t broker_fns = {
+  .push = broker_push,
+  .may_push = broker_may_push,
+  .pull = broker_pull,
+  .close = broker_close,
+};
+
+
 static void
 handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
 {
@@ -432,11 +532,15 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   rsp->hdr.code = L2CAP_LE_CREDIT_BASED_CONNECTION_RSP;
 
   const service_t *s = NULL;
+  int named = 0;
   if(req->spsm > 0x80 && req->spsm < 0x100) {
-    s = service_find_by_ble_psm(req->spsm & 0x3f);
+    if((req->spsm & L2CAP_NAMED_PSM_ID) == L2CAP_NAMED_PSM_ID)
+      named = 1; // service selected by name in the first SDU
+    else
+      s = service_find_by_ble_psm(req->spsm & 0x3f);
   }
 
-  if(s == NULL) {
+  if(s == NULL && !named) {
     return handle_le_credit_based_connection_fail(l2c, pb, "No service",
                                                   L2CAP_CON_NO_PSM);
   }
@@ -462,21 +566,27 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   lc->lc_pushpull.net_opaque = lc;
   lc->lc_pushpull.net = &l2cap_fns;
 
-  // service_open_pushpull() also bridges stream-only services (e.g. shell)
-  // onto the pushpull interface.
-  if(service_open_pushpull(s, &lc->lc_pushpull)) {
+  if(named) {
+    // The service is selected by the first SDU; until then the broker app
+    // owns the channel.
+    lc->lc_pushpull.app = &broker_fns;
+    lc->lc_pushpull.app_opaque = lc;
+    lc->lc_name = "named";
+  } else if(service_open_pushpull(s, &lc->lc_pushpull)) {
+    // service_open_pushpull() also bridges stream-only services (e.g. shell)
+    // onto the pushpull interface.
     free(lc);
     return handle_le_credit_based_connection_fail(l2c, pb, "Unable to setup",
                                                   L2CAP_CON_NO_RESOURCES);
+  } else {
+    lc->lc_name = s->name;
   }
-
-  lc->lc_name = s->name;
 
   evlog(LOG_INFO,
         "l2cap: Connect [SPSM:0x%x CID:0x%x MTU:%d MPS:%d IC:%d]"
         " -- OK: %s",
         req->spsm, req->src_cid, req->mtu, req->mps, req->initial_credits,
-        s->name);
+        lc->lc_name);
 
 
   LIST_INSERT_HEAD(&l2c->l2c_connections, lc, lc_link);
