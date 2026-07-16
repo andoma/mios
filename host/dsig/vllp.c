@@ -1431,7 +1431,7 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
 
     int err = pthread_join(vc->rx_thread, NULL);
     if(err) {
-      fprintf(stderr, "vllp_channel_close -- %s\n", strerror(err));
+      vllp_logf(v, LOG_CRIT, "vllp_channel_close -- %s", strerror(err));
       abort();
     }
     pthread_mutex_lock(&v->mutex);
@@ -1482,10 +1482,10 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
         timed_out = 1;
     }
     if(vc->state != VLLP_CHANNEL_STATE_CLOSED) {
-      fprintf(stderr,
-              "vllp: channel %d: no close-response from peer, "
-              "forcing local close\n",
-              vc->id);
+      vllp_logf(v, LOG_WARNING,
+                "channel %d: no close-response from peer, "
+                "forcing local close",
+                vc->id);
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
       if(is_client(v))
         v->available_channel_ids |= (1 << vc->id);
