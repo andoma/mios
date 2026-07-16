@@ -13,7 +13,8 @@
 #include "vllp.h"
 
 static const char *
-vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
+vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc,
+            int *rebooting)
 {
   int result;
 
@@ -117,8 +118,10 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc)
 
   vllp_logf(v, LOG_DEBUG, "OTA: Got response, code:%d", fin);
 
-  if(fin == 0)
+  if(fin == 0) {
+    *rebooting = 1;
     return NULL;
+  }
 
   return vllp_strerror(-(int)fin);
 
@@ -130,8 +133,19 @@ vllp_ota(struct vllp *v, const char *elfpath)
 {
   vllp_channel_t *vc = vllp_channel_create(v, "ota", 0, NULL, NULL, NULL, NULL);
 
-  const char *errstr = vllp_do_ota(v, elfpath, vc);
+  int rebooting = 0;
+  const char *errstr = vllp_do_ota(v, elfpath, vc, &rebooting);
 
-  vllp_channel_close(vc, 0, 1);
+  if(rebooting) {
+    // The target reboots into the new image: newer firmware closes the
+    // channel on its way down, older firmware just vanishes. Don't
+    // block on the close handshake, but linger so the final ack and
+    // our CLOSE reach the wire (and the close-response can arrive)
+    // before the caller tears the link down.
+    vllp_channel_close(vc, 0, 0);
+    usleep(100000);
+  } else {
+    vllp_channel_close(vc, 0, 1);
+  }
   return errstr;
 }
