@@ -1,15 +1,48 @@
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <sys/param.h>
 
 #include <libusb.h>
 
 #include "mios_image.h"
+
+// All narration goes through dfu_logf(). Tools that embed this file (it is
+// written to be #included) can redirect it with dfu_set_logger(); levels
+// are syslog levels (LOG_ERR/LOG_WARNING/LOG_INFO/LOG_DEBUG). The default
+// prints to stdout, matching the CLI tools' historical output.
+
+typedef void (*dfu_log_fn_t)(void *opaque, int level, const char *msg);
+
+static dfu_log_fn_t dfu_log_fn;
+static void *dfu_log_fn_opaque;
+
+static void __attribute__((unused))
+dfu_set_logger(dfu_log_fn_t fn, void *opaque)
+{
+  dfu_log_fn = fn;
+  dfu_log_fn_opaque = opaque;
+}
+
+static void __attribute__((format(printf, 2, 3)))
+dfu_logf(int level, const char *fmt, ...)
+{
+  char buf[512];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  if(dfu_log_fn)
+    dfu_log_fn(dfu_log_fn_opaque, level, buf);
+  else
+    printf("%s\n", buf);
+}
 
 struct dfu_status {
   uint8_t bStatus;          // status code
@@ -135,7 +168,7 @@ hexdump(const char *pfx, const void *data_, int len)
     for(j = 0; j + i < len && j < 16; j++)
       buf[p++] = data[i+j] < 32 || data[i+j] > 126 ? '.' : data[i+j];
     buf[p] = 0;
-    printf("%s: %s\n", pfx, buf);
+    dfu_logf(LOG_DEBUG, "%s: %s", pfx, buf);
   }
 }
 
@@ -200,7 +233,7 @@ dfu_wait_while_busy(libusb_device_handle *h)
     if(st.bState == DFU_STATE_dfuDNBUSY)
       continue;
     if(st.bStatus != DFU_STATUS_OK) {
-      printf("DFU error: %s (state=%s)\n", dfu_status_str(st.bStatus), dfu_state_str(st.bState));
+      dfu_logf(LOG_ERR, "DFU error: %s (state=%s)", dfu_status_str(st.bStatus), dfu_state_str(st.bState));
       return -1;
     }
     return 0;
@@ -230,17 +263,17 @@ read_blocks(libusb_device_handle *h, uint32_t base_addr, uint8_t* out, size_t le
   size_t off = 0;
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
-    printf("failed to abort\n");
+    dfu_logf(LOG_ERR, "failed to abort");
     return -1;
   }
 
   if(set_address_pointer(h, base_addr) < 0) {
-    printf("set address pointer 0x%x failed\n", base_addr);
+    dfu_logf(LOG_ERR, "set address pointer 0x%x failed", base_addr);
     return -1;
   }
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
-    printf("failed to abort\n");
+    dfu_logf(LOG_ERR, "failed to abort");
     return -1;
   }
 
@@ -249,7 +282,7 @@ read_blocks(libusb_device_handle *h, uint32_t base_addr, uint8_t* out, size_t le
     int chunk = MIN(xfer_size, len - off);
     int r = ctrl_in(h, DFU_UPLOAD, block, out + off, chunk);
     if(r < 0) {
-      printf("DFU_UPLOAD failed %d\n", r);
+      dfu_logf(LOG_ERR, "DFU_UPLOAD failed %d", r);
       return r;
     }
     off += chunk;
@@ -297,8 +330,12 @@ write_blocks(libusb_device_handle *h, uint32_t base_addr, const uint8_t* data, s
           return -1;
         block = 2;
         need_set_address = 0;
-        printf("%sWrite to 0x%zx ", off ? "\n" : "", base_addr + off);
-        fflush(stdout);
+        if(dfu_log_fn) {
+          dfu_logf(LOG_INFO, "Write to 0x%zx", base_addr + off);
+        } else {
+          printf("%sWrite to 0x%zx ", off ? "\n" : "", base_addr + off);
+          fflush(stdout);
+        }
       }
 
       int r = ctrl_out(h, DFU_DNLOAD, (uint16_t)block, p, chunk);
@@ -306,12 +343,15 @@ write_blocks(libusb_device_handle *h, uint32_t base_addr, const uint8_t* data, s
         return r;
       dfu_wait_while_busy(h);
       block++;
-      printf(".");
-      fflush(stdout);
+      if(dfu_log_fn == NULL) {
+        printf(".");
+        fflush(stdout);
+      }
     }
     off += chunk;
   }
-  printf("\n");
+  if(dfu_log_fn == NULL)
+    printf("\n");
   return 0;
 }
 
@@ -354,7 +394,7 @@ get_dfu_interface_string(libusb_device_handle *h, char* out, size_t outlen,
   libusb_device* dev = libusb_get_device(h);
 
   if((r = libusb_get_active_config_descriptor(dev, &cfg)) != 0 || !cfg) {
-    printf("Unable to get active config descriptor\n");
+    dfu_logf(LOG_ERR, "Unable to get active config descriptor");
     return -1;
   }
 
@@ -398,7 +438,7 @@ get_dfu_interface_string(libusb_device_handle *h, char* out, size_t outlen,
     libusb_free_config_descriptor(cfg);
 
   if(idx <= 0) {
-    printf("No flash geometry config descriptor found\n");
+    dfu_logf(LOG_ERR, "No flash geometry config descriptor found");
     return -1;
   }
 
@@ -425,7 +465,7 @@ parse_geometry(libusb_device_handle *h, uint32_t *base,
   char geometry[256];
   if(get_dfu_interface_string(h, geometry, sizeof(geometry),
                               xfer_size)) {
-    printf("Unable to get flash geometry\n");
+    dfu_logf(LOG_ERR, "Unable to get flash geometry");
     return 0;
   }
 
@@ -479,7 +519,7 @@ parse_geometry(libusb_device_handle *h, uint32_t *base,
   return count;
 
  bad:
-  printf("Unable to parse flash geometry: %s\n", geometry);
+  dfu_logf(LOG_ERR, "Unable to parse flash geometry: %s", geometry);
   return 0;
 }
 
@@ -497,7 +537,7 @@ write_cmdline(libusb_device_handle *h, uint32_t addr, uint32_t maxlen,
 {
   size_t len = strlen(cmdline);
   if(len > maxlen) {
-    printf("cmdline too long: %zu bytes (firmware max %u)\n", len, maxlen);
+    dfu_logf(LOG_ERR, "cmdline too long: %zu bytes (firmware max %u)", len, maxlen);
     return -1;
   }
 
@@ -523,7 +563,7 @@ write_cmdline(libusb_device_handle *h, uint32_t addr, uint32_t maxlen,
   if(r < 0 || dfu_wait_while_busy(h))
     return -1;
 
-  printf("Wrote cmdline to 0x%08x: \"%s\"\n", addr, cmdline);
+  dfu_logf(LOG_INFO, "Wrote cmdline to 0x%08x: \"%s\"", addr, cmdline);
   return 0;
 }
 
@@ -537,38 +577,38 @@ stm32_dfu_flasher(const struct mios_image *mi,
   struct dfu_status st;
 
   if(dfu_getstatus(h, &st)) {
-    printf("Failed to read status\n");
+    dfu_logf(LOG_ERR, "Failed to read status");
     return -1;
   }
 
   if(st.bState != DFU_STATE_dfuIDLE) {
 
     if(dfu_clrstatus(h)) {
-      printf("Clear status failed\n");
+      dfu_logf(LOG_ERR, "Clear status failed");
       return -1;
     }
 
     if(dfu_getstatus(h, &st)) {
-      printf("Failed to read status\n");
+      dfu_logf(LOG_ERR, "Failed to read status");
       return -1;
     }
   }
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
-    printf("Unable to reset DFU statemachine\n");
+    dfu_logf(LOG_ERR, "Unable to reset DFU statemachine");
     return -1;
   }
 
   if(read_blocks(h, mi->buildid_paddr, buildid, sizeof(buildid))) {
-    printf("Failed to read current buildid at 0x%lx\n",
-           (long)mi->buildid_paddr);
+    dfu_logf(LOG_WARNING, "Failed to read current buildid at 0x%lx",
+             (long)mi->buildid_paddr);
   }
 
   //  hexdump("CURRENT", buildid, sizeof(buildid));
   //  hexdump(" LOADED", mi->buildid, sizeof(mi->buildid));
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
-    printf("Unable to reset DFU statemachine\n");
+    dfu_logf(LOG_ERR, "Unable to reset DFU statemachine");
     return -1;
   }
 
@@ -584,18 +624,16 @@ stm32_dfu_flasher(const struct mios_image *mi,
                                       &xfer_size);
 
     if(num_sector_sizes == 0) {
-      printf("Mass erase ... ");
-      fflush(stdout);
+      dfu_logf(LOG_INFO, "Mass erase ...");
       erase_mass(h);
-      printf("\n");
     } else {
 
       uint32_t erased_to = 0;
       int s = 0;
       while(mi->image_size > erased_to) {
-        printf("Erasing sector %d\n", s);
+        dfu_logf(LOG_INFO, "Erasing sector %d", s);
         if(erase_address(h, flashstart + erased_to)) {
-          printf("Erase failed\n");
+          dfu_logf(LOG_ERR, "Erase failed");
           return -1;
         }
         erased_to += sectorsizes[s];
@@ -605,41 +643,41 @@ stm32_dfu_flasher(const struct mios_image *mi,
 
     if(write_blocks(h, mi->load_addr, mi->image, mi->image_size,
                     xfer_size)) {
-      printf("Write failed\n");
+      dfu_logf(LOG_ERR, "Write failed");
       return -1;
     }
 
   } else {
-    printf("Build ID matches, skipping flash operation\n\n");
+    dfu_logf(LOG_INFO, "Build ID matches, skipping flash operation");
   }
 
   if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
-    printf("Unable to reset DFU statemachine\n");
+    dfu_logf(LOG_ERR, "Unable to reset DFU statemachine");
     return -1;
   }
 
   if(cmdline != NULL) {
     if(mi->cmdline_addr == 0) {
-      printf("Firmware does not export a cmdline region; ignoring cmdline\n");
+      dfu_logf(LOG_WARNING, "Firmware does not export a cmdline region; ignoring cmdline");
     } else if(write_cmdline(h, mi->cmdline_addr, mi->cmdline_size, cmdline)) {
       return -1;
     } else if(ctrl_out(h, DFU_ABORT, 0, NULL, 0)) {
-      printf("Unable to reset DFU statemachine\n");
+      dfu_logf(LOG_ERR, "Unable to reset DFU statemachine");
       return -1;
     }
   }
 
   if(set_address_pointer(h, mi->load_addr) < 0) {
-    printf("Failed to set address pointer\n");
+    dfu_logf(LOG_ERR, "Failed to set address pointer");
     return -1;
   }
 
   int r = ctrl_out(h, DFU_DNLOAD, 0, NULL, 0);
   if(r < 0) {
-    printf("Unable to leave DFU\n");
+    dfu_logf(LOG_ERR, "Unable to leave DFU");
     return -1;
   }
-  printf("Leaving DFU, GLHF\n");
+  dfu_logf(LOG_INFO, "Leaving DFU, GLHF");
   dfu_getstatus(h, &st);
   return 0;
 }
@@ -723,7 +761,7 @@ static libusb_device_handle *
 detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
                 int iface_num)
 {
-  printf("Found DFU Runtime device, sending DFU_DETACH...\n");
+  dfu_logf(LOG_INFO, "Found DFU Runtime device, sending DFU_DETACH...");
 
   libusb_detach_kernel_driver(rt_handle, iface_num);
   libusb_claim_interface(rt_handle, iface_num);
@@ -748,11 +786,11 @@ detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
      r != LIBUSB_ERROR_IO &&
      r != LIBUSB_ERROR_NO_DEVICE &&
      r != LIBUSB_ERROR_PIPE) {
-    printf("DFU_DETACH failed: %s\n", libusb_error_name(r));
+    dfu_logf(LOG_ERR, "DFU_DETACH failed: %s", libusb_error_name(r));
     return NULL;
   }
 
-  printf("Waiting for device to re-enumerate in DFU mode...\n");
+  dfu_logf(LOG_INFO, "Waiting for device to re-enumerate in DFU mode...");
 
   // Poll for the ST DFU bootloader to appear
   for(int attempt = 0; attempt < 20; attempt++) {
@@ -760,12 +798,12 @@ detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
     libusb_device_handle *h =
       libusb_open_device_with_vid_pid(ctx, 0x483, 0xdf11);
     if(h != NULL) {
-      printf("Device is now in DFU mode\n\n");
+      dfu_logf(LOG_INFO, "Device is now in DFU mode");
       return h;
     }
   }
 
-  printf("Timeout waiting for DFU bootloader\n");
+  dfu_logf(LOG_ERR, "Timeout waiting for DFU bootloader");
   return NULL;
 }
 
@@ -908,7 +946,7 @@ n6_build_image(const char *elf_path, const char *cmdline, size_t *out_len)
 {
   FILE *f = fopen(elf_path, "rb");
   if(f == NULL) {
-    printf("Cannot open %s\n", elf_path);
+    dfu_logf(LOG_ERR, "Cannot open %s", elf_path);
     return NULL;
   }
 
@@ -925,7 +963,7 @@ n6_build_image(const char *elf_path, const char *cmdline, size_t *out_len)
   fclose(f);
 
   if(memcmp(elf, "\x7f""ELF", 4)) {
-    printf("Not an ELF: %s\n", elf_path);
+    dfu_logf(LOG_ERR, "Not an ELF: %s", elf_path);
     free(elf);
     return NULL;
   }
@@ -944,8 +982,8 @@ n6_build_image(const char *elf_path, const char *cmdline, size_t *out_len)
     }
   }
   if(boot_sz == 0) {
-    printf("No .boot segment (paddr 0x%x) in %s\n",
-           N6_BOOT_PADDR_LO, elf_path);
+    dfu_logf(LOG_ERR, "No .boot segment (paddr 0x%x) in %s",
+             N6_BOOT_PADDR_LO, elf_path);
     free(elf);
     return NULL;
   }
@@ -966,8 +1004,8 @@ n6_build_image(const char *elf_path, const char *cmdline, size_t *out_len)
   size_t total = N6_FSBL_HEADER_TOTAL + payload;
 
   if(total > N6_DOWNLOAD_MAX) {
-    printf("Bootstrap image %zu bytes exceeds %d KB download buffer\n",
-           total, N6_DOWNLOAD_MAX / 1024);
+    dfu_logf(LOG_ERR, "Bootstrap image %zu bytes exceeds %d KB download buffer",
+             total, N6_DOWNLOAD_MAX / 1024);
     free(elf);
     return NULL;
   }
@@ -1029,8 +1067,8 @@ n6_build_image(const char *elf_path, const char *cmdline, size_t *out_len)
     sum += blob[N6_FSBL_HEADER_TOTAL + i];
   hd->image_checksum = sum;
 
-  printf("N6 bootstrap image: %zu bytes (.boot %u + parked mIAP %zu + cmdline %zu)\n",
-         total, boot_sz, miap_len, cmdline_total);
+  dfu_logf(LOG_INFO, "N6 bootstrap image: %zu bytes (.boot %u + parked mIAP %zu + cmdline %zu)",
+           total, boot_sz, miap_len, cmdline_total);
   free(elf);
   *out_len = total;
   return blob;
@@ -1054,8 +1092,8 @@ n6_wait_idle(libusb_device_handle *h)
       continue;
     }
     if(st.bStatus != DFU_STATUS_OK) {
-      printf("DFU error: %s (state=%s)\n",
-             dfu_status_str(st.bStatus), dfu_state_str(st.bState));
+      dfu_logf(LOG_ERR, "DFU error: %s (state=%s)",
+               dfu_status_str(st.bStatus), dfu_state_str(st.bState));
       return -1;
     }
     return 0;
@@ -1079,11 +1117,11 @@ n6_download(libusb_device_handle *h, const uint8_t *blob, size_t len)
 
   // Select the @FSBL phase (alt 0); this also resets the DFU block counter.
   if(libusb_set_interface_alt_setting(h, INTERFACE, 0)) {
-    printf("Failed to select FSBL phase (alt 0)\n");
+    dfu_logf(LOG_ERR, "Failed to select FSBL phase (alt 0)");
     return -1;
   }
 
-  printf("Downloading %zu bytes...\n", len);
+  dfu_logf(LOG_INFO, "Downloading %zu bytes...", len);
   size_t off = 0;
   uint16_t block = 0;
   while(off < len) {
@@ -1091,8 +1129,8 @@ n6_download(libusb_device_handle *h, const uint8_t *blob, size_t len)
     int r = libusb_control_transfer(h, CTRL_OUT, DFU_DNLOAD, block, INTERFACE,
                                     (uint8_t *)blob + off, chunk, 5000);
     if(r != chunk) {
-      printf("DNLOAD block %u failed: %s\n", block,
-             r < 0 ? libusb_error_name(r) : "short");
+      dfu_logf(LOG_ERR, "DNLOAD block %u failed: %s", block,
+               r < 0 ? libusb_error_name(r) : "short");
       return -1;
     }
     int w = n6_wait_idle(h);
@@ -1121,19 +1159,19 @@ n6_download(libusb_device_handle *h, const uint8_t *blob, size_t len)
     int r = libusb_control_transfer(h, CTRL_IN, DFU_GETSTATUS, 0, INTERFACE,
                                     (uint8_t *)&st, sizeof(st), 500);
     if(r < 0) {
-      printf("Branched to FSBL (device detached)\n");
+      dfu_logf(LOG_INFO, "Branched to FSBL (device detached)");
       return 0;
     }
     usleep(50000);
   }
-  printf("Device still in DFU after detach; image rejected?\n");
+  dfu_logf(LOG_ERR, "Device still in DFU after detach; image rejected?");
   return -1;
 }
 
 static const char *
 n6_provision(libusb_device_handle *h, const char *elf_path, const char *cmdline)
 {
-  printf("\nSTM32N6 boot ROM detected; provisioning via ROM DFU\n\n");
+  dfu_logf(LOG_INFO, "STM32N6 boot ROM detected; provisioning via ROM DFU");
 
   size_t len;
   uint8_t *blob = n6_build_image(elf_path, cmdline, &len);
@@ -1183,7 +1221,7 @@ dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash,
     return err;
   }
 
-  printf("\nLoaded application: %s\n\n", mi->appname);
+  dfu_logf(LOG_INFO, "Loaded application: %s", mi->appname);
 
   libusb_claim_interface(h, 0);
   int r = stm32_dfu_flasher(mi, h, force_flash, cmdline);
