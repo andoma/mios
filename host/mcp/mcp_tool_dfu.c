@@ -14,7 +14,8 @@ tool_flash_dfu(mcp_context_t *ctx, const cJSON *params, const char **errstr)
   const cJSON *force = cJSON_GetObjectItem(params, "force");
   int force_flash = cJSON_IsTrue(force);
 
-  const char *err = dfu_flash_elf(ctx->usb, elf_path->valuestring, force_flash);
+  const char *err = dfu_flash_elf(ctx->usb, elf_path->valuestring,
+                                  force_flash, NULL);
   if(err) {
     *errstr = err;
     return NULL;
