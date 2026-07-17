@@ -494,6 +494,14 @@ nrf54l_sdc_init(void)
   sdc_support_le_2m_phy();
   sdc_support_phy_update_peripheral();
 
+  // The default resource config assumes one central link too; claim only
+  // what this glue implements so the memory pool stays minimal.
+  const sdc_cfg_t central_cfg = { .central_count = { .count = 0 } };
+  err = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG,
+                    SDC_CFG_TYPE_CENTRAL_COUNT, &central_cfg);
+  if(err < 0)
+    panic("sdc_cfg_set: %d", err);
+
   const sdc_cfg_t bufcfg = {
     .buffer_cfg = {
       .tx_packet_size = SDC_PKT_SIZE,

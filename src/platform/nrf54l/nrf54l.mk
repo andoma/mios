@@ -32,7 +32,11 @@ ENABLE_NRF_SDC ?= no
 ifeq (${ENABLE_NRF_SDC},yes)
 
 NRFXLIB ?= ${T}vendor/nrf/sdk-nrfxlib
-SDC_VARIANT ?= peripheral
+
+# multirole carries every SDC feature (central, coded PHY, extended adv,
+# channel sounding, ISO); the linker strips what the build does not enable,
+# so it only costs ~14 kB over the peripheral-only variant.
+SDC_VARIANT ?= multirole
 
 CPPFLAGS += -DNRF54L15_XXAA \
 	-I${P}/sdc_shim \
