@@ -52,5 +52,13 @@ struct lldata {             // 2.3.3.1 CONNECT_IND (Figure 2.13)
 #define LL_PERIPHERAL_FEATURE_REQ 0x0e
 #define LL_LENGTH_REQ             0x14
 #define LL_LENGTH_RSP             0x15
+#define LL_PHY_REQ                0x16
+#define LL_PHY_RSP                0x17
+#define LL_PHY_UPDATE_IND         0x18
 #define LL_CHANNEL_REPORTING_IND  0x28
+
+// PHY bitmask in LL_PHY_REQ/RSP/UPDATE_IND
+#define LL_PHY_1M    0x1
+#define LL_PHY_2M    0x2
+#define LL_PHY_CODED 0x4
 

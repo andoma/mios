@@ -121,6 +121,15 @@ typedef struct connection {
   uint8_t pending_chmask[5];
   uint16_t pending_chmask_instant;
 
+  // PHY update procedure (same pending/instant pattern as the channel map).
+  // rx_phy/tx_phy hold LL_PHY_* bits; asymmetric configurations are allowed.
+  uint8_t rx_phy; // central -> us
+  uint8_t tx_phy; // us -> central
+  uint8_t pending_phy_valid;
+  uint8_t pending_rx_phy;
+  uint8_t pending_tx_phy;
+  uint16_t pending_phy_instant;
+
   uint16_t eventCounter;
 
   struct {
@@ -224,6 +233,20 @@ radio_init_ble(void)
 }
 
 
+// Program the radio for a BLE PHY: symbol rate and the matching preamble
+// length (2M uses a 16-bit preamble).
+static void
+radio_set_phy(uint8_t ll_phy)
+{
+  const int is2m = ll_phy & LL_PHY_2M;
+  reg_wr(RADIO_MODE, is2m ? 4 : 3);
+  reg_wr(RADIO_PCNF0,
+         (8 << 0) |             // LFLEN
+         (1 << 8) |             // S0LEN
+         ((is2m ? 1 : 0) << 24)); // PLEN: 8-bit (1M) / 16-bit (2M)
+}
+
+
 static void
 radio_setup_for_adv(nrf54l_radio_t *nr)
 {
@@ -231,6 +254,7 @@ radio_setup_for_adv(nrf54l_radio_t *nr)
   if(nr->nr_adv_ch == 3)
     nr->nr_adv_ch = 0;
 
+  radio_set_phy(LL_PHY_1M); // legacy advertising is always 1M
   select_channel(37 + nr->nr_adv_ch, 0x555555, 0x8e89bed6);
 }
 
@@ -321,6 +345,10 @@ conn_init(connection_t *con, const struct lldata *lld)
   con->termination_code = 0;
 
   con->pending_chmask_valid = 0;
+
+  con->rx_phy = LL_PHY_1M;
+  con->tx_phy = LL_PHY_1M;
+  con->pending_phy_valid = 0;
 
   con->eventCounter = 0xffff;
 }
@@ -444,6 +472,39 @@ handle_ll_feature_req(connection_t *con, const uint8_t *req, int reqlen)
   if(req[0] & (1 << 5)) {
     rsp[0] |= 1 << 5;
   }
+  rsp[1] |= 0x01; // LE 2M PHY (FeatureSet bit 8)
+  return 1;
+}
+
+
+static int
+handle_ll_phy_req(connection_t *con, const uint8_t *req, int reqlen)
+{
+  uint8_t *rsp = enqueue_ctrl_pdu(con, LL_PHY_RSP, 2);
+  if(rsp == NULL)
+    return 0;
+  rsp[0] = LL_PHY_1M | LL_PHY_2M; // our TX capabilities
+  rsp[1] = LL_PHY_1M | LL_PHY_2M; // our RX capabilities
+  return 1;
+}
+
+
+static int
+handle_ll_phy_update_ind(connection_t *con, const uint8_t *req, int reqlen)
+{
+  if(reqlen < 4)
+    return 1;
+
+  const uint8_t phy_m_to_s = req[0]; // our RX; 0 = unchanged
+  const uint8_t phy_s_to_m = req[1]; // our TX; 0 = unchanged
+
+  if(phy_m_to_s == 0 && phy_s_to_m == 0)
+    return 1; // no change, instant is ignored
+
+  con->pending_rx_phy = phy_m_to_s;
+  con->pending_tx_phy = phy_s_to_m;
+  con->pending_phy_instant = req[2] | (req[3] << 8);
+  con->pending_phy_valid = 1;
   return 1;
 }
 
@@ -542,6 +603,10 @@ handle_ctrl_pdu(nrf54l_radio_t *nr, connection_t *con,
     return conn_terminate(nr, con, req[1], "remote");
   case LL_LENGTH_REQ:
     return handle_ll_length_req(con, req + 1, reqlen - 1);
+  case LL_PHY_REQ:
+    return handle_ll_phy_req(con, req + 1, reqlen - 1);
+  case LL_PHY_UPDATE_IND:
+    return handle_ll_phy_update_ind(con, req + 1, reqlen - 1);
   default:
     return handle_unknown_ctrlop(con, req[0]);
   }
@@ -671,6 +736,9 @@ conn_rx_done(nrf54l_radio_t *nr)
   b0 |= con->tx_seq & 1 ? DATA_SN : 0;
   pkt[0] = b0;
 
+  // The radio is disabled between RX and the timed TXEN (PHYEND_DISABLE
+  // short), so the transmit direction's PHY can be programmed here.
+  radio_set_phy(con->tx_phy);
   reg_wr(RADIO_PACKETPTR, (intptr_t)pkt);
 
   uint32_t rxend = reg_rd(TIMER_BASE + TIMER_CC(2));
@@ -695,6 +763,7 @@ conn_tx_done(nrf54l_radio_t *nr)
 
   if(nr->nr_more_data) {
     nr->nr_ll_state = LL_CONNECTED_RX_N;
+    radio_set_phy(nr->nr_con.rx_phy);
     reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
     reg_wr(RADIO_TASKS_RXEN, 1);
   } else {
@@ -730,10 +799,23 @@ conn_open_window(nrf54l_radio_t *nr)
     con->pending_chmask_valid = 0;
   }
 
+  if(con->pending_phy_valid &&
+     con->pending_phy_instant == con->eventCounter) {
+    if(con->pending_rx_phy)
+      con->rx_phy = con->pending_rx_phy;
+    if(con->pending_tx_phy)
+      con->tx_phy = con->pending_tx_phy;
+    con->pending_phy_valid = 0;
+    netlog("ble: PHY update rx:%s tx:%s",
+           con->rx_phy & LL_PHY_2M ? "2M" : "1M",
+           con->tx_phy & LL_PHY_2M ? "2M" : "1M");
+  }
+
   nrf54l_radio_arb_acquire(); // take the radio from 802.15.4 for this event
   conn_hop(nr, con);
 
   nr->nr_ll_state = LL_CONNECTED_RX_1;
+  radio_set_phy(con->rx_phy);
   reg_wr(RADIO_PACKETPTR, (intptr_t)pbuf_data(nr->nr_pbuf, 0));
   reg_wr(RADIO_TASKS_RXEN, 1);
 
@@ -857,8 +939,10 @@ nrf54l_radio_print_info(struct device *dev, struct stream *st)
     stprintf(st, "  Peer: %02x:%02x:%02x:%02x:%02x:%02x RSSI:%d\n",
              con->addr[5], con->addr[4], con->addr[3],
              con->addr[2], con->addr[1], con->addr[0], -con->rssi);
-    stprintf(st, "  interval: %d  timeout: %d\n",
-             con->connInterval, con->timeout);
+    stprintf(st, "  interval: %d  timeout: %d  PHY rx:%s tx:%s\n",
+             con->connInterval, con->timeout,
+             con->rx_phy & LL_PHY_2M ? "2M" : "1M",
+             con->tx_phy & LL_PHY_2M ? "2M" : "1M");
     stprintf(st, "  RX:%d  BadSeq:%d  Silent:%d  CRC:%d  Drops:%d\n",
              con->stat.rx, con->stat.rx_bad_seq, con->stat.rx_silent,
              con->stat.rx_crc, con->stat.rx_qdrops);
