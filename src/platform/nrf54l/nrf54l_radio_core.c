@@ -1,7 +1,4 @@
-// Radio core: HFXO control and the per-protocol PHY presets. The radio is a
-// single time-division-multiplexed resource; this is the one place that knows
-// how to configure it for each protocol, so a client can re-assert its PHY
-// after another client borrowed the radio.
+// Radio core: HFXO control and the BLE PHY preset for the native link layer.
 
 #include "nrf54l_reg.h"
 #include "nrf54l_radio_core.h"
@@ -57,20 +54,3 @@ nrf54l_radio_use_ble(void)
   reg_wr(RADIO_TXPOWER, 0x18); // 0 dBm (higher settings may need extra PA/regulator config)
 }
 
-
-void
-nrf54l_radio_use_154(void)
-{
-  reg_wr(RADIO_MODE, 0xf); // IEEE 802.15.4 250 kbit
-  // 8-bit length field, 32-bit-zero preamble, LENGTH-includes-CRC (all 15.4).
-  reg_wr(RADIO_PCNF0, (8 << 0) | (2 << 24) | (1 << 26));
-  reg_wr(RADIO_PCNF1, 127 << 0); // MAXLEN, no whitening, no base address
-  reg_wr(RADIO_CRCCNF, (2 << 0) | (2 << 8)); // 2-byte FCS, 802.15.4 coverage
-  reg_wr(RADIO_CRCPOLY, 0x011021);
-  reg_wr(RADIO_CRCINIT, 0);
-  reg_wr(RADIO_SFD, 0xa7);
-  // Continuous RX: start after ramp, auto-restart after each frame, sample RSSI.
-  reg_wr(RADIO_SHORTS, RADIO_SHORT_READY_START | RADIO_SHORT_END_START |
-                       RADIO_SHORT_ADDRESS_RSSISTART);
-  reg_wr(RADIO_INTENSET00, RADIO_INT_END); // arbiter dispatches END to the owner
-}

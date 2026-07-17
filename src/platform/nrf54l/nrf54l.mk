@@ -54,8 +54,6 @@ else
 
 SRCS-${ENABLE_NET_BLE} += \
 	${P}/nrf54l_radio.c \
-	${P}/nrf54l_radio_arb.c \
-	${P}/nrf54l_154.c \
 
 endif
 ${MOS}/platform/nrf54l/%.o : CFLAGS += ${NOFPU}
