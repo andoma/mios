@@ -78,7 +78,9 @@ SRCS-${ENABLE_NET_MBUS_GW} += \
 	${SRC}/net/mbus/mbus_gateway.c \
 
 SRCS-${ENABLE_NET_BLE} += \
-	${SRC}/net/ble/l2cap.c
+	${SRC}/net/ble/l2cap.c \
+	${SRC}/net/ble/smp.c \
+	${SRC}/net/ble/ble_bond.c
 
 # dsig endpoint over a BLE CoC channel (the "dsig" named service)
 ifeq (${ENABLE_NET_BLE}${ENABLE_NET_DSIG},yesyes)

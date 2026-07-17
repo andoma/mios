@@ -18,6 +18,10 @@ typedef struct l2cap {
   // Will never fail
   void (*l2c_output)(struct l2cap *self, struct pbuf *pb);
 
+  // Reply to a pending controller LTK request (peripheral). ltk NULL rejects.
+  // NULL when the controller has no link encryption (native link layer).
+  void (*l2c_ltk_reply)(struct l2cap *self, const uint8_t *ltk);
+
   struct l2cap_connection_list l2c_connections;
 
   struct pbuf_queue l2c_tx_queue;
@@ -25,7 +29,21 @@ typedef struct l2cap {
   uint16_t l2c_tx_queue_len;
   uint16_t l2c_rx_queue_len;
 
+  // Link addresses, filled by the driver at connection setup; needed by the
+  // pairing crypto. Stored least-significant-byte first (HCI order).
+  uint8_t l2c_our_addr[6];
+  uint8_t l2c_peer_addr[6];
+  uint8_t l2c_our_addr_type;  // 0 = public, 1 = random
+  uint8_t l2c_peer_addr_type;
+
+  struct smp *l2c_smp; // pairing state, allocated on first SMP PDU
+
 } l2cap_t;
+
+void l2cap_output(l2cap_t *l2c, struct pbuf *pb, uint16_t cid);
+
+// l2cap task signal raised by the driver when the link becomes encrypted.
+#define L2CAP_SIGNAL_SMP 0x4
 
 void l2cap_input(l2cap_t *l2c, pbuf_t *pb);
 

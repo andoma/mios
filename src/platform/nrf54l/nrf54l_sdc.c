@@ -14,6 +14,7 @@
 #include "net/pbuf.h"
 #include "net/netif.h"
 #include "net/ble/l2cap.h"
+#include "net/ble/smp.h"
 
 #include <mios/mios.h>
 
@@ -65,6 +66,7 @@ typedef struct sdc_ble {
     uint8_t peer[6];
     uint8_t tx_phy, rx_phy;
     uint8_t connected;
+    uint8_t encrypted;
   } con;
 
   uint8_t sb_tx_credits;  // ACL packets the controller can accept right now
@@ -99,6 +101,38 @@ static void
 sdc_rand_poll(uint8_t *buf, uint8_t len)
 {
   nrf54l_trng_read(buf, len);
+}
+
+
+// Entropy for the SMP pairing nonce (overrides the weak default in smp.c).
+void
+ble_rand(void *out, unsigned int len)
+{
+  nrf54l_trng_read(out, len);
+}
+
+
+// Answer a pending controller LTK request (SMP -> controller). NULL rejects.
+static void
+sdc_ltk_reply(l2cap_t *l2c, const uint8_t *ltk)
+{
+  sdc_ble_t *sb = &g_sdc;
+
+  if(ltk == NULL) {
+    const sdc_hci_cmd_le_long_term_key_request_negative_reply_t neg = {
+      .conn_handle = sb->con.handle,
+    };
+    sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t ret;
+    sdc_hci_cmd_le_long_term_key_request_negative_reply(&neg, &ret);
+    return;
+  }
+
+  sdc_hci_cmd_le_long_term_key_request_reply_t rep = {
+    .conn_handle = sb->con.handle,
+  };
+  memcpy(rep.long_term_key, ltk, 16);
+  sdc_hci_cmd_le_long_term_key_request_reply_return_t ret;
+  sdc_hci_cmd_le_long_term_key_request_reply(&rep, &ret);
 }
 
 
@@ -195,11 +229,19 @@ sdc_handle_conn_complete(sdc_ble_t *sb, const uint8_t *p)
   sb->con.timeout = cc->supervision_timeout;
   sb->con.tx_phy = 1;
   sb->con.rx_phy = 1;
+  sb->con.encrypted = 0;
   memcpy(sb->con.peer, cc->peer_address, 6);
 
   sb->con.l2c.l2c_output = sdc_conn_output;
+  sb->con.l2c.l2c_ltk_reply = sdc_ltk_reply;
   STAILQ_INIT(&sb->con.l2c.l2c_tx_queue);
   sb->con.l2c.l2c_tx_queue_len = 0;
+
+  // Addresses for the pairing crypto (HCI order = LSB first).
+  memcpy(sb->con.l2c.l2c_peer_addr, cc->peer_address, 6);
+  sb->con.l2c.l2c_peer_addr_type = cc->peer_address_type;
+  memcpy(sb->con.l2c.l2c_our_addr, sb->sb_addr, 6);
+  sb->con.l2c.l2c_our_addr_type = 1; // static random
 
   if(l2cap_connect(&sb->con.l2c))
     return;
@@ -255,10 +297,25 @@ sdc_handle_event(sdc_ble_t *sb, const uint8_t *buf)
       }
       break;
     }
+    case SDC_HCI_SUBEVENT_LE_LONG_TERM_KEY_REQUEST: {
+      const sdc_hci_subevent_le_long_term_key_request_t *ltk =
+        (const void *)(p + 1);
+      smp_ltk_request(&sb->con.l2c, ltk->random_number,
+                      ltk->encrypted_diversifier);
+      break;
+    }
     default:
       break;
     }
     break;
+
+  case SDC_HCI_EVENT_ENCRYPTION_CHANGE: {
+    const sdc_hci_event_encryption_change_t *ec = (const void *)p;
+    const int on = !ec->status && ec->encryption_enabled;
+    sb->con.encrypted = on;
+    smp_encryption_changed(&sb->con.l2c, on);
+    break;
+  }
 
   case SDC_HCI_EVENT_DISCONN_COMPLETE:
     sdc_handle_disconn(sb, p);
@@ -360,9 +417,10 @@ sdc_print_info(struct device *dev, struct stream *st)
            sb->sb_advertising ? "Advertising" : "Idle");
 
   if(sb->con.connected) {
-    stprintf(st, "  Peer: %02x:%02x:%02x:%02x:%02x:%02x\n",
+    stprintf(st, "  Peer: %02x:%02x:%02x:%02x:%02x:%02x  %s\n",
              sb->con.peer[5], sb->con.peer[4], sb->con.peer[3],
-             sb->con.peer[2], sb->con.peer[1], sb->con.peer[0]);
+             sb->con.peer[2], sb->con.peer[1], sb->con.peer[0],
+             sb->con.encrypted ? "ENCRYPTED" : "unencrypted");
     stprintf(st, "  interval: %dus  timeout: %dus  PHY rx:%s tx:%s\n",
              sb->con.interval * 1250, sb->con.timeout * 10000,
              sb->con.rx_phy == 2 ? "2M" : "1M",
@@ -401,14 +459,18 @@ sdc_setup_hci(sdc_ble_t *sb)
   // Event routing: Disconnection Complete (bit 4), LE Meta (bit 61); within
   // LE Meta: Connection Complete (0), Connection Update (2), Data Length
   // Change (6), PHY Update Complete (11).
+  // Classic event mask: Disconnection Complete (bit 4), Encryption Change
+  // (bit 7), LE Meta (bit 61).
   sdc_hci_cmd_cb_set_event_mask_t evtmask = {};
-  evtmask.raw[0] = 0x10;
+  evtmask.raw[0] = 0x10 | 0x80;
   evtmask.raw[7] = 0x20;
   if((status = sdc_hci_cmd_cb_set_event_mask(&evtmask)))
     panic("sdc: event_mask: 0x%x", status);
 
+  // LE event mask: Connection Complete (0), Connection Update (2), LTK
+  // Request (4), Data Length Change (6), PHY Update Complete (11).
   sdc_hci_cmd_le_set_event_mask_t le_evtmask = {};
-  le_evtmask.raw[0] = 0x45;
+  le_evtmask.raw[0] = 0x45 | 0x10;
   le_evtmask.raw[1] = 0x08;
   if((status = sdc_hci_cmd_le_set_event_mask(&le_evtmask)))
     panic("sdc: le_event_mask: 0x%x", status);
@@ -547,3 +609,24 @@ nrf54l_sdc_init(void)
          sb->sb_addr[5], sb->sb_addr[4], sb->sb_addr[3],
          sb->sb_addr[2], sb->sb_addr[1], sb->sb_addr[0]);
 }
+
+
+#include <mios/cli.h>
+
+// Ask the connected central to start pairing. Needed to test SMP with centrals
+// (e.g. iOS) that never initiate pairing on their own.
+static error_t
+cmd_blepair(cli_t *cli, int argc, char **argv)
+{
+  sdc_ble_t *sb = &g_sdc;
+  if(!sb->con.connected) {
+    cli_printf(cli, "Not connected\n");
+    return ERR_NOT_CONNECTED;
+  }
+  smp_request_security(&sb->con.l2c);
+  cli_printf(cli, "Sent SMP Security Request\n");
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("ble_pair", cmd_blepair, NULL,
+                "Ask the connected central to start pairing");

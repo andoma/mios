@@ -4,6 +4,8 @@
 
 #include "ble_proto.h"
 #include "l2cap_proto.h"
+#include "smp.h"
+#include "smp_proto.h"
 
 #include <unistd.h>
 #include <assert.h>
@@ -23,6 +25,7 @@
 
 #define L2CAP_SIGNAL_INPUT      0x1
 #define L2CAP_SIGNAL_DISCONNECT 0x2
+// L2CAP_SIGNAL_SMP is declared in l2cap.h (shared with smp.c).
 
 typedef struct l2cap_connection {
 
@@ -128,7 +131,7 @@ l2cap_splice(struct pbuf_queue *pq, int header_size)
 }
 
 
-static void
+void
 l2cap_output(l2cap_t *l2c, pbuf_t *pb, uint16_t cid)
 {
   const uint16_t len = pb->pb_pktlen;
@@ -830,6 +833,10 @@ handle_packet(l2cap_t *l2c, pbuf_t *pb)
     handle_att(l2c, pb);
     return NULL;
 
+  case L2CAP_CID_SMP:
+    smp_input(l2c, pb);
+    return NULL;
+
   default:
     return handle_channel(l2c, pb, channel_id);
   }
@@ -864,12 +871,18 @@ l2cap_dispatch_signal(struct net_task *nt, uint32_t signals)
       connection_close(lc, "Transport disconnect");
     }
 
+    smp_fini(l2c);
+
     int q = irq_forbid(IRQ_LEVEL_NET);
     l2c->l2c_output(l2c, NULL);
     pbuf_free_queue_irq_blocked(&l2c->l2c_rx_queue);
     l2c->l2c_rx_queue_len = 0;
     irq_permit(q);
     return;
+  }
+
+  if(signals & L2CAP_SIGNAL_SMP) {
+    smp_encrypted(l2c);
   }
 
   if(signals & L2CAP_SIGNAL_INPUT) {
