@@ -438,6 +438,7 @@ static const pushpull_net_fn_t l2cap_fns = {
 #define L2CAP_NAMED_STATUS_NOT_FOUND    1
 #define L2CAP_NAMED_STATUS_NO_RESOURCES 2
 #define L2CAP_NAMED_STATUS_NO_ROUTE     3 // @node forwarding not available
+#define L2CAP_NAMED_STATUS_NEED_ENC     4 // link not encrypted enough; pair+retry
 
 static void
 broker_send_status(l2cap_connection_t *lc, uint8_t status)
@@ -470,6 +471,12 @@ broker_push(void *opaque, struct pbuf *pb)
     status = L2CAP_NAMED_STATUS_NO_ROUTE; // VLLP forwarding not yet built
   } else if((s = service_find_by_namelen(name, len)) == NULL) {
     status = L2CAP_NAMED_STATUS_NOT_FOUND;
+#ifndef ENABLE_BLE_INSECURE
+  } else if(s->ble_sec_level > lc->lc_l2c->l2c_sec_level) {
+    // Prompt the central to pair; it re-sends the name once encrypted.
+    smp_request_security(lc->lc_l2c);
+    status = L2CAP_NAMED_STATUS_NEED_ENC;
+#endif
   } else if(service_open_pushpull(s, &lc->lc_pushpull)) {
     // The service TX pump is only kicked after the status byte below, so
     // opening before answering cannot reorder service output ahead of it.
@@ -546,6 +553,16 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
     return handle_le_credit_based_connection_fail(l2c, pb, "No service",
                                                   L2CAP_CON_NO_PSM);
   }
+
+  // A service on a numeric PSM enforces its minimum security here; named
+  // services are checked in the broker once the name is known.
+#ifndef ENABLE_BLE_INSECURE
+  if(s != NULL && s->ble_sec_level > l2c->l2c_sec_level) {
+    smp_request_security(l2c); // prompt the central to pair, then reconnect
+    return handle_le_credit_based_connection_fail(l2c, pb, "Needs encryption",
+                                                  L2CAP_CON_INSUFF_ENC);
+  }
+#endif
 
   l2cap_connection_t *lc = connection_create(l2c);
   if(lc == NULL) {
@@ -913,6 +930,7 @@ error_t
 l2cap_connect(l2cap_t *l2cap)
 {
   l2cap->l2c_task.nt_cb = l2cap_dispatch_signal;
+  l2cap->l2c_sec_level = BLE_SEC_NONE; // fresh link starts unencrypted
   STAILQ_INIT(&l2cap->l2c_rx_queue);
   return 0;
 }
@@ -971,3 +989,12 @@ l2cap_print(l2cap_t *l2c, stream_t *st)
   }
 }
 
+
+
+#ifdef ENABLE_BLE_INSECURE
+static void __attribute__((constructor(1000)))
+l2cap_insecure_warn(void)
+{
+  printf("BLE service security disabled (ENABLE_BLE_INSECURE is set)\n");
+}
+#endif

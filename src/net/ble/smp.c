@@ -10,6 +10,7 @@
 #include "net/pbuf.h"
 
 #include <mios/eventlog.h>
+#include <mios/service.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -397,7 +398,9 @@ smp_request_security(l2cap_t *l2c)
 {
   if(l2c->l2c_ltk_reply == NULL)
     return; // controller cannot encrypt (native link layer)
-  const uint8_t pdu[2] = { SMP_SECURITY_REQUEST, 0 }; // no bonding/MITM (legacy)
+  // Request bonding (no MITM: Just Works, legacy) so the central stores keys
+  // and later reconnects encrypt without re-pairing.
+  const uint8_t pdu[2] = { SMP_SECURITY_REQUEST, SMP_AUTH_BONDING };
   smp_send(l2c, pdu, sizeof(pdu));
 }
 
@@ -435,7 +438,10 @@ void
 smp_encryption_changed(l2cap_t *l2c, int enabled)
 {
   // Runs in the driver's interrupt context. Defer the real work (key PDUs,
-  // flash) to the net thread via the l2cap task.
+  // flash) to the net thread via the l2cap task. Everything we can pair today
+  // is Just Works, so an encrypted link is exactly level ENCRYPTED (L2);
+  // authenticated / LE Secure Connections will raise this when implemented.
+  l2c->l2c_sec_level = enabled ? BLE_SEC_ENCRYPTED : BLE_SEC_NONE;
   if(enabled)
     net_task_raise(&l2c->l2c_task, L2CAP_SIGNAL_SMP);
   else if(l2c->l2c_smp)

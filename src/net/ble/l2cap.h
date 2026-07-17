@@ -36,6 +36,8 @@ typedef struct l2cap {
   uint8_t l2c_our_addr_type;  // 0 = public, 1 = random
   uint8_t l2c_peer_addr_type;
 
+  uint8_t l2c_sec_level; // achieved link security, BLE_SEC_* (0 until encrypted)
+
   struct smp *l2c_smp; // pairing state, allocated on first SMP PDU
 
 } l2cap_t;

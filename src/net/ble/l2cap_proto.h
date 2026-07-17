@@ -16,6 +16,8 @@
 #define L2CAP_CON_OK              0x0
 #define L2CAP_CON_NO_PSM          0x2
 #define L2CAP_CON_NO_RESOURCES    0x4
+#define L2CAP_CON_INSUFF_AUTHEN   0x5
+#define L2CAP_CON_INSUFF_ENC      0x8
 
 
 #define ATT_ERROR_RSP              0x01

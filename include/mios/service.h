@@ -15,12 +15,24 @@ typedef struct {
 
 struct stream;
 
+// Minimum BLE link security a service requires (GAP LE Security Mode 1). The
+// value is an ordered level: the stack admits a connection only when the
+// link's achieved level is >= the service's. Only NONE/ENCRYPTED are
+// reachable today; AUTH/AUTH_SC become satisfiable when authenticated and
+// LE Secure Connections pairing land, at which point a service demanding them
+// is simply unopenable until then (rejected, never silently downgraded).
+#define BLE_SEC_NONE      0  // L1: no encryption required
+#define BLE_SEC_ENCRYPTED 1  // L2: encrypted (Just Works or better)
+#define BLE_SEC_AUTH      2  // L3: authenticated / MITM-protected
+#define BLE_SEC_AUTH_SC   3  // L4: authenticated + LE Secure Connections
+
 typedef struct service {
 
   const char *name;
 
   uint16_t ip_port;
   uint8_t ble_psm;
+  uint8_t ble_sec_level; // BLE_SEC_*, minimum link security
 
   error_t (*open_pushpull)(pushpull_t *p);
 
@@ -61,4 +73,8 @@ static const service_t MIOS_JOIN(servicedef, __LINE__) __attribute__ ((used, sec
 
 #define SERVICE_DEF_PUSHPULL(name, ip_port, ble_psm, open)  \
 static const service_t MIOS_JOIN(servicedef, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, .open_pushpull = open};
+
+// Same as SERVICE_DEF_PUSHPULL but with a minimum BLE security level (BLE_SEC_*).
+#define SERVICE_DEF_PUSHPULL_SEC(name, ip_port, ble_psm, sec, open)  \
+static const service_t MIOS_JOIN(servicedef, __LINE__) __attribute__ ((used, section("servicedef"))) = { name, ip_port, ble_psm, .ble_sec_level = (sec), .open_pushpull = open};
 

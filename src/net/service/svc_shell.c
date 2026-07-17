@@ -33,5 +33,6 @@ static const service_t svc_shell
 __attribute__ ((used, section("servicedef"))) = {
   .name = "shell",
   .ble_psm = 23, // BLE L2CAP CoC: PSM 0x97 (packet) / 0xd7 (stream reframing)
+  .ble_sec_level = BLE_SEC_ENCRYPTED, // a root console must not be plaintext
   .open_stream = shell_open,
 };
