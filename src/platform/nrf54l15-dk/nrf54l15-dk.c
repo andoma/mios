@@ -54,7 +54,11 @@ board_init_late(void)
   mcp_uart_create(mcp);
 
   nrf54l_radio_ble_init("mios-nrf54l");
-  nrf54l_154_init(); // 802.15.4 background RX, shares the radio via the arbiter
+#ifndef ENABLE_NRF_SDC
+  // 802.15.4 background RX, shares the radio via the arbiter. Not yet
+  // ported to MPSL timeslots, so unavailable with the SoftDevice Controller.
+  nrf54l_154_init();
+#endif
 }
 
 
