@@ -203,3 +203,41 @@ nrf54l_systim_init(void)
 
   clock_get_irq_blocked(); // capture the boot-time GRTC offset
 }
+
+
+// Dump the timer queue: debugging aid for timers that claim to be armed
+// (t_expire != 0) but never fire.
+#include <mios/cli.h>
+
+static error_t
+cmd_timers(cli_t *cli, int argc, char **argv)
+{
+  static struct {
+    const char *name;
+    uint64_t expire;
+  } snap[16]; // static: stack frames are capped at 192 bytes
+  int n = 0;
+
+  int q = irq_forbid(IRQ_LEVEL_CLOCK);
+  const int64_t now = clock_get_irq_blocked();
+  const timer_t *t;
+  LIST_FOREACH(t, &systim_timers, t_link) {
+    if(n == 16)
+      break;
+    snap[n].name = t->t_name;
+    snap[n].expire = t->t_expire;
+    n++;
+  }
+  irq_permit(q);
+
+  cli_printf(cli, "now: %lld\n", now);
+  for(int i = 0; i < n; i++)
+    cli_printf(cli, "%2d: %-12s expire:%lld (%s%lld us)\n",
+               i, snap[i].name ?: "?", snap[i].expire,
+               snap[i].expire >= (uint64_t)now ? "+" : "-",
+               snap[i].expire >= (uint64_t)now ?
+               snap[i].expire - now : now - snap[i].expire);
+  return 0;
+}
+
+CLI_CMD_DEF("timers", cmd_timers);
