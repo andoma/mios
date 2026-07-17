@@ -80,7 +80,11 @@ SRCS-${ENABLE_NET_MBUS_GW} += \
 SRCS-${ENABLE_NET_BLE} += \
 	${SRC}/net/ble/l2cap.c \
 	${SRC}/net/ble/smp.c \
+	${SRC}/net/ble/smp_lesc.c \
 	${SRC}/net/ble/ble_bond.c
+
+# The LESC toolbox stack-allocates the 176-byte AES expanded key.
+${MOS}/net/ble/smp_lesc.o : CFLAGS += -Wno-frame-larger-than
 
 # dsig endpoint over a BLE CoC channel (the "dsig" named service)
 ifeq (${ENABLE_NET_BLE}${ENABLE_NET_DSIG},yesyes)

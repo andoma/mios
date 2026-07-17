@@ -28,9 +28,19 @@
 #define SMP_ERR_ENC_KEY_SIZE    0x06
 #define SMP_ERR_CMD_NOTSUPP     0x07
 #define SMP_ERR_UNSPECIFIED     0x08
+#define SMP_ERR_DHKEY_CHECK     0x0b
+#define SMP_ERR_NUMERIC_CMP     0x0c
 
 // IO capabilities.
+#define SMP_IO_DISPLAY_ONLY       0x00
+#define SMP_IO_DISPLAY_YESNO      0x01
+#define SMP_IO_KEYBOARD_ONLY      0x02
 #define SMP_IO_NO_INPUT_NO_OUTPUT 0x03
+#define SMP_IO_KEYBOARD_DISPLAY   0x04
+
+// LESC public-key and DHKey-check PDUs.
+#define SMP_PAIRING_PUBLIC_KEY  0x0c
+#define SMP_PAIRING_DHKEY_CHECK 0x0d
 
 // Key distribution flags (init_key_dist / resp_key_dist).
 #define SMP_DIST_ENC   0x01 // LTK / EDIV / Rand

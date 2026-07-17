@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <mios/error.h>
 
 struct l2cap;
 struct pbuf;
@@ -15,6 +16,10 @@ void smp_input(struct l2cap *l2c, struct pbuf *pb);
 // centrals (notably iOS) never initiate pairing on their own; the peripheral
 // must request it.
 void smp_request_security(struct l2cap *l2c);
+
+// Confirm the LESC Numeric Comparison value (CLI). ERR_BAD_STATE if no
+// pairing is waiting on it.
+error_t smp_numeric_confirm(struct l2cap *l2c);
 
 // The controller (peripheral) received an encryption start and is asking the
 // host for the key. random_number and ediv are 0 for legacy pairing's initial

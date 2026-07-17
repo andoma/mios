@@ -1,0 +1,4 @@
+Vendored subset of micro-ecc (https://github.com/kmackay/micro-ecc)
+Upstream commit: 541b3a78026420a3e369c4c9281c396b5e531113
+Only the source files mios compiles are kept; tests/examples/build
+files are omitted. See LICENSE.txt (BSD-2-Clause).

@@ -931,6 +931,7 @@ l2cap_connect(l2cap_t *l2cap)
 {
   l2cap->l2c_task.nt_cb = l2cap_dispatch_signal;
   l2cap->l2c_sec_level = BLE_SEC_NONE; // fresh link starts unencrypted
+  l2cap->l2c_pending_sec_level = BLE_SEC_ENCRYPTED; // legacy/default when encrypted
   STAILQ_INIT(&l2cap->l2c_rx_queue);
   return 0;
 }

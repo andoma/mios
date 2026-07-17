@@ -630,3 +630,20 @@ cmd_blepair(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF_EXT("ble_pair", cmd_blepair, NULL,
                 "Ask the connected central to start pairing");
+
+// Confirm the LE Secure Connections numeric-comparison value shown at pairing.
+static error_t
+cmd_bleconfirm(cli_t *cli, int argc, char **argv)
+{
+  sdc_ble_t *sb = &g_sdc;
+  if(!sb->con.connected) {
+    cli_printf(cli, "Not connected\n");
+    return ERR_NOT_CONNECTED;
+  }
+  error_t err = smp_numeric_confirm(&sb->con.l2c);
+  cli_printf(cli, err ? "No pairing waiting for confirmation\n" : "Confirmed\n");
+  return err;
+}
+
+CLI_CMD_DEF_EXT("ble_confirm", cmd_bleconfirm, NULL,
+                "Confirm the LE Secure Connections pairing value");

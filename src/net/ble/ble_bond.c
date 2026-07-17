@@ -1,4 +1,5 @@
 #include "ble_bond.h"
+#include "smp_lesc.h" // smp_ah
 
 #include <mios/mios.h>
 #include <mios/eventlog.h>
@@ -65,6 +66,59 @@ ble_bond_find_by_ediv(uint16_t ediv, const uint8_t rand[8], ble_bond_t *out)
       break;
     }
   }
+  irq_permit(q);
+  return found;
+}
+
+
+int
+ble_bond_find_by_addr(const uint8_t addr[6], uint8_t addr_type, ble_bond_t *out)
+{
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  int found = 0;
+  int sc_bonds = 0, last_sc = -1;
+
+  for(int i = 0; i < BLE_BOND_MAX; i++) {
+    if(!bonds[i].valid || !bonds[i].sc)
+      continue;
+    sc_bonds++;
+    last_sc = i;
+    // Exact identity-address match.
+    if(bonds[i].peer_addr_type == addr_type &&
+       !memcmp(bonds[i].peer_addr, addr, 6)) {
+      *out = bonds[i];
+      found = 1;
+      break;
+    }
+  }
+
+  // Resolvable private address (top two bits of the MSB = 0b01): resolve the
+  // hash against each stored IRK.
+  if(!found && (addr[5] & 0xc0) == 0x40) {
+    const uint8_t prand[3] = { addr[5], addr[4], addr[3] };
+    const uint8_t hash[3]  = { addr[2], addr[1], addr[0] };
+    for(int i = 0; i < BLE_BOND_MAX; i++) {
+      if(!bonds[i].valid || !bonds[i].sc)
+        continue;
+      uint8_t irk_be[16], h[3];
+      for(int j = 0; j < 16; j++) // stored IRK is little-endian (wire order)
+        irk_be[j] = bonds[i].irk[15 - j];
+      smp_ah(irk_be, prand, h);
+      if(!memcmp(h, hash, 3)) {
+        *out = bonds[i];
+        found = 1;
+        break;
+      }
+    }
+  }
+
+  // Single SC bond and no better match: use it (covers the common one-peer
+  // case even if identity/IRK resolution did not fire).
+  if(!found && sc_bonds == 1) {
+    *out = bonds[last_sc];
+    found = 1;
+  }
+
   irq_permit(q);
   return found;
 }
