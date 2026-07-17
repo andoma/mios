@@ -25,12 +25,14 @@
 #define GRTC_MODE            (GRTC_BASE + 0x510)
 #define GRTC_MODE_SYSCOUNTEREN (1u << 1) // AUTOEN=0 keeps the counter active
 
-// One-shot timer for arming the next deadline: TIMER20, run at 1 MHz /
+// One-shot timer for arming the next deadline: TIMER21, run at 1 MHz /
 // 32-bit to match the microsecond clock base. Note the nRF54L TIMER is
 // clocked from PCLK1M (1 MHz), so PRESCALER=0 gives 1 MHz (unlike nRF52,
 // whose TIMER is clocked from 16 MHz and needs PRESCALER=4).
-#define TIMER_BASE           0x500ca000  // TIMER20
-#define TIMER_IRQ            202         // TIMER20
+// TIMER20 is deliberately left alone: Nordic's MPSL claims it (together
+// with TIMER10) when the SoftDevice Controller is in use.
+#define TIMER_BASE           0x500cb000  // TIMER21
+#define TIMER_IRQ            203         // TIMER21
 #define TIMER_TASKS_START    0x000
 #define TIMER_TASKS_STOP     0x004
 #define TIMER_TASKS_CLEAR    0x00c
@@ -137,9 +139,9 @@ systim_rearm(int64_t now)
 }
 
 
-// TIMER20 compare interrupt
+// TIMER21 compare interrupt
 void
-irq_202(void)
+irq_203(void)
 {
   if(!reg_rd(TIMER_BASE + TIMER_EVENTS_COMPARE))
     return;
