@@ -285,8 +285,10 @@ mcp_serial_scan(char (*paths)[256], int max)
 {
   glob_t g;
   memset(&g, 0, sizeof(g));
-  glob("/dev/ttyACM*", 0, NULL, &g);
-  glob("/dev/ttyUSB*", GLOB_APPEND, NULL, &g);
+  glob("/dev/ttyACM*", 0, NULL, &g);             // Linux CDC-ACM
+  glob("/dev/ttyUSB*", GLOB_APPEND, NULL, &g);   // Linux USB-serial
+  glob("/dev/cu.usbmodem*", GLOB_APPEND, NULL, &g); // macOS CDC-ACM
+  glob("/dev/cu.usbserial*", GLOB_APPEND, NULL, &g); // macOS USB-serial
 
   int n = 0;
   for(size_t i = 0; i < g.gl_pathc && n < max; i++) {

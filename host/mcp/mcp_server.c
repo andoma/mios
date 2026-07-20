@@ -224,8 +224,7 @@ dispatch(mcp_context_t *ctx, cJSON *msg)
 }
 
 // Tool init functions (defined in each tool file)
-void mcp_tool_dfu_init(mcp_context_t *ctx);
-void mcp_tool_stlink_init(mcp_context_t *ctx);
+void mcp_tool_flash_init(mcp_context_t *ctx);
 void mcp_tool_cli_init(mcp_context_t *ctx);
 void mcp_tool_sigcapture_init(mcp_context_t *ctx);
 
@@ -287,8 +286,7 @@ main(int argc, char **argv)
   cfg_tool.input_schema = cfg_schema;
   mcp_register_tool(&cfg_tool);
 
-  mcp_tool_dfu_init(&ctx);
-  mcp_tool_stlink_init(&ctx);
+  mcp_tool_flash_init(&ctx);
   mcp_tool_cli_init(&ctx);
   mcp_tool_sigcapture_init(&ctx);
 
