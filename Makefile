@@ -176,6 +176,15 @@ clean::
 
 bin: ${O}/${ARTIFACT}.bin
 
+# Load firmware onto a target. Platform .mk files set FLASH_METHOD
+# (jlink, dfu, openocd); auto probes for a J-Link, then falls back to DFU.
+# Extra mios-flash options can be passed via FLASH_OPTS.
+FLASH_METHOD ?= auto
+
+flash: ${O}/${ARTIFACT}.elf
+	@${MAKE} --no-print-directory -C ${T}host/flash
+	${T}host/flash/mios-flash -m ${FLASH_METHOD} ${FLASH_OPTS} $<
+
 toolchain:
 	@which >/dev/null ${TOOLCHAIN}gcc || \
 	(echo "\nERROR: Toolchain misconfigured, \
