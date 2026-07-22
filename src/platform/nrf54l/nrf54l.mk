@@ -18,35 +18,22 @@ SRCS += ${C}/entry-xip.s \
 	${P}/nrf54l.c \
 	${P}/nrf54l_uart.c \
 	${P}/nrf54l_gpio.c \
-	${P}/nrf54l_radio_core.c \
 	${P}/nrf54l_spi.c \
 	${P}/nrf54l_systim.c \
 	${P}/nrf54l_wdt.c \
 	${SRC}/shell/mcp_uart.c \
 
-# BLE controller selection: ENABLE_NRF_SDC=yes links Nordic's SoftDevice
-# Controller + MPSL binary blobs (HCI boundary, gives DLE/Coded PHY/central/
-# channel sounding). Default is our own link layer.
-ENABLE_NRF_SDC ?= no
-
-ifeq (${ENABLE_NRF_SDC},yes)
-
-NRFXLIB ?= ${T}vendor/nrf/sdk-nrfxlib
-
-# multirole carries every SDC feature (central, coded PHY, extended adv,
-# channel sounding, ISO); the linker strips what the build does not enable,
-# so it only costs ~14 kB over the peripheral-only variant.
-SDC_VARIANT ?= multirole
-
-CPPFLAGS += -DNRF54L15_XXAA \
-	-I${P}/sdc_shim \
-	-I${NRFXLIB}/softdevice_controller/include \
-	-I${NRFXLIB}/mpsl/include
+# BLE is Nordic's SoftDevice Controller + MPSL binary blobs (HCI boundary,
+# gives DLE/Coded PHY/central/channel sounding). Our own link layer is gone.
+# The SoC-independent HCI/l2cap glue comes from platform/nrf/nrf.mk; here we
+# add the nRF54L hardware layer and link its prebuilt libraries.
+CPPFLAGS += -DNRF54L15_XXAA
 
 SRCS-${ENABLE_NET_BLE} += \
 	${P}/nrf54l_mpsl.c \
 	${P}/nrf54l_trng.c \
-	${P}/nrf54l_sdc.c \
+
+include ${SRC}/platform/nrf/nrf.mk
 
 # Order matters: SDC needs MPSL and FEM symbols, FEM needs MPSL.
 LDFLAGS += \
@@ -54,10 +41,4 @@ LDFLAGS += \
 	${NRFXLIB}/mpsl/fem/common/lib/nrf54l/hard-float/libmpsl_fem_common.a \
 	${NRFXLIB}/mpsl/lib/nrf54l/hard-float/libmpsl.a \
 
-else
-
-SRCS-${ENABLE_NET_BLE} += \
-	${P}/nrf54l_radio.c \
-
-endif
 ${MOS}/platform/nrf54l/%.o : CFLAGS += ${NOFPU}

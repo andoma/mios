@@ -10,6 +10,10 @@ ENTRYPOINT ?= $(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),bl_start,start)
 
 include ${SRC}/cpu/cortexm/cortexm4f.mk
 
+# Nordic's SDC/MPSL binary libraries are built with AAPCS "small" enums; build
+# the whole platform the same way so the ABI matches everywhere it links them.
+CFLAGS += -fshort-enums
+
 SRCS += ${C}/entry-xip.s \
 	${P}/nrf52.c \
 	${P}/nrf52_clk.c \
@@ -23,8 +27,28 @@ SRCS += ${C}/entry-xip.s \
 	${P}/nrf52_wdt.c \
 	${P}/nrf52_adc.c \
 
-SRCS-${ENABLE_NET_BLE} += \
-	${P}/nrf52_radio.c \
+# BLE via Nordic's SoftDevice Controller. SoC-independent HCI/l2cap glue comes
+# from platform/nrf/nrf.mk; here we add the nRF52 hardware layer and link the
+# nrf52 prebuilt libraries. The board picks the device (default nRF52840).
+NRF_DEVICE ?= NRF52840_XXAA
+
+ifeq (${ENABLE_NET_BLE},yes)
+
+CPPFLAGS += -D${NRF_DEVICE}
+
+SRCS += \
+	${P}/nrf52_mpsl.c \
+	${P}/nrf52_trng.c \
+
+include ${SRC}/platform/nrf/nrf.mk
+
+# Order matters: SDC needs MPSL and FEM symbols, FEM needs MPSL.
+LDFLAGS += \
+	${NRFXLIB}/softdevice_controller/lib/nrf52/hard-float/libsoftdevice_controller_${SDC_VARIANT}.a \
+	${NRFXLIB}/mpsl/fem/common/lib/nrf52/hard-float/libmpsl_fem_common.a \
+	${NRFXLIB}/mpsl/lib/nrf52/hard-float/libmpsl.a \
+
+endif
 
 SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
 	${P}/boot/nrf52_bootloader.c \

@@ -18,5 +18,3 @@
 
 #define CLOCK_LFCLKSRC            (CLOCK_BASE + 0x518)
 #define CLOCK_CTIV                (CLOCK_BASE + 0x538)
-
-void nrf52_clk_radio_xtal(int on);

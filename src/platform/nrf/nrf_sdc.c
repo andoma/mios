@@ -1,15 +1,15 @@
 // BLE controller glue for Nordic's SoftDevice Controller (binary blob,
-// sdk-nrfxlib). The SDC replaces our own link layer (nrf54l_radio.c) behind
-// the Bluetooth HCI boundary: everything from l2cap up is unchanged.
+// sdk-nrfxlib). The SDC sits below the Bluetooth HCI boundary; everything
+// from l2cap up is the shared mios host stack.
 //
 // Execution model: every SDC/MPSL "low priority" API must be called from one
 // execution priority. That priority is IRQ_LEVEL_NET here: the MPSL low
-// priority interrupt (SWI00) runs at NET level and drains HCI events/data,
+// priority interrupt runs at NET level and drains HCI events/data,
 // and all other call sites (init, l2cap output path) block NET around their
 // calls. The time-critical radio scheduling runs in NVIC priority-0
 // interrupts owned by MPSL, which mios never masks (BASEPRI levels >= 1).
 
-#include "nrf54l_radio.h"
+#include "nrf_sdc.h"
 
 #include "net/pbuf.h"
 #include "net/netif.h"
@@ -22,9 +22,6 @@
 #include <stdio.h>
 
 #include "irq.h"
-#include "nrf54l_reg.h"
-#include "nrf54l_mpsl.h"
-#include "nrf54l_trng.h"
 
 #include "mpsl.h"
 #include "sdc.h"
@@ -33,10 +30,6 @@
 #include "sdc_hci_cmd_le.h"
 #include "sdc_hci_cmd_controller_baseband.h"
 #include "sdc_hci_evt.h"
-
-// FICR factory device address (same source as the native link layer).
-#define FICR_DEVICEADDR0 0x00ffc3a4
-#define FICR_DEVICEADDR1 0x00ffc3a8
 
 // Link layer packet size: matched to our pbufs so an ACL fragment always
 // fits one pbuf (the SDC negotiates DLE up to this).
@@ -100,7 +93,7 @@ sdc_fault(const char *file, uint32_t line)
 static void
 sdc_rand_poll(uint8_t *buf, uint8_t len)
 {
-  nrf54l_trng_read(buf, len);
+  nrf_trng_read(buf, len);
 }
 
 
@@ -108,7 +101,7 @@ sdc_rand_poll(uint8_t *buf, uint8_t len)
 void
 ble_rand(void *out, unsigned int len)
 {
-  nrf54l_trng_read(out, len);
+  nrf_trng_read(out, len);
 }
 
 
@@ -399,7 +392,7 @@ sdc_hci_signal(void)
 {
   // New HCI messages are available. We may already be inside sdc_low_prio's
   // drain loop; pending the interrupt again is always safe.
-  nrf54l_mpsl_kick();
+  nrf_mpsl_kick();
 }
 
 
@@ -445,7 +438,7 @@ static const device_class_t sdc_device_class = {
 // Called from board init (constructor 8xx, interrupts still masked): just
 // record the name. The controller is brought up on the main thread.
 void
-nrf54l_radio_ble_init(const char *name)
+nrf_ble_init(const char *name)
 {
   g_sdc.sb_name = name;
 }
@@ -481,16 +474,9 @@ sdc_setup_hci(sdc_ble_t *sb)
   sb->sb_tx_ceiling = bufsz.total_num_le_acl_data_packets;
   sb->sb_tx_credits = sb->sb_tx_ceiling;
 
-  // Static random address from the factory device address, same as the
-  // native link layer used, so the device identity is stable across both.
-  const uint32_t deviceaddr0 = reg_rd(FICR_DEVICEADDR0);
-  const uint32_t deviceaddr1 = reg_rd(FICR_DEVICEADDR1);
-  sb->sb_addr[0] = deviceaddr0;
-  sb->sb_addr[1] = deviceaddr0 >> 8;
-  sb->sb_addr[2] = deviceaddr0 >> 16;
-  sb->sb_addr[3] = deviceaddr0 >> 24;
-  sb->sb_addr[4] = deviceaddr1;
-  sb->sb_addr[5] = (deviceaddr1 >> 8) | 0xc0;
+  // Static random address from the factory device address, so the device
+  // identity is stable (SoC layer reads the right FICR location).
+  nrf_ficr_ble_addr(sb->sb_addr);
 
   sdc_hci_cmd_le_set_random_address_t addr;
   memcpy(addr.random_address, sb->sb_addr, 6);
@@ -529,18 +515,17 @@ sdc_setup_hci(sdc_ble_t *sb)
 
 
 // Runs on the main thread with interrupts enabled (after multitasking
-// start): MPSL's LFCLK (XTAL) startup wait and the controller bring-up
-// happen here.
+// start): MPSL's LFCLK startup and the controller bring-up happen here.
 static void __attribute__((constructor(5200)))
-nrf54l_sdc_init(void)
+nrf_sdc_init(void)
 {
   sdc_ble_t *sb = &g_sdc;
 
   if(sb->sb_name == NULL)
     return; // board did not enable BLE
 
-  nrf54l_trng_init();
-  nrf54l_mpsl_init(sdc_low_prio);
+  nrf_trng_init();
+  nrf_mpsl_init(sdc_low_prio);
 
   // From here on the MPSL low priority interrupt may run; serialize all
   // controller API calls by blocking NET.

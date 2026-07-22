@@ -1,16 +1,24 @@
 #include "nrf52_clk.h"
 #include "nrf52_reg.h"
-#include "nrf52_radio.h"
 
 #include "irq.h"
 
-#include "net/netif.h"
+// The LFCLK runs from the internal RC oscillator (the nRF52840 Dongle has no
+// 32 kHz crystal). It needs periodic calibration against the HFCLK to stay
+// accurate. Who does that depends on the build:
+//
+//  - No BLE: mios owns the CLOCK peripheral and calibrates it here (irq_0).
+//  - With BLE: MPSL owns the CLOCK peripheral (POWER_CLOCK IRQ) and calibrates
+//    the RC for the radio; our RTCs ride the same LFCLK. mios must not touch
+//    the CLOCK IRQ then, only start the LFCLK early so the RTCs tick from boot
+//    (MPSL comes up much later, in the SDC constructor).
+
+#ifndef ENABLE_NET_BLE
 
 static uint8_t xtal_want;
 static uint8_t xtal_have;
 
 #define XTAL_CALIB 0x1
-#define XTAL_RADIO 0x2
 
 
 static void
@@ -32,8 +40,6 @@ xtal_got(void)
 
   if(got & XTAL_CALIB)
     reg_wr(CLOCK_TASKS_CAL, 1);
-  if(got & XTAL_RADIO)
-    nrf52_radio_got_xtal();
 }
 
 
@@ -71,31 +77,26 @@ irq_0(void)
   }
 }
 
+#endif // !ENABLE_NET_BLE
+
 
 static void  __attribute__((constructor(132)))
 nrf52_clk_init(void)
 {
+#ifndef ENABLE_NET_BLE
   irq_enable(0, IRQ_LEVEL_CLOCK);
   reg_wr(CLOCK_INTENSET,
          (1 << 4) | // Calibration interval Timeout
          (1 << 3) | // Calibration done
          (1 << 0)); // HF Started
+#endif
 
   reg_wr(CLOCK_TASKS_LFCLKSTART, 1);
   while(reg_rd(CLOCK_EVENTS_LFCLKSTARTED) == 0) {}
 
+#ifndef ENABLE_NET_BLE
   reg_wr(CLOCK_CTIV, 0x0);
   reg_wr(CLOCK_TASKS_CTSTART, 1);
   reg_wr(CLOCK_CTIV, 0x7f); // Recalibrate LFCLK every 31.75 second
-}
-
-
-
-void
-nrf52_clk_radio_xtal(int on)
-{
-  if(on)
-    xtal_set(XTAL_RADIO);
-  else
-    xtal_clear(XTAL_RADIO);
+#endif
 }

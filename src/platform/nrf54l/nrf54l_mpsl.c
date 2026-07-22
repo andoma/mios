@@ -3,7 +3,8 @@
 #include "irq.h"
 #include "mpsl.h"
 
-#include "nrf54l_mpsl.h"
+#include "nrf_sdc.h"
+#include "nrf54l_reg.h"
 
 // Interrupt lines used by MPSL/SDC on nRF54L15. The time-critical handlers
 // run at NVIC priority 0: mios irq_forbid() uses BASEPRI with levels >= 1,
@@ -26,7 +27,7 @@ mpsl_low_prio_irq(void)
 }
 
 void
-nrf54l_mpsl_kick(void)
+nrf_mpsl_kick(void)
 {
   static volatile unsigned int * const NVIC_ISPR = (unsigned int *)0xe000e200;
   NVIC_ISPR[SWI00_IRQ >> 5] = 1 << (SWI00_IRQ & 0x1f);
@@ -52,7 +53,7 @@ mpsl_low_latency_release_callback(void)
 }
 
 void
-nrf54l_mpsl_init(void (*low_prio)(void))
+nrf_mpsl_init(void (*low_prio)(void))
 {
   mpsl_low_prio_fn = low_prio;
 
@@ -73,4 +74,22 @@ nrf54l_mpsl_init(void (*low_prio)(void))
   int err = mpsl_init(&lfclk, SWI00_IRQ, mpsl_assert_handler);
   if(err)
     panic("mpsl_init: %d", err);
+}
+
+
+// FICR factory device address (same source the native link layer used).
+#define FICR_DEVICEADDR0 0x00ffc3a4
+#define FICR_DEVICEADDR1 0x00ffc3a8
+
+void
+nrf_ficr_ble_addr(uint8_t addr[6])
+{
+  const uint32_t da0 = reg_rd(FICR_DEVICEADDR0);
+  const uint32_t da1 = reg_rd(FICR_DEVICEADDR1);
+  addr[0] = da0;
+  addr[1] = da0 >> 8;
+  addr[2] = da0 >> 16;
+  addr[3] = da0 >> 24;
+  addr[4] = da1;
+  addr[5] = (da1 >> 8) | 0xc0; // top two bits set: static random address
 }

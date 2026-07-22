@@ -1,7 +1,7 @@
 #include <string.h>
 
 #include "nrf54l_reg.h"
-#include "nrf54l_trng.h"
+#include "nrf_sdc.h"
 
 // CRACEN wrapper: clock/power gating for the crypto engine blocks.
 #define CRACEN_BASE       0x50048000
@@ -36,13 +36,13 @@ trng_start(void)
 }
 
 void
-nrf54l_trng_init(void)
+nrf_trng_init(void)
 {
   trng_start();
 }
 
 void
-nrf54l_trng_read(uint8_t *buf, size_t len)
+nrf_trng_read(uint8_t *buf, size_t len)
 {
   while(len) {
     if(RNG_STATUS_STATE(reg_rd(RNG_STATUS)) == RNG_STATE_ERROR) {

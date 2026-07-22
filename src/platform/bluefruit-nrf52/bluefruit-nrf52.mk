@@ -1,6 +1,8 @@
 
+# BLE via Nordic's SoftDevice Controller (nRF52832).
 ENABLE_NET_BLE=yes
 ENABLE_NET_MBUS=yes
+NRF_DEVICE := NRF52832_XXAA
 
 BOARDNAME := bluefruit-nrf52
 

@@ -4,15 +4,13 @@
 #include <mios/io.h>
 #include <mios/mios.h>
 #include <mios/task.h>
-#include <mios/cli.h>
-#include <mios/ghook.h>
 
 #include "irq.h"
 
 #include "nrf52_reg.h"
 #include "nrf52_uart.h"
 #include "nrf52_timer.h"
-#include "nrf52_radio.h"
+#include "nrf_sdc.h"
 
 // Product: https://www.adafruit.com/product/3406
 // Schematics: https://cdn-learn.adafruit.com/assets/assets/000/052/793/original/microcontrollers_revgsch.png
@@ -42,17 +40,6 @@ blinker(void *arg)
 }
 
 
-static void
-ble_status_update(ghook_type_t type, int on)
-{
-  if(type != GHOOK_BLE_STATUS)
-    return;
-
-  gpio_set_output(LED_RED, on);
-}
-
-GHOOK(ble_status_update);
-
 static void __attribute__((constructor(800)))
 platform_init_late(void)
 {
@@ -63,5 +50,5 @@ platform_init_late(void)
 
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
 
-  nrf52_radio_ble_init("bluefruit");
+  nrf_ble_init("bluefruit");
 }
