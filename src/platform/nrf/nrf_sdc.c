@@ -40,9 +40,15 @@
 // Controller memory pool, sized with the compile-time worst-case macros for
 // our configuration. sdc_cfg_set() reports the actual requirement at init
 // and we verify it fits.
+#define SDC_SCAN_BUFFERS 3
+
 static uint8_t sdc_mem[SDC_MEM_PER_PERIPHERAL_LINK(SDC_PKT_SIZE, SDC_PKT_SIZE,
                                                    SDC_TX_COUNT, SDC_RX_COUNT) +
                        SDC_MEM_PERIPHERAL_LINKS_SHARED +
+                       SDC_MEM_PER_CENTRAL_LINK(SDC_PKT_SIZE, SDC_PKT_SIZE,
+                                                SDC_TX_COUNT, SDC_RX_COUNT) +
+                       SDC_MEM_CENTRAL_LINKS_SHARED +
+                       SDC_MEM_SCAN_EXT(SDC_SCAN_BUFFERS) +
                        SDC_MEM_PER_ADV_SET(SDC_DEFAULT_ADV_BUF_SIZE) +
                        SDC_MEM_FAL(SDC_DEFAULT_FAL_SIZE)]
   __attribute__((aligned(8)));
@@ -60,13 +66,17 @@ typedef struct sdc_ble {
     uint8_t tx_phy, rx_phy;
     uint8_t connected;
     uint8_t encrypted;
+    uint8_t role; // 0 = central, 1 = peripheral
   } con;
 
   uint8_t sb_tx_credits;  // ACL packets the controller can accept right now
   uint8_t sb_tx_ceiling;  // from LE Read Buffer Size
 
   uint8_t sb_advertising;
+  uint8_t sb_scanning;
+  uint8_t sb_connecting;
   uint8_t sb_addr[6];
+  char sb_target[24]; // name prefix the central role scans/connects for
 
   struct {
     uint32_t rx;
@@ -80,7 +90,19 @@ typedef struct sdc_ble {
 
   const char *sb_name;
 
+  // Bring-up diagnostics: if a controller/HCI setup step fails we record it
+  // here and keep the system booting (instead of panicking, which would also
+  // take down the console/MCP) so it can be read back over "dev".
+  const char *sb_err_step;
+  int sb_err_status;
+
 } sdc_ble_t;
+
+#define SDC_TRY(step, expr)                                     \
+  do {                                                          \
+    int _s = (expr);                                            \
+    if(_s) { g_sdc.sb_err_step = (step); g_sdc.sb_err_status = _s; return; } \
+  } while(0)
 
 static sdc_ble_t g_sdc;
 
@@ -132,8 +154,13 @@ sdc_ltk_reply(l2cap_t *l2c, const uint8_t *ltk)
 static uint8_t
 sdc_adv_enable(uint8_t on)
 {
-  const sdc_hci_cmd_le_set_adv_enable_t en = { .adv_enable = on };
-  uint8_t status = sdc_hci_cmd_le_set_adv_enable(&en);
+  uint8_t buf[sizeof(sdc_hci_cmd_le_set_ext_adv_enable_t) +
+              sizeof(sdc_hci_le_set_ext_adv_enable_array_params_t)] = {0};
+  sdc_hci_cmd_le_set_ext_adv_enable_t *en = (void *)buf;
+  en->enable = on;
+  en->num_sets = 1;
+  en->array_params[0].adv_handle = 0;
+  uint8_t status = sdc_hci_cmd_le_set_ext_adv_enable(en);
   if(!status)
     g_sdc.sb_advertising = on;
   return status;
@@ -209,43 +236,69 @@ sdc_conn_output(struct l2cap *self, struct pbuf *pb)
 // --- RX: HCI events and ACL data -------------------------------------------
 // All of this runs in the MPSL low priority interrupt at IRQ_LEVEL_NET.
 
+// Common connection-up path for both LE Connection Complete and LE Enhanced
+// Connection Complete (extended advertising/scanning reports the latter).
+static void
+sdc_connected(sdc_ble_t *sb, uint8_t status, uint16_t handle, uint8_t role,
+              uint8_t peer_addr_type, const uint8_t *peer_addr,
+              uint16_t interval, uint16_t timeout)
+{
+  if(status)
+    return;
+
+  sb->con.handle = handle;
+  sb->con.interval = interval;
+  sb->con.timeout = timeout;
+  sb->con.tx_phy = 1;
+  sb->con.rx_phy = 1;
+  sb->con.encrypted = 0;
+  sb->con.role = role;
+  memcpy(sb->con.peer, peer_addr, 6);
+
+  // The l2cap/CoC host runs on the peripheral (CoC server) side. A central
+  // link (e.g. a Channel Sounding initiator) just tracks the ACL connection.
+  if(role == 1) {
+    sb->con.l2c.l2c_output = sdc_conn_output;
+    sb->con.l2c.l2c_ltk_reply = sdc_ltk_reply;
+    STAILQ_INIT(&sb->con.l2c.l2c_tx_queue);
+    sb->con.l2c.l2c_tx_queue_len = 0;
+
+    // Addresses for the pairing crypto (HCI order = LSB first).
+    memcpy(sb->con.l2c.l2c_peer_addr, peer_addr, 6);
+    sb->con.l2c.l2c_peer_addr_type = peer_addr_type;
+    memcpy(sb->con.l2c.l2c_our_addr, sb->sb_addr, 6);
+    sb->con.l2c.l2c_our_addr_type = 1; // static random
+
+    if(l2cap_connect(&sb->con.l2c))
+      return;
+  }
+
+  sb->con.connected = 1;
+  sb->sb_connecting = 0;
+  sb->sb_advertising = 0; // controller stops advertising on connect
+
+  netlog("ble: %s %02x:%02x:%02x:%02x:%02x:%02x interval:%d",
+         role ? "Connected to" : "Connected (central) to",
+         peer_addr[5], peer_addr[4], peer_addr[3],
+         peer_addr[2], peer_addr[1], peer_addr[0], interval);
+}
+
 static void
 sdc_handle_conn_complete(sdc_ble_t *sb, const uint8_t *p)
 {
   const sdc_hci_subevent_le_conn_complete_t *cc = (const void *)p;
+  sdc_connected(sb, cc->status, cc->conn_handle, cc->role,
+                cc->peer_address_type, cc->peer_address,
+                cc->conn_interval, cc->supervision_timeout);
+}
 
-  if(cc->status)
-    return;
-
-  sb->con.handle = cc->conn_handle;
-  sb->con.interval = cc->conn_interval;
-  sb->con.timeout = cc->supervision_timeout;
-  sb->con.tx_phy = 1;
-  sb->con.rx_phy = 1;
-  sb->con.encrypted = 0;
-  memcpy(sb->con.peer, cc->peer_address, 6);
-
-  sb->con.l2c.l2c_output = sdc_conn_output;
-  sb->con.l2c.l2c_ltk_reply = sdc_ltk_reply;
-  STAILQ_INIT(&sb->con.l2c.l2c_tx_queue);
-  sb->con.l2c.l2c_tx_queue_len = 0;
-
-  // Addresses for the pairing crypto (HCI order = LSB first).
-  memcpy(sb->con.l2c.l2c_peer_addr, cc->peer_address, 6);
-  sb->con.l2c.l2c_peer_addr_type = cc->peer_address_type;
-  memcpy(sb->con.l2c.l2c_our_addr, sb->sb_addr, 6);
-  sb->con.l2c.l2c_our_addr_type = 1; // static random
-
-  if(l2cap_connect(&sb->con.l2c))
-    return;
-
-  sb->con.connected = 1;
-  sb->sb_advertising = 0; // controller stops advertising on connect
-
-  netlog("ble: Connected to %02x:%02x:%02x:%02x:%02x:%02x interval:%d",
-         cc->peer_address[5], cc->peer_address[4], cc->peer_address[3],
-         cc->peer_address[2], cc->peer_address[1], cc->peer_address[0],
-         cc->conn_interval);
+static void
+sdc_handle_enh_conn_complete(sdc_ble_t *sb, const uint8_t *p)
+{
+  const sdc_hci_subevent_le_enhanced_conn_complete_t *cc = (const void *)p;
+  sdc_connected(sb, cc->status, cc->conn_handle, cc->role,
+                cc->peer_address_type, cc->peer_address,
+                cc->conn_interval, cc->supervision_timeout);
 }
 
 
@@ -260,12 +313,121 @@ sdc_handle_disconn(sdc_ble_t *sb, const uint8_t *p)
   netlog("ble: Disconnected (reason=0x%x)", dc->reason);
 
   sb->con.connected = 0;
-  l2cap_disconnect(&sb->con.l2c);
-  pbuf_free_queue_irq_blocked(&sb->con.l2c.l2c_tx_queue);
-  sb->con.l2c.l2c_tx_queue_len = 0;
+  sb->sb_connecting = 0;
+  if(sb->con.role == 1) {
+    l2cap_disconnect(&sb->con.l2c);
+    pbuf_free_queue_irq_blocked(&sb->con.l2c.l2c_tx_queue);
+    sb->con.l2c.l2c_tx_queue_len = 0;
+  }
   sb->sb_tx_credits = sb->sb_tx_ceiling;
 
   sdc_adv_enable(1);
+}
+
+
+// --- Central role: scan for a peer by name, then connect ------------------
+
+static uint8_t
+sdc_start_scan(void)
+{
+  uint8_t buf[sizeof(sdc_hci_cmd_le_set_ext_scan_params_t) +
+              sizeof(sdc_hci_le_set_ext_scan_params_array_params_t)] = {0};
+  sdc_hci_cmd_le_set_ext_scan_params_t *sp = (void *)buf;
+  sp->own_address_type = 1;          // random
+  sp->scanning_phys = 0x01;          // LE 1M
+  sp->array_params[0].scan_type = 0; // passive
+  sp->array_params[0].scan_interval = 0x0060;
+  sp->array_params[0].scan_window = 0x0030;
+  uint8_t status = sdc_hci_cmd_le_set_ext_scan_params(sp);
+  if(status)
+    return status;
+
+  sdc_hci_cmd_le_set_ext_scan_enable_t en = { .enable = 1 };
+  status = sdc_hci_cmd_le_set_ext_scan_enable(&en);
+  if(!status)
+    g_sdc.sb_scanning = 1;
+  return status;
+}
+
+static void
+sdc_stop_scan(void)
+{
+  sdc_hci_cmd_le_set_ext_scan_enable_t en = { .enable = 0 };
+  sdc_hci_cmd_le_set_ext_scan_enable(&en);
+  g_sdc.sb_scanning = 0;
+}
+
+static uint8_t
+sdc_create_conn(uint8_t peer_addr_type, const uint8_t *peer_addr)
+{
+  uint8_t buf[sizeof(sdc_hci_cmd_le_ext_create_conn_t) +
+              sizeof(sdc_hci_le_ext_create_conn_array_params_t)] = {0};
+  sdc_hci_cmd_le_ext_create_conn_t *cc = (void *)buf;
+  cc->own_address_type = 1;    // random
+  cc->peer_address_type = peer_addr_type;
+  memcpy(cc->peer_address, peer_addr, 6);
+  cc->initiating_phys = 0x01;  // LE 1M
+  cc->array_params[0].scan_interval = 0x0060;
+  cc->array_params[0].scan_window = 0x0030;
+  cc->array_params[0].conn_interval_min = 0x0018; // 30 ms
+  cc->array_params[0].conn_interval_max = 0x0028; // 50 ms
+  cc->array_params[0].supervision_timeout = 0x0100; // 2.56 s
+  return sdc_hci_cmd_le_ext_create_conn(cc);
+}
+
+// Match the target name against an AD payload (0x08 short / 0x09 complete).
+static int
+adv_name_matches(const uint8_t *data, uint8_t len, const char *prefix)
+{
+  const size_t plen = strlen(prefix);
+  for(uint8_t i = 0; i + 1 < len; ) {
+    uint8_t adlen = data[i];
+    if(adlen == 0 || i + 1 + adlen > len)
+      break;
+    uint8_t adtype = data[i + 1];
+    if((adtype == 0x08 || adtype == 0x09) && (size_t)(adlen - 1) >= plen &&
+       !memcmp(&data[i + 2], prefix, plen))
+      return 1;
+    i += 1 + adlen;
+  }
+  return 0;
+}
+
+static void
+sdc_handle_ext_adv_report(sdc_ble_t *sb, const uint8_t *p)
+{
+  if(!sb->sb_scanning || sb->sb_connecting)
+    return;
+  const sdc_hci_subevent_le_ext_adv_report_t *rep = (const void *)p;
+  if(rep->num_reports < 1)
+    return;
+  const sdc_hci_le_ext_adv_report_array_params_t *r =
+    (const void *)rep->reports;
+  if(!adv_name_matches(r->data, r->data_length, sb->sb_target))
+    return;
+
+  const uint8_t addr_type = r->address_type;
+  uint8_t addr[6];
+  memcpy(addr, r->address, 6);
+  sdc_stop_scan();
+  if(sdc_create_conn(addr_type, addr) == 0)
+    sb->sb_connecting = 1;
+}
+
+// Public: start acting as a central and connect to a peer whose advertised
+// name begins with `prefix`. Safe to call from a thread (blocks NET).
+int
+nrf_ble_connect(const char *prefix)
+{
+  sdc_ble_t *sb = &g_sdc;
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  int r = -1;
+  if(!sb->con.connected && !sb->sb_connecting) {
+    snprintf(sb->sb_target, sizeof(sb->sb_target), "%s", prefix);
+    r = sdc_start_scan() ? -1 : 0;
+  }
+  irq_permit(q);
+  return r;
 }
 
 
@@ -280,6 +442,12 @@ sdc_handle_event(sdc_ble_t *sb, const uint8_t *buf)
     switch(p[0]) {
     case SDC_HCI_SUBEVENT_LE_CONN_COMPLETE:
       sdc_handle_conn_complete(sb, p + 1);
+      break;
+    case SDC_HCI_SUBEVENT_LE_ENHANCED_CONN_COMPLETE:
+      sdc_handle_enh_conn_complete(sb, p + 1);
+      break;
+    case SDC_HCI_SUBEVENT_LE_EXT_ADV_REPORT:
+      sdc_handle_ext_adv_report(sb, p + 1);
       break;
     case SDC_HCI_SUBEVENT_LE_PHY_UPDATE_COMPLETE: {
       const sdc_hci_subevent_le_phy_update_complete_t *pu =
@@ -409,6 +577,10 @@ sdc_print_info(struct device *dev, struct stream *st)
            sb->con.connected ? "Connected" :
            sb->sb_advertising ? "Advertising" : "Idle");
 
+  if(sb->sb_err_step)
+    stprintf(st, "  BRING-UP FAILED at %s (status %d / 0x%x)\n",
+             sb->sb_err_step, sb->sb_err_status, sb->sb_err_status);
+
   if(sb->con.connected) {
     stprintf(st, "  Peer: %02x:%02x:%02x:%02x:%02x:%02x  %s\n",
              sb->con.peer[5], sb->con.peer[4], sb->con.peer[3],
@@ -447,30 +619,25 @@ nrf_ble_init(const char *name)
 static void
 sdc_setup_hci(sdc_ble_t *sb)
 {
-  uint8_t status;
-
-  // Event routing: Disconnection Complete (bit 4), LE Meta (bit 61); within
-  // LE Meta: Connection Complete (0), Connection Update (2), Data Length
-  // Change (6), PHY Update Complete (11).
   // Classic event mask: Disconnection Complete (bit 4), Encryption Change
   // (bit 7), LE Meta (bit 61).
   sdc_hci_cmd_cb_set_event_mask_t evtmask = {};
   evtmask.raw[0] = 0x10 | 0x80;
   evtmask.raw[7] = 0x20;
-  if((status = sdc_hci_cmd_cb_set_event_mask(&evtmask)))
-    panic("sdc: event_mask: 0x%x", status);
+  SDC_TRY("event_mask", sdc_hci_cmd_cb_set_event_mask(&evtmask));
 
-  // LE event mask: Connection Complete (0), Connection Update (2), LTK
-  // Request (4), Data Length Change (6), PHY Update Complete (11).
+  // LE event mask. Byte 0: Connection Complete (0), Connection Update (2),
+  // LTK Request (4), Data Length Change (6). Byte 1: Enhanced Connection
+  // Complete (9), PHY Update Complete (11), Extended Advertising Report (12).
+  // With extended advertising/scanning the controller reports connections via
+  // Enhanced Connection Complete, and scan results via Extended Adv Report.
   sdc_hci_cmd_le_set_event_mask_t le_evtmask = {};
-  le_evtmask.raw[0] = 0x45 | 0x10;
-  le_evtmask.raw[1] = 0x08;
-  if((status = sdc_hci_cmd_le_set_event_mask(&le_evtmask)))
-    panic("sdc: le_event_mask: 0x%x", status);
+  le_evtmask.raw[0] = 0x55; // bits 0,2,4,6
+  le_evtmask.raw[1] = 0x1a; // bits 9,11,12
+  SDC_TRY("le_event_mask", sdc_hci_cmd_le_set_event_mask(&le_evtmask));
 
   sdc_hci_cmd_le_read_buffer_size_return_t bufsz;
-  if((status = sdc_hci_cmd_le_read_buffer_size(&bufsz)))
-    panic("sdc: read_buffer_size: 0x%x", status);
+  SDC_TRY("read_buffer_size", sdc_hci_cmd_le_read_buffer_size(&bufsz));
   sb->sb_tx_ceiling = bufsz.total_num_le_acl_data_packets;
   sb->sb_tx_credits = sb->sb_tx_ceiling;
 
@@ -478,39 +645,58 @@ sdc_setup_hci(sdc_ble_t *sb)
   // identity is stable (SoC layer reads the right FICR location).
   nrf_ficr_ble_addr(sb->sb_addr);
 
+  // Global random address is used when scanning / initiating (central role).
   sdc_hci_cmd_le_set_random_address_t addr;
   memcpy(addr.random_address, sb->sb_addr, 6);
-  if((status = sdc_hci_cmd_le_set_random_address(&addr)))
-    panic("sdc: set_random_address: 0x%x", status);
+  SDC_TRY("set_random_address", sdc_hci_cmd_le_set_random_address(&addr));
 
-  const sdc_hci_cmd_le_set_adv_params_t advp = {
-    .adv_interval_min = 0xa0, // 100 ms
-    .adv_interval_max = 0xa0,
-    .adv_type = 0,            // ADV_IND
-    .own_address_type = 1,    // random
-    .adv_channel_map = 0x7,
+  // Extended advertising, but emitting legacy ADV_IND PDUs (connectable +
+  // scannable + legacy): the modern command set, still discoverable by hosts
+  // (e.g. iOS) that don't scan extended-only advertisements.
+  sdc_hci_cmd_le_set_ext_adv_params_t advp = {
+    .adv_handle = 0,
+    .primary_adv_interval_min = 0xa0, // 100 ms (0.625 ms units)
+    .primary_adv_interval_max = 0xa0,
+    .primary_adv_channel_map = 0x7,
+    .own_address_type = 1,            // random
+    .adv_tx_power = 0x7f,             // no preference
+    .primary_adv_phy = 1,            // LE 1M
+    .secondary_adv_phy = 1,          // LE 1M
+    .adv_sid = 0,
   };
-  if((status = sdc_hci_cmd_le_set_adv_params(&advp)))
-    panic("sdc: set_adv_params: 0x%x", status);
+  advp.adv_event_properties.params.connectable_adv = 1;
+  advp.adv_event_properties.params.scannable_adv = 1;
+  advp.adv_event_properties.params.legacy_adv_packets = 1;
+  sdc_hci_cmd_le_set_ext_adv_params_return_t advp_ret;
+  SDC_TRY("set_ext_adv_params",
+          sdc_hci_cmd_le_set_ext_adv_params(&advp, &advp_ret));
 
-  // Flags AD (mandatory for BlueZ discovery) + Complete Local Name.
-  sdc_hci_cmd_le_set_adv_data_t advd = {};
+  // The advertising set now exists (handle 0); give it its random address.
+  sdc_hci_cmd_le_set_adv_set_random_address_t setaddr = { .adv_handle = 0 };
+  memcpy(setaddr.random_address, sb->sb_addr, 6);
+  SDC_TRY("set_adv_set_random_address",
+          sdc_hci_cmd_le_set_adv_set_random_address(&setaddr));
+
+  // Flags AD (mandatory for discovery) + Complete Local Name.
+  uint8_t dbuf[sizeof(sdc_hci_cmd_le_set_ext_adv_data_t) + 31] = {0};
+  sdc_hci_cmd_le_set_ext_adv_data_t *advd = (void *)dbuf;
+  advd->adv_handle = 0;
+  advd->operation = 0x03;         // complete adv data
+  advd->fragment_preference = 1;  // controller should not fragment
   size_t namelen = strlen(sb->sb_name);
   if(namelen > 31 - 3 - 2)
     namelen = 31 - 3 - 2;
-  uint8_t *p = advd.adv_data;
+  uint8_t *p = advd->adv_data;
   p[0] = 2;
   p[1] = 1;   // Flags
   p[2] = 6;   // LE General Discoverable, BR/EDR not supported
   p[3] = namelen + 1;
   p[4] = 9;   // Complete Local Name
   memcpy(p + 5, sb->sb_name, namelen);
-  advd.adv_data_length = 3 + 2 + namelen;
-  if((status = sdc_hci_cmd_le_set_adv_data(&advd)))
-    panic("sdc: set_adv_data: 0x%x", status);
+  advd->adv_data_length = 3 + 2 + namelen;
+  SDC_TRY("set_ext_adv_data", sdc_hci_cmd_le_set_ext_adv_data(advd));
 
-  if((status = sdc_adv_enable(1)))
-    panic("sdc: adv_enable: 0x%x", status);
+  SDC_TRY("adv_enable", sdc_adv_enable(1));
 }
 
 
@@ -532,22 +718,20 @@ nrf_sdc_init(void)
   int q = irq_forbid(IRQ_LEVEL_NET);
 
   int err = sdc_init(sdc_fault);
-  if(err)
-    panic("sdc_init: %d", err);
+  if(err) { sb->sb_err_step = "sdc_init"; sb->sb_err_status = err; goto done; }
 
-  sdc_support_adv();
+  sdc_support_ext_adv();
+  sdc_support_ext_scan();
   sdc_support_peripheral();
+  sdc_support_central();
   sdc_support_dle_peripheral();
   sdc_support_le_2m_phy();
   sdc_support_phy_update_peripheral();
 
-  // The default resource config assumes one central link too; claim only
-  // what this glue implements so the memory pool stays minimal.
-  const sdc_cfg_t central_cfg = { .central_count = { .count = 0 } };
+  const sdc_cfg_t central_cfg = { .central_count = { .count = 1 } };
   err = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG,
                     SDC_CFG_TYPE_CENTRAL_COUNT, &central_cfg);
-  if(err < 0)
-    panic("sdc_cfg_set: %d", err);
+  if(err < 0) { sb->sb_err_step = "cfg_central"; sb->sb_err_status = err; goto done; }
 
   const sdc_cfg_t bufcfg = {
     .buffer_cfg = {
@@ -559,32 +743,36 @@ nrf_sdc_init(void)
   };
   err = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG,
                     SDC_CFG_TYPE_BUFFER_CFG, &bufcfg);
-  if(err < 0)
-    panic("sdc_cfg_set: %d", err);
+  if(err < 0) { sb->sb_err_step = "cfg_buffer"; sb->sb_err_status = err; goto done; }
 
   err = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, NULL);
-  if(err < 0)
-    panic("sdc_cfg_set: %d", err);
-  if(err > (int)sizeof(sdc_mem))
-    panic("sdc: pool too small: %d > %d", err, sizeof(sdc_mem));
+  if(err < 0) { sb->sb_err_step = "cfg_none"; sb->sb_err_status = err; goto done; }
+  if(err > (int)sizeof(sdc_mem)) {
+    sb->sb_err_step = "pool_too_small"; sb->sb_err_status = err; goto done;
+  }
 
   static const sdc_rand_source_t rand_source = {
     .rand_poll = sdc_rand_poll,
   };
   err = sdc_rand_source_register(&rand_source);
-  if(err)
-    panic("sdc_rand_source_register: %d", err);
+  if(err) { sb->sb_err_step = "rand_source"; sb->sb_err_status = err; goto done; }
 
   err = sdc_enable(sdc_hci_signal, sdc_mem);
-  if(err)
-    panic("sdc_enable: %d", err);
+  if(err) { sb->sb_err_step = "sdc_enable"; sb->sb_err_status = err; goto done; }
 
-  sdc_setup_hci(sb);
+  sdc_setup_hci(sb); // records sb_err_step on failure, but keeps booting
 
+ done:
   irq_permit(q);
 
   netif_init(&sb->sb_ni, "radio", &sdc_device_class);
   netif_attach(&sb->sb_ni);
+
+  if(sb->sb_err_step) {
+    printf("BLE: bring-up FAILED at %s (status %d / 0x%x)\n",
+           sb->sb_err_step, sb->sb_err_status, sb->sb_err_status);
+    return;
+  }
 
   uint8_t rev[SDC_BUILD_REVISION_SIZE];
   sdc_build_revision_get(rev);
@@ -615,6 +803,21 @@ cmd_blepair(cli_t *cli, int argc, char **argv)
 
 CLI_CMD_DEF_EXT("ble_pair", cmd_blepair, NULL,
                 "Ask the connected central to start pairing");
+
+// Act as central: scan for a peer advertising the given name prefix (default
+// "mios") and connect to it.
+static error_t
+cmd_bleconnect(cli_t *cli, int argc, char **argv)
+{
+  const char *prefix = argc > 1 ? argv[1] : "mios";
+  int r = nrf_ble_connect(prefix);
+  cli_printf(cli, r ? "Busy or already connected\n" : "Scanning for '%s'\n",
+             prefix);
+  return r ? ERR_NOT_READY : 0;
+}
+
+CLI_CMD_DEF_EXT("ble_connect", cmd_bleconnect, NULL,
+                "Scan and connect to a peer [name-prefix]");
 
 // Confirm the LE Secure Connections numeric-comparison value shown at pairing.
 static error_t

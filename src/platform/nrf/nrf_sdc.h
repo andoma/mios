@@ -13,6 +13,11 @@
 // the controller is brought up later on the main thread.
 void nrf_ble_init(const char *name);
 
+// Act as a BLE central: scan for a peer advertising a name starting with
+// `prefix` and connect to it. Returns 0 if the scan started. Used for
+// device-to-device links (e.g. Channel Sounding).
+int nrf_ble_connect(const char *prefix);
+
 // --- SoC hooks (implemented per SoC: nrf52_mpsl.c / nrf54l_mpsl.c etc.) -----
 
 // Bring up Nordic's Multiprotocol Service Layer. low_prio is invoked from the
