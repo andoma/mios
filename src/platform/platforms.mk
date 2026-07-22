@@ -9,6 +9,7 @@ ALLPLATFORMS := \
 	vexpress-a9 \
 	stm32h7-nucleo144 \
 	nrf54l15-dk \
+	nrf52840-dongle \
 
 ${ALLPLATFORMS}:
 	$(MAKE) PLATFORM=$@
