@@ -95,6 +95,8 @@ flash_run(const flash_params_t *p, flash_log_t *log)
     return flash_dfu(p, log);
   if(!strcmp(method, "openocd"))
     return flash_openocd(p, log);
+  if(!strcmp(method, "nrfdfu"))
+    return flash_nrfdfu(p, log);
 
   flash_logf(log, "Unknown flash method '%s'", method);
   return -1;

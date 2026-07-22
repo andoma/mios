@@ -12,7 +12,7 @@ usage(const char *argv0)
          "\n"
          "  Load mios firmware onto a target device\n"
          "\n"
-         "   -m METHOD    jlink, dfu, openocd or auto [default: auto]\n"
+         "   -m METHOD    jlink, dfu, openocd, nrfdfu or auto [default: auto]\n"
          "   -c CMDLINE   Boot cmdline deposited in RAM (dfu)\n"
          "   -s SERIAL    Select probe by USB serial number (jlink)\n"
          "   -S KHZ       SWD clock [default: 4000] (jlink)\n"

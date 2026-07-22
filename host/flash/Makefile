@@ -4,6 +4,7 @@ SRC = \
 	flash_jlink.c \
 	flash_dfu.c \
 	flash_openocd.c \
+	flash_nrfdfu.c \
 	../jlink/jlink.c \
 	../jlink/dap.c \
 	../jlink/nrf54l.c \

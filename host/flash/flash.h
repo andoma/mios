@@ -49,3 +49,5 @@ int flash_jlink(const flash_params_t *p, flash_log_t *log);
 int flash_dfu(const flash_params_t *p, flash_log_t *log);
 
 int flash_openocd(const flash_params_t *p, flash_log_t *log);
+
+int flash_nrfdfu(const flash_params_t *p, flash_log_t *log);
