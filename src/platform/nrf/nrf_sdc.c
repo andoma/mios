@@ -64,8 +64,9 @@ sdc_ble_t g_sdc;
 __attribute__((weak)) int  nrf_sdc_cs_configure(void) { return 0; }
 __attribute__((weak)) void nrf_sdc_cs_setup_hci(void) {}
 __attribute__((weak)) void nrf_sdc_cs_connected(sdc_ble_t *sb) { (void)sb; }
-__attribute__((weak)) int  nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p)
-{ (void)sb; (void)p; return 0; }
+__attribute__((weak)) int  nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p,
+                                              uint8_t plen)
+{ (void)sb; (void)p; (void)plen; return 0; }
 __attribute__((weak)) int  nrf_sdc_cs_ltk(sdc_ble_t *sb) { (void)sb; return 0; }
 __attribute__((weak)) int  nrf_sdc_cs_encryption_changed(sdc_ble_t *sb, int on)
 { (void)sb; (void)on; return 0; }
@@ -440,7 +441,7 @@ sdc_handle_event(sdc_ble_t *sb, const uint8_t *buf)
     default:
       // The optional CS extension handles its LE subevents (and the LL
       // feature-exchange-complete it chains on); otherwise log as unhandled.
-      if(!nrf_sdc_cs_le_meta(sb, p))
+      if(!nrf_sdc_cs_le_meta(sb, p, buf[1]))
         netlog("le: unhandled subevent 0x%x", p[0]);
       break;
     }

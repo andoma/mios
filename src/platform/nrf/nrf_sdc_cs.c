@@ -17,6 +17,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stddef.h>
 
 #include <mios/cli.h>
 #include <mios/error.h>
@@ -162,6 +163,61 @@ cs_start_procedure(sdc_ble_t *sb)
 }
 
 
+// --- Per-tone IQ capture (mode-2 PBR) ---------------------------------------
+// The subevent result carries the step data: a sequence of steps, each
+//   mode(1) channel(1) data_len(1) data[data_len].
+// A mode-2 step's data is antenna_permutation_index(1) followed by (n_ap+1)
+// tone_info records of 4 bytes: a 24-bit phase correction term (12-bit I in
+// bits 0..11, 12-bit Q in bits 12..23, both two's complement) plus a
+// quality/extension nibble byte. We keep the primary antenna path's I/Q per
+// channel for the last subevent, for read-out via the `cs_data` command; the
+// distance itself (phase slope vs frequency, combining this device's tones
+// with the peer's) is computed off-device for now.
+#define CS_MAX_TONES 72
+struct cs_tone {
+  uint8_t channel;
+  uint8_t quality;
+  int16_t i;
+  int16_t q;
+};
+static struct cs_tone cs_tones[CS_MAX_TONES];
+static uint8_t cs_ntones;
+
+static void
+cs_store_tone(uint8_t channel, const uint8_t *tone)
+{
+  if(cs_ntones >= CS_MAX_TONES)
+    return;
+  uint32_t pct = tone[0] | (tone[1] << 8) | (tone[2] << 16);
+  int16_t i = (int16_t)((pct & 0x000fff) ^ 0x800) - 0x800;
+  int16_t q = (int16_t)(((pct & 0xfff000) >> 12) ^ 0x800) - 0x800;
+  cs_tones[cs_ntones].channel = channel;
+  cs_tones[cs_ntones].quality = tone[3] & 0x0f; // quality_indicator (low nibble)
+  cs_tones[cs_ntones].i = i;
+  cs_tones[cs_ntones].q = q;
+  cs_ntones++;
+}
+
+// Walk a step-data blob, capturing the primary tone of each mode-2 step.
+static void
+cs_parse_steps(const uint8_t *d, int len)
+{
+  int off = 0;
+  while(off + 3 <= len) {
+    uint8_t mode = d[off];
+    uint8_t channel = d[off + 1];
+    uint8_t dlen = d[off + 2];
+    off += 3;
+    if(off + dlen > len)
+      break;
+    // mode-2: antenna_permutation_index(1) + tone_info[] (4 bytes each). Use
+    // the first tone (primary antenna path) for single-antenna ranging.
+    if(mode == 2 && dlen >= 1 + 4)
+      cs_store_tone(channel, d + off + 1);
+    off += dlen;
+  }
+}
+
 // --- Hooks called from nrf_sdc.c --------------------------------------------
 
 int
@@ -242,7 +298,7 @@ nrf_sdc_cs_connected(sdc_ble_t *sb)
 }
 
 int
-nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p)
+nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p, uint8_t plen)
 {
   switch(p[0]) {
   case 0x04: // LE Read Remote Features Complete
@@ -294,11 +350,24 @@ nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p)
            e->procedure_counter, e->num_steps_reported,
            e->procedure_done_status, e->subevent_done_status,
            e->abort_reason, e->num_antenna_paths);
+    // Start of a subevent report: reset the tone capture and parse its steps.
+    // data[] length = (LE-meta params) - subevent code - fixed struct fields.
+    cs_ntones = 0;
+    cs_parse_steps(e->data,
+                   (int)plen - 1 -
+                   (int)offsetof(sdc_hci_subevent_le_cs_subevent_result_t, data));
     return 1;
   }
-  case SDC_HCI_SUBEVENT_LE_CS_SUBEVENT_RESULT_CONTINUE:
-    netlog("cs: result (continued)");
+  case SDC_HCI_SUBEVENT_LE_CS_SUBEVENT_RESULT_CONTINUE: {
+    const sdc_hci_subevent_le_cs_subevent_result_continue_t *e =
+      (const void *)(p + 1);
+    // More steps for the same subevent: append to the tone capture.
+    cs_parse_steps(e->data,
+                   (int)plen - 1 -
+                   (int)offsetof(sdc_hci_subevent_le_cs_subevent_result_continue_t,
+                                 data));
     return 1;
+  }
 
   default:
     return 0;
@@ -486,3 +555,26 @@ cmd_ble_feat(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF_EXT("ble_feat", cmd_ble_feat, NULL, "Trigger LL feature exchange");
+
+// Dump the last CS subevent's captured per-channel tone I/Q (mode-2 PBR), one
+// "channel i q quality" line per tone. Distance = phase slope of the combined
+// (this device x peer) tone phase vs frequency; computed off-device from the
+// initiator's and reflector's dumps for now (see support/cs_distance.py).
+static error_t
+cmd_cs_data(cli_t *cli, int argc, char **argv)
+{
+  static struct cs_tone snap[CS_MAX_TONES];
+  int ql = irq_forbid(IRQ_LEVEL_NET);
+  uint8_t n = cs_ntones;
+  memcpy(snap, cs_tones, n * sizeof(snap[0]));
+  irq_permit(ql);
+
+  cli_printf(cli, "cs_tones %d\n", n);
+  for(uint8_t k = 0; k < n; k++)
+    cli_printf(cli, "%d %d %d %d\n",
+               snap[k].channel, snap[k].i, snap[k].q, snap[k].quality);
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("cs_data", cmd_cs_data, NULL,
+                "Dump last CS subevent tone I/Q (channel i q quality)");

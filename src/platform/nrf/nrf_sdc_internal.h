@@ -79,6 +79,6 @@ uint8_t sdc_adv_enable(uint8_t on);
 int  nrf_sdc_cs_configure(void);                       // sdc_support_*/cfg (init)
 void nrf_sdc_cs_setup_hci(void);                        // host feature + timing
 void nrf_sdc_cs_connected(sdc_ble_t *sb);               // arm reflector on connect
-int  nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p); // CS LE subevents -> 1
+int  nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p, uint8_t plen); // CS subevents -> 1
 int  nrf_sdc_cs_ltk(sdc_ble_t *sb);                     // fixed-key LTK reply -> 1
 int  nrf_sdc_cs_encryption_changed(sdc_ble_t *sb, int on); // consume enc-change -> 1
