@@ -18,3 +18,8 @@ CPPFLAGS += \
 
 SRCS-${ENABLE_NET_BLE} += \
 	${NP}/nrf_sdc.c \
+
+# Channel Sounding is optional. When disabled, no sdc_support_channel_sounding_*
+# call remains, so --gc-sections drops the controller's CS code from the image.
+SRCS-${ENABLE_BLE_CS} += \
+	${NP}/nrf_sdc_cs.c \

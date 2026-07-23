@@ -8,6 +8,7 @@ CPPFLAGS += -I${B} -include ${BOARDNAME}.h
 
 ENABLE_LITTLEFS := yes
 ENABLE_NET_BLE := yes
+ENABLE_BLE_CS := yes
 ENABLE_NET_DSIG := yes
 
 FLASH_METHOD := jlink
