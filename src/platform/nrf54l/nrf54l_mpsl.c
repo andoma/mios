@@ -2,6 +2,7 @@
 
 #include "irq.h"
 #include "mpsl.h"
+#include "mpsl_clock.h"
 
 #include "nrf_sdc.h"
 #include "nrf54l_reg.h"
@@ -39,17 +40,31 @@ mpsl_assert_handler(const char *file, uint32_t line)
   panic("mpsl assert %s:%d", file, line);
 }
 
-// Called by MPSL around time-critical radio work so the platform can switch
-// NVM latency / CPU power profile. We never put the RRAM controller or CPU
-// in a low-latency-violating power state, so these are no-ops.
+// MPSL calls these around time-critical radio work (mandatory platform hooks on
+// nRF54L). Between back-to-back radio events the CPU idles in WFI and the RRAM
+// auto-powers-down (LOWPOWERCONFIG reset = PowerDown); the resulting wake/read
+// latency is absorbed by a normal connection event but wrecks Channel Sounding,
+// whose sub-events chain microsecond-timed steps and abort ("limited resources")
+// if a step is serviced late. So hold the CPU in constant-latency mode and keep
+// the RRAM in fast-wake Standby while MPSL runs, mirroring the NCS glue.
+#define POWER_TASKS_CONSTLAT   0x5010e030
+#define POWER_TASKS_LOWPWR     0x5010e034
+#define RRAMC_LOWPOWERCONFIG   0x5004b518  // RRAMC(0x5004b000)+POWER(0x510)+0x08
+#define RRAMC_MODE_POWERDOWN   0
+#define RRAMC_MODE_STANDBY     1
+
 void
 mpsl_low_latency_acquire_callback(void)
 {
+  reg_wr(POWER_TASKS_CONSTLAT, 1);
+  reg_wr(RRAMC_LOWPOWERCONFIG, RRAMC_MODE_STANDBY);
 }
 
 void
 mpsl_low_latency_release_callback(void)
 {
+  reg_wr(RRAMC_LOWPOWERCONFIG, RRAMC_MODE_POWERDOWN);
+  reg_wr(POWER_TASKS_LOWPWR, 1);
 }
 
 void
@@ -74,6 +89,13 @@ nrf_mpsl_init(void (*low_prio)(void))
   int err = mpsl_init(&lfclk, SWI00_IRQ, mpsl_assert_handler);
   if(err)
     panic("mpsl_init: %d", err);
+
+  // Tell MPSL the HFXO ramp-up time (nRF54L15-DK devicetree: 1650 us). Without
+  // this, MPSL uses a default that mis-times the high-frequency clock request;
+  // a normal connection tolerates the slack, but Channel Sounding's back-to-back
+  // microsecond-scheduled sub-events cannot be placed and abort (0x30). Zephyr's
+  // MPSL glue always sets this from the hfxo startup-time-us property.
+  mpsl_clock_hfclk_latency_set(1650);
 }
 
 
