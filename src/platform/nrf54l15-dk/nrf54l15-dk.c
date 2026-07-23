@@ -11,7 +11,20 @@
 
 #include "nrf54l_uart.h"
 #include "nrf54l_spi.h"
+#include "nrf54l_reg.h"
 #include "nrf_sdc.h"
+
+// REGULATORS (secure) VREGMAIN.DCDCEN. The DK is fitted with the VREGMAIN
+// inductor, so run the main supply from the DC/DC buck: better efficiency and,
+// more importantly, better load-transient response for the radio's rapid
+// current bursts (e.g. Channel Sounding tone exchanges).
+#define REG_VREGMAIN_DCDCEN 0x50120600
+
+static void __attribute__((constructor(105)))
+board_init_dcdc(void)
+{
+  reg_wr(REG_VREGMAIN_DCDCEN, 1);
+}
 
 // nRF54L15 DK onboard debugger virtual serial ports (HW User Guide v1.0),
 // both exposed as host ACM ports:
