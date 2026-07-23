@@ -10,16 +10,19 @@
 // interrupts owned by MPSL, which mios never masks (BASEPRI levels >= 1).
 
 #include "nrf_sdc.h"
+#include "nrf_sdc_internal.h"
 
 #include "net/pbuf.h"
 #include "net/netif.h"
 #include "net/ble/l2cap.h"
 #include "net/ble/smp.h"
 
+#include <malloc.h>
 #include <mios/mios.h>
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "irq.h"
 
@@ -29,6 +32,7 @@
 #include "sdc_hci.h"
 #include "sdc_hci_cmd_le.h"
 #include "sdc_hci_cmd_controller_baseband.h"
+#include "sdc_hci_vs.h"
 #include "sdc_hci_evt.h"
 
 // Link layer packet size: matched to our pbufs so an ACL fragment always
@@ -37,66 +41,15 @@
 #define SDC_TX_COUNT 3
 #define SDC_RX_COUNT 2
 
-// Controller memory pool, sized with the compile-time worst-case macros for
-// our configuration. sdc_cfg_set() reports the actual requirement at init
-// and we verify it fits.
-#define SDC_SCAN_BUFFERS 3
+// Controller memory pool. Allocated dynamically at init from the exact size
+// sdc_cfg_set() reports for the configured features, so there is no
+// compile-time worst-case sizing and no per-feature pool #ifdefs.
+static void *sdc_mem;
+static size_t sdc_mem_size;
 
-static uint8_t sdc_mem[SDC_MEM_PER_PERIPHERAL_LINK(SDC_PKT_SIZE, SDC_PKT_SIZE,
-                                                   SDC_TX_COUNT, SDC_RX_COUNT) +
-                       SDC_MEM_PERIPHERAL_LINKS_SHARED +
-                       SDC_MEM_PER_CENTRAL_LINK(SDC_PKT_SIZE, SDC_PKT_SIZE,
-                                                SDC_TX_COUNT, SDC_RX_COUNT) +
-                       SDC_MEM_CENTRAL_LINKS_SHARED +
-                       SDC_MEM_SCAN_EXT(SDC_SCAN_BUFFERS) +
-                       SDC_MEM_PER_ADV_SET(SDC_DEFAULT_ADV_BUF_SIZE) +
-                       SDC_MEM_FAL(SDC_DEFAULT_FAL_SIZE)]
-  __attribute__((aligned(8)));
-
-typedef struct sdc_ble {
-
-  netif_t sb_ni;
-
-  struct {
-    l2cap_t l2c; // must be first: l2c_output casts back
-    uint16_t handle;
-    uint16_t interval;   // units of 1.25 ms
-    uint16_t timeout;    // units of 10 ms
-    uint8_t peer[6];
-    uint8_t tx_phy, rx_phy;
-    uint8_t connected;
-    uint8_t encrypted;
-    uint8_t role; // 0 = central, 1 = peripheral
-  } con;
-
-  uint8_t sb_tx_credits;  // ACL packets the controller can accept right now
-  uint8_t sb_tx_ceiling;  // from LE Read Buffer Size
-
-  uint8_t sb_advertising;
-  uint8_t sb_scanning;
-  uint8_t sb_connecting;
-  uint8_t sb_addr[6];
-  char sb_target[24]; // name prefix the central role scans/connects for
-
-  struct {
-    uint32_t rx;
-    uint32_t tx;
-    uint32_t rx_drops;    // pbuf exhaustion
-    uint32_t rx_stale;    // ACL data for a handle we do not know
-    uint32_t rx_oversize; // ACL data larger than our LL packet size
-    uint32_t events;
-    uint32_t swi_runs;    // low priority interrupt invocations
-  } stat;
-
-  const char *sb_name;
-
-  // Bring-up diagnostics: if a controller/HCI setup step fails we record it
-  // here and keep the system booting (instead of panicking, which would also
-  // take down the console/MCP) so it can be read back over "dev".
-  const char *sb_err_step;
-  int sb_err_status;
-
-} sdc_ble_t;
+// The sdc_ble_t definition lives in nrf_sdc_internal.h (shared with the
+// optional Channel Sounding extension).
+sdc_ble_t g_sdc;
 
 #define SDC_TRY(step, expr)                                     \
   do {                                                          \
@@ -104,7 +57,18 @@ typedef struct sdc_ble {
     if(_s) { g_sdc.sb_err_step = (step); g_sdc.sb_err_status = _s; return; } \
   } while(0)
 
-static sdc_ble_t g_sdc;
+// Channel Sounding hooks: weak no-ops here, overridden by nrf_sdc_cs.c when the
+// build sets ENABLE_BLE_CS. This keeps all CS code -- and the controller's CS
+// implementation, dropped by --gc-sections when no sdc_support_channel_sounding_*
+// call remains -- out of builds that do not use it.
+__attribute__((weak)) int  nrf_sdc_cs_configure(void) { return 0; }
+__attribute__((weak)) void nrf_sdc_cs_setup_hci(void) {}
+__attribute__((weak)) void nrf_sdc_cs_connected(sdc_ble_t *sb) { (void)sb; }
+__attribute__((weak)) int  nrf_sdc_cs_le_meta(sdc_ble_t *sb, const uint8_t *p)
+{ (void)sb; (void)p; return 0; }
+__attribute__((weak)) int  nrf_sdc_cs_ltk(sdc_ble_t *sb) { (void)sb; return 0; }
+__attribute__((weak)) int  nrf_sdc_cs_encryption_changed(sdc_ble_t *sb, int on)
+{ (void)sb; (void)on; return 0; }
 
 static void
 sdc_fault(const char *file, uint32_t line)
@@ -128,7 +92,7 @@ ble_rand(void *out, unsigned int len)
 
 
 // Answer a pending controller LTK request (SMP -> controller). NULL rejects.
-static void
+void
 sdc_ltk_reply(l2cap_t *l2c, const uint8_t *ltk)
 {
   sdc_ble_t *sb = &g_sdc;
@@ -151,7 +115,7 @@ sdc_ltk_reply(l2cap_t *l2c, const uint8_t *ltk)
 }
 
 
-static uint8_t
+uint8_t
 sdc_adv_enable(uint8_t on)
 {
   uint8_t buf[sizeof(sdc_hci_cmd_le_set_ext_adv_enable_t) +
@@ -277,6 +241,11 @@ sdc_connected(sdc_ble_t *sb, uint8_t status, uint16_t handle, uint8_t role,
   sb->sb_connecting = 0;
   sb->sb_advertising = 0; // controller stops advertising on connect
 
+  // Optional Channel Sounding: as a peripheral this arms the CS reflector role
+  // so a CS-capable central can drive a procedure right after pairing. No-op
+  // unless the build enables CS.
+  nrf_sdc_cs_connected(sb);
+
   netlog("ble: %s %02x:%02x:%02x:%02x:%02x:%02x interval:%d",
          role ? "Connected to" : "Connected (central) to",
          peer_addr[5], peer_addr[4], peer_addr[3],
@@ -369,7 +338,7 @@ sdc_create_conn(uint8_t peer_addr_type, const uint8_t *peer_addr)
   cc->initiating_phys = 0x01;  // LE 1M
   cc->array_params[0].scan_interval = 0x0060;
   cc->array_params[0].scan_window = 0x0030;
-  cc->array_params[0].conn_interval_min = 0x0018; // 30 ms
+  cc->array_params[0].conn_interval_min = 0x0028; // 50 ms
   cc->array_params[0].conn_interval_max = 0x0028; // 50 ms
   cc->array_params[0].supervision_timeout = 0x0100; // 2.56 s
   return sdc_hci_cmd_le_ext_create_conn(cc);
@@ -449,6 +418,7 @@ sdc_handle_event(sdc_ble_t *sb, const uint8_t *buf)
     case SDC_HCI_SUBEVENT_LE_EXT_ADV_REPORT:
       sdc_handle_ext_adv_report(sb, p + 1);
       break;
+
     case SDC_HCI_SUBEVENT_LE_PHY_UPDATE_COMPLETE: {
       const sdc_hci_subevent_le_phy_update_complete_t *pu =
         (const void *)(p + 1);
@@ -461,11 +431,17 @@ sdc_handle_event(sdc_ble_t *sb, const uint8_t *buf)
     case SDC_HCI_SUBEVENT_LE_LONG_TERM_KEY_REQUEST: {
       const sdc_hci_subevent_le_long_term_key_request_t *ltk =
         (const void *)(p + 1);
-      smp_ltk_request(&sb->con.l2c, ltk->random_number,
-                      ltk->encrypted_diversifier);
+      if(!nrf_sdc_cs_ltk(sb)) // CS (if built) may answer with its fixed test key
+        smp_ltk_request(&sb->con.l2c, ltk->random_number,
+                        ltk->encrypted_diversifier);
       break;
     }
+
     default:
+      // The optional CS extension handles its LE subevents (and the LL
+      // feature-exchange-complete it chains on); otherwise log as unhandled.
+      if(!nrf_sdc_cs_le_meta(sb, p))
+        netlog("le: unhandled subevent 0x%x", p[0]);
       break;
     }
     break;
@@ -474,7 +450,10 @@ sdc_handle_event(sdc_ble_t *sb, const uint8_t *buf)
     const sdc_hci_event_encryption_change_t *ec = (const void *)p;
     const int on = !ec->status && ec->encryption_enabled;
     sb->con.encrypted = on;
-    smp_encryption_changed(&sb->con.l2c, on);
+    // The optional CS extension consumes this on a fixed-key link (and chains
+    // its next step); otherwise it belongs to SMP.
+    if(!nrf_sdc_cs_encryption_changed(sb, on))
+      smp_encryption_changed(&sb->con.l2c, on);
     break;
   }
 
@@ -598,6 +577,11 @@ sdc_print_info(struct device *dev, struct stream *st)
   stprintf(st, "  Stale:%d  Oversize:%d  Events:%d  SWI:%d\n",
            sb->stat.rx_stale, sb->stat.rx_oversize,
            sb->stat.events, sb->stat.swi_runs);
+
+  if(sb->cs.active || sb->cs.procedures || sb->cs.step)
+    stprintf(st, "  CS: active:%d  procedures:%d  last_steps:%d  last:%s(0x%x)\n",
+             sb->cs.active, sb->cs.procedures, sb->cs.last_steps,
+             sb->cs.step ? sb->cs.step : "-", sb->cs.status);
 }
 
 
@@ -632,9 +616,14 @@ sdc_setup_hci(sdc_ble_t *sb)
   // With extended advertising/scanning the controller reports connections via
   // Enhanced Connection Complete, and scan results via Extended Adv Report.
   sdc_hci_cmd_le_set_event_mask_t le_evtmask = {};
-  le_evtmask.raw[0] = 0x55; // bits 0,2,4,6
+  le_evtmask.raw[0] = 0x5d; // bits 0,2,3,4,6 (3 = read remote features complete)
   le_evtmask.raw[1] = 0x1a; // bits 9,11,12
   SDC_TRY("le_event_mask", sdc_hci_cmd_le_set_event_mask(&le_evtmask));
+
+  // Optional Channel Sounding HCI setup: CS host-support feature bit, CS
+  // subevent mask bits, and the ACL event-length reservation CS needs. No-op
+  // unless the build enables CS.
+  nrf_sdc_cs_setup_hci();
 
   sdc_hci_cmd_le_read_buffer_size_return_t bufsz;
   SDC_TRY("read_buffer_size", sdc_hci_cmd_le_read_buffer_size(&bufsz));
@@ -724,9 +713,17 @@ nrf_sdc_init(void)
   sdc_support_ext_scan();
   sdc_support_peripheral();
   sdc_support_central();
+  sdc_support_dle_central();
   sdc_support_dle_peripheral();
   sdc_support_le_2m_phy();
+  sdc_support_phy_update_central();
   sdc_support_phy_update_peripheral();
+
+  // Optional Channel Sounding: enables the CS roles + LE Power Control and the
+  // CS resource cfg. Returns 0 (no-op) unless the build enables CS. Must run
+  // after the base sdc_support_*() and before the cfg below.
+  err = nrf_sdc_cs_configure();
+  if(err < 0) { sb->sb_err_step = "cfg_cs"; sb->sb_err_status = err; goto done; }
 
   const sdc_cfg_t central_cfg = { .central_count = { .count = 1 } };
   err = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG,
@@ -745,10 +742,15 @@ nrf_sdc_init(void)
                     SDC_CFG_TYPE_BUFFER_CFG, &bufcfg);
   if(err < 0) { sb->sb_err_step = "cfg_buffer"; sb->sb_err_status = err; goto done; }
 
+  // Ask the controller how much memory this configuration needs, then allocate
+  // exactly that (8-byte aligned). No compile-time worst-case pool sizing.
   err = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, NULL);
   if(err < 0) { sb->sb_err_step = "cfg_none"; sb->sb_err_status = err; goto done; }
-  if(err > (int)sizeof(sdc_mem)) {
-    sb->sb_err_step = "pool_too_small"; sb->sb_err_status = err; goto done;
+  sdc_mem_size = err;
+  sdc_mem = xalloc(sdc_mem_size, 8, MEM_MAY_FAIL);
+  if(sdc_mem == NULL) {
+    sb->sb_err_step = "pool_alloc"; sb->sb_err_status = (int)sdc_mem_size;
+    goto done;
   }
 
   static const sdc_rand_source_t rand_source = {
