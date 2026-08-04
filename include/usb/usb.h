@@ -61,6 +61,11 @@ struct usb_ep {
   // Initialized by interface
   uint8_t ue_interval;
 
+  // Use hardware double-buffering (bulk only, makes the endpoint
+  // unidirectional). Set by interface before controller create,
+  // support is controller dependent.
+  uint8_t ue_dbl_buf;
+
   // Initialized by interface
   uint16_t ue_max_packet_size;
 

@@ -96,6 +96,13 @@ typedef struct usb_ctrl {
   uint8_t *txbuf[MAX_NUM_ENDPOINTS];
   uint8_t txsiz[MAX_NUM_ENDPOINTS];
 
+  // Double-buffered TX state: second PMA buffer and number of filled
+  // buffers (0-2). DTOG==SW_BUF encodes both "empty" and "both full,
+  // one in flight", so occupancy must be tracked in software:
+  // incremented on write, decremented on CTR_TX.
+  uint8_t *txbuf1[MAX_NUM_ENDPOINTS];
+  uint8_t uc_txq[MAX_NUM_ENDPOINTS];
+
   struct usb_interface_queue uc_ifaces;
 
 } usb_ctrl_t;
@@ -152,7 +159,7 @@ handle_ctr(usb_ctrl_t *uc, uint16_t istr)
     write_epnr(epa, uc->uc_epreg[epa] & ~(1 << 15)); // Clear CTR_RX
     // RX (OUT from host point-of-view)
     usb_ep_t *ep = uc->uc_ue[1][epa];
-    if(ep != NULL) {
+    if(ep != NULL && !(ep->ue_address & 0x80)) {
       const int len = reg_rd16(USB_COUNT_RX(epa)) & 0x3ff;
       const int is_setup = (epnr >> 11) & 1;
       ep->ue_completed(&uc->uc_ud.ud_dev, ep, len, is_setup);
@@ -165,6 +172,18 @@ handle_ctr(usb_ctrl_t *uc, uint16_t istr)
     write_epnr(epa, uc->uc_epreg[epa] & ~(1 << 7)); // Clear CTR_TX
 
     usb_ep_t *ep = uc->uc_ue[0][epa];
+
+    if(ep != NULL && ep->ue_dbl_buf) {
+      __atomic_fetch_sub(&uc->uc_txq[epa], 1, __ATOMIC_RELAXED);
+
+      // The first transaction after DBL_BUF is set still runs normal
+      // flow control and drops STAT to NAK; restore VALID once.
+      const uint16_t cur = reg_rd16(USB_EPnR(epa));
+      const uint16_t stat = (cur >> 4) & 3;
+      if(stat != 3)
+        write_epnr(epa, uc->uc_epreg[epa] | ((stat ^ 3) << 4));
+    }
+
     if(ep != NULL && ep->ue_completed) {
       ep->ue_completed(&uc->uc_ud.ud_dev, ep, 0, 0);
     }
@@ -390,12 +409,23 @@ enable_endpoints(usb_ctrl_t *uc)
     int bits = 0;
     usb_ep_t *in  = uc->uc_ue[0][ea];
     usb_ep_t *out = uc->uc_ue[1][ea];
+    if(out == in)
+      out = NULL;  // Double-buffered IN reserves the OUT slot
+
     if(out) {
       bits |= (3 << 12);  // RX: OFF -> VALID
     }
 
     if(in) {
-      bits |= (2 << 4);  // TX: OFF -> NAK
+      if(in->ue_dbl_buf) {
+        // TX: VALID regardless of current state, DTOG_TX/SW_BUF -> 0
+        const uint16_t cur = reg_rd16(USB_EPnR(ea));
+        bits |= ((((cur >> 4) & 3) ^ 3) << 4);
+        bits |= cur & ((1 << 6) | (1 << 14));
+        uc->uc_txq[ea] = 0;
+      } else {
+        bits |= (2 << 4);  // TX: OFF -> NAK
+      }
     }
 
     write_epnr(ea, uc->uc_epreg[ea] | bits);
@@ -419,6 +449,11 @@ reset_endpoints(usb_ctrl_t *uc)
   for(int ea = 1; ea < MAX_NUM_ENDPOINTS; ea++) {
     usb_ep_t *in  = uc->uc_ue[0][ea];
     usb_ep_t *out = uc->uc_ue[1][ea];
+    if(out == in)
+      out = NULL;  // Double-buffered IN reserves the OUT slot
+
+    uc->uc_txq[ea] = 0;
+
     if(in) {
       in->ue_running = 0;
       if(in->ue_reset)
@@ -536,11 +571,11 @@ static usb_ctrl_t g_usb_ctrl = {
 };
 
 void
-irq_19(void) // High prio interrupts
+irq_19(void) // High prio interrupts: CTR for iso/double-buffered bulk only
 {
   uint16_t irq = reg_rd(USB_ISTR);
-  panic("i19:%x", irq);
-  handle_ctr(&g_usb_ctrl, irq);
+  if(irq & 0x8000)
+    handle_ctr(&g_usb_ctrl, irq);
 }
 
 void
@@ -689,7 +724,13 @@ stm32g4_ep_read(device_t *dev, usb_ep_t *ue,
 static int
 stm32g4_ep_avail_bytes(device_t *dev, usb_ep_t *ue)
 {
+  usb_ctrl_t *uc = (usb_ctrl_t *)dev;
   const uint32_t ea = ue->ue_address & 0x7f;
+
+  if(ue->ue_dbl_buf) {
+    return __atomic_load_n(&uc->uc_txq[ea], __ATOMIC_RELAXED) < 2 ?
+      ue->ue_max_packet_size : 0;
+  }
 
   uint16_t epnr = reg_rd16(USB_EPnR(ea));
   uint16_t state = (epnr >> 4) & 3;
@@ -700,19 +741,9 @@ stm32g4_ep_avail_bytes(device_t *dev, usb_ep_t *ue)
 
 
 
-static error_t
-stm32g4_ep_write(device_t *dev, usb_ep_t *ue,
-                 const uint8_t *buf, size_t len)
+static void
+pma_copy(uint16_t *dst16, const uint8_t *buf, size_t len)
 {
-  if(stm32g4_ep_avail_bytes(dev, ue) < len)
-    return ERR_NOT_READY;
-
-  usb_ctrl_t *uc = (usb_ctrl_t *)dev;
-  const uint32_t ea = ue->ue_address & 0x7f;
-  reg_wr16(USB_COUNT_TX(ea), len);
-
-  uint16_t *dst16 = (uint16_t *)uc->txbuf[ea];
-
   while(len > 1) {
     uint8_t a = *buf++;
     uint8_t b = *buf++;
@@ -725,6 +756,47 @@ stm32g4_ep_write(device_t *dev, usb_ep_t *ue,
     uint8_t a = *buf++;
     *dst16++ = a;
   }
+}
+
+
+static error_t
+stm32g4_ep_write(device_t *dev, usb_ep_t *ue,
+                 const uint8_t *buf, size_t len)
+{
+  usb_ctrl_t *uc = (usb_ctrl_t *)dev;
+  const uint32_t ea = ue->ue_address & 0x7f;
+
+  if(ue->ue_dbl_buf) {
+    // Fill the buffer indicated by SW_BUF, then hand it to the
+    // peripheral by toggling SW_BUF. Occupancy is tracked in
+    // uc_txq since the DTOG/SW_BUF pair cannot distinguish
+    // "empty" from "both buffers full".
+    if(__atomic_load_n(&uc->uc_txq[ea], __ATOMIC_RELAXED) >= 2)
+      return ERR_NOT_READY;
+
+    const uint16_t epnr = reg_rd16(USB_EPnR(ea));
+    const int sw_buf = (epnr >> 14) & 1;
+
+    reg_wr16(sw_buf ? USB_COUNT_RX(ea) : USB_COUNT_TX(ea), len);
+    pma_copy((uint16_t *)(sw_buf ? uc->txbuf1[ea] : uc->txbuf[ea]), buf, len);
+
+    __atomic_fetch_add(&uc->uc_txq[ea], 1, __ATOMIC_RELAXED);
+    write_epnr(ea, uc->uc_epreg[ea] | (1 << 14)); // Toggle SW_BUF
+
+    // Re-arm transmission: hardware latches STAT_TX at NAK when it
+    // runs out of buffers, and does not recover by itself.
+    const uint16_t cur = reg_rd16(USB_EPnR(ea));
+    const uint16_t stat = (cur >> 4) & 3;
+    if(stat != 3)
+      write_epnr(ea, uc->uc_epreg[ea] | ((stat ^ 3) << 4));
+    return 0;
+  }
+
+  if(stm32g4_ep_avail_bytes(dev, ue) < len)
+    return ERR_NOT_READY;
+
+  reg_wr16(USB_COUNT_TX(ea), len);
+  pma_copy((uint16_t *)uc->txbuf[ea], buf, len);
 
   write_epnr(ea, uc->uc_epreg[ea] | (1 << 4)); // TX: NAK -> VALID
   return 0;
@@ -802,6 +874,18 @@ alloc_ep(usb_ctrl_t *uc, int out, usb_ep_t *ep)
   for(int i = 0; i < MAX_NUM_ENDPOINTS; i++) {
     if(uc->uc_ue[out][i] != NULL)
       continue;
+
+    if(!out && ep->ue_dbl_buf) {
+      // Double-buffered endpoints use all four buffer description
+      // slots and are forced unidirectional; claim both directions.
+      if(uc->uc_ue[1][i] != NULL)
+        continue;
+      set_ep_type(uc, i, type);
+      uc->uc_epreg[i] |= (1 << 8); // EP_KIND = DBL_BUF
+      uc->uc_ue[0][i] = ep;
+      uc->uc_ue[1][i] = ep;
+      return i;
+    }
 
     if(uc->uc_ue[!out][i] == NULL || get_ep_type(uc, i) == type) {
       set_ep_type(uc, i, type);
@@ -902,6 +986,13 @@ init_interfaces(usb_ctrl_t *uc)
         uc->txbuf[ea] = (uint8_t *)(intptr_t)USB_SRAM + sramptr;
         reg_wr16(USB_ADDR_TX(ea), sramptr);
         sramptr += ue->ue_max_packet_size;
+
+        if(ue->ue_dbl_buf) {
+          // Second TX buffer lives in the RX buffer description slots
+          uc->txbuf1[ea] = (uint8_t *)(intptr_t)USB_SRAM + sramptr;
+          reg_wr16(USB_ADDR_RX(ea), sramptr);
+          sramptr += ue->ue_max_packet_size;
+        }
       }
 
       o += sizeof(struct usb_endpoint_descriptor);
