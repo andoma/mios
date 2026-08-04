@@ -561,7 +561,7 @@ flash_nrfdfu(const flash_params_t *p, flash_log_t *log)
   libusb_exit(usb);
 
   // Wait for the bootloader's serial port to appear.
-  char tty[128];
+  char tty[PATH_MAX];
   int found = 0;
   for(int i = 0; i < 50; i++) {
     if(!find_bootloader_tty(serial, tty, sizeof(tty))) { found = 1; break; }

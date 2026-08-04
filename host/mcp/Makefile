@@ -9,6 +9,7 @@ MCP_SRC = \
 	../flash/flash.c \
 	../flash/flash_jlink.c \
 	../flash/flash_dfu.c \
+	../flash/flash_nrfdfu.c \
 	../flash/flash_openocd.c \
 	../jlink/jlink.c \
 	../jlink/dap.c \
