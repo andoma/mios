@@ -116,6 +116,8 @@ typedef struct {
   uint8_t version_sent;
   uint8_t force_empty;    // Debug: respond only with empty PDUs
   uint8_t autotx_time;    // SetAutoTx arm value (calibration sweep)
+  uint8_t param_req_sent; // L2CAP conn param update request sent
+  uint16_t last_fire;     // µs, RxDone -> TxDone of most recent AutoTx
 
   uint8_t chmap[37];      // CSA#1 remap table
   uint8_t last_unmapped_channel;
@@ -150,6 +152,7 @@ typedef struct {
 
   // Stats
   uint32_t ev_rx, ev_missed, ev_crc;
+  uint32_t rx_pdus;       // Total PDUs (several per event with MD)
   uint32_t tx_acked, tx_retrans, rx_bad_seq, rx_data, rx_drops;
   uint32_t tx_fired, tx_nofire; // AutoTx TxDone seen / not seen
   uint32_t max_patch;     // µs, RxDone -> response PDU written
@@ -381,6 +384,27 @@ empty:
   c->tx_src = 0;
 }
 
+// More TX queued beyond the PDU currently in tx_pdu?
+static int
+ble_conn_tx_pending(ble_conn_t *c)
+{
+  if(c->ctrlq_count > (c->tx_src == 1 ? 1 : 0))
+    return 1;
+
+  int more = 0;
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  pbuf_t *pb = STAILQ_FIRST(&c->l2c.l2c_tx_queue);
+  if(pb != NULL) {
+    if(c->tx_src == 2)
+      more = c->tx_frag_off + c->tx_pdu[1] < pb->pb_pktlen ||
+        STAILQ_NEXT(pb, pb_link) != NULL;
+    else
+      more = 1;
+  }
+  irq_permit(q);
+  return more;
+}
+
 // ARQ + next TX selection, per BT spec 4.5.9. Fills tx_pdu and
 // returns the on-air header byte.
 static void
@@ -415,6 +439,8 @@ ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t *hdr_out,
     b0 |= BLE_NESN;
   if(c->tx_seq)
     b0 |= BLE_SN;
+  if(ble_conn_tx_pending(c))
+    b0 |= BLE_MD; // Ask the master to keep this event going
 
   *hdr_out = b0;
   *len_out = c->tx_pdu[1];
@@ -515,12 +541,9 @@ ble_conn_config_event(ble_conn_t *c, sx1280_t *s, uint8_t ch)
   if((err = sx1280_cmd(s, standby, NULL, sizeof(standby))) != 0)
     return err;
 
-  // AutoFS (used for fast adv turnaround) competes with AutoTx for
-  // the post-RX transition; keep it off during connection events
-  static const uint8_t autofs_off[2] = {SX1280_SET_AUTOFS, 0};
-  if((err = sx1280_cmd(s, autofs_off, NULL, sizeof(autofs_off))) != 0)
-    return err;
-
+  // AutoFS stays on: the post-TX FS parking gives the fast TX->RX
+  // turnaround that multi-PDU events need. (The AutoTx cancellations
+  // once blamed on AutoFS were the mid-countdown ClrIrqStatus.)
   const uint8_t autotx[3] = {SX1280_SET_AUTOTX, 0, c->autotx_time};
   if((err = sx1280_cmd(s, autotx, NULL, sizeof(autotx))) != 0)
     return err;
@@ -617,6 +640,80 @@ ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
   return 0;
 }
 
+// Wait for the AutoTx TxDone by polling status (no ClrIrqStatus while
+// the countdown runs, it cancels the transmission). Clears IRQs after.
+// Returns 1 if the transmission fired, 0 if not, negative on error.
+static int
+ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev)
+{
+  error_t err;
+  int fired = 0;
+
+  while(clock_get() - t_ev < 1200) {
+    uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
+    if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
+      return err;
+    if((ts[2] << 8 | ts[3]) & SX1280_IRQ_TX_DONE) {
+      c->last_fire = clock_get() - t_ev;
+      fired = 1;
+      break;
+    }
+  }
+  if(fired)
+    c->tx_fired++;
+  else
+    c->tx_nofire++;
+
+  static const uint8_t clr[3] = {SX1280_CLR_IRQSTATUS, 0xff, 0xff};
+  if((err = sx1280_cmd(s, clr, NULL, sizeof(clr))) != 0)
+    return err;
+  return fired;
+}
+
+// Between exchanges within one event: back into RX quickly. AutoTx
+// stays armed from the event setup (it survives its own firing) and
+// the chip parks in FS (AutoFS), so no standby round-trip here.
+static error_t
+ble_conn_rearm(ble_conn_t *c, sx1280_t *s)
+{
+  error_t err;
+
+  uint8_t fb[4] = {SX1280_WRITE_BUFFER, BLE_CONN_TX_BASE,
+                   BLE_LLID_CONT, 0};
+  if(!c->last_rx_sn)
+    fb[2] |= BLE_NESN;
+  if(c->tx_seq)
+    fb[2] |= BLE_SN;
+  if((err = sx1280_cmd(s, fb, NULL, sizeof(fb))) != 0)
+    return err;
+
+  static const uint8_t rx[4] = {SX1280_SET_RX, SX1280_TICK_SIZE_1_MS, 0, 2};
+  return sx1280_cmd(s, rx, NULL, sizeof(rx));
+}
+
+// Ask the master for a shorter connection interval (7.5-15ms) via an
+// L2CAP Connection Parameter Update Request; the master answers with
+// LL_CONNECTION_UPDATE_IND which the event loop already applies.
+static void
+ble_conn_request_conn_params(ble_conn_t *c)
+{
+  pbuf_t *pb = pbuf_make(0, 0);
+  if(pb == NULL)
+    return;
+  uint8_t *d = pbuf_append(pb, 16);
+  d[0] = 12; d[1] = 0;   // L2CAP length
+  d[2] = 5;  d[3] = 0;   // CID: LE signaling
+  d[4] = 0x12;           // Connection Parameter Update Request
+  d[5] = 1;              // identifier
+  d[6] = 8;  d[7] = 0;   // command length
+  d[8] = 6;  d[9] = 0;   // interval min: 7.5ms
+  d[10] = 12; d[11] = 0; // interval max: 15ms
+  d[12] = 0; d[13] = 0;  // latency
+  d[14] = 100; d[15] = 0; // supervision timeout: 1s
+  pb->pb_flags |= PBUF_SOP;
+  ble_conn_l2cap_output(&c->l2c, pb);
+}
+
 static int64_t
 ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 {
@@ -639,6 +736,11 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
   }
 
   c->event_counter++;
+
+  if(c->established && !c->param_req_sent && c->event_counter >= 8) {
+    c->param_req_sent = 1;
+    ble_conn_request_conn_params(c);
+  }
 
   if(c->pending_chmask_valid &&
      c->pending_chmask_instant == c->event_counter) {
@@ -757,27 +859,11 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     if(patch > c->max_patch)
       c->max_patch = patch;
 
-    // Do NOT clear IRQs yet: the AutoTx countdown may be cancelled by
-    // a ClrIrqStatus during it. Poll the status register for TxDone.
-    int64_t t_fire = 0;
-    uint16_t tirq = 0;
-    while(clock_get() - t_ev < 1200) {
-      uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
-      if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
-        goto recover;
-      tirq = ts[2] << 8 | ts[3];
-      if(tirq & SX1280_IRQ_TX_DONE) {
-        t_fire = clock_get();
-        break;
-      }
-    }
-    if(t_fire)
-      c->tx_fired++;
-    else
-      c->tx_nofire++;
-
-    if((err = sx1280_cmd(s, clr, NULL, sizeof(clr))) != 0)
+    int fired = ble_conn_wait_txdone(c, s, t_ev);
+    if(fired < 0) {
+      err = fired;
       goto recover;
+    }
 
     // Anchor resync: the packet started one airtime before RxDone
     c->anchor = t_ev - (10 + rxlen) * 8 - 8;
@@ -786,6 +872,7 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     c->established = 1;
     c->window = 0;
     c->ev_rx++;
+    c->rx_pdus++;
     got_packet = 1;
 
     if((err = ble_conn_process_rx(c, s, rx_b0, rxlen)) != 0)
@@ -795,7 +882,70 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
       evlog(LOG_DEBUG, "%s: ev:%d ch:%d rx b0:%02x len:%d "
             "off:%d atx:%d fire:%d", s->name, c->event_counter, ch,
             rx_b0, rxlen, (int)(t_ev - anchor0), c->autotx_time,
-            t_fire ? (int)(t_fire - t_ev) : -1);
+            fired ? (int)c->last_fire : -1);
+
+    // --- More exchanges within this event while either side has
+    // data (MD bit). One exchange per T_IFS pair.
+    uint8_t prev_b0 = rx_b0;
+    const int64_t budget = anchor0 + (int64_t)c->interval * 3 / 4;
+
+    while(fired > 0 && clock_get() < budget &&
+          ((prev_b0 & BLE_MD) || ble_conn_tx_pending(c))) {
+
+      if((err = ble_conn_rearm(c, s)) != 0)
+        goto recover;
+
+      const uint64_t rx_deadline = clock_get() + 800;
+      while(!gpio_get_input(s->dio1) && clock_get() < rx_deadline) {
+      }
+      if(!gpio_get_input(s->dio1))
+        break; // Master closed the event
+
+      const int64_t t_ex = clock_get();
+
+      uint8_t st2[4] = {SX1280_GET_IRQSTATUS};
+      if((err = sx1280_cmd(s, st2, st2, sizeof(st2))) != 0)
+        goto recover;
+      const uint16_t irq2 = st2[2] << 8 | st2[3];
+
+      if(!(irq2 & SX1280_IRQ_RX_DONE) || (irq2 & SX1280_IRQ_CRC_ERROR)) {
+        static const uint8_t sb2[2] = {SX1280_SET_STANDBY,
+                                       SX1280_STDBY_RC};
+        if((err = sx1280_cmd(s, sb2, NULL, sizeof(sb2))) != 0)
+          goto recover;
+        if((err = sx1280_cmd(s, clr, NULL, sizeof(clr))) != 0)
+          goto recover;
+        break;
+      }
+
+      uint8_t hb2[3 + 2] = {SX1280_READ_BUFFER, 0, 0};
+      if((err = sx1280_cmd(s, hb2, hb2, sizeof(hb2))) != 0)
+        goto recover;
+      const uint8_t b0 = hb2[3];
+      const uint8_t len = hb2[4];
+
+      uint8_t th, tl;
+      ble_conn_pick_tx(c, b0, &th, &tl);
+      wb[2] = th;
+      wb[3] = tl;
+      memcpy(wb + 4, c->tx_pdu + 2, tl);
+      if((err = sx1280_cmd(s, wb, NULL, 4 + tl)) != 0)
+        goto recover;
+
+      fired = ble_conn_wait_txdone(c, s, t_ex);
+      if(fired < 0) {
+        err = fired;
+        goto recover;
+      }
+
+      c->last_rx = t_ex;
+      c->rx_pdus++;
+
+      if((err = ble_conn_process_rx(c, s, b0, len)) != 0)
+        goto recover;
+
+      prev_b0 = b0;
+    }
   }
 
   if(!got_packet && c->event_counter < 8)
@@ -868,6 +1018,8 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->rx_bad_seq = 0;
   c->rx_data = 0;
   c->rx_drops = 0;
+  c->rx_pdus = 0;
+  c->param_req_sent = 0;
   c->tx_fired = 0;
   c->tx_nofire = 0;
   c->max_patch = 0;
@@ -1174,13 +1326,14 @@ sx1280_ble_adv_report(sx1280_t *s, struct stream *st)
   if(c == NULL)
     return;
   stprintf(st, "conn: %s peer:%02x:%02x:%02x:%02x:%02x:%02x "
-           "interval:%dus ev_rx:%d missed:%d crc:%d acked:%d retrans:%d "
-           "bad_seq:%d data:%d patch:%dus\n",
+           "interval:%dus ev_rx:%d pdus:%d missed:%d crc:%d acked:%d "
+           "retrans:%d bad_seq:%d data:%d patch:%dus\n",
            c->active ? (c->established ? "UP" : "establishing") : "closed",
            c->peer_addr[5], c->peer_addr[4], c->peer_addr[3],
            c->peer_addr[2], c->peer_addr[1], c->peer_addr[0],
-           (int)c->interval, (int)c->ev_rx, (int)c->ev_missed,
-           (int)c->ev_crc, (int)c->tx_acked, (int)c->tx_retrans,
-           (int)c->rx_bad_seq, (int)c->rx_data, (int)c->max_patch);
+           (int)c->interval, (int)c->ev_rx, (int)c->rx_pdus,
+           (int)c->ev_missed, (int)c->ev_crc, (int)c->tx_acked,
+           (int)c->tx_retrans, (int)c->rx_bad_seq, (int)c->rx_data,
+           (int)c->max_patch);
 }
 
