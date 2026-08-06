@@ -61,6 +61,7 @@ typedef struct dhcp_hdr {
 #define DHCPREQUEST        3
 #define DHCPDECLINE        4
 #define DHCPACK            5
+#define DHCPNAK            6
 
 static void *
 make_option(pbuf_t *pb, uint8_t code, uint8_t len)
@@ -428,11 +429,23 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 
   parsed_opts_t po;
   if((pb = parse_opts(pb, &po)) != NULL &&
-     (po.valid & REQUIRED_OPTIONS_FROM_SERVER) ==
-     REQUIRED_OPTIONS_FROM_SERVER) {
+     po.valid & PO_MSGTYPE) {
 
     switch(po.msgtype) {
+    case DHCPNAK:
+      if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING &&
+         eni->eni_dhcp_state != DHCP_STATE_BOUND)
+        break;
+
+      evlog(LOG_INFO, "dhcp: NAK from %Id", from);
+      dhcpv4_discover(eni);
+      break;
+
     case DHCPOFFER:
+      if((po.valid & REQUIRED_OPTIONS_FROM_SERVER) !=
+         REQUIRED_OPTIONS_FROM_SERVER)
+        break;
+
       if(eni->eni_dhcp_state != DHCP_STATE_SELECTING) {
         evlog(LOG_INFO, "dhcp: Got OFFER but we are not selecting");
         break;
@@ -447,6 +460,9 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
       break;
 
     case DHCPACK:
+      if((po.valid & REQUIRED_OPTIONS_FROM_SERVER) !=
+         REQUIRED_OPTIONS_FROM_SERVER)
+        break;
 
       if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING &&
          eni->eni_dhcp_state != DHCP_STATE_BOUND)
