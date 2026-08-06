@@ -76,3 +76,7 @@ SRCS-${ENABLE_HDC302x} += \
 
 SRCS-${ENABLE_DRV8899} += \
 	${SRC}/drivers/drv8899.c
+
+SRCS-${ENABLE_SX1280} += \
+	${SRC}/drivers/sx1280.c \
+	${SRC}/drivers/sx1280_ble.c
