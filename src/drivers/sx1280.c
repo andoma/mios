@@ -42,16 +42,24 @@ sx1280_dio1_irq(void *arg)
   task_wakeup(&s->irq_waitq, 1);
 }
 
-// The falling-edge IRQ gives a prompt wakeup; the short sleep slices
-// make a lost race between level check and sleep cost at most 100µs
+// Command processing takes µs, so spin briefly first. For the long
+// waits (reset, calibration) fall back to sleeping; the falling-edge
+// IRQ gives a prompt wakeup and the short sleep slices bound a lost
+// level-check race to 100µs.
 static error_t
 sx1280_wait_ready(sx1280_t *s, int timeout)
 {
-  uint64_t deadline = clock_get() + timeout;
+  const uint64_t spin_until = clock_get() + 30;
   while(gpio_get_input(s->busy)) {
-    if(clock_get() > deadline)
-      return ERR_TIMEOUT;
-    if(task_sleep_delta(&s->busy_waitq, 100)) {}
+    if(clock_get() < spin_until)
+      continue;
+
+    uint64_t deadline = clock_get() + timeout;
+    while(gpio_get_input(s->busy)) {
+      if(clock_get() > deadline)
+        return ERR_TIMEOUT;
+      if(task_sleep_delta(&s->busy_waitq, 100)) {}
+    }
   }
   return ERR_OK;
 }
@@ -65,17 +73,9 @@ sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
   return s->bus->rw(s->bus, tx, rx, len, s->nss, s->spicfg);
 }
 
-int
-sx1280_wait_irq(sx1280_t *s, int timeout)
+static int
+sx1280_irq_ack(sx1280_t *s)
 {
-  uint64_t deadline = clock_get() + timeout;
-  while(!s->irq_pending) {
-    if(clock_get() > deadline)
-      return 0;
-    if(task_sleep_delta(&s->irq_waitq, 500)) {}
-  }
-  s->irq_pending = 0;
-
   uint8_t st[4] = {SX1280_GET_IRQSTATUS};
   error_t err = sx1280_cmd(s, st, st, sizeof(st));
   if(err)
@@ -87,6 +87,34 @@ sx1280_wait_irq(sx1280_t *s, int timeout)
   if(err)
     return err;
   return irq;
+}
+
+int
+sx1280_wait_irq(sx1280_t *s, int timeout)
+{
+  uint64_t deadline = clock_get() + timeout;
+  while(!s->irq_pending) {
+    if(clock_get() > deadline)
+      return 0;
+    if(task_sleep_delta(&s->irq_waitq, 500)) {}
+  }
+  s->irq_pending = 0;
+  return sx1280_irq_ack(s);
+}
+
+// Spin-polling variant for T_IFS-critical windows (BLE inter frame
+// space is 150µs; the sleeping variant has ~500µs wakeup latency).
+// DIO1 is level-high until the IRQ is cleared, so polling is race-free.
+int
+sx1280_wait_irq_poll(sx1280_t *s, int timeout)
+{
+  const uint64_t deadline = clock_get() + timeout;
+  while(!gpio_get_input(s->dio1)) {
+    if(clock_get() > deadline)
+      return 0;
+  }
+  s->irq_pending = 0;
+  return sx1280_irq_ack(s);
 }
 
 error_t
@@ -395,9 +423,7 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
       sx1280_ble_adv_start(s, argc >= 3 ? argv[2] : NULL, 0);
       cli_printf(cli, "advertising started\n");
     }
-    uint32_t done, tmo, errs;
-    sx1280_ble_adv_stats(s, &done, &tmo, &errs);
-    cli_printf(cli, "tx_done:%d tx_timeout:%d errors:%d\n", done, tmo, errs);
+    sx1280_ble_adv_report(s, cli->cl_stream);
     return 0;
   }
 

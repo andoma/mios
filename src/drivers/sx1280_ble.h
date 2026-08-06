@@ -8,5 +8,7 @@ void sx1280_ble_adv_start(sx1280_t *s, const char *name, int sweep);
 
 void sx1280_ble_adv_stop(sx1280_t *s);
 
-void sx1280_ble_adv_stats(sx1280_t *s, uint32_t *tx_done,
-                          uint32_t *tx_timeout, uint32_t *cmd_errors);
+struct stream;
+
+// Print counters (tx, scan_req, conn_ind, ...) to a stream
+void sx1280_ble_adv_report(sx1280_t *s, struct stream *st);
