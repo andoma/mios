@@ -419,6 +419,12 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
     } else if(argc >= 3 && !strcmp(argv[2], "sweep")) {
       sx1280_ble_adv_start(s, NULL, 1);
       cli_printf(cli, "whitening seed sweep started (ch37, ~40s/lap)\n");
+    } else if(argc >= 4 && !strcmp(argv[2], "atx")) {
+      sx1280_ble_set_autotx(s, atoi(argv[3]));
+      cli_printf(cli, "autotx arm value: %d\n", atoi(argv[3]));
+    } else if(argc >= 4 && !strcmp(argv[2], "pwr")) {
+      sx1280_ble_set_txpower(s, atoi(argv[3]));
+      cli_printf(cli, "tx power: %d dBm\n", atoi(argv[3]));
     } else {
       sx1280_ble_adv_start(s, argc >= 3 ? argv[2] : NULL, 0);
       cli_printf(cli, "advertising started\n");

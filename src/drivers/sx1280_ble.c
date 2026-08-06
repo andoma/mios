@@ -159,6 +159,10 @@ typedef struct {
 
 static ble_conn_t *g_conn;
 
+// CLI-tunables for calibration against different masters
+static uint8_t g_ble_autotx_time = BLE_AUTOTX_TIME;
+static int8_t g_ble_tx_dbm = 10;
+
 // Channel index -> MHz above 2400 (BLE data channels 0-36)
 static const uint8_t ble_ch_freq[37] = {
    4,  6,  8, 10, 12, 14, 16, 18, 20, 22,
@@ -472,9 +476,10 @@ ble_radio_setup(sx1280_t *s)
   if((err = sx1280_write_reg(s, SX1280_REG_CRC_INIT, crcinit, 3)) != 0)
     return err;
 
-  // +10dBm (value = dBm + 18), 2µs ramp (the ramp delays AutoTx and
-  // the T_IFS budget is ±2µs)
-  static const uint8_t txparams[3] = {SX1280_SET_TXPARAMS, 28, 0x00};
+  // value = dBm + 18; 2µs ramp (the ramp delays AutoTx and the T_IFS
+  // budget is ±2µs)
+  const uint8_t txparams[3] = {SX1280_SET_TXPARAMS,
+                               g_ble_tx_dbm + 18, 0x00};
   if((err = sx1280_cmd(s, txparams, NULL, sizeof(txparams))) != 0)
     return err;
 
@@ -868,7 +873,7 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->max_patch = 0;
   memcpy(c->peer_addr, pdu + 2, 6);
   c->force_empty = 0;
-  c->autotx_time = BLE_AUTOTX_TIME;
+  c->autotx_time = g_ble_autotx_time;
 
   // Attach the mios BLE host stack
   c->l2c.l2c_output = ble_conn_l2cap_output;
@@ -1131,6 +1136,25 @@ sx1280_ble_adv_stop(sx1280_t *s)
 {
   if(g_adv != NULL)
     sx1280_sched_cancel(s, &g_adv->slot);
+}
+
+void
+sx1280_ble_set_autotx(sx1280_t *s, int val)
+{
+  g_ble_autotx_time = val;
+  if(g_conn != NULL)
+    g_conn->autotx_time = val;
+}
+
+void
+sx1280_ble_set_txpower(sx1280_t *s, int dbm)
+{
+  if(dbm < -18)
+    dbm = -18;
+  if(dbm > 13)
+    dbm = 13;
+  g_ble_tx_dbm = dbm;
+  sx1280_sched_set_mode(s, NULL); // Force reconfig
 }
 
 void
