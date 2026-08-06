@@ -22,10 +22,37 @@
 #define BLE_ADV_PDU_MAX (2 + 6 + 31)
 #define BLE_ADV_INTERVAL 100000 // µs, plus advDelay jitter
 
-#define BLE_SCAN_WINDOW 30000   // µs per channel visit
+// Data channel PDU header bits
+#define BLE_LLID_MASK   0x03
+#define BLE_LLID_CONT   0x01 // L2CAP continuation / empty
+#define BLE_LLID_START  0x02 // L2CAP start
+#define BLE_LLID_CTRL   0x03
+#define BLE_NESN        0x04
+#define BLE_SN          0x08
+#define BLE_MD          0x10
 
-// Shared modem-config token: advertiser and scanner use the same
-// radio setup
+// LL control opcodes
+#define LL_CONNECTION_UPDATE_IND 0x00
+#define LL_CHANNEL_MAP_IND       0x01
+#define LL_TERMINATE_IND         0x02
+#define LL_UNKNOWN_RSP           0x07
+#define LL_FEATURE_REQ           0x08
+#define LL_FEATURE_RSP           0x09
+#define LL_VERSION_IND           0x0c
+#define LL_PING_REQ              0x12
+#define LL_PING_RSP              0x13
+
+// AutoTx fires at a fixed offset after RX end plus the programmed
+// time. The datasheet example claims a 33µs offset; calibrated
+// against a real BLE master (per-event arm-value sweep, watching for
+// the incoming NESN to flip) values 19-22 are acknowledged, so the
+// silicon offset in BLE mode is ~130µs.
+#define BLE_AUTOTX_TIME 20
+
+#define BLE_CONN_LEAD    1000 // Fire the event slot this early, µs
+#define BLE_CONN_TX_BASE 0x80 // TX half of the 256B data buffer
+
+// Shared modem-config token for advertising
 static const char ble_mode[] = "ble";
 
 typedef struct {
@@ -56,6 +83,231 @@ typedef struct {
 static const uint8_t ble_our_addr[6] = {0x28, 0x12, 0x80, 0x66, 0x66, 0xc6};
 
 static sx1280_ble_adv_t *g_adv;
+
+// --- Connection (peripheral role) ---
+
+#define BLE_TXQ_SIZE 4       // Pending LL PDUs (control responses)
+#define BLE_TXQ_PDU  32
+
+typedef struct {
+  sx1280_slot_t slot;
+  sx1280_t *chip;
+
+  uint32_t access_addr;
+  uint32_t crc_init;
+
+  int64_t anchor;         // Where the master may start transmitting
+  int64_t last_sync;      // Last anchor resync (for window widening)
+  int64_t last_rx;        // For supervision timeout
+  uint32_t interval;      // µs
+  uint32_t timeout;       // µs
+  uint32_t window;        // Listen slack after anchor (first event /
+                          // connection update), µs
+  uint16_t event_counter;
+
+  uint8_t active;
+  uint8_t established;    // Received at least one packet
+  uint8_t term_code;
+  uint8_t version_sent;
+  uint8_t force_empty;    // Debug: respond only with empty PDUs
+  uint8_t autotx_time;    // SetAutoTx arm value (calibration sweep)
+
+  uint8_t chmap[37];      // CSA#1 remap table
+  uint8_t last_unmapped_channel;
+  uint8_t hop_increment;
+
+  uint8_t pending_chmask[5];
+  uint16_t pending_chmask_instant;
+  uint8_t pending_chmask_valid;
+
+  uint8_t pending_update[9]; // WinSize,WinOffset2,Interval2,Lat2,Timo2
+  uint16_t pending_update_instant;
+  uint8_t pending_update_valid;
+
+  // ARQ state
+  uint8_t last_rx_sn;     // BLE_SN bit of last accepted packet
+  uint8_t tx_seq;         // Our sequence (0/1)
+  uint8_t tx_dummy;       // Last transmitted PDU was an empty one
+
+  // Pending TX PDUs: [0]=hdr(LLID), [1]=len, [2..]=payload
+  uint8_t txq[BLE_TXQ_SIZE][BLE_TXQ_PDU];
+  uint8_t txq_head, txq_count;
+
+  // Stats
+  uint32_t ev_rx, ev_missed, ev_crc;
+  uint32_t tx_acked, tx_retrans, rx_bad_seq, rx_data;
+  uint32_t tx_fired, tx_nofire; // AutoTx TxDone seen / not seen
+  uint32_t max_patch;     // µs, RxDone -> response PDU written
+
+  uint8_t peer_addr[6];
+} ble_conn_t;
+
+static ble_conn_t *g_conn;
+
+// Channel index -> MHz above 2400 (BLE data channels 0-36)
+static const uint8_t ble_ch_freq[37] = {
+   4,  6,  8, 10, 12, 14, 16, 18, 20, 22,
+  24, 28, 30, 32, 34, 36, 38, 40, 42, 44,
+  46, 48, 50, 52, 54, 56, 58, 60, 62, 64,
+  66, 68, 70, 72, 74, 76, 78,
+};
+
+// Build the CSA#1 remap table: chmap[i] = i for used channels,
+// remap into the used set otherwise
+static void
+ble_conn_update_channels(uint8_t *chmap, const uint8_t *mask)
+{
+  int num_used = 0;
+  for(int i = 0; i <= 36; i++) {
+    if(mask[i / 8] & (1 << (i & 7)))
+      chmap[num_used++] = i;
+  }
+  if(num_used == 0)
+    return; // Malformed; keep previous table
+
+  for(int i = 36; i >= 0; i--) {
+    if(mask[i / 8] & (1 << (i & 7)))
+      chmap[i] = i;
+    else
+      chmap[i] = chmap[i % num_used];
+  }
+}
+
+static uint8_t *
+ble_conn_enqueue_ctrl(ble_conn_t *c, uint8_t op, uint8_t len)
+{
+  if(c->txq_count == BLE_TXQ_SIZE)
+    return NULL; // Full; peer retransmits its request later
+
+  uint8_t *pdu = c->txq[(c->txq_head + c->txq_count) % BLE_TXQ_SIZE];
+  c->txq_count++;
+  pdu[0] = BLE_LLID_CTRL;
+  pdu[1] = len + 1;
+  pdu[2] = op;
+  return pdu + 3;
+}
+
+static void
+ble_conn_handle_ctrl(ble_conn_t *c, const uint8_t *req, int len)
+{
+  uint8_t *rsp;
+
+  if(len < 1)
+    return;
+
+  switch(req[0]) {
+  case LL_FEATURE_REQ:
+    if((rsp = ble_conn_enqueue_ctrl(c, LL_FEATURE_RSP, 8)) != NULL)
+      memset(rsp, 0, 8);
+    break;
+
+  case LL_VERSION_IND:
+    if(!c->version_sent &&
+       (rsp = ble_conn_enqueue_ctrl(c, LL_VERSION_IND, 5)) != NULL) {
+      c->version_sent = 1;
+      rsp[0] = 0x08;   // Core 4.2
+      rsp[1] = 0xff;   // CompId: no assigned number
+      rsp[2] = 0xff;
+      rsp[3] = 0x00;
+      rsp[4] = 0x00;
+    }
+    break;
+
+  case LL_CHANNEL_MAP_IND:
+    if(len >= 8) {
+      memcpy(c->pending_chmask, req + 1, 5);
+      c->pending_chmask_instant = req[6] | (req[7] << 8);
+      c->pending_chmask_valid = 1;
+    }
+    break;
+
+  case LL_CONNECTION_UPDATE_IND:
+    if(len >= 12) {
+      memcpy(c->pending_update, req + 1, 9);
+      c->pending_update_instant = req[10] | (req[11] << 8);
+      c->pending_update_valid = 1;
+    }
+    break;
+
+  case LL_TERMINATE_IND:
+    c->term_code = len >= 2 ? req[1] : 0x13;
+    break;
+
+  case LL_PING_REQ:
+    ble_conn_enqueue_ctrl(c, LL_PING_RSP, 0);
+    break;
+
+  default:
+    if((rsp = ble_conn_enqueue_ctrl(c, LL_UNKNOWN_RSP, 1)) != NULL)
+      rsp[0] = req[0];
+    break;
+  }
+}
+
+static int64_t
+ble_conn_drop(ble_conn_t *c, sx1280_t *s, uint8_t code, const char *why)
+{
+  evlog(LOG_NOTICE, "%s: BLE disconnected (0x%02x, %s) "
+        "rx:%d missed:%d crc:%d acked:%d retrans:%d "
+        "txfired:%d nofire:%d patch:%dus",
+        s->name, code, why, (int)c->ev_rx, (int)c->ev_missed,
+        (int)c->ev_crc, (int)c->tx_acked, (int)c->tx_retrans,
+        (int)c->tx_fired, (int)c->tx_nofire, (int)c->max_patch);
+
+  c->active = 0;
+  sx1280_sched_set_mode(s, NULL);
+
+  // Resume advertising
+  if(g_adv != NULL)
+    sx1280_sched_submit(s, &g_adv->slot, clock_get());
+  return 0;
+}
+
+// Select next TX PDU and build its header, per BT spec 4.5.9
+static const uint8_t *
+ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t *hdr_out,
+                 uint8_t *len_out)
+{
+  static const uint8_t empty[2] = {BLE_LLID_CONT, 0};
+
+  // Did the peer acknowledge our previous PDU?
+  const uint8_t nesn = !!(rx_b0 & BLE_NESN);
+  if(c->tx_seq != nesn) {
+    if(!c->tx_dummy && c->txq_count) {
+      c->txq_head = (c->txq_head + 1) % BLE_TXQ_SIZE;
+      c->txq_count--;
+    }
+    c->tx_seq = nesn;
+    c->tx_acked++;
+  } else if(!c->tx_dummy) {
+    c->tx_retrans++;
+  }
+
+  const uint8_t *pdu;
+  if(c->txq_count && !c->force_empty) {
+    pdu = c->txq[c->txq_head];
+    c->tx_dummy = 0;
+  } else {
+    pdu = empty;
+    c->tx_dummy = 1;
+  }
+
+  // The SN of the incoming packet decides our NESN: acknowledge it if
+  // it is the one we expected (we always have room, v1 never NAKs)
+  uint8_t next_rx_sn = c->last_rx_sn;
+  if((c->last_rx_sn ^ rx_b0) & BLE_SN)
+    next_rx_sn = rx_b0 & BLE_SN; // Will be committed by caller
+
+  uint8_t b0 = pdu[0] & BLE_LLID_MASK;
+  if(!next_rx_sn)
+    b0 |= BLE_NESN;
+  if(c->tx_seq)
+    b0 |= BLE_SN;
+
+  *hdr_out = b0;
+  *len_out = pdu[1];
+  return pdu;
+}
 
 // 2402, 2426, 2480 MHz
 static const uint8_t adv_channels[3] = {37, 38, 39};
@@ -113,14 +365,20 @@ ble_radio_setup(sx1280_t *s)
   if((err = sx1280_write_reg(s, SX1280_REG_CRC_INIT, crcinit, 3)) != 0)
     return err;
 
-  // +10dBm (value = dBm + 18), 10µs ramp
-  static const uint8_t txparams[3] = {SX1280_SET_TXPARAMS, 28, 0x80};
+  // +10dBm (value = dBm + 18), 2µs ramp (the ramp delays AutoTx and
+  // the T_IFS budget is ±2µs)
+  static const uint8_t txparams[3] = {SX1280_SET_TXPARAMS, 28, 0x00};
   if((err = sx1280_cmd(s, txparams, NULL, sizeof(txparams))) != 0)
     return err;
 
   // Park in FS between TX/RX: shortens the T_IFS turnaround
   static const uint8_t autofs[2] = {SX1280_SET_AUTOFS, 1};
   if((err = sx1280_cmd(s, autofs, NULL, sizeof(autofs))) != 0)
+    return err;
+
+  // Disarm AutoTx (may be armed from a previous connection)
+  static const uint8_t autotx_off[3] = {SX1280_SET_AUTOTX, 0, 0};
+  if((err = sx1280_cmd(s, autotx_off, NULL, sizeof(autotx_off))) != 0)
     return err;
 
   const uint16_t irqmask = SX1280_IRQ_TX_DONE | SX1280_IRQ_RX_DONE |
@@ -130,6 +388,363 @@ ble_radio_setup(sx1280_t *s)
                              irqmask >> 8, irqmask & 0xff, // DIO1
                              0, 0, 0, 0};
   return sx1280_cmd(s, dioirq, NULL, sizeof(dioirq));
+}
+
+// Per-event radio configuration for a connection event on channel ch.
+// Everything connection-specific is rewritten each event so no state
+// is assumed across mode switches.
+static error_t
+ble_conn_config_event(ble_conn_t *c, sx1280_t *s, uint8_t ch)
+{
+  error_t err;
+
+  // AutoTx must be armed from STDBY_RC
+  static const uint8_t standby[2] = {SX1280_SET_STANDBY, SX1280_STDBY_RC};
+  if((err = sx1280_cmd(s, standby, NULL, sizeof(standby))) != 0)
+    return err;
+
+  // AutoFS (used for fast adv turnaround) competes with AutoTx for
+  // the post-RX transition; keep it off during connection events
+  static const uint8_t autofs_off[2] = {SX1280_SET_AUTOFS, 0};
+  if((err = sx1280_cmd(s, autofs_off, NULL, sizeof(autofs_off))) != 0)
+    return err;
+
+  const uint8_t autotx[3] = {SX1280_SET_AUTOTX, 0, c->autotx_time};
+  if((err = sx1280_cmd(s, autotx, NULL, sizeof(autotx))) != 0)
+    return err;
+
+  const uint8_t aa[4] = {c->access_addr >> 24, c->access_addr >> 16,
+                         c->access_addr >> 8, c->access_addr};
+  if((err = sx1280_write_reg(s, SX1280_REG_BLE_ACCESS_ADDR, aa, 4)) != 0)
+    return err;
+
+  const uint8_t crc[3] = {c->crc_init >> 16, c->crc_init >> 8, c->crc_init};
+  if((err = sx1280_write_reg(s, SX1280_REG_CRC_INIT, crc, 3)) != 0)
+    return err;
+
+  static const uint8_t baseaddr[3] = {SX1280_SET_BUFFERBASEADDRESS,
+                                      BLE_CONN_TX_BASE, 0};
+  if((err = sx1280_cmd(s, baseaddr, NULL, sizeof(baseaddr))) != 0)
+    return err;
+
+  const uint32_t f =
+    SX1280_HZ_TO_FREQ((2400 + ble_ch_freq[ch]) * 1000000u);
+  const uint8_t freq[4] = {SX1280_SET_RFFREQUENCY, f >> 16, f >> 8, f};
+  if((err = sx1280_cmd(s, freq, NULL, sizeof(freq))) != 0)
+    return err;
+
+  const uint8_t seed = bitrev7(0x40 | ch);
+  if((err = sx1280_write_reg(s, SX1280_REG_WHITENING_SEED, &seed, 1)) != 0)
+    return err;
+
+  // Fallback response with predicted ARQ bits, in case the post-RX
+  // patch path ever runs late: an empty PDU is always protocol-legal
+  uint8_t fb[4] = {SX1280_WRITE_BUFFER, BLE_CONN_TX_BASE,
+                   BLE_LLID_CONT, 0};
+  if(!c->last_rx_sn)
+    fb[2] |= BLE_NESN;
+  if(c->tx_seq)
+    fb[2] |= BLE_SN;
+  if((err = sx1280_cmd(s, fb, NULL, sizeof(fb))) != 0)
+    return err;
+
+  static const uint8_t clr[3] = {SX1280_CLR_IRQSTATUS, 0xff, 0xff};
+  return sx1280_cmd(s, clr, NULL, sizeof(clr));
+}
+
+// Process the received PDU payload (after the T_IFS-critical path)
+static error_t
+ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
+{
+  if(!((c->last_rx_sn ^ b0) & BLE_SN)) {
+    c->rx_bad_seq++; // Retransmission of something we already have
+    return 0;
+  }
+  c->last_rx_sn = b0 & BLE_SN;
+
+  if(rxlen == 0)
+    return 0; // Empty PDU
+
+  uint8_t buf[3 + 2 + 40];
+  if(rxlen > 40)
+    return 0;
+
+  buf[0] = SX1280_READ_BUFFER;
+  buf[1] = 0;
+  buf[2] = 0;
+  error_t err = sx1280_cmd(s, buf, buf, 3 + 2 + rxlen);
+  if(err)
+    return err;
+
+  const uint8_t *payload = buf + 3 + 2;
+
+  switch(b0 & BLE_LLID_MASK) {
+  case BLE_LLID_CTRL:
+    ble_conn_handle_ctrl(c, payload, rxlen);
+    break;
+  case BLE_LLID_START:
+  case BLE_LLID_CONT:
+    c->rx_data++; // L2CAP glue comes later
+    break;
+  }
+  return 0;
+}
+
+static int64_t
+ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
+{
+  ble_conn_t *c = (ble_conn_t *)slot;
+  error_t err;
+
+  if(c->term_code)
+    return ble_conn_drop(c, s, c->term_code, "peer");
+
+  if(c->established) {
+    if(now - c->last_rx > c->timeout)
+      return ble_conn_drop(c, s, 0x08, "supervision timeout");
+  } else if(c->event_counter != 0xffff && c->event_counter >= 5) {
+    return ble_conn_drop(c, s, 0x3e, "no first packet");
+  }
+
+  if(sx1280_sched_set_mode(s, c)) {
+    if((err = ble_radio_setup(s)) != 0)
+      goto recover;
+  }
+
+  c->event_counter++;
+
+  if(c->pending_chmask_valid &&
+     c->pending_chmask_instant == c->event_counter) {
+    ble_conn_update_channels(c->chmap, c->pending_chmask);
+    c->pending_chmask_valid = 0;
+  }
+
+  if(c->pending_update_valid &&
+     c->pending_update_instant == c->event_counter) {
+    const uint8_t *u = c->pending_update;
+    // The new transmit window opens WinOffset + 1.25ms after the
+    // point where this event's anchor would have been
+    c->anchor += 1250 + (u[1] | (u[2] << 8)) * 1250;
+    c->window = u[0] * 1250;
+    c->interval = (u[3] | (u[4] << 8)) * 1250;
+    c->timeout = (u[7] | (u[8] << 8)) * 10000;
+    c->pending_update_valid = 0;
+    evlog(LOG_NOTICE, "%s: BLE connection update: interval %dus",
+          s->name, (int)c->interval);
+  }
+
+  // Channel selection algorithm #1
+  const uint8_t unmapped =
+    (c->last_unmapped_channel + c->hop_increment) % 37;
+  c->last_unmapped_channel = unmapped;
+  const uint8_t ch = c->chmap[unmapped];
+
+  if((err = ble_conn_config_event(c, s, ch)) != 0)
+    goto recover;
+
+  // Window widening: 600ppm combined clock drift since last resync
+  const uint32_t ww = (now - c->last_sync) * 6 / 10000 + 32;
+  const int64_t anchor0 = c->anchor;
+  const int64_t listen_end = c->anchor + c->window + ww;
+  int got_packet = 0;
+
+  while(!got_packet) {
+    // The RX timeout keeps counting during the AutoTx delay and
+    // cancels the pending transmission if it expires, so it must
+    // cover the whole exchange: packet + T_IFS + our response
+    int64_t dur = listen_end + 2500 - clock_get();
+    if(dur < 2000)
+      break;
+    uint32_t ticks = dur * 64 / 1000 + 1;
+    if(ticks > 0xffff)
+      ticks = 0xffff;
+
+    const uint8_t rx[4] = {SX1280_SET_RX, SX1280_TICK_SIZE_15_6_US,
+                           ticks >> 8, ticks};
+    if((err = sx1280_cmd(s, rx, NULL, sizeof(rx))) != 0)
+      goto recover;
+
+    // Spin: the response must be in the TX buffer within
+    // BLE_AUTOTX_TIME of packet end
+    while(!gpio_get_input(s->dio1)) {
+      if(clock_get() > listen_end + 500)
+        break;
+    }
+    if(!gpio_get_input(s->dio1))
+      break; // Window exhausted with radio timeout imminent
+
+    const int64_t t_ev = clock_get();
+
+    // Peek IRQ status without clearing: AutoTx may be counting down
+    uint8_t st[4] = {SX1280_GET_IRQSTATUS};
+    if((err = sx1280_cmd(s, st, st, sizeof(st))) != 0)
+      goto recover;
+    const uint16_t irq = st[2] << 8 | st[3];
+
+    static const uint8_t clr[3] = {SX1280_CLR_IRQSTATUS, 0xff, 0xff};
+
+    if(irq & SX1280_IRQ_RX_TX_TIMEOUT) {
+      if((err = sx1280_cmd(s, clr, NULL, sizeof(clr))) != 0)
+        goto recover;
+      break; // Missed event
+    }
+
+    if(irq & SX1280_IRQ_CRC_ERROR) {
+      // Abort the armed AutoTx: never respond to a corrupt packet
+      static const uint8_t sb[2] = {SX1280_SET_STANDBY, SX1280_STDBY_RC};
+      if((err = sx1280_cmd(s, sb, NULL, sizeof(sb))) != 0)
+        goto recover;
+      if((err = sx1280_cmd(s, clr, NULL, sizeof(clr))) != 0)
+        goto recover;
+      // SetStandby disarmed AutoTx; re-arm for the rest of the window
+      static const uint8_t atx[3] = {SX1280_SET_AUTOTX, 0, BLE_AUTOTX_TIME};
+      if((err = sx1280_cmd(s, atx, NULL, sizeof(atx))) != 0)
+        goto recover;
+      c->ev_crc++;
+      continue;
+    }
+
+    if(!(irq & SX1280_IRQ_RX_DONE))
+      continue;
+
+    // T_IFS-critical path: read header, build response, write it
+    uint8_t hb[3 + 2] = {SX1280_READ_BUFFER, 0, 0};
+    if((err = sx1280_cmd(s, hb, hb, sizeof(hb))) != 0)
+      goto recover;
+    const uint8_t rx_b0 = hb[3];
+    const uint8_t rxlen = hb[4];
+
+    uint8_t tx_hdr, tx_len;
+    const uint8_t *tx_pdu = ble_conn_pick_tx(c, rx_b0, &tx_hdr, &tx_len);
+
+    uint8_t wb[2 + 2 + BLE_TXQ_PDU];
+    wb[0] = SX1280_WRITE_BUFFER;
+    wb[1] = BLE_CONN_TX_BASE;
+    wb[2] = tx_hdr;
+    wb[3] = tx_len;
+    memcpy(wb + 4, tx_pdu + 2, tx_len);
+    if((err = sx1280_cmd(s, wb, NULL, 4 + tx_len)) != 0)
+      goto recover;
+
+    const uint32_t patch = clock_get() - t_ev;
+    if(patch > c->max_patch)
+      c->max_patch = patch;
+
+    // Do NOT clear IRQs yet: the AutoTx countdown may be cancelled by
+    // a ClrIrqStatus during it. Poll the status register for TxDone.
+    int64_t t_fire = 0;
+    uint16_t tirq = 0;
+    while(clock_get() - t_ev < 1200) {
+      uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
+      if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
+        goto recover;
+      tirq = ts[2] << 8 | ts[3];
+      if(tirq & SX1280_IRQ_TX_DONE) {
+        t_fire = clock_get();
+        break;
+      }
+    }
+    if(t_fire)
+      c->tx_fired++;
+    else
+      c->tx_nofire++;
+
+    if((err = sx1280_cmd(s, clr, NULL, sizeof(clr))) != 0)
+      goto recover;
+
+    // Anchor resync: the packet started one airtime before RxDone
+    c->anchor = t_ev - (10 + rxlen) * 8 - 8;
+    c->last_sync = c->anchor;
+    c->last_rx = t_ev;
+    c->established = 1;
+    c->window = 0;
+    c->ev_rx++;
+    got_packet = 1;
+
+    if((err = ble_conn_process_rx(c, s, rx_b0, rxlen)) != 0)
+      goto recover;
+
+    if(c->event_counter < 16)
+      evlog(LOG_DEBUG, "%s: ev:%d ch:%d rx b0:%02x len:%d "
+            "off:%d atx:%d fire:%d", s->name, c->event_counter, ch,
+            rx_b0, rxlen, (int)(t_ev - anchor0), c->autotx_time,
+            t_fire ? (int)(t_fire - t_ev) : -1);
+  }
+
+  if(!got_packet && c->event_counter < 8)
+    evlog(LOG_DEBUG, "%s: ev:%d ch:%d miss (win %d+%d)", s->name,
+          c->event_counter, ch, (int)c->window, (int)ww);
+
+  if(!got_packet)
+    c->ev_missed++;
+
+  c->anchor += c->interval;
+  return c->anchor - BLE_CONN_LEAD;
+
+recover:
+  sx1280_sched_recover(s);
+  return ble_conn_drop(c, s, 0x3e, error_to_string(err));
+}
+
+// Accept a CONNECT_IND received at rx_end (LLData layout per BT spec
+// 2.3.3.1): AA[4] CRCInit[3] WinSize[1] WinOffset[2] Interval[2]
+// Latency[2] Timeout[2] ChM[5] Hop:5|SCA:3
+static void
+ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
+{
+  if(g_conn == NULL) {
+    g_conn = calloc(1, sizeof(ble_conn_t));
+    g_conn->chip = s;
+    g_conn->slot.ss_execute = ble_conn_execute;
+    g_conn->slot.ss_duration = 5000;
+    g_conn->slot.ss_prio = 3;
+  }
+  ble_conn_t *c = g_conn;
+  if(c->active)
+    return;
+
+  const uint8_t *ll = pdu + 14;
+
+  c->access_addr = ll[0] | (ll[1] << 8) | (ll[2] << 16) | (ll[3] << 24);
+  c->crc_init = ll[4] | (ll[5] << 8) | (ll[6] << 16);
+  c->interval = (ll[10] | (ll[11] << 8)) * 1250;
+  c->timeout = (ll[14] | (ll[15] << 8)) * 10000;
+  ble_conn_update_channels(c->chmap, ll + 16);
+  c->hop_increment = ll[21] & 0x1f;
+  c->last_unmapped_channel = 0;
+
+  c->anchor = rx_end + 1250 + (ll[8] | (ll[9] << 8)) * 1250;
+  c->window = ll[7] * 1250;
+  c->last_sync = rx_end;
+  c->last_rx = rx_end;
+
+  c->event_counter = 0xffff;
+  c->last_rx_sn = BLE_SN; // Expect SN=0 first
+  c->tx_seq = 0;
+  c->tx_dummy = 1;
+  c->txq_head = 0;
+  c->txq_count = 0;
+  c->established = 0;
+  c->term_code = 0;
+  c->version_sent = 0;
+  c->pending_chmask_valid = 0;
+  c->pending_update_valid = 0;
+  c->ev_rx = 0;
+  c->ev_missed = 0;
+  c->ev_crc = 0;
+  c->tx_acked = 0;
+  c->tx_retrans = 0;
+  c->rx_bad_seq = 0;
+  c->rx_data = 0;
+  c->tx_fired = 0;
+  c->tx_nofire = 0;
+  c->max_patch = 0;
+  memcpy(c->peer_addr, pdu + 2, 6);
+  c->force_empty = 0;
+  c->autotx_time = BLE_AUTOTX_TIME;
+  c->active = 1;
+
+  sx1280_sched_submit(s, &c->slot, c->anchor - BLE_CONN_LEAD);
 }
 
 static size_t
@@ -282,6 +897,10 @@ ble_adv_tx(sx1280_ble_adv_t *a, int ch, const char *name, int seed_override)
           (ll[10] | ll[11] << 8) * 125 % 100,
           (ll[14] | ll[15] << 8) * 10,
           ll[21] & 0x1f);
+
+    // rx_latency was measured to DIO1 detection; the IRQ ack inside
+    // the wait costs ~25µs on top of the actual packet end
+    ble_conn_start(s, pdu, t0 + rx_latency - 25);
   } else if((pdu_type == 0x3 || pdu_type == 0x5) && payloadlen >= 12) {
     // Directed PDU that failed our address check: log the first one
     a->rx_misaddr++;
@@ -300,6 +919,9 @@ ble_adv_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 {
   sx1280_ble_adv_t *a = (sx1280_ble_adv_t *)slot;
   error_t err = 0;
+
+  if(g_conn != NULL && g_conn->active)
+    return 0; // Connected: stop advertising, resumed on disconnect
 
   if(sx1280_sched_set_mode(s, ble_mode)) {
     err = ble_radio_setup(s);
@@ -331,6 +953,9 @@ ble_adv_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     a->cmd_errors++;
     sx1280_sched_recover(s);
   }
+
+  if(g_conn != NULL && g_conn->active)
+    return 0; // A CONNECT_IND just started a connection
 
   // advInterval + advDelay jitter
   return now + BLE_ADV_INTERVAL + (clock_get() & 0x1fff);
@@ -379,5 +1004,18 @@ sx1280_ble_adv_report(sx1280_t *s, struct stream *st)
            (int)a->rx_other, (int)a->rx_crc_errors,
            (int)a->rx_early, a->early_irq, a->early_us,
            (int)a->max_turnaround);
+
+  const ble_conn_t *c = g_conn;
+  if(c == NULL)
+    return;
+  stprintf(st, "conn: %s peer:%02x:%02x:%02x:%02x:%02x:%02x "
+           "interval:%dus ev_rx:%d missed:%d crc:%d acked:%d retrans:%d "
+           "bad_seq:%d data:%d patch:%dus\n",
+           c->active ? (c->established ? "UP" : "establishing") : "closed",
+           c->peer_addr[5], c->peer_addr[4], c->peer_addr[3],
+           c->peer_addr[2], c->peer_addr[1], c->peer_addr[0],
+           (int)c->interval, (int)c->ev_rx, (int)c->ev_missed,
+           (int)c->ev_crc, (int)c->tx_acked, (int)c->tx_retrans,
+           (int)c->rx_bad_seq, (int)c->rx_data, (int)c->max_patch);
 }
 
