@@ -1,12 +1,14 @@
 // BLE advertising (non-connectable beacons) on SX1280
 //
-// Transmits ADV_NONCONN_IND on channels 37/38/39. The whitening seed
-// register is undocumented; sweep mode advertises the seed in the
-// device name so a phone scanner reveals the correct per-channel
-// transform empirically.
+// Transmits ADV_NONCONN_IND on channels 37/38/39 as a radio scheduler
+// slot. The whitening seed register is undocumented and loads
+// bit-reversed relative to the BLE spec convention; sweep mode
+// advertises seed candidates in the device name for empirical
+// verification against a phone scanner.
 
 #include "sx1280_i.h"
 #include "sx1280_ble.h"
+#include "sx1280_sched.h"
 
 #include <mios/task.h>
 #include <mios/eventlog.h>
@@ -17,16 +19,19 @@
 #include <unistd.h>
 
 #define BLE_ADV_PDU_MAX (2 + 6 + 31)
+#define BLE_ADV_INTERVAL 100000 // µs, plus advDelay jitter
 
 typedef struct {
+  sx1280_slot_t slot;
   sx1280_t *chip;
 
   uint32_t tx_done;
   uint32_t tx_timeout;
   uint32_t cmd_errors;
 
-  uint8_t enabled;
   uint8_t sweep;      // Sweep whitening seeds, name carries the seed
+  uint8_t sweep_seed;
+  uint8_t sweep_cnt;
 
   char name[17];
 } sx1280_ble_adv_t;
@@ -51,9 +56,6 @@ static error_t
 ble_radio_setup(sx1280_t *s)
 {
   error_t err;
-
-  if((err = sx1280_reset(s)) != 0)
-    return err;
 
   static const uint8_t standby[2] = {SX1280_SET_STANDBY, SX1280_STDBY_RC};
   if((err = sx1280_cmd(s, standby, NULL, sizeof(standby))) != 0)
@@ -175,56 +177,45 @@ ble_adv_tx(sx1280_ble_adv_t *a, int ch, const char *name, int seed_override)
   return 0;
 }
 
-__attribute__((noreturn))
-static void *
-ble_adv_thread(void *arg)
+static int64_t
+ble_adv_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 {
-  sx1280_ble_adv_t *a = arg;
-  sx1280_t *s = a->chip;
-  int sweep_seed = 0;
+  sx1280_ble_adv_t *a = (sx1280_ble_adv_t *)slot;
+  error_t err = 0;
 
-  while(1) {
-    error_t err = ble_radio_setup(s);
+  if(sx1280_sched_set_mode(s, a)) {
+    err = ble_radio_setup(s);
     if(err) {
-      evlog(LOG_ERR, "%s: BLE setup failed: %s", s->name,
-            error_to_string(err));
-      sleep(1);
-      continue;
-    }
-
-    while(1) {
-      if(!a->enabled) {
-        usleep(100000);
-        continue;
-      }
-
-      if(a->sweep) {
-        // Channel 37 only: the correct seed is channel-dependent, so a
-        // fixed candidate can only match one channel. The name carries
-        // the candidate so a scanner shows which one decodes.
-        char name[24];
-        snprintf(name, sizeof(name), "mios-%02x", sweep_seed);
-        err = 0;
-        for(int i = 0; i < 3 && !err; i++) {
-          err = ble_adv_tx(a, 0, name, sweep_seed);
-          if(!err)
-            usleep(100000 + (clock_get() & 0x1fff));
-        }
-        sweep_seed = (sweep_seed + 1) & 0x7f;
-      } else {
-        err = 0;
-        for(int ch = 0; ch < 3 && !err; ch++)
-          err = ble_adv_tx(a, ch, a->name, -1);
-        if(!err)
-          usleep(100000 + (clock_get() & 0x1fff)); // advInterval + advDelay
-      }
-
-      if(err) {
-        a->cmd_errors++;
-        break; // Re-init radio
-      }
+      a->cmd_errors++;
+      sx1280_sched_recover(s);
+      return now + 1000000;
     }
   }
+
+  if(a->sweep) {
+    // Channel 37 only: the correct seed is channel-dependent, so a
+    // fixed candidate can only match one channel. The name carries
+    // the candidate so a scanner shows which one decodes.
+    char name[24];
+    snprintf(name, sizeof(name), "mios-%02x", a->sweep_seed);
+    err = ble_adv_tx(a, 0, name, a->sweep_seed);
+    a->sweep_cnt++;
+    if(a->sweep_cnt >= 3) { // ~300ms per candidate
+      a->sweep_cnt = 0;
+      a->sweep_seed = (a->sweep_seed + 1) & 0x7f;
+    }
+  } else {
+    for(int ch = 0; ch < 3 && !err; ch++)
+      err = ble_adv_tx(a, ch, a->name, -1);
+  }
+
+  if(err) {
+    a->cmd_errors++;
+    sx1280_sched_recover(s);
+  }
+
+  // advInterval + advDelay jitter
+  return now + BLE_ADV_INTERVAL + (clock_get() & 0x1fff);
 }
 
 static sx1280_ble_adv_t *
@@ -233,8 +224,10 @@ sx1280_ble_adv_get(sx1280_t *s)
   if(g_adv == NULL) {
     g_adv = calloc(1, sizeof(sx1280_ble_adv_t));
     g_adv->chip = s;
+    g_adv->slot.ss_execute = ble_adv_execute;
+    g_adv->slot.ss_duration = 5000;
+    g_adv->slot.ss_prio = 1;
     strcpy(g_adv->name, "mios");
-    thread_create(ble_adv_thread, g_adv, 1024, "bleadv", 0, 0);
   }
   return g_adv;
 }
@@ -243,18 +236,17 @@ void
 sx1280_ble_adv_start(sx1280_t *s, const char *name, int sweep)
 {
   sx1280_ble_adv_t *a = sx1280_ble_adv_get(s);
-  if(name != NULL) {
+  if(name != NULL)
     strlcpy(a->name, name, sizeof(a->name));
-  }
   a->sweep = sweep;
-  a->enabled = 1;
+  sx1280_sched_submit(s, &a->slot, clock_get());
 }
 
 void
 sx1280_ble_adv_stop(sx1280_t *s)
 {
   if(g_adv != NULL)
-    g_adv->enabled = 0;
+    sx1280_sched_cancel(s, &g_adv->slot);
 }
 
 void

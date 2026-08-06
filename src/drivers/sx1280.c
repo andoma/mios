@@ -7,6 +7,7 @@
 #include "sx1280.h"
 #include "sx1280_i.h"
 #include "sx1280_ble.h"
+#include "sx1280_sched.h"
 
 #include <mios/cli.h>
 #include <mios/eventlog.h>
@@ -161,6 +162,8 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
 
   gpio_conf_irq(dio1, GPIO_PULL_DOWN, sx1280_dio1_irq, s,
                 GPIO_RISING_EDGE, IRQ_LEVEL_IO);
+
+  sx1280_sched_init(s);
 
   sx1280_cli_instance = s;
   return s;
@@ -357,6 +360,11 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
 {
   if(sx1280_cli_instance == NULL)
     return ERR_NO_DEVICE;
+
+  // The bring-up commands below poke the radio directly, behind the
+  // scheduler's back. Invalidate the mode cache so the next slot does
+  // a full reconfig.
+  sx1280_sched_set_mode(sx1280_cli_instance, NULL);
 
   if(argc >= 2 && !strcmp(argv[1], "test"))
     return cmd_sx1280_test(cli);

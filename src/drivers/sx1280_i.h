@@ -6,6 +6,9 @@
 #include "sx1280_regs.h"
 
 #include <mios/task.h>
+#include <sys/queue.h>
+
+LIST_HEAD(sx1280_slot_list, sx1280_slot);
 
 struct sx1280 {
   spi_t *bus;
@@ -23,7 +26,16 @@ struct sx1280 {
   int spicfg;
 
   const char *name;
+
+  // Radio arbiter (sx1280_sched.c)
+  mutex_t sched_mutex;
+  cond_t sched_cond;
+  struct sx1280_slot_list sched_slots;
+  const void *sched_mode;
+  const struct sx1280_slot *sched_cancelled; // Cancelled while executing
 };
+
+void sx1280_sched_init(sx1280_t *s);
 
 error_t sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len);
 

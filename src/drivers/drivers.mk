@@ -79,4 +79,5 @@ SRCS-${ENABLE_DRV8899} += \
 
 SRCS-${ENABLE_SX1280} += \
 	${SRC}/drivers/sx1280.c \
+	${SRC}/drivers/sx1280_sched.c \
 	${SRC}/drivers/sx1280_ble.c
