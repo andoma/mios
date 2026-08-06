@@ -141,7 +141,7 @@ sx1280_sched_init(sx1280_t *s)
   mutex_init(&s->sched_mutex, "radiosched");
   task_waitable_init(&s->sched_cond, "radiosched");
   LIST_INIT(&s->sched_slots);
-  // High priority: connection-event anchors must not lose the CPU to
-  // housekeeping threads (ethernet PHY polling and friends)
-  thread_create(sched_thread, s, 1024, "radio", 0, 10);
+  // Above everything else including the net thread (prio 10):
+  // connection-event anchors are the hardest deadline in the system
+  thread_create(sched_thread, s, 1024, "radio", 0, 11);
 }
