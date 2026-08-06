@@ -19,6 +19,10 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "irq.h"
+#include "net/pbuf.h"
+#include "net/ble/l2cap.h"
+
 #define BLE_ADV_PDU_MAX (2 + 6 + 31)
 #define BLE_ADV_INTERVAL 100000 // µs, plus advDelay jitter
 
@@ -86,12 +90,13 @@ static sx1280_ble_adv_t *g_adv;
 
 // --- Connection (peripheral role) ---
 
-#define BLE_TXQ_SIZE 4       // Pending LL PDUs (control responses)
-#define BLE_TXQ_PDU  32
+#define BLE_LL_MAX_PAYLOAD 27 // No DLE: one LL data PDU carries this much
 
 typedef struct {
   sx1280_slot_t slot;
   sx1280_t *chip;
+
+  l2cap_t l2c;            // mios BLE host stack attachment
 
   uint32_t access_addr;
   uint32_t crc_init;
@@ -129,13 +134,23 @@ typedef struct {
   uint8_t tx_seq;         // Our sequence (0/1)
   uint8_t tx_dummy;       // Last transmitted PDU was an empty one
 
-  // Pending TX PDUs: [0]=hdr(LLID), [1]=len, [2..]=payload
-  uint8_t txq[BLE_TXQ_SIZE][BLE_TXQ_PDU];
-  uint8_t txq_head, txq_count;
+  // Sub-fragmentation of an oversized l2cap fragment across LL PDUs
+  uint16_t tx_frag_off;
+
+  // The in-flight (unacked) LL PDU, copied out of the queue so queue
+  // and pbuf lifetime stay simple
+  uint8_t tx_pdu[2 + BLE_LL_MAX_PAYLOAD];
+  uint8_t tx_src;         // 0 = empty PDU, 1 = ctrl ring, 2 = l2cap queue
+
+  // Control responses take priority over l2cap data
+#define BLE_CTRLQ_SIZE 4
+#define BLE_CTRLQ_PDU  12
+  uint8_t ctrlq[BLE_CTRLQ_SIZE][BLE_CTRLQ_PDU];
+  uint8_t ctrlq_head, ctrlq_count;
 
   // Stats
   uint32_t ev_rx, ev_missed, ev_crc;
-  uint32_t tx_acked, tx_retrans, rx_bad_seq, rx_data;
+  uint32_t tx_acked, tx_retrans, rx_bad_seq, rx_data, rx_drops;
   uint32_t tx_fired, tx_nofire; // AutoTx TxDone seen / not seen
   uint32_t max_patch;     // µs, RxDone -> response PDU written
 
@@ -176,11 +191,11 @@ ble_conn_update_channels(uint8_t *chmap, const uint8_t *mask)
 static uint8_t *
 ble_conn_enqueue_ctrl(ble_conn_t *c, uint8_t op, uint8_t len)
 {
-  if(c->txq_count == BLE_TXQ_SIZE)
+  if(c->ctrlq_count == BLE_CTRLQ_SIZE)
     return NULL; // Full; peer retransmits its request later
 
-  uint8_t *pdu = c->txq[(c->txq_head + c->txq_count) % BLE_TXQ_SIZE];
-  c->txq_count++;
+  uint8_t *pdu = c->ctrlq[(c->ctrlq_head + c->ctrlq_count) % BLE_CTRLQ_SIZE];
+  c->ctrlq_count++;
   pdu[0] = BLE_LLID_CTRL;
   pdu[1] = len + 1;
   pdu[2] = op;
@@ -244,17 +259,52 @@ ble_conn_handle_ctrl(ble_conn_t *c, const uint8_t *req, int len)
   }
 }
 
+// l2cap hands us raw fragments (PBUF_SOP marks an SDU start); the
+// radio thread drains the queue one LL PDU chunk per connection event
+static void
+ble_conn_l2cap_output(struct l2cap *self, struct pbuf *pb)
+{
+  ble_conn_t *c = g_conn;
+
+  if(pb == NULL) {
+    // l2cap layer closed
+    self->l2c_output = NULL;
+    return;
+  }
+
+  if(pbuf_pullup(pb, pb->pb_pktlen))
+    panic("%s: pullup failed", __FUNCTION__);
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  if(c != NULL && c->active) {
+    STAILQ_INSERT_TAIL(&self->l2c_tx_queue, pb, pb_link);
+    self->l2c_tx_queue_len++;
+  } else {
+    pbuf_free_irq_blocked(pb);
+  }
+  irq_permit(q);
+}
+
 static int64_t
 ble_conn_drop(ble_conn_t *c, sx1280_t *s, uint8_t code, const char *why)
 {
   evlog(LOG_NOTICE, "%s: BLE disconnected (0x%02x, %s) "
         "rx:%d missed:%d crc:%d acked:%d retrans:%d "
-        "txfired:%d nofire:%d patch:%dus",
+        "txfired:%d nofire:%d data:%d patch:%dus",
         s->name, code, why, (int)c->ev_rx, (int)c->ev_missed,
         (int)c->ev_crc, (int)c->tx_acked, (int)c->tx_retrans,
-        (int)c->tx_fired, (int)c->tx_nofire, (int)c->max_patch);
+        (int)c->tx_fired, (int)c->tx_nofire, (int)c->rx_data,
+        (int)c->max_patch);
 
   c->active = 0;
+
+  l2cap_disconnect(&c->l2c);
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  pbuf_free_queue_irq_blocked(&c->l2c.l2c_tx_queue);
+  c->l2c.l2c_tx_queue_len = 0;
+  irq_permit(q);
+
   sx1280_sched_set_mode(s, NULL);
 
   // Resume advertising
@@ -263,34 +313,92 @@ ble_conn_drop(ble_conn_t *c, sx1280_t *s, uint8_t code, const char *why)
   return 0;
 }
 
-// Select next TX PDU and build its header, per BT spec 4.5.9
-static const uint8_t *
+// Advance the TX pipeline after an acknowledgement: pop the acked
+// control PDU or consume the acked chunk of the l2cap queue head
+static void
+ble_conn_tx_consume(ble_conn_t *c)
+{
+  if(c->tx_src == 1) {
+    c->ctrlq_head = (c->ctrlq_head + 1) % BLE_CTRLQ_SIZE;
+    c->ctrlq_count--;
+  } else if(c->tx_src == 2) {
+    int q = irq_forbid(IRQ_LEVEL_NET);
+    pbuf_t *pb = STAILQ_FIRST(&c->l2c.l2c_tx_queue);
+    if(pb != NULL) {
+      c->tx_frag_off += c->tx_pdu[1];
+      if(c->tx_frag_off >= pb->pb_pktlen) {
+        STAILQ_REMOVE_HEAD(&c->l2c.l2c_tx_queue, pb_link);
+        c->l2c.l2c_tx_queue_len--;
+        pb->pb_next = NULL;
+        pbuf_free_irq_blocked(pb);
+        c->tx_frag_off = 0;
+      }
+    }
+    irq_permit(q);
+  }
+}
+
+// Load the next PDU to transmit into tx_pdu: control responses first,
+// then (a chunk of) the l2cap TX queue head, else an empty PDU
+static void
+ble_conn_tx_load(ble_conn_t *c)
+{
+  if(c->force_empty)
+    goto empty;
+
+  if(c->ctrlq_count) {
+    const uint8_t *pdu = c->ctrlq[c->ctrlq_head];
+    memcpy(c->tx_pdu, pdu, 2 + pdu[1]);
+    c->tx_src = 1;
+    return;
+  }
+
+  int q = irq_forbid(IRQ_LEVEL_NET);
+  pbuf_t *pb = STAILQ_FIRST(&c->l2c.l2c_tx_queue);
+  if(pb != NULL) {
+    const uint8_t *d = pbuf_data(pb, 0);
+    const uint16_t left = pb->pb_pktlen - c->tx_frag_off;
+    const uint8_t chunk =
+      left > BLE_LL_MAX_PAYLOAD ? BLE_LL_MAX_PAYLOAD : left;
+
+    c->tx_pdu[0] = c->tx_frag_off ? BLE_LLID_CONT :
+      ((pb->pb_flags & PBUF_SOP) ? BLE_LLID_START : BLE_LLID_CONT);
+    c->tx_pdu[1] = chunk;
+    memcpy(c->tx_pdu + 2, d + c->tx_frag_off, chunk);
+    c->tx_src = 2;
+    irq_permit(q);
+    return;
+  }
+  irq_permit(q);
+
+empty:
+  c->tx_pdu[0] = BLE_LLID_CONT;
+  c->tx_pdu[1] = 0;
+  c->tx_src = 0;
+}
+
+// ARQ + next TX selection, per BT spec 4.5.9. Fills tx_pdu and
+// returns the on-air header byte.
+static void
 ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t *hdr_out,
                  uint8_t *len_out)
 {
-  static const uint8_t empty[2] = {BLE_LLID_CONT, 0};
-
   // Did the peer acknowledge our previous PDU?
   const uint8_t nesn = !!(rx_b0 & BLE_NESN);
   if(c->tx_seq != nesn) {
-    if(!c->tx_dummy && c->txq_count) {
-      c->txq_head = (c->txq_head + 1) % BLE_TXQ_SIZE;
-      c->txq_count--;
+    if(c->tx_src) {
+      ble_conn_tx_consume(c);
+      c->tx_acked++;
     }
     c->tx_seq = nesn;
-    c->tx_acked++;
-  } else if(!c->tx_dummy) {
-    c->tx_retrans++;
-  }
-
-  const uint8_t *pdu;
-  if(c->txq_count && !c->force_empty) {
-    pdu = c->txq[c->txq_head];
-    c->tx_dummy = 0;
+    ble_conn_tx_load(c);
   } else {
-    pdu = empty;
-    c->tx_dummy = 1;
+    if(c->tx_src)
+      c->tx_retrans++; // Same PDU goes out again, bits repatched
+    else
+      ble_conn_tx_load(c); // Unheard empty PDU may be upgraded
   }
+  c->tx_dummy = (c->tx_src == 0);
 
   // The SN of the incoming packet decides our NESN: acknowledge it if
   // it is the one we expected (we always have room, v1 never NAKs)
@@ -298,15 +406,14 @@ ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t *hdr_out,
   if((c->last_rx_sn ^ rx_b0) & BLE_SN)
     next_rx_sn = rx_b0 & BLE_SN; // Will be committed by caller
 
-  uint8_t b0 = pdu[0] & BLE_LLID_MASK;
+  uint8_t b0 = c->tx_pdu[0] & BLE_LLID_MASK;
   if(!next_rx_sn)
     b0 |= BLE_NESN;
   if(c->tx_seq)
     b0 |= BLE_SN;
 
   *hdr_out = b0;
-  *len_out = pdu[1];
-  return pdu;
+  *len_out = c->tx_pdu[1];
 }
 
 // 2402, 2426, 2480 MHz
@@ -482,10 +589,25 @@ ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
   case BLE_LLID_CTRL:
     ble_conn_handle_ctrl(c, payload, rxlen);
     break;
+
   case BLE_LLID_START:
-  case BLE_LLID_CONT:
-    c->rx_data++; // L2CAP glue comes later
+  case BLE_LLID_CONT: {
+    pbuf_t *pb = pbuf_make(0, 0);
+    if(pb == NULL) {
+      c->rx_drops++;
+      break;
+    }
+    // Same layout the other LL drivers hand to l2cap_input: payload
+    // at offset 2 (where the LL header would sit)
+    pb->pb_pktlen = 0;
+    pb->pb_offset = 2;
+    pb->pb_buflen = rxlen;
+    pb->pb_flags = (b0 & BLE_LLID_MASK) == BLE_LLID_START ? PBUF_SOP : 0;
+    memcpy(pbuf_data(pb, 0), payload, rxlen);
+    c->rx_data++;
+    l2cap_input(&c->l2c, pb);
     break;
+  }
   }
   return 0;
 }
@@ -615,14 +737,14 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     const uint8_t rxlen = hb[4];
 
     uint8_t tx_hdr, tx_len;
-    const uint8_t *tx_pdu = ble_conn_pick_tx(c, rx_b0, &tx_hdr, &tx_len);
+    ble_conn_pick_tx(c, rx_b0, &tx_hdr, &tx_len);
 
-    uint8_t wb[2 + 2 + BLE_TXQ_PDU];
+    uint8_t wb[2 + 2 + BLE_LL_MAX_PAYLOAD];
     wb[0] = SX1280_WRITE_BUFFER;
     wb[1] = BLE_CONN_TX_BASE;
     wb[2] = tx_hdr;
     wb[3] = tx_len;
-    memcpy(wb + 4, tx_pdu + 2, tx_len);
+    memcpy(wb + 4, c->tx_pdu + 2, tx_len);
     if((err = sx1280_cmd(s, wb, NULL, 4 + tx_len)) != 0)
       goto recover;
 
@@ -722,8 +844,12 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->last_rx_sn = BLE_SN; // Expect SN=0 first
   c->tx_seq = 0;
   c->tx_dummy = 1;
-  c->txq_head = 0;
-  c->txq_count = 0;
+  c->tx_src = 0;
+  c->tx_pdu[0] = BLE_LLID_CONT;
+  c->tx_pdu[1] = 0;
+  c->tx_frag_off = 0;
+  c->ctrlq_head = 0;
+  c->ctrlq_count = 0;
   c->established = 0;
   c->term_code = 0;
   c->version_sent = 0;
@@ -736,12 +862,27 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->tx_retrans = 0;
   c->rx_bad_seq = 0;
   c->rx_data = 0;
+  c->rx_drops = 0;
   c->tx_fired = 0;
   c->tx_nofire = 0;
   c->max_patch = 0;
   memcpy(c->peer_addr, pdu + 2, 6);
   c->force_empty = 0;
   c->autotx_time = BLE_AUTOTX_TIME;
+
+  // Attach the mios BLE host stack
+  c->l2c.l2c_output = ble_conn_l2cap_output;
+  c->l2c.l2c_ltk_reply = NULL; // No link encryption (yet)
+  STAILQ_INIT(&c->l2c.l2c_tx_queue);
+  c->l2c.l2c_tx_queue_len = 0;
+  memcpy(c->l2c.l2c_peer_addr, pdu + 2, 6);
+  c->l2c.l2c_peer_addr_type = (pdu[0] & 0x40) ? 1 : 0; // TxAdd
+  memcpy(c->l2c.l2c_our_addr, ble_our_addr, 6);
+  c->l2c.l2c_our_addr_type = 1; // Static random
+
+  if(l2cap_connect(&c->l2c) != 0)
+    return; // Host stack refused; keep advertising
+
   c->active = 1;
 
   sx1280_sched_submit(s, &c->slot, c->anchor - BLE_CONN_LEAD);
