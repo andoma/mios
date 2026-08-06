@@ -118,6 +118,9 @@ typedef struct {
   uint8_t force_empty;    // Debug: respond only with empty PDUs
   uint8_t autotx_time;    // SetAutoTx arm value (calibration sweep)
   uint8_t param_req_sent; // L2CAP conn param update request sent
+  uint8_t term_req;       // Local termination requested (any thread)
+  uint8_t term_sent;      // LL_TERMINATE_IND queued
+  int64_t term_deadline;  // Give up if the ack never arrives
   uint16_t last_fire;     // µs, RxDone -> TxDone of most recent AutoTx
 
   uint8_t chmap[37];      // CSA#1 remap table
@@ -327,6 +330,10 @@ static void
 ble_conn_tx_consume(ble_conn_t *c)
 {
   if(c->tx_src == 1) {
+    // An acknowledged LL_TERMINATE_IND completes the termination
+    // procedure (BT spec 5.1.6)
+    if(c->ctrlq[c->ctrlq_head][2] == LL_TERMINATE_IND)
+      c->term_code = c->ctrlq[c->ctrlq_head][3];
     c->ctrlq_head = (c->ctrlq_head + 1) % BLE_CTRLQ_SIZE;
     c->ctrlq_count--;
   } else if(c->tx_src == 2) {
@@ -722,7 +729,19 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
   error_t err;
 
   if(c->term_code)
-    return ble_conn_drop(c, s, c->term_code, "peer");
+    return ble_conn_drop(c, s, c->term_code, c->term_sent ? "local" : "peer");
+
+  if(c->term_req && !c->term_sent) {
+    uint8_t *rsp = ble_conn_enqueue_ctrl(c, LL_TERMINATE_IND, 1);
+    if(rsp != NULL) {
+      rsp[0] = 0x16; // Connection terminated by local host
+      c->term_sent = 1;
+      // Spec 5.1.6: the procedure is bounded by the supervision timeout
+      c->term_deadline = now + c->timeout;
+    }
+  }
+  if(c->term_sent && now > c->term_deadline)
+    return ble_conn_drop(c, s, 0x16, "local, unacked");
 
   if(c->established) {
     if(now - c->last_rx > c->timeout)
@@ -1021,6 +1040,8 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->rx_drops = 0;
   c->rx_pdus = 0;
   c->param_req_sent = 0;
+  c->term_req = 0;
+  c->term_sent = 0;
   c->tx_fired = 0;
   c->tx_nofire = 0;
   c->max_patch = 0;
@@ -1289,6 +1310,19 @@ sx1280_ble_adv_stop(sx1280_t *s)
 {
   if(g_adv != NULL)
     sx1280_sched_cancel(s, &g_adv->slot);
+}
+
+int
+sx1280_ble_conn_active(sx1280_t *s)
+{
+  return g_conn != NULL && g_conn->active;
+}
+
+void
+sx1280_ble_conn_drop(sx1280_t *s)
+{
+  if(g_conn != NULL && g_conn->active)
+    g_conn->term_req = 1; // Picked up by the radio thread next event
 }
 
 void

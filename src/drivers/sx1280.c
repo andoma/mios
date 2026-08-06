@@ -43,9 +43,10 @@ sx1280_dio1_irq(void *arg)
 }
 
 // Command processing takes µs, so spin briefly first. For the long
-// waits (reset, calibration) fall back to sleeping; the falling-edge
-// IRQ gives a prompt wakeup and the short sleep slices bound a lost
-// level-check race to 100µs.
+// waits (reset, calibration) sleep with the BUSY IRQ masked across
+// the level-check-and-sleep: the falling edge cannot fire between the
+// check and the waitqueue enrollment, so no wakeup is ever lost. The
+// mask is per-thread state; it does not stay raised while sleeping.
 static error_t
 sx1280_wait_ready(sx1280_t *s, int timeout)
 {
@@ -54,12 +55,17 @@ sx1280_wait_ready(sx1280_t *s, int timeout)
     if(clock_get() < spin_until)
       continue;
 
-    uint64_t deadline = clock_get() + timeout;
+    const int64_t deadline = clock_get() + timeout;
+    error_t err = ERR_OK;
+    int q = irq_forbid(IRQ_LEVEL_IO);
     while(gpio_get_input(s->busy)) {
-      if(clock_get() > deadline)
-        return ERR_TIMEOUT;
-      if(task_sleep_delta(&s->busy_waitq, 100)) {}
+      if(task_sleep_deadline(&s->busy_waitq, deadline)) {
+        err = ERR_TIMEOUT;
+        break;
+      }
     }
+    irq_permit(q);
+    return err;
   }
   return ERR_OK;
 }
@@ -92,13 +98,18 @@ sx1280_irq_ack(sx1280_t *s)
 int
 sx1280_wait_irq(sx1280_t *s, int timeout)
 {
-  uint64_t deadline = clock_get() + timeout;
-  while(!s->irq_pending) {
-    if(clock_get() > deadline)
+  const int64_t deadline = clock_get() + timeout;
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  // Also check the DIO1 level: the edge flag misses interrupts that
+  // were left partially unacked (DIO1 never fell, so no new edge)
+  while(!s->irq_pending && !gpio_get_input(s->dio1)) {
+    if(task_sleep_deadline(&s->irq_waitq, deadline)) {
+      irq_permit(q);
       return 0;
-    if(task_sleep_delta(&s->irq_waitq, 500)) {}
+    }
   }
   s->irq_pending = 0;
+  irq_permit(q);
   return sx1280_irq_ack(s);
 }
 
@@ -389,10 +400,19 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
   if(sx1280_cli_instance == NULL)
     return ERR_NO_DEVICE;
 
-  // The bring-up commands below poke the radio directly, behind the
-  // scheduler's back. Invalidate the mode cache so the next slot does
-  // a full reconfig.
-  sx1280_sched_set_mode(sx1280_cli_instance, NULL);
+  // The bring-up commands (test/cw/pins/status/power) poke the radio
+  // directly, behind the scheduler's back. That is tolerable while
+  // idle or advertising (one garbled adv event self-heals) but would
+  // corrupt a live connection's event timing.
+  if(argc >= 2 && strcmp(argv[1], "ble")) {
+    if(sx1280_ble_conn_active(sx1280_cli_instance)) {
+      cli_printf(cli, "radio busy: BLE connection active, "
+                 "'sx1280 ble drop' first\n");
+      return ERR_NOT_READY;
+    }
+    // Invalidate the mode cache so the next slot does a full reconfig
+    sx1280_sched_set_mode(sx1280_cli_instance, NULL);
+  }
 
   if(argc >= 2 && !strcmp(argv[1], "test"))
     return cmd_sx1280_test(cli);
@@ -413,9 +433,15 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
 
   if(argc >= 2 && !strcmp(argv[1], "ble")) {
     sx1280_t *s = sx1280_cli_instance;
-    if(argc >= 3 && !strcmp(argv[2], "stop")) {
+    if(argc >= 3 && !strcmp(argv[2], "adv")) {
+      sx1280_ble_adv_start(s, argc >= 4 ? argv[3] : NULL, 0);
+      cli_printf(cli, "advertising started\n");
+    } else if(argc >= 3 && !strcmp(argv[2], "stop")) {
       sx1280_ble_adv_stop(s);
       cli_printf(cli, "advertising stopped\n");
+    } else if(argc >= 3 && !strcmp(argv[2], "drop")) {
+      sx1280_ble_conn_drop(s);
+      cli_printf(cli, "terminating connection\n");
     } else if(argc >= 3 && !strcmp(argv[2], "sweep")) {
       sx1280_ble_adv_start(s, NULL, 1);
       cli_printf(cli, "whitening seed sweep started (ch37, ~40s/lap)\n");
@@ -425,9 +451,10 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
     } else if(argc >= 4 && !strcmp(argv[2], "pwr")) {
       sx1280_ble_set_txpower(s, atoi(argv[3]));
       cli_printf(cli, "tx power: %d dBm\n", atoi(argv[3]));
-    } else {
-      sx1280_ble_adv_start(s, argc >= 3 ? argv[2] : NULL, 0);
-      cli_printf(cli, "advertising started\n");
+    } else if(argc >= 3) {
+      cli_printf(cli, "usage: sx1280 ble "
+                 "[adv [name]|stop|drop|sweep|atx <n>|pwr <dBm>]\n");
+      return 0;
     }
     sx1280_ble_adv_report(s, cli->cl_stream);
     return 0;

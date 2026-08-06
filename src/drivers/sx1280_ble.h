@@ -17,3 +17,8 @@ void sx1280_ble_adv_report(sx1280_t *s, struct stream *st);
 void sx1280_ble_set_autotx(sx1280_t *s, int val);
 
 void sx1280_ble_set_txpower(sx1280_t *s, int dbm);
+
+int sx1280_ble_conn_active(sx1280_t *s);
+
+// Terminate the current connection (LL_TERMINATE_IND)
+void sx1280_ble_conn_drop(sx1280_t *s);
