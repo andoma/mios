@@ -47,11 +47,12 @@
 #define LL_PING_RSP              0x13
 
 // AutoTx fires at a fixed offset after RX end plus the programmed
-// time. The datasheet example claims a 33µs offset; calibrated
-// against a real BLE master (per-event arm-value sweep, watching for
-// the incoming NESN to flip) values 19-22 are acknowledged, so the
-// silicon offset in BLE mode is ~130µs.
-#define BLE_AUTOTX_TIME 20
+// time; the datasheet example claims a 33µs offset but the silicon
+// disagrees. Calibrated per master (arm-value sweep watching for the
+// incoming NESN flip, `sx1280 ble atx <n>`): a phone acks 19-22, a
+// Realtek RTL8761 dongle 62-82. Default to the Realtek band; the
+// phone's upper bound is untested and the two may yet overlap here.
+#define BLE_AUTOTX_TIME 72
 
 #define BLE_CONN_LEAD    1000 // Fire the event slot this early, µs
 #define BLE_CONN_TX_BASE 0x80 // TX half of the 256B data buffer
