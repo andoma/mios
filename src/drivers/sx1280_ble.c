@@ -648,8 +648,12 @@ ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
   return 0;
 }
 
-// Wait for the AutoTx TxDone by polling status (no ClrIrqStatus while
-// the countdown runs, it cancels the transmission). Clears IRQs after.
+// Wait for the AutoTx TxDone by polling GetIrqStatus. ANY
+// ClrIrqStatus during the AutoTx countdown cancels the pending
+// transmission - selective bit masks included (tested: clearing only
+// the RX bits kills it just as dead as 0xffff). So DIO1 cannot be
+// lowered and re-used as a sleepable TxDone signal; status polling
+// it is. Clears IRQs once the transmission is done.
 // Returns 1 if the transmission fired, 0 if not, negative on error.
 static int
 ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev)
@@ -813,13 +817,10 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     if((err = sx1280_cmd(s, rx, NULL, sizeof(rx))) != 0)
       goto recover;
 
-    // Spin: the response must be in the TX buffer within
-    // BLE_AUTOTX_TIME of packet end
-    while(!gpio_get_input(s->dio1)) {
-      if(clock_get() > listen_end + 500)
-        break;
-    }
-    if(!gpio_get_input(s->dio1))
+    // Sleep until the packet (or window end). The wakeup latency of
+    // the highest-priority thread (~10-30µs) fits comfortably inside
+    // the AutoTx response budget (~200µs at the current arm value).
+    if(!sx1280_wait_dio1(s, listen_end + 500))
       break; // Window exhausted with radio timeout imminent
 
     const int64_t t_ev = clock_get();
@@ -915,10 +916,7 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
       if((err = ble_conn_rearm(c, s)) != 0)
         goto recover;
 
-      const uint64_t rx_deadline = clock_get() + 800;
-      while(!gpio_get_input(s->dio1) && clock_get() < rx_deadline) {
-      }
-      if(!gpio_get_input(s->dio1))
+      if(!sx1280_wait_dio1(s, clock_get() + 800))
         break; // Master closed the event
 
       const int64_t t_ex = clock_get();

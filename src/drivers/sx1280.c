@@ -113,9 +113,9 @@ sx1280_wait_irq(sx1280_t *s, int timeout)
   return sx1280_irq_ack(s);
 }
 
-// Spin-polling variant for T_IFS-critical windows (BLE inter frame
-// space is 150µs; the sleeping variant has ~500µs wakeup latency).
-// DIO1 is level-high until the IRQ is cleared, so polling is race-free.
+// Spin-polling variant for T_IFS-critical windows where even the
+// wakeup latency of the sleeping wait is unaffordable. DIO1 is
+// level-high until the IRQ is cleared, so polling is race-free.
 int
 sx1280_wait_irq_poll(sx1280_t *s, int timeout)
 {
@@ -126,6 +126,24 @@ sx1280_wait_irq_poll(sx1280_t *s, int timeout)
   }
   s->irq_pending = 0;
   return sx1280_irq_ack(s);
+}
+
+// Sleep until DIO1 asserts, without touching the chip (no IRQ status
+// read or clear: the caller may have an AutoTx counting down, which a
+// ClrIrqStatus would cancel). Returns 1 on assertion, 0 on deadline.
+int
+sx1280_wait_dio1(sx1280_t *s, int64_t deadline)
+{
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  while(!s->irq_pending && !gpio_get_input(s->dio1)) {
+    if(task_sleep_deadline(&s->irq_waitq, deadline)) {
+      irq_permit(q);
+      return 0;
+    }
+  }
+  s->irq_pending = 0;
+  irq_permit(q);
+  return 1;
 }
 
 error_t

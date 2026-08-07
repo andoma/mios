@@ -45,3 +45,7 @@ int sx1280_wait_irq(sx1280_t *s, int timeout);
 
 // Same, but spin-polls DIO1 for T_IFS-critical windows
 int sx1280_wait_irq_poll(sx1280_t *s, int timeout);
+
+// Sleep until DIO1 asserts (absolute deadline); does not read or
+// clear the chip's IRQ status. 1 = asserted, 0 = deadline.
+int sx1280_wait_dio1(sx1280_t *s, int64_t deadline);
