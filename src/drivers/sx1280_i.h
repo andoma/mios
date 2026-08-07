@@ -22,6 +22,8 @@ struct sx1280 {
   gpio_t nreset;
   gpio_t busy;
   gpio_t dio1;
+  gpio_t dio2; // Optional, level-read only (no EXTI: PA15 shares
+               // line 15 with DIO1's PD15 on the nucleo wiring)
 
   int spicfg;
 

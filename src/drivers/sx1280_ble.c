@@ -159,6 +159,7 @@ typedef struct {
   uint32_t rx_pdus;       // Total PDUs (several per event with MD)
   uint32_t tx_acked, tx_retrans, rx_bad_seq, rx_data, rx_drops;
   uint32_t tx_fired, tx_nofire; // AutoTx TxDone seen / not seen
+  uint32_t dio2_miss;           // TX_DONE set but DIO2 never rose
   uint32_t max_patch;     // µs, RxDone -> response PDU written
 
   uint8_t peer_addr[6];
@@ -527,12 +528,15 @@ ble_radio_setup(sx1280_t *s)
   if((err = sx1280_cmd(s, autotx_off, NULL, sizeof(autotx_off))) != 0)
     return err;
 
+  // DIO2 (if wired) carries TX_DONE alone: a clean level for the
+  // AutoTx completion that nothing needs to ClrIrqStatus for
   const uint16_t irqmask = SX1280_IRQ_TX_DONE | SX1280_IRQ_RX_DONE |
     SX1280_IRQ_CRC_ERROR | SX1280_IRQ_RX_TX_TIMEOUT;
   const uint8_t dioirq[9] = {SX1280_SET_DIOIRQPARAMS,
                              irqmask >> 8, irqmask & 0xff,
                              irqmask >> 8, irqmask & 0xff, // DIO1
-                             0, 0, 0, 0};
+                             0, SX1280_IRQ_TX_DONE,        // DIO2
+                             0, 0};
   return sx1280_cmd(s, dioirq, NULL, sizeof(dioirq));
 }
 
@@ -648,29 +652,65 @@ ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
   return 0;
 }
 
-// Wait for the AutoTx TxDone by polling GetIrqStatus. ANY
-// ClrIrqStatus during the AutoTx countdown cancels the pending
-// transmission - selective bit masks included (tested: clearing only
-// the RX bits kills it just as dead as 0xffff). So DIO1 cannot be
-// lowered and re-used as a sleepable TxDone signal; status polling
-// it is. Clears IRQs once the transmission is done.
-// Returns 1 if the transmission fired, 0 if not, negative on error.
+// Wait for the AutoTx TxDone. ANY ClrIrqStatus during the AutoTx
+// countdown cancels the pending transmission - selective bit masks
+// included (tested: clearing only the RX bits kills it just as dead
+// as 0xffff), so DIO1 cannot be lowered and reused as a signal.
+//
+// With DIO2 wired (TX_DONE only, no clearing needed): the completion
+// time is deterministic (arm value + silicon offset + airtime), so
+// sleep until just before it and briefly poll the pin level.
+// Without DIO2: poll GetIrqStatus over SPI.
+//
+// Clears IRQs once done. Returns 1 if the transmission fired, 0 if
+// not, negative on error.
 static int
-ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev)
+ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev,
+                     uint8_t tx_len)
 {
   error_t err;
   int fired = 0;
 
-  while(clock_get() - t_ev < 1200) {
-    uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
-    if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
-      return err;
-    if((ts[2] << 8 | ts[3]) & SX1280_IRQ_TX_DONE) {
+  if(s->dio2 != GPIO_UNUSED) {
+    const int64_t predicted =
+      t_ev + 130 + c->autotx_time + (10 + tx_len) * 8;
+
+    const int64_t d = predicted - 60 - clock_get();
+    if(d > 30)
+      usleep(d);
+
+    const int64_t give_up = predicted + 400;
+    while(!gpio_get_input(s->dio2) && clock_get() < give_up) {
+    }
+
+    if(gpio_get_input(s->dio2)) {
       c->last_fire = clock_get() - t_ev;
       fired = 1;
-      break;
+    } else {
+      // Distinguish an unfired AutoTx from a dead DIO2 wire
+      uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
+      if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
+        return err;
+      if((ts[2] << 8 | ts[3]) & SX1280_IRQ_TX_DONE) {
+        fired = 1;
+        if(c->dio2_miss++ == 0)
+          evlog(LOG_WARNING, "%s: TX_DONE set but DIO2 low; wire?",
+                s->name);
+      }
+    }
+  } else {
+    while(clock_get() - t_ev < 1200) {
+      uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
+      if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
+        return err;
+      if((ts[2] << 8 | ts[3]) & SX1280_IRQ_TX_DONE) {
+        c->last_fire = clock_get() - t_ev;
+        fired = 1;
+        break;
+      }
     }
   }
+
   if(fired)
     c->tx_fired++;
   else
@@ -880,7 +920,7 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     if(patch > c->max_patch)
       c->max_patch = patch;
 
-    int fired = ble_conn_wait_txdone(c, s, t_ev);
+    int fired = ble_conn_wait_txdone(c, s, t_ev, tx_len);
     if(fired < 0) {
       err = fired;
       goto recover;
@@ -950,7 +990,7 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
       if((err = sx1280_cmd(s, wb, NULL, 4 + tl)) != 0)
         goto recover;
 
-      fired = ble_conn_wait_txdone(c, s, t_ex);
+      fired = ble_conn_wait_txdone(c, s, t_ex, tl);
       if(fired < 0) {
         err = fired;
         goto recover;
@@ -1042,6 +1082,7 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->term_sent = 0;
   c->tx_fired = 0;
   c->tx_nofire = 0;
+  c->dio2_miss = 0;
   c->max_patch = 0;
   memcpy(c->peer_addr, pdu + 2, 6);
   c->force_empty = 0;

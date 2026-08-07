@@ -191,7 +191,7 @@ sx1280_get_status(sx1280_t *s)
 
 sx1280_t *
 sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
-              gpio_t busy, gpio_t dio1, const char *name)
+              gpio_t busy, gpio_t dio1, gpio_t dio2, const char *name)
 {
   sx1280_t *s = calloc(1, sizeof(sx1280_t));
   s->bus = bus;
@@ -199,7 +199,11 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
   s->nreset = nreset;
   s->busy = busy;
   s->dio1 = dio1;
+  s->dio2 = dio2;
   s->name = name;
+
+  if(dio2 != GPIO_UNUSED)
+    gpio_conf_input(dio2, GPIO_PULL_DOWN);
 
   mutex_init(&s->mutex, name);
   task_waitable_init(&s->busy_waitq, name);
