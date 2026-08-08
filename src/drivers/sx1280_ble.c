@@ -528,15 +528,15 @@ ble_radio_setup(sx1280_t *s)
   if((err = sx1280_cmd(s, autotx_off, NULL, sizeof(autotx_off))) != 0)
     return err;
 
-  // Chip DIO3 (if wired) carries TX_DONE alone: a clean interrupt for
+  // Chip DIO2 (if wired) carries TX_DONE alone: a clean interrupt for
   // the AutoTx completion that nothing needs to ClrIrqStatus for
   const uint16_t irqmask = SX1280_IRQ_TX_DONE | SX1280_IRQ_RX_DONE |
     SX1280_IRQ_CRC_ERROR | SX1280_IRQ_RX_TX_TIMEOUT;
   const uint8_t dioirq[9] = {SX1280_SET_DIOIRQPARAMS,
                              irqmask >> 8, irqmask & 0xff,
                              irqmask >> 8, irqmask & 0xff, // DIO1
-                             0, 0,                         // DIO2
-                             0, SX1280_IRQ_TX_DONE};       // DIO3
+                             0, SX1280_IRQ_TX_DONE,        // DIO2
+                             0, 0};                        // DIO3
   return sx1280_cmd(s, dioirq, NULL, sizeof(dioirq));
 }
 
