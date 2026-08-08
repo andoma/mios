@@ -26,21 +26,25 @@ typedef struct sx1280 sx1280_t;
 //                 signal it. Without this pin the driver falls back
 //                 to polling GetIrqStatus over SPI, which is slow
 //                 enough to break multi-PDU BLE connection events.
-//                 On this board it is chip DIO2; any DIO works.
+//                 Any chip DIO works; pick one when routing.
 //
-// EXTI constraints (STM32; see stm32h7_gpio.c for the dispatch)
+// Choosing interrupt pins
 //
-//   Each interrupt pin claims the EXTI line of its pin NUMBER, and
-//   same-numbered pins of all ports share one line: PA15 and PD15
-//   are both line 15, so busy/dio1/dio_txdone must use three
-//   distinct pin numbers. Route this deliberately on a PCB.
+//   All three interrupts are registered at IRQ_LEVEL_IO via
+//   gpio_conf_irq(). What makes a set of pins valid is platform
+//   specific - check the platform's gpio code before routing a PCB:
 //
-//   All three are registered at IRQ_LEVEL_IO. EXTI lines 5-9 and
-//   10-15 are dispatched in two shared NVIC groups (one OS handler
-//   fans out to the per-line callbacks), and mios requires every
-//   line within a group to use the same IRQ level - so claiming a
-//   grouped line here pins that whole group to IRQ_LEVEL_IO for any
-//   other driver on the system.
+//   - On STM32 parts, same-numbered pins of all ports share one EXTI
+//     line (PA15 and PD15 are both line 15), so the three pins must
+//     use distinct pin numbers.
+//
+//   - Some parts also gang EXTI lines into shared CPU interrupts
+//     (e.g. STM32H7: lines 5-9 and 10-15 form two groups, dispatched
+//     by one OS handler each), and mios then requires every line in
+//     a group to use the same IRQ level - claiming a grouped line
+//     here pins that group to IRQ_LEVEL_IO for all other drivers.
+//     Parts with per-line interrupts (e.g. STM32N6) have no such
+//     coupling.
 sx1280_t *sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
                         gpio_t busy, gpio_t dio1, gpio_t dio_txdone,
                         const char *name);
