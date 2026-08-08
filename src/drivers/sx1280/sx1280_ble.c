@@ -22,6 +22,9 @@
 #include "irq.h"
 #include "net/pbuf.h"
 #include "net/ble/l2cap.h"
+#include "util/crc32.h"
+
+#include <mios/sys.h>
 
 #define BLE_ADV_PDU_MAX (2 + 6 + 31)
 #define BLE_ADV_INTERVAL 100000 // µs, plus advDelay jitter
@@ -71,11 +74,8 @@ typedef struct {
   uint32_t rx_conn_ind;
   uint32_t rx_other;
   uint32_t rx_crc_errors;
-  uint32_t rx_early;       // DIO1 events completing <600µs into window
   uint32_t rx_misaddr;     // SCAN_REQ/CONNECT_IND not addressed to us
   uint32_t max_turnaround; // µs, TxDone -> SetRx accepted
-  uint16_t early_irq;      // IRQ bits of most recent early event
-  uint16_t early_us;       // and its latency from TxDone
 
   uint8_t sweep;      // Sweep whitening seeds, name carries the seed
   uint8_t sweep_seed;
@@ -86,8 +86,27 @@ typedef struct {
   char name[17];
 } sx1280_ble_adv_t;
 
-// Our static random device address (MSB last on air, top two bits 11)
-static const uint8_t ble_our_addr[6] = {0x28, 0x12, 0x80, 0x66, 0x66, 0xc6};
+// Our static random device address, derived from the chip's unique
+// id so every board gets its own. Stored LSB first (transmit order);
+// the top two bits of the last byte mark it as static random.
+static uint8_t ble_our_addr[6];
+
+static void
+ble_addr_init(void)
+{
+  if(ble_our_addr[5])
+    return; // Already derived (byte 5 is always >= 0xc0)
+
+  const struct serial_number sn = sys_get_serial_number();
+  const uint32_t a = crc32(0, sn.data, sn.len);
+  const uint32_t b = crc32(a, sn.data, sn.len);
+  ble_our_addr[0] = a;
+  ble_our_addr[1] = a >> 8;
+  ble_our_addr[2] = a >> 16;
+  ble_our_addr[3] = a >> 24;
+  ble_our_addr[4] = b;
+  ble_our_addr[5] = 0xc0 | (b >> 8);
+}
 
 static sx1280_ble_adv_t *g_adv;
 
@@ -117,7 +136,6 @@ typedef struct {
   uint8_t established;    // Received at least one packet
   uint8_t term_code;
   uint8_t version_sent;
-  uint8_t force_empty;    // Debug: respond only with empty PDUs
   uint8_t autotx_time;    // SetAutoTx arm value (calibration sweep)
   uint8_t param_req_sent; // L2CAP conn param update request sent
   uint8_t term_req;       // Local termination requested (any thread)
@@ -126,7 +144,6 @@ typedef struct {
   uint8_t phase;          // Debug: event stage for recover diagnosis
   uint8_t recovers;       // Chip resets survived by this connection
   int64_t term_deadline;  // Give up if the ack never arrives
-  uint16_t last_fire;     // µs, RxDone -> TxDone of most recent AutoTx
 
   uint8_t chmap[37];      // CSA#1 remap table
   uint8_t last_unmapped_channel;
@@ -372,9 +389,6 @@ ble_conn_tx_consume(ble_conn_t *c)
 static void
 ble_conn_tx_load(ble_conn_t *c)
 {
-  if(c->force_empty)
-    goto empty;
-
   if(c->ctrlq_count) {
     const uint8_t *pdu = c->ctrlq[c->ctrlq_head];
     memcpy(c->tx_pdu, pdu, 2 + pdu[1]);
@@ -400,7 +414,6 @@ ble_conn_tx_load(ble_conn_t *c)
   }
   irq_permit(q);
 
-empty:
   c->tx_pdu[0] = BLE_LLID_CONT;
   c->tx_pdu[1] = 0;
   c->tx_src = 0;
@@ -695,7 +708,6 @@ ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev,
 
   if(s->dio_txdone != GPIO_UNUSED) {
     if(sx1280_wait_txdone_pin(s, t_ev + 1200)) {
-      c->last_fire = clock_get() - t_ev;
       fired = 1;
     } else {
       // Distinguish an unfired AutoTx from a dead wire
@@ -715,7 +727,6 @@ ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev,
       if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
         return err;
       if((ts[2] << 8 | ts[3]) & SX1280_IRQ_TX_DONE) {
-        c->last_fire = clock_get() - t_ev;
         fired = 1;
         break;
       }
@@ -954,12 +965,6 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     if((err = ble_conn_process_rx(c, s, rx_b0, rxlen)) != 0)
       goto recover;
 
-    if(c->event_counter < 16)
-      evlog(LOG_DEBUG, "%s: ev:%d ch:%d rx b0:%02x len:%d "
-            "off:%d atx:%d fire:%d", s->name, c->event_counter, ch,
-            rx_b0, rxlen, (int)(t_ev - anchor0), c->autotx_time,
-            fired ? (int)c->last_fire : -1);
-
     // --- More exchanges within this event while either side has
     // data (MD bit). One exchange per T_IFS pair.
     uint8_t prev_b0 = rx_b0;
@@ -1021,10 +1026,6 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
       prev_b0 = b0;
     }
   }
-
-  if(!got_packet && c->event_counter < 8)
-    evlog(LOG_DEBUG, "%s: ev:%d ch:%d miss (win %d+%d)", s->name,
-          c->event_counter, ch, (int)c->window, (int)ww);
 
   // Deterministic end-of-event state. The chip may still be sitting
   // in RX with AutoTx armed (abandoned window, or the master closed
@@ -1152,7 +1153,6 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->txdone_pin_miss = 0;
   c->max_patch = 0;
   memcpy(c->peer_addr, pdu + 2, 6);
-  c->force_empty = 0;
   c->autotx_time = g_ble_autotx_time;
 
   // Attach the mios BLE host stack
@@ -1266,15 +1266,7 @@ ble_adv_tx(sx1280_ble_adv_t *a, int ch, const char *name, int seed_override)
   if(irq < 0)
     return irq;
 
-  // Directed responses (T_IFS-timed) complete within ~600µs of the
-  // window opening; late completions are ambient traffic. Record the
-  // early events to verify we are not deaf at the start of the window.
   const uint32_t rx_latency = clock_get() - t0;
-  if(irq != 0 && rx_latency < 600) {
-    a->rx_early++;
-    a->early_irq = irq;
-    a->early_us = rx_latency;
-  }
   if(irq == 0 || (irq & SX1280_IRQ_RX_TX_TIMEOUT))
     return 0; // Nobody talked to us
 
@@ -1397,6 +1389,7 @@ ble_adv_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 static sx1280_ble_adv_t *
 sx1280_ble_adv_get(sx1280_t *s)
 {
+  ble_addr_init();
   if(g_adv == NULL) {
     g_adv = calloc(1, sizeof(sx1280_ble_adv_t));
     g_adv->chip = s;
@@ -1468,11 +1461,13 @@ sx1280_ble_adv_report(sx1280_t *s, struct stream *st)
   const sx1280_ble_adv_t *a = sx1280_ble_adv_get(s);
   stprintf(st, "tx_done:%d tx_timeout:%d errors:%d\n",
            (int)a->tx_done, (int)a->tx_timeout, (int)a->cmd_errors);
+  stprintf(st, "addr:%02x:%02x:%02x:%02x:%02x:%02x name:%s\n",
+           ble_our_addr[5], ble_our_addr[4], ble_our_addr[3],
+           ble_our_addr[2], ble_our_addr[1], ble_our_addr[0], a->name);
   stprintf(st, "scan_req:%d conn_ind:%d misaddr:%d other:%d crc_errors:%d "
-           "early:%d[irq:%04x @%dus] max_turnaround:%dus\n",
+           "max_turnaround:%dus\n",
            (int)a->rx_scan_req, (int)a->rx_conn_ind, (int)a->rx_misaddr,
            (int)a->rx_other, (int)a->rx_crc_errors,
-           (int)a->rx_early, a->early_irq, a->early_us,
            (int)a->max_turnaround);
 
   for(int i = 0; i < BLE_MAX_CONN; i++) {
