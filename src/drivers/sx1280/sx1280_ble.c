@@ -48,6 +48,8 @@
 #define LL_VERSION_IND           0x0c
 #define LL_PING_REQ              0x12
 #define LL_PING_RSP              0x13
+#define LL_LENGTH_REQ            0x14
+#define LL_LENGTH_RSP            0x15
 
 // AutoTx fires at a fixed offset after RX end plus the programmed
 // time; the datasheet example claims a 33µs offset but the silicon
@@ -112,7 +114,11 @@ static sx1280_ble_adv_t *g_adv;
 
 // --- Connection (peripheral role) ---
 
-#define BLE_LL_MAX_PAYLOAD 27 // No DLE: one LL data PDU carries this much
+#define BLE_LL_MAX_PAYLOAD 27  // Pre-DLE default per BT spec
+// With DLE negotiated: bounded by the SX1280's 128-byte buffer halves
+// (TX at 0x80, RX at 0) minus the 2-byte PDU header
+#define BLE_LL_DLE_PAYLOAD 126
+#define BLE_LL_TIME(octets) (((octets) + 10) * 8) // 1M PHY airtime, µs
 
 typedef struct {
   sx1280_slot_t slot;
@@ -138,11 +144,15 @@ typedef struct {
   uint8_t version_sent;
   uint8_t autotx_time;    // SetAutoTx arm value (calibration sweep)
   uint8_t param_req_sent; // L2CAP conn param update request sent
+  uint8_t length_req_sent;// LL_LENGTH_REQ initiated by us
   uint8_t term_req;       // Local termination requested (any thread)
   uint8_t term_sent;      // LL_TERMINATE_IND queued
   uint8_t coll_missed;    // Consecutive missed events (fairness boost)
   uint8_t phase;          // Debug: event stage for recover diagnosis
   uint8_t recovers;       // Chip resets survived by this connection
+  uint8_t eff_tx;         // Effective max TX payload (DLE negotiated)
+  uint8_t rx_accept;      // pick_tx's ack/NAK decision for this PDU
+  struct pbuf *rx_spare;  // Pre-reserved buffer; NULL means NAK data
   int64_t term_deadline;  // Give up if the ack never arrives
 
   uint8_t chmap[37];      // CSA#1 remap table
@@ -167,7 +177,7 @@ typedef struct {
 
   // The in-flight (unacked) LL PDU, copied out of the queue so queue
   // and pbuf lifetime stay simple
-  uint8_t tx_pdu[2 + BLE_LL_MAX_PAYLOAD];
+  uint8_t tx_pdu[2 + BLE_LL_DLE_PAYLOAD];
   uint8_t tx_src;         // 0 = empty PDU, 1 = ctrl ring, 2 = l2cap queue
 
   // Control responses take priority over l2cap data
@@ -249,6 +259,21 @@ ble_conn_enqueue_ctrl(ble_conn_t *c, uint8_t op, uint8_t len)
 }
 
 static void
+ble_conn_fill_length(uint8_t *p)
+{
+  const uint16_t o = BLE_LL_DLE_PAYLOAD;
+  const uint16_t t = BLE_LL_TIME(o);
+  p[0] = o & 0xff;
+  p[1] = o >> 8;
+  p[2] = t & 0xff;
+  p[3] = t >> 8;
+  p[4] = o & 0xff;
+  p[5] = o >> 8;
+  p[6] = t & 0xff;
+  p[7] = t >> 8;
+}
+
+static void
 ble_conn_handle_ctrl(ble_conn_t *c, const uint8_t *req, int len)
 {
   uint8_t *rsp;
@@ -258,8 +283,10 @@ ble_conn_handle_ctrl(ble_conn_t *c, const uint8_t *req, int len)
 
   switch(req[0]) {
   case LL_FEATURE_REQ:
-    if((rsp = ble_conn_enqueue_ctrl(c, LL_FEATURE_RSP, 8)) != NULL)
+    if((rsp = ble_conn_enqueue_ctrl(c, LL_FEATURE_RSP, 8)) != NULL) {
       memset(rsp, 0, 8);
+      rsp[0] = 0x20; // LE Data Packet Length Extension
+    }
     break;
 
   case LL_VERSION_IND:
@@ -293,6 +320,34 @@ ble_conn_handle_ctrl(ble_conn_t *c, const uint8_t *req, int len)
   case LL_TERMINATE_IND:
     c->term_code = len >= 2 ? req[1] : 0x13;
     break;
+
+  case LL_LENGTH_REQ:
+  case LL_LENGTH_RSP:
+    // MaxRxOctets(2) MaxRxTime(2) MaxTxOctets(2) MaxTxTime(2).
+    // No instant: effective lengths apply right away. Our TX is
+    // bounded by what the peer can receive, in octets and in time.
+    if(len >= 9) {
+      const uint16_t peer_rx_octets = req[1] | (req[2] << 8);
+      const uint16_t peer_rx_time = req[3] | (req[4] << 8);
+      uint16_t tx = BLE_LL_DLE_PAYLOAD;
+      if(tx > peer_rx_octets)
+        tx = peer_rx_octets;
+      if(BLE_LL_TIME(tx) > peer_rx_time)
+        tx = peer_rx_time / 8 - 10;
+      if(tx < BLE_LL_MAX_PAYLOAD)
+        tx = BLE_LL_MAX_PAYLOAD;
+      c->eff_tx = tx;
+      evlog(LOG_NOTICE, "%s: BLE data length: op:%02x peer rx %d octets "
+            "%d us -> tx %d octets", c->chip->name, req[0],
+            peer_rx_octets, peer_rx_time, c->eff_tx);
+    }
+    if(req[0] == LL_LENGTH_REQ &&
+       (rsp = ble_conn_enqueue_ctrl(c, LL_LENGTH_RSP, 8)) != NULL)
+      ble_conn_fill_length(rsp);
+    break;
+
+  case LL_UNKNOWN_RSP:
+    break; // Never answer an unknown-response with another one
 
   case LL_PING_REQ:
     ble_conn_enqueue_ctrl(c, LL_PING_RSP, 0);
@@ -349,6 +404,10 @@ ble_conn_drop(ble_conn_t *c, sx1280_t *s, uint8_t code, const char *why)
   int q = irq_forbid(IRQ_LEVEL_NET);
   pbuf_free_queue_irq_blocked(&c->l2c.l2c_tx_queue);
   c->l2c.l2c_tx_queue_len = 0;
+  if(c->rx_spare != NULL) {
+    pbuf_free_irq_blocked(c->rx_spare);
+    c->rx_spare = NULL;
+  }
   irq_permit(q);
 
   sx1280_sched_set_mode(s, NULL);
@@ -401,8 +460,7 @@ ble_conn_tx_load(ble_conn_t *c)
   if(pb != NULL) {
     const uint8_t *d = pbuf_data(pb, 0);
     const uint16_t left = pb->pb_pktlen - c->tx_frag_off;
-    const uint8_t chunk =
-      left > BLE_LL_MAX_PAYLOAD ? BLE_LL_MAX_PAYLOAD : left;
+    const uint8_t chunk = left > c->eff_tx ? c->eff_tx : left;
 
     c->tx_pdu[0] = c->tx_frag_off ? BLE_LLID_CONT :
       ((pb->pb_flags & PBUF_SOP) ? BLE_LLID_START : BLE_LLID_CONT);
@@ -443,8 +501,8 @@ ble_conn_tx_pending(ble_conn_t *c)
 // ARQ + next TX selection, per BT spec 4.5.9. Fills tx_pdu and
 // returns the on-air header byte.
 static void
-ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t *hdr_out,
-                 uint8_t *len_out)
+ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t rx_len,
+                 uint8_t *hdr_out, uint8_t *len_out)
 {
   // Did the peer acknowledge our previous PDU?
   const uint8_t nesn = !!(rx_b0 & BLE_NESN);
@@ -463,11 +521,18 @@ ble_conn_pick_tx(ble_conn_t *c, uint8_t rx_b0, uint8_t *hdr_out,
   }
   c->tx_dummy = (c->tx_src == 0);
 
-  // The SN of the incoming packet decides our NESN: acknowledge it if
-  // it is the one we expected (we always have room, v1 never NAKs)
-  uint8_t next_rx_sn = c->last_rx_sn;
-  if((c->last_rx_sn ^ rx_b0) & BLE_SN)
-    next_rx_sn = rx_b0 & BLE_SN; // Will be committed by caller
+  // The SN of the incoming packet decides our NESN: acknowledge it
+  // if it is the one we expected AND, for data PDUs, an RX buffer is
+  // reserved. NAK (NESN unchanged) makes pbuf exhaustion lossless:
+  // the peer retransmits instead of us acking into the void.
+  int accept = (c->last_rx_sn ^ rx_b0) & BLE_SN;
+  if(accept && (rx_b0 & BLE_LLID_MASK) != BLE_LLID_CTRL &&
+     rx_len > 0 && c->rx_spare == NULL)
+    accept = 0;
+  c->rx_accept = accept;
+
+  const uint8_t next_rx_sn =
+    accept ? (rx_b0 & BLE_SN) : c->last_rx_sn;
 
   uint8_t b0 = c->tx_pdu[0] & BLE_LLID_MASK;
   if(!next_rx_sn)
@@ -517,7 +582,7 @@ ble_radio_setup(sx1280_t *s)
     return err;
 
   static const uint8_t pktparams[8] = {SX1280_SET_PACKETPARAMS,
-                                       SX1280_BLE_PAYLOAD_MAX_37,
+                                       SX1280_BLE_PAYLOAD_MAX_255,
                                        SX1280_BLE_CRC_3B,
                                        0, // test payload, unused
                                        SX1280_BLE_WHITENING_ENABLE,
@@ -637,19 +702,21 @@ ble_conn_config_event(ble_conn_t *c, sx1280_t *s, uint8_t ch)
 static error_t
 ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
 {
-  if(!((c->last_rx_sn ^ b0) & BLE_SN)) {
-    c->rx_bad_seq++; // Retransmission of something we already have
+  if(!c->rx_accept) {
+    // Duplicate SN, or a data PDU NAKed for want of an RX buffer
+    // (counted separately); the peer retransmits
+    if((c->last_rx_sn ^ b0) & BLE_SN)
+      c->rx_drops++;
+    else
+      c->rx_bad_seq++;
     return 0;
   }
   c->last_rx_sn = b0 & BLE_SN;
 
-  if(rxlen == 0)
-    return 0; // Empty PDU
+  if(rxlen == 0 || rxlen > BLE_LL_DLE_PAYLOAD)
+    goto refill; // Empty PDU (or filtered oversize)
 
-  uint8_t buf[3 + 2 + 40];
-  if(rxlen > 40)
-    return 0;
-
+  uint8_t buf[3 + 2 + BLE_LL_DLE_PAYLOAD];
   buf[0] = SX1280_READ_BUFFER;
   buf[1] = 0;
   buf[2] = 0;
@@ -666,13 +733,11 @@ ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
 
   case BLE_LLID_START:
   case BLE_LLID_CONT: {
-    pbuf_t *pb = pbuf_make(0, 0);
-    if(pb == NULL) {
-      c->rx_drops++;
-      break;
-    }
-    // Same layout the other LL drivers hand to l2cap_input: payload
-    // at offset 2 (where the LL header would sit)
+    // The buffer was reserved before we acked (pick_tx NAKs data
+    // PDUs otherwise), so this cannot fail. Same layout the other LL
+    // drivers hand to l2cap_input: payload at offset 2.
+    pbuf_t *pb = c->rx_spare;
+    c->rx_spare = NULL;
     pb->pb_pktlen = 0;
     pb->pb_offset = 2;
     pb->pb_buflen = rxlen;
@@ -683,6 +748,11 @@ ble_conn_process_rx(ble_conn_t *c, sx1280_t *s, uint8_t b0, uint8_t rxlen)
     break;
   }
   }
+
+refill:
+  // Runs while our AutoTx response is on the air, not T_IFS-critical
+  if(c->rx_spare == NULL)
+    c->rx_spare = pbuf_make(0, 0);
   return 0;
 }
 
@@ -706,8 +776,11 @@ ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev,
   error_t err;
   int fired = 0;
 
+  // AutoTx fires ~200µs after RX end; add the TX airtime and margin
+  const int64_t tx_deadline = t_ev + 200 + BLE_LL_TIME(tx_len) + 500;
+
   if(s->dio_txdone != GPIO_UNUSED) {
-    if(sx1280_wait_txdone_pin(s, t_ev + 1200)) {
+    if(sx1280_wait_txdone_pin(s, tx_deadline)) {
       fired = 1;
     } else {
       // Distinguish an unfired AutoTx from a dead wire
@@ -722,7 +795,7 @@ ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev,
       }
     }
   } else {
-    while(clock_get() - t_ev < 1200) {
+    while(clock_get() < tx_deadline) {
       uint8_t ts[4] = {SX1280_GET_IRQSTATUS};
       if((err = sx1280_cmd(s, ts, ts, sizeof(ts))) != 0)
         return err;
@@ -760,7 +833,7 @@ ble_conn_rearm(ble_conn_t *c, sx1280_t *s)
   if((err = sx1280_cmd(s, fb, NULL, sizeof(fb))) != 0)
     return err;
 
-  static const uint8_t rx[4] = {SX1280_SET_RX, SX1280_TICK_SIZE_1_MS, 0, 2};
+  static const uint8_t rx[4] = {SX1280_SET_RX, SX1280_TICK_SIZE_1_MS, 0, 3};
   return sx1280_cmd(s, rx, NULL, sizeof(rx));
 }
 
@@ -823,9 +896,22 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 
   c->event_counter++;
 
+
   if(c->established && !c->param_req_sent && c->event_counter >= 8) {
     c->param_req_sent = 1;
     ble_conn_request_conn_params(c);
+  }
+
+  // Some masters never initiate the data length procedure even when
+  // our feature bit advertises it; ask ourselves (BT spec 5.1.9,
+  // either side may). A DLE-less peer answers LL_UNKNOWN_RSP, which
+  // is ignored and leaves the default 27 in effect.
+  if(c->established && !c->length_req_sent && c->event_counter >= 12) {
+    uint8_t *req = ble_conn_enqueue_ctrl(c, LL_LENGTH_REQ, 8);
+    if(req != NULL) {
+      ble_conn_fill_length(req);
+      c->length_req_sent = 1;
+    }
   }
 
   if(c->pending_chmask_valid &&
@@ -867,11 +953,13 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
   while(!got_packet) {
     // The RX timeout keeps counting during the AutoTx delay and
     // cancels the pending transmission if it expires, so it must
-    // cover an attended exchange: packet + T_IFS + our response.
-    // Beyond that, keep it close to our abandonment point so an
-    // unattended window does not linger armed.
-    int64_t dur = listen_end + 1200 - clock_get();
-    if(dur < 900)
+    // cover an attended exchange: a full-size packet ending late in
+    // the window plus the AutoTx fire point. Beyond that, keep it
+    // close to our abandonment point so an unattended window does
+    // not linger armed.
+    const int rx_pad = BLE_LL_TIME(BLE_LL_DLE_PAYLOAD) + 500;
+    int64_t dur = listen_end + rx_pad - clock_get();
+    if(dur < rx_pad - 300)
       break;
     uint32_t ticks = dur * 64 / 1000 + 1;
     if(ticks > 0xffff)
@@ -882,10 +970,11 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     if((err = sx1280_cmd(s, rx, NULL, sizeof(rx))) != 0)
       goto recover;
 
-    // Sleep until the packet (or window end). The wakeup latency of
-    // the highest-priority thread (~10-30µs) fits comfortably inside
-    // the AutoTx response budget (~200µs at the current arm value).
-    if(!sx1280_wait_dio1(s, listen_end + 500))
+    // Sleep until the packet (or window end). RxDone fires at packet
+    // END, so a packet starting just inside the window completes up
+    // to one full DLE airtime later. The wakeup latency (~10-30µs)
+    // fits comfortably inside the AutoTx response budget.
+    if(!sx1280_wait_dio1(s, listen_end + BLE_LL_TIME(BLE_LL_DLE_PAYLOAD) + 200))
       break; // Window exhausted with radio timeout imminent
 
     const int64_t t_ev = clock_get();
@@ -929,9 +1018,9 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     const uint8_t rxlen = hb[4];
 
     uint8_t tx_hdr, tx_len;
-    ble_conn_pick_tx(c, rx_b0, &tx_hdr, &tx_len);
+    ble_conn_pick_tx(c, rx_b0, rxlen, &tx_hdr, &tx_len);
 
-    uint8_t wb[2 + 2 + BLE_LL_MAX_PAYLOAD];
+    uint8_t wb[2 + 2 + BLE_LL_DLE_PAYLOAD];
     wb[0] = SX1280_WRITE_BUFFER;
     wb[1] = BLE_CONN_TX_BASE;
     wb[2] = tx_hdr;
@@ -977,7 +1066,8 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
       if((err = ble_conn_rearm(c, s)) != 0)
         goto recover;
 
-      if(!sx1280_wait_dio1(s, clock_get() + 800))
+      if(!sx1280_wait_dio1(s, clock_get() + 150 +
+                           BLE_LL_TIME(BLE_LL_DLE_PAYLOAD) + 300))
         break; // Master closed the event
 
       const int64_t t_ex = clock_get();
@@ -1004,7 +1094,7 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
       const uint8_t len = hb2[4];
 
       uint8_t th, tl;
-      ble_conn_pick_tx(c, b0, &th, &tl);
+      ble_conn_pick_tx(c, b0, len, &th, &tl);
       wb[2] = th;
       wb[3] = tl;
       memcpy(wb + 4, c->tx_pdu + 2, tl);
@@ -1126,6 +1216,9 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->tx_pdu[0] = BLE_LLID_CONT;
   c->tx_pdu[1] = 0;
   c->tx_frag_off = 0;
+  c->eff_tx = BLE_LL_MAX_PAYLOAD;
+  if(c->rx_spare == NULL)
+    c->rx_spare = pbuf_make(0, 0);
   c->ctrlq_head = 0;
   c->ctrlq_count = 0;
   c->established = 0;
@@ -1146,6 +1239,7 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->recovers = 0;
   c->slot.ss_prio = BLE_CONN_PRIO;
   c->param_req_sent = 0;
+  c->length_req_sent = 0;
   c->term_req = 0;
   c->term_sent = 0;
   c->tx_fired = 0;
@@ -1476,14 +1570,14 @@ sx1280_ble_adv_report(sx1280_t *s, struct stream *st)
       continue;
     stprintf(st, "conn%d: %s peer:%02x:%02x:%02x:%02x:%02x:%02x "
              "interval:%dus ev_rx:%d pdus:%d missed:%d crc:%d acked:%d "
-             "retrans:%d bad_seq:%d data:%d patch:%dus\n", i,
+             "retrans:%d bad_seq:%d data:%d nak:%d etx:%d patch:%dus\n", i,
              c->active ? (c->established ? "UP" : "establishing") : "closed",
              c->peer_addr[5], c->peer_addr[4], c->peer_addr[3],
              c->peer_addr[2], c->peer_addr[1], c->peer_addr[0],
              (int)c->interval, (int)c->ev_rx, (int)c->rx_pdus,
              (int)c->ev_missed, (int)c->ev_crc, (int)c->tx_acked,
              (int)c->tx_retrans, (int)c->rx_bad_seq, (int)c->rx_data,
-             (int)c->max_patch);
+             (int)c->rx_drops, (int)c->eff_tx, (int)c->max_patch);
   }
 }
 

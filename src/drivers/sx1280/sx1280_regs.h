@@ -102,6 +102,7 @@
 
 // BLE packet parameters
 #define SX1280_BLE_PAYLOAD_MAX_37     0x20 // packetParam1: adv channel PDUs
+#define SX1280_BLE_PAYLOAD_MAX_255    0x80 // packetParam1: DLE data PDUs
 #define SX1280_BLE_CRC_3B             0x10 // packetParam2
 #define SX1280_BLE_WHITENING_ENABLE   0x00 // packetParam4
 #define SX1280_BLE_WHITENING_DISABLE  0x08
