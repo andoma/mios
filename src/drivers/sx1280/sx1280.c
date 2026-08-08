@@ -245,8 +245,9 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
   task_waitable_init(&s->busy_waitq, name);
   task_waitable_init(&s->irq_waitq, name);
 
-  // Conservative clock for dupont wires; the chip does 18MHz
-  s->spicfg = bus->get_config(bus, 0, 8000000);
+  // The chip does 18MHz; 16 works on dupont wires and halves the
+  // T_IFS-critical response-write time for DLE-size PDUs
+  s->spicfg = bus->get_config(bus, 0, 16000000);
 
   gpio_set_output(nss, 1);
   gpio_conf_output(nss, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
