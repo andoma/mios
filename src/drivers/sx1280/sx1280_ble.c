@@ -1138,6 +1138,18 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
     c->coll_missed = 0;
   }
 
+  // The l2cap layer stops pulling from services at high water on our
+  // TX queue (or when the pbuf pool ran dry, which our draining is
+  // what remedies); once drained, ask it to refill. Racing the flag
+  // against a concurrent set on the net thread is benign: that set
+  // implies the queue was just at high water, and the next event
+  // rechecks.
+  if(c->l2c.l2c_tx_throttled &&
+     c->l2c.l2c_tx_queue_len <= L2CAP_TXQ_LOW) {
+    c->l2c.l2c_tx_throttled = 0;
+    l2cap_txq_pump(&c->l2c);
+  }
+
   // Fairness between overlapping connections: with equal priority and
   // equal intervals the same connection would lose every collision,
   // so missed events raise this slot's priority until it wins one.

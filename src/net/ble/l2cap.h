@@ -29,6 +29,14 @@ typedef struct l2cap {
   uint16_t l2c_tx_queue_len;
   uint16_t l2c_rx_queue_len;
 
+  // Set when a service had more to send but connection_pull stopped
+  // early (TX queue at high water, or pbuf pool dry). A driver that
+  // drains l2c_tx_queue should check this once the queue falls to
+  // L2CAP_TXQ_LOW, clear it and call l2cap_txq_pump(). Without this a
+  // flooding service would either fill the queue unboundedly or stall
+  // for good after the first early stop.
+  uint8_t l2c_tx_throttled;
+
   // Link addresses, filled by the driver at connection setup; needed by the
   // pairing crypto. Stored least-significant-byte first (HCI order).
   uint8_t l2c_our_addr[6];
@@ -49,6 +57,13 @@ void l2cap_output(l2cap_t *l2c, struct pbuf *pb, uint16_t cid);
 // Weak no-op by default; the CS extension overrides it. The caller retains pb
 // ownership (frees it after this returns), so the hook must copy what it needs.
 void ble_cs_l2cap_input(l2cap_t *l2c, struct pbuf *pb);
+
+// TX queue watermarks for the pull throttle (pbufs on l2c_tx_queue)
+#define L2CAP_TXQ_HIGH 6
+#define L2CAP_TXQ_LOW  2
+
+// Re-run service pulls after the TX queue drained. IRQ safe.
+void l2cap_txq_pump(l2cap_t *l2c);
 
 // l2cap task signal raised by the driver when the link becomes encrypted.
 #define L2CAP_SIGNAL_SMP 0x4
