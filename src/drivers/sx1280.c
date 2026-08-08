@@ -42,32 +42,28 @@ sx1280_dio1_irq(void *arg)
   task_wakeup(&s->irq_waitq, 1);
 }
 
-// Command processing takes µs, so spin briefly first. For the long
-// waits (reset, calibration) sleep with the BUSY IRQ masked across
-// the level-check-and-sleep: the falling edge cannot fire between the
-// check and the waitqueue enrollment, so no wakeup is ever lost. The
+// Event-driven BUSY wait: sleep with the BUSY IRQ masked across the
+// level-check-and-sleep, so the falling edge cannot fire between the
+// check and the waitqueue enrollment and no wakeup is ever lost. The
 // mask is per-thread state; it does not stay raised while sleeping.
+// IRQ + wakeup is ~1µs on this core, cheaper than polling the pin.
 static error_t
 sx1280_wait_ready(sx1280_t *s, int timeout)
 {
-  const uint64_t spin_until = clock_get() + 30;
-  while(gpio_get_input(s->busy)) {
-    if(clock_get() < spin_until)
-      continue;
+  if(!gpio_get_input(s->busy))
+    return ERR_OK; // Common case: chip already idle
 
-    const int64_t deadline = clock_get() + timeout;
-    error_t err = ERR_OK;
-    int q = irq_forbid(IRQ_LEVEL_IO);
-    while(gpio_get_input(s->busy)) {
-      if(task_sleep_deadline(&s->busy_waitq, deadline)) {
-        err = ERR_TIMEOUT;
-        break;
-      }
+  const int64_t deadline = clock_get() + timeout;
+  error_t err = ERR_OK;
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  while(gpio_get_input(s->busy)) {
+    if(task_sleep_deadline(&s->busy_waitq, deadline)) {
+      err = ERR_TIMEOUT;
+      break;
     }
-    irq_permit(q);
-    return err;
   }
-  return ERR_OK;
+  irq_permit(q);
+  return err;
 }
 
 error_t
@@ -79,7 +75,7 @@ sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
   return s->bus->rw(s->bus, tx, rx, len, s->nss, s->spicfg);
 }
 
-static int
+int
 sx1280_irq_ack(sx1280_t *s)
 {
   uint8_t st[4] = {SX1280_GET_IRQSTATUS};
@@ -110,21 +106,6 @@ sx1280_wait_irq(sx1280_t *s, int timeout)
   }
   s->irq_pending = 0;
   irq_permit(q);
-  return sx1280_irq_ack(s);
-}
-
-// Spin-polling variant for T_IFS-critical windows where even the
-// wakeup latency of the sleeping wait is unaffordable. DIO1 is
-// level-high until the IRQ is cleared, so polling is race-free.
-int
-sx1280_wait_irq_poll(sx1280_t *s, int timeout)
-{
-  const uint64_t deadline = clock_get() + timeout;
-  while(!gpio_get_input(s->dio1)) {
-    if(clock_get() > deadline)
-      return 0;
-  }
-  s->irq_pending = 0;
   return sx1280_irq_ack(s);
 }
 

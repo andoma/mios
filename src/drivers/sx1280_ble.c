@@ -675,13 +675,16 @@ ble_conn_wait_txdone(ble_conn_t *c, sx1280_t *s, int64_t t_ev,
     const int64_t predicted =
       t_ev + 130 + c->autotx_time + (10 + tx_len) * 8;
 
-    const int64_t d = predicted - 60 - clock_get();
+    // The prediction is good to ±10µs (see the fire stat), so the
+    // first check after the sleep almost always hits; the stepped
+    // sleeps cover the tail without pinning the CPU
+    const int64_t d = predicted + 15 - clock_get();
     if(d > 30)
       usleep(d);
 
     const int64_t give_up = predicted + 400;
-    while(!gpio_get_input(s->dio2) && clock_get() < give_up) {
-    }
+    while(!gpio_get_input(s->dio2) && clock_get() < give_up)
+      usleep(30);
 
     if(gpio_get_input(s->dio2)) {
       c->last_fire = clock_get() - t_ev;
@@ -1163,21 +1166,18 @@ ble_adv_tx(sx1280_ble_adv_t *a, int ch, const char *name, int seed_override)
   if((err = sx1280_cmd(s, tx, NULL, sizeof(tx))) != 0)
     return err;
 
-  // Spin on DIO1 for TxDone: the T_IFS response window opens 150µs
-  // after our TX ends, so SetRx must be the FIRST thing we send.
-  // IRQ status bookkeeping waits until the radio is already listening.
-  const uint64_t deadline = clock_get() + 2000;
-  while(!gpio_get_input(s->dio1)) {
-    if(clock_get() > deadline) {
-      a->tx_timeout++;
-      return sx1280_wait_irq_poll(s, 0) < 0 ? ERR_TIMEOUT : 0;
-    }
+  // Sleep until TxDone. The T_IFS response window opens 150µs after
+  // our TX ends and the wakeup costs ~1µs, so SetRx (the FIRST
+  // command sent after waking) still lands with margin to spare.
+  if(!sx1280_wait_dio1(s, clock_get() + 2000)) {
+    a->tx_timeout++;
+    return sx1280_irq_ack(s) < 0 ? ERR_TIMEOUT : 0;
   }
   const uint64_t t0 = clock_get();
 
   // Ack TxDone first: SetRx issued during the chip's own TxDone->FS
   // (AutoFS) transition is silently lost
-  int irq = sx1280_wait_irq_poll(s, 0);
+  int irq = sx1280_irq_ack(s);
   if(irq < 0)
     return irq;
   if(irq & SX1280_IRQ_TX_DONE)
@@ -1193,7 +1193,7 @@ ble_adv_tx(sx1280_ble_adv_t *a, int ch, const char *name, int seed_override)
   if(turnaround > a->max_turnaround)
     a->max_turnaround = turnaround;
 
-  irq = sx1280_wait_irq_poll(s, 1500);
+  irq = sx1280_wait_irq(s, 1500);
   if(irq < 0)
     return irq;
 

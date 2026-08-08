@@ -45,9 +45,10 @@ error_t sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len);
 // Returns IRQ bits, 0 on DIO1 timeout, or negative error.
 int sx1280_wait_irq(sx1280_t *s, int timeout);
 
-// Same, but spin-polls DIO1 for T_IFS-critical windows
-int sx1280_wait_irq_poll(sx1280_t *s, int timeout);
-
 // Sleep until DIO1 asserts (absolute deadline); does not read or
 // clear the chip's IRQ status. 1 = asserted, 0 = deadline.
 int sx1280_wait_dio1(sx1280_t *s, int64_t deadline);
+
+// Read-and-clear the chip's IRQ status (clears only the bits read).
+// Returns the bits or negative error.
+int sx1280_irq_ack(sx1280_t *s);
