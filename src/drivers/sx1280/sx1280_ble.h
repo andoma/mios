@@ -16,6 +16,10 @@ void sx1280_ble_adv_report(sx1280_t *s, struct stream *st);
 // T_IFS calibration: SetAutoTx arm value used for connections
 void sx1280_ble_set_autotx(sx1280_t *s, int val);
 
+// Cap the advertised DLE payload (27..126 octets); affects new
+// connections' LENGTH exchanges only
+void sx1280_ble_set_dle(sx1280_t *s, int octets);
+
 void sx1280_ble_set_txpower(sx1280_t *s, int dbm);
 
 int sx1280_ble_conn_active(sx1280_t *s);

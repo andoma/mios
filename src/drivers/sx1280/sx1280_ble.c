@@ -213,6 +213,12 @@ ble_conn_from_l2c(struct l2cap *l2c)
 
 // CLI-tunables for calibration against different masters
 static uint8_t g_ble_autotx_time = BLE_AUTOTX_TIME;
+
+// Advertised DLE payload cap (LL_LENGTH_REQ/RSP maxRx and maxTx).
+// Some masters misbehave with long PDUs even after negotiating them
+// (Zephyr's split LL central skips whole connection events); capping
+// what we advertise bounds PDU airtime in both directions.
+static uint8_t g_ble_dle_max = BLE_LL_DLE_PAYLOAD;
 static int8_t g_ble_tx_dbm = 10;
 
 // Channel index -> MHz above 2400 (BLE data channels 0-36)
@@ -261,7 +267,7 @@ ble_conn_enqueue_ctrl(ble_conn_t *c, uint8_t op, uint8_t len)
 static void
 ble_conn_fill_length(uint8_t *p)
 {
-  const uint16_t o = BLE_LL_DLE_PAYLOAD;
+  const uint16_t o = g_ble_dle_max;
   const uint16_t t = BLE_LL_TIME(o);
   p[0] = o & 0xff;
   p[1] = o >> 8;
@@ -329,7 +335,7 @@ ble_conn_handle_ctrl(ble_conn_t *c, const uint8_t *req, int len)
     if(len >= 9) {
       const uint16_t peer_rx_octets = req[1] | (req[2] << 8);
       const uint16_t peer_rx_time = req[3] | (req[4] << 8);
-      uint16_t tx = BLE_LL_DLE_PAYLOAD;
+      uint16_t tx = g_ble_dle_max;
       if(tx > peer_rx_octets)
         tx = peer_rx_octets;
       if(BLE_LL_TIME(tx) > peer_rx_time)
@@ -1539,6 +1545,16 @@ sx1280_ble_conn_drop(sx1280_t *s)
   for(int i = 0; i < BLE_MAX_CONN; i++)
     if(g_conns[i] != NULL && g_conns[i]->active)
       g_conns[i]->term_req = 1; // Picked up by the radio thread
+}
+
+void
+sx1280_ble_set_dle(sx1280_t *s, int octets)
+{
+  if(octets < 27)
+    octets = 27;
+  if(octets > BLE_LL_DLE_PAYLOAD)
+    octets = BLE_LL_DLE_PAYLOAD;
+  g_ble_dle_max = octets;
 }
 
 void

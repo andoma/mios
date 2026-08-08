@@ -510,9 +510,14 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
     } else if(argc >= 4 && !strcmp(argv[2], "pwr")) {
       sx1280_ble_set_txpower(s, atoi(argv[3]));
       cli_printf(cli, "tx power: %d dBm\n", atoi(argv[3]));
+    } else if(argc >= 4 && !strcmp(argv[2], "dle")) {
+      sx1280_ble_set_dle(s, atoi(argv[3]));
+      cli_printf(cli, "dle payload cap: %d octets (new connections)\n",
+                 atoi(argv[3]));
     } else if(argc >= 3) {
       cli_printf(cli, "usage: sx1280 ble "
-                 "[adv [name]|stop|drop|sweep|atx <n>|pwr <dBm>]\n");
+                 "[adv [name]|stop|drop|sweep|atx <n>|pwr <dBm>|"
+                 "dle <octets>]\n");
       return 0;
     }
     sx1280_ble_adv_report(s, cli->cl_stream);
