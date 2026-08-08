@@ -26,6 +26,7 @@
 #define L2CAP_SIGNAL_INPUT      0x1
 #define L2CAP_SIGNAL_DISCONNECT 0x2
 // L2CAP_SIGNAL_SMP is declared in l2cap.h (shared with smp.c).
+#define L2CAP_SIGNAL_TXQ        0x8
 
 typedef struct l2cap_connection {
 
@@ -89,9 +90,18 @@ l2cap_splice(struct pbuf_queue *pq, int header_size)
 
   const uint16_t *hdr = pbuf_cdata(pb, 0);
   const int expected_length = hdr[0] + header_size;
-  if(expected_length > 200) {
-    pbuf_dump("badlen", pb, 1);
-    panic("High unexpected length %d",expected_length);
+  if(expected_length > PBUF_DATA_SIZE) {
+    // Longer than we ever advertise (MTU and MPS are both derived
+    // from PBUF_DATA_SIZE so that reassembled PDUs survive the
+    // pullups downstream). The peer broke the contract and framing
+    // is lost for good; drop everything queued and let the channel
+    // starve out.
+    evlog(LOG_ERR, "l2cap: %d byte PDU exceeds %d limit, flushing",
+          expected_length, PBUF_DATA_SIZE);
+    int q = irq_forbid(IRQ_LEVEL_NET);
+    pbuf_free_queue_irq_blocked(pq);
+    irq_permit(q);
+    return NULL;
   }
   int sum = 0;
   int count = 1;
@@ -198,10 +208,23 @@ con_output(l2cap_connection_t *lc, pbuf_t *pb)
 static void
 connection_pull(l2cap_connection_t *lc)
 {
+  l2cap_t *l2c = lc->lc_l2c;
+
   while(lc->lc_remote_credits > 0 && lc->lc_pushpull.app_opaque) {
-    pbuf_t *pb = lc->lc_pushpull.app->pull(lc->lc_pushpull.app_opaque);
-    if(pb == NULL)
+    if(l2c->l2c_tx_queue_len >= L2CAP_TXQ_HIGH) {
+      // Driver TX queue full; it pumps us again at low water
+      l2c->l2c_tx_throttled = 1;
       break;
+    }
+    pbuf_t *pb = lc->lc_pushpull.app->pull(lc->lc_pushpull.app_opaque);
+    if(pb == NULL) {
+      // The service may have stopped because the pbuf pool is dry
+      // rather than for lack of data; the driver draining its TX
+      // queue is what frees buffers, so ask it to pump us then
+      if(!pbuf_buffer_avail())
+        l2c->l2c_tx_throttled = 1;
+      break;
+    }
     con_output(lc, pb);
   }
 }
@@ -579,7 +602,9 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   lc->lc_remote_mps = MIN(req->mps, PBUF_DATA_SIZE - hdrs);
   lc->lc_remote_credits = req->initial_credits;
 
-  lc->lc_pushpull.max_fragment_size = lc->lc_remote_mps;
+  // Whole SDUs go out as single K-frames, so an SDU plus its 2-byte
+  // length prefix must fit the peer's MPS
+  lc->lc_pushpull.max_fragment_size = lc->lc_remote_mps - 2;
   lc->lc_pushpull.preferred_offset = hdrs;
 
   lc->lc_pushpull.net_opaque = lc;
@@ -613,7 +638,9 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   rsp->dst_cid = lc->lc_local_cid;
   rsp->result = 0;
   rsp->mtu = LLMTU;
-  rsp->mps = PBUF_DATA_SIZE;
+  // A peer-sized PDU must survive reassembly into a single pbuf
+  // (basic header + payload <= PBUF_DATA_SIZE)
+  rsp->mps = PBUF_DATA_SIZE - 4;
   rsp->initial_credits = 65535;
   lc->lc_credit_threshold = 2;
   lc->lc_local_credits = rsp->initial_credits;
@@ -889,6 +916,13 @@ l2cap_disconnect(l2cap_t *l2c)
 }
 
 
+void
+l2cap_txq_pump(l2cap_t *l2c)
+{
+  net_task_raise(&l2c->l2c_task, L2CAP_SIGNAL_TXQ);
+}
+
+
 static void
 l2cap_dispatch_signal(struct net_task *nt, uint32_t signals)
 {
@@ -912,6 +946,12 @@ l2cap_dispatch_signal(struct net_task *nt, uint32_t signals)
 
   if(signals & L2CAP_SIGNAL_SMP) {
     smp_encrypted(l2c);
+  }
+
+  if(signals & L2CAP_SIGNAL_TXQ) {
+    l2cap_connection_t *lc;
+    LIST_FOREACH(lc, &l2c->l2c_connections, lc_link)
+      connection_pull(lc);
   }
 
   if(signals & L2CAP_SIGNAL_INPUT) {
