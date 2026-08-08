@@ -17,13 +17,14 @@ struct sx1280 {
   task_waitable_t busy_waitq;
   task_waitable_t irq_waitq;
   uint8_t irq_pending;
+  uint8_t txdone_pending;
 
   gpio_t nss;
   gpio_t nreset;
   gpio_t busy;
   gpio_t dio1;
-  gpio_t dio2; // Optional, level-read only (no EXTI: PA15 shares
-               // line 15 with DIO1's PD15 on the nucleo wiring)
+  gpio_t dio_txdone; // Optional; needs a pin whose EXTI line is free
+               // (not 3=BUSY, not 15=DIO1)
 
   int spicfg;
 
@@ -48,6 +49,9 @@ int sx1280_wait_irq(sx1280_t *s, int timeout);
 // Sleep until DIO1 asserts (absolute deadline); does not read or
 // clear the chip's IRQ status. 1 = asserted, 0 = deadline.
 int sx1280_wait_dio1(sx1280_t *s, int64_t deadline);
+
+// Same for the TX_DONE pin (chip DIO3 on this board)
+int sx1280_wait_txdone_pin(sx1280_t *s, int64_t deadline);
 
 // Read-and-clear the chip's IRQ status (clears only the bits read).
 // Returns the bits or negative error.

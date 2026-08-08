@@ -42,6 +42,14 @@ sx1280_dio1_irq(void *arg)
   task_wakeup(&s->irq_waitq, 1);
 }
 
+static void
+sx1280_txdone_irq(void *arg)
+{
+  sx1280_t *s = arg;
+  s->txdone_pending = 1;
+  task_wakeup(&s->irq_waitq, 1);
+}
+
 // Event-driven BUSY wait: sleep with the BUSY IRQ masked across the
 // level-check-and-sleep, so the falling edge cannot fire between the
 // check and the waitqueue enrollment and no wakeup is ever lost. The
@@ -127,6 +135,21 @@ sx1280_wait_dio1(sx1280_t *s, int64_t deadline)
   return 1;
 }
 
+int
+sx1280_wait_txdone_pin(sx1280_t *s, int64_t deadline)
+{
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  while(!s->txdone_pending && !gpio_get_input(s->dio_txdone)) {
+    if(task_sleep_deadline(&s->irq_waitq, deadline)) {
+      irq_permit(q);
+      return 0;
+    }
+  }
+  s->txdone_pending = 0;
+  irq_permit(q);
+  return 1;
+}
+
 error_t
 sx1280_read_reg(sx1280_t *s, uint16_t addr, void *ptr, size_t len)
 {
@@ -172,7 +195,7 @@ sx1280_get_status(sx1280_t *s)
 
 sx1280_t *
 sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
-              gpio_t busy, gpio_t dio1, gpio_t dio2, const char *name)
+              gpio_t busy, gpio_t dio1, gpio_t dio_txdone, const char *name)
 {
   sx1280_t *s = calloc(1, sizeof(sx1280_t));
   s->bus = bus;
@@ -180,11 +203,12 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
   s->nreset = nreset;
   s->busy = busy;
   s->dio1 = dio1;
-  s->dio2 = dio2;
+  s->dio_txdone = dio_txdone;
   s->name = name;
 
-  if(dio2 != GPIO_UNUSED)
-    gpio_conf_input(dio2, GPIO_PULL_DOWN);
+  if(dio_txdone != GPIO_UNUSED)
+    gpio_conf_irq(dio_txdone, GPIO_PULL_DOWN, sx1280_txdone_irq, s,
+                  GPIO_RISING_EDGE, IRQ_LEVEL_IO);
 
   mutex_init(&s->mutex, name);
   task_waitable_init(&s->busy_waitq, name);
