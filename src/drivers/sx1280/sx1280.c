@@ -83,6 +83,24 @@ sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
   return s->bus->rw(s->bus, tx, rx, len, s->nss, s->spicfg);
 }
 
+// After clearing chip IRQ status, drop the software edge flags if
+// their pins are now low: a flag set by an edge whose event was
+// already consumed would make the next wait return immediately (and
+// once poisoned a stale flag persists, since raw ClrIrqStatus never
+// touched it - this wedged advertising for good at one point). With
+// the IO IRQs masked across check-and-clear, a genuinely new edge
+// can never be lost.
+static void
+sx1280_drop_stale_flags(sx1280_t *s)
+{
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  if(!gpio_get_input(s->dio1))
+    s->irq_pending = 0;
+  if(s->dio_txdone != GPIO_UNUSED && !gpio_get_input(s->dio_txdone))
+    s->txdone_pending = 0;
+  irq_permit(q);
+}
+
 int
 sx1280_irq_ack(sx1280_t *s)
 {
@@ -96,7 +114,20 @@ sx1280_irq_ack(sx1280_t *s)
   err = sx1280_cmd(s, clr, NULL, sizeof(clr));
   if(err)
     return err;
+  sx1280_drop_stale_flags(s);
   return irq;
+}
+
+// Clear all chip IRQ status and stale software edge flags
+error_t
+sx1280_irq_clear(sx1280_t *s)
+{
+  static const uint8_t clr[3] = {SX1280_CLR_IRQSTATUS, 0xff, 0xff};
+  error_t err = sx1280_cmd(s, clr, NULL, sizeof(clr));
+  if(err)
+    return err;
+  sx1280_drop_stale_flags(s);
+  return ERR_OK;
 }
 
 int

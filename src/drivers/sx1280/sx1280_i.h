@@ -56,3 +56,6 @@ int sx1280_wait_txdone_pin(sx1280_t *s, int64_t deadline);
 // Read-and-clear the chip's IRQ status (clears only the bits read).
 // Returns the bits or negative error.
 int sx1280_irq_ack(sx1280_t *s);
+
+// Clear all chip IRQ status and stale software edge flags
+error_t sx1280_irq_clear(sx1280_t *s);
