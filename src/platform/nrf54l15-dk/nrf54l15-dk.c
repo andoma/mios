@@ -1,8 +1,14 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <string.h>
+
 #include <mios/io.h>
 #include <mios/mcp.h>
+#include <mios/task.h>
+#include <mios/cli.h>
+#include <mios/error.h>
+#include <mios/hostname.h>
 #include <mios/type_macros.h>
 
 #include <mios/block.h>
@@ -53,6 +59,39 @@ board_init_console(void)
 }
 
 
+// LED0 heartbeat = "alive" (blinks whether or not CS is running), so a
+// battery-powered board is distinguishable from a dead one at a glance.
+static void *
+heartbeat_thread(void *arg)
+{
+  int on = 0;
+  while(1) {
+    usleep(500000);
+    on = !on;
+    gpio_set_output(leds[0], on);
+  }
+  return NULL;
+}
+
+static void __attribute__((constructor(5200)))
+board_init_heartbeat(void)
+{
+  thread_create(heartbeat_thread, NULL, 1024, "hb", TASK_DETACHED, 2);
+}
+
+// LED1 = "ranging": toggled on each Channel Sounding update (weak no-op default
+// in nrf_sdc_cs.c). On the battery reflector this blinks while it is actively
+// ranging, and goes quiet (LED1 stops) when the CS link drops. Distinct from
+// LED0's alive heartbeat.
+void
+board_cs_activity(void)
+{
+  static uint8_t on;
+  on = !on;
+  gpio_set_output(leds[1], on);
+}
+
+
 static void __attribute__((constructor(800)))
 board_init_late(void)
 {
@@ -65,7 +104,10 @@ board_init_late(void)
                                    GPIO_P0(0), GPIO_P0(1), 0);
   mcp_uart_create(mcp);
 
-  nrf_ble_init("mios-nrf54l");
+  // Advertise under the (persisted) hostname. nrf_ble_init only stores the
+  // pointer; the controller reads it when it builds the adv data on the main
+  // thread (constructor 5200), after board_init_hostname (5150) has loaded it.
+  nrf_ble_init(hostname);
 }
 
 
@@ -79,6 +121,46 @@ board_init_late(void)
 #define SPIM00_BASE  0x5004a000
 #define SPIM00_IRQ   74          // SERIAL00
 #define SPIM00_CLOCK 128000000   // SPIM00 source clock (128 MHz)
+
+// Persisted hostname (littlefs). Distinguishes the two identical DKs on the
+// console (and as the BLE advertised name). Stored as the bare name string.
+#define HOSTNAME_PATH "/hostname"
+
+static void
+board_load_hostname(void)
+{
+  fs_file_t *f;
+  if(!fs_open(HOSTNAME_PATH, FS_RDONLY, &f)) {
+    char buf[HOSTNAME_BUFFER_SIZE];
+    ssize_t n = fs_read(f, buf, sizeof(buf) - 1);
+    fs_close(f);
+    if(n > 0) {
+      buf[n] = '\0';
+      hostname_set(buf);
+    }
+  }
+  if(hostname[0] == '\0')
+    hostname_set("mios-nrf54l"); // default when nothing is stored
+  printf("hostname: %s\n", hostname);
+}
+
+static error_t
+cmd_hostname(cli_t *cli, int argc, char **argv)
+{
+  if(argc > 1) {
+    hostname_set(argv[1]);
+    fs_file_t *f;
+    if(!fs_open(HOSTNAME_PATH, FS_WRONLY | FS_CREAT | FS_TRUNC, &f)) {
+      fs_write(f, argv[1], strlen(argv[1]));
+      fs_close(f);
+    }
+    cli_printf(cli, "hostname set (reboot to apply to the BLE adv name)\n");
+  }
+  cli_printf(cli, "%s\n", hostname);
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("hostname", cmd_hostname, NULL, "Get/set persisted hostname");
 
 // Constructor priority > 4999 runs on the main thread after multitasking has
 // started (see multitasking_mark in kernel/mios.c), so interrupts are enabled
@@ -99,6 +181,8 @@ board_init_flash(void)
                                  GPIO_P2(2));  // MOSI (IO0)
 
   block_iface_t *blk = spiflash_create(spi, GPIO_P2(5)); // CS
-  if(blk != NULL)
+  if(blk != NULL) {
     fs_init(blk); // mount littlefs (formats on first boot)
+    board_load_hostname();
+  }
 }
