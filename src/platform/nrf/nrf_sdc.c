@@ -220,23 +220,24 @@ sdc_connected(sdc_ble_t *sb, uint8_t status, uint16_t handle, uint8_t role,
   sb->con.role = role;
   memcpy(sb->con.peer, peer_addr, 6);
 
-  // The l2cap/CoC host runs on the peripheral (CoC server) side. A central
-  // link (e.g. a Channel Sounding initiator) just tracks the ACL connection.
-  if(role == 1) {
-    sb->con.l2c.l2c_output = sdc_conn_output;
-    sb->con.l2c.l2c_ltk_reply = sdc_ltk_reply;
-    STAILQ_INIT(&sb->con.l2c.l2c_tx_queue);
-    sb->con.l2c.l2c_tx_queue_len = 0;
+  // Set up the l2cap host for both roles. The peripheral is the CoC/SMP server;
+  // the central (e.g. a Channel Sounding initiator) needs it too so it can
+  // receive L2CAP data (the reflector streams CS tones over L2CAP_CID_CS).
+  // Without this the central's rx queue is never initialised and the first
+  // inbound frame faults in l2cap_input.
+  sb->con.l2c.l2c_output = sdc_conn_output;
+  sb->con.l2c.l2c_ltk_reply = sdc_ltk_reply;
+  STAILQ_INIT(&sb->con.l2c.l2c_tx_queue);
+  sb->con.l2c.l2c_tx_queue_len = 0;
 
-    // Addresses for the pairing crypto (HCI order = LSB first).
-    memcpy(sb->con.l2c.l2c_peer_addr, peer_addr, 6);
-    sb->con.l2c.l2c_peer_addr_type = peer_addr_type;
-    memcpy(sb->con.l2c.l2c_our_addr, sb->sb_addr, 6);
-    sb->con.l2c.l2c_our_addr_type = 1; // static random
+  // Addresses for the pairing crypto (HCI order = LSB first).
+  memcpy(sb->con.l2c.l2c_peer_addr, peer_addr, 6);
+  sb->con.l2c.l2c_peer_addr_type = peer_addr_type;
+  memcpy(sb->con.l2c.l2c_our_addr, sb->sb_addr, 6);
+  sb->con.l2c.l2c_our_addr_type = 1; // static random
 
-    if(l2cap_connect(&sb->con.l2c))
-      return;
-  }
+  if(l2cap_connect(&sb->con.l2c))
+    return;
 
   sb->con.connected = 1;
   sb->sb_connecting = 0;
@@ -341,7 +342,9 @@ sdc_create_conn(uint8_t peer_addr_type, const uint8_t *peer_addr)
   cc->array_params[0].scan_window = 0x0030;
   cc->array_params[0].conn_interval_min = 0x0028; // 50 ms
   cc->array_params[0].conn_interval_max = 0x0028; // 50 ms
-  cc->array_params[0].supervision_timeout = 0x0100; // 2.56 s
+  // 6 s: Channel Sounding procedures can starve ACL anchors for longer than the
+  // usual 2.56 s, so widen the supervision window to keep the link up during CS.
+  cc->array_params[0].supervision_timeout = 0x0258; // 6 s
   return sdc_hci_cmd_le_ext_create_conn(cc);
 }
 
