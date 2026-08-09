@@ -269,6 +269,32 @@ connection_clear_credit_deficit(l2cap_connection_t *lc)
 }
 
 
+// As peripheral, ask the central for a short connection interval: the
+// broker services (shell, test floods) all want low latency and high
+// event density. Sent once per link, when the first named service
+// opens - by then the central's own setup procedures have settled, so
+// the request does not collide with them.
+static void
+l2cap_request_conn_params(l2cap_t *l2c)
+{
+  if(l2c->l2c_is_central || l2c->l2c_cpup_sent)
+    return;
+  l2c->l2c_cpup_sent = 1;
+
+  pbuf_t *pb = pbuf_make(8, 0);
+  if(pb == NULL)
+    return;
+  uint8_t *d = pbuf_append(pb, 12);
+  d[0] = L2CAP_CONNECTION_PARAMETER_UPDATE_REQ;
+  d[1] = 1;               // identifier
+  d[2] = 8; d[3] = 0;     // command length
+  d[4] = 6; d[5] = 0;     // interval min: 7.5ms
+  d[6] = 12; d[7] = 0;    // interval max: 15ms
+  d[8] = 0; d[9] = 0;     // latency
+  d[10] = 100; d[11] = 0; // supervision timeout: 1s
+  l2cap_output(l2c, pb, L2CAP_CID_LE_SIGNALING);
+}
+
 static int
 count_credits(const pbuf_t *pb)
 {
@@ -376,6 +402,17 @@ connection_task_cb(net_task_t *task, uint32_t signals)
 
   if(signals & PUSHPULL_EVENT_PULL && l2c) {
     connection_pull(lc);
+  }
+
+  if(signals & PUSHPULL_EVENT_PUSH && l2c) {
+    // The app can accept deliveries again: drain what queued while it
+    // was busy. Without this the flow deadlocks once the peer runs
+    // out of credits (nothing inbound retriggers delivery, and no
+    // deliveries means no credits are re-granted).
+    pbuf_t *pb = connection_push(lc);
+    if(pb != NULL)
+      pbuf_free(pb);
+    connection_clear_credit_deficit(lc);
   }
 }
 
@@ -513,6 +550,9 @@ broker_push(void *opaque, struct pbuf *pb)
         (int)len, name, status ? "failed" : "OK");
   pbuf_free(pb);
 
+  if(status == L2CAP_NAMED_STATUS_OK)
+    l2cap_request_conn_params(lc->lc_l2c);
+
   broker_send_status(lc, status);
 
   if(status == L2CAP_NAMED_STATUS_OK) {
@@ -641,7 +681,11 @@ handle_le_credit_based_connection_req(l2cap_t *l2c, pbuf_t *pb)
   // A peer-sized PDU must survive reassembly into a single pbuf
   // (basic header + payload <= PBUF_DATA_SIZE)
   rsp->mps = PBUF_DATA_SIZE - 4;
-  rsp->initial_credits = 65535;
+  // A bounded credit window is the flow control that keeps a fast
+  // peer from overrunning the pbuf pool (HCI transports drop inbound
+  // frames outright when it is dry). Credits are re-granted as the
+  // service consumes, so throughput does not suffer.
+  rsp->initial_credits = 32;
   lc->lc_credit_threshold = 2;
   lc->lc_local_credits = rsp->initial_credits;
 

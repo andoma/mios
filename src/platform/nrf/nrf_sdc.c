@@ -168,6 +168,15 @@ sdc_tx_pump(sdc_ble_t *sb)
     sb->sb_tx_credits--;
     sb->stat.tx++;
   }
+
+  // The l2cap layer stops pulling from services at high water on our
+  // queue (or when the pbuf pool ran dry); ask it to refill once
+  // drained, or a flooding service stalls for good
+  if(sb->con.l2c.l2c_tx_throttled &&
+     sb->con.l2c.l2c_tx_queue_len <= L2CAP_TXQ_LOW) {
+    sb->con.l2c.l2c_tx_throttled = 0;
+    l2cap_txq_pump(&sb->con.l2c);
+  }
 }
 
 
@@ -236,6 +245,7 @@ sdc_connected(sdc_ble_t *sb, uint8_t status, uint16_t handle, uint8_t role,
   sb->con.l2c.l2c_peer_addr_type = peer_addr_type;
   memcpy(sb->con.l2c.l2c_our_addr, sb->sb_addr, 6);
   sb->con.l2c.l2c_our_addr_type = 1; // static random
+  sb->con.l2c.l2c_is_central = role == 0; // HCI role 0 = central
 
   if(l2cap_connect(&sb->con.l2c))
     return;

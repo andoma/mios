@@ -47,6 +47,9 @@ typedef struct l2cap {
   uint8_t l2c_sec_level; // achieved link security, BLE_SEC_* (0 until encrypted)
   uint8_t l2c_pending_sec_level; // level to apply when encryption turns on
 
+  uint8_t l2c_is_central; // our role; set by the driver at connection setup
+  uint8_t l2c_cpup_sent;  // conn param update requested (once per link)
+
   struct smp *l2c_smp; // pairing state, allocated on first SMP PDU
 
 } l2cap_t;

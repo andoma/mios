@@ -144,7 +144,6 @@ typedef struct {
   uint8_t term_code;
   uint8_t version_sent;
   uint8_t autotx_time;    // SetAutoTx arm value (calibration sweep)
-  uint8_t param_req_sent; // L2CAP conn param update request sent
   uint8_t length_req_sent;// LL_LENGTH_REQ initiated by us
   uint8_t term_req;       // Local termination requested (any thread)
   uint8_t term_sent;      // LL_TERMINATE_IND queued
@@ -847,26 +846,6 @@ ble_conn_rearm(ble_conn_t *c, sx1280_t *s)
 // Ask the master for a shorter connection interval (7.5-15ms) via an
 // L2CAP Connection Parameter Update Request; the master answers with
 // LL_CONNECTION_UPDATE_IND which the event loop already applies.
-static void
-ble_conn_request_conn_params(ble_conn_t *c)
-{
-  pbuf_t *pb = pbuf_make(0, 0);
-  if(pb == NULL)
-    return;
-  uint8_t *d = pbuf_append(pb, 16);
-  d[0] = 12; d[1] = 0;   // L2CAP length
-  d[2] = 5;  d[3] = 0;   // CID: LE signaling
-  d[4] = 0x12;           // Connection Parameter Update Request
-  d[5] = 1;              // identifier
-  d[6] = 8;  d[7] = 0;   // command length
-  d[8] = 6;  d[9] = 0;   // interval min: 7.5ms
-  d[10] = 12; d[11] = 0; // interval max: 15ms
-  d[12] = 0; d[13] = 0;  // latency
-  d[14] = 100; d[15] = 0; // supervision timeout: 1s
-  pb->pb_flags |= PBUF_SOP;
-  ble_conn_l2cap_output(&c->l2c, pb);
-}
-
 static int64_t
 ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 {
@@ -903,11 +882,6 @@ ble_conn_execute(sx1280_slot_t *slot, sx1280_t *s, int64_t now)
 
   c->event_counter++;
 
-
-  if(c->established && !c->param_req_sent && c->event_counter >= 8) {
-    c->param_req_sent = 1;
-    ble_conn_request_conn_params(c);
-  }
 
   // Some masters never initiate the data length procedure even when
   // our feature bit advertises it; ask ourselves (BT spec 5.1.9,
@@ -1257,7 +1231,6 @@ ble_conn_start(sx1280_t *s, const uint8_t *pdu, int64_t rx_end)
   c->coll_missed = 0;
   c->recovers = 0;
   c->slot.ss_prio = BLE_CONN_PRIO;
-  c->param_req_sent = 0;
   c->length_req_sent = 0;
   c->term_req = 0;
   c->term_sent = 0;
