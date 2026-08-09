@@ -45,6 +45,11 @@ typedef struct l2cap {
 
 void l2cap_output(l2cap_t *l2c, struct pbuf *pb, uint16_t cid);
 
+// Consume an inbound frame on L2CAP_CID_CS (Channel Sounding tone exchange).
+// Weak no-op by default; the CS extension overrides it. The caller retains pb
+// ownership (frees it after this returns), so the hook must copy what it needs.
+void ble_cs_l2cap_input(l2cap_t *l2c, struct pbuf *pb);
+
 // l2cap task signal raised by the driver when the link becomes encrypted.
 #define L2CAP_SIGNAL_SMP 0x4
 

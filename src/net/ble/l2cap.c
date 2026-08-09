@@ -854,9 +854,21 @@ handle_packet(l2cap_t *l2c, pbuf_t *pb)
     smp_input(l2c, pb);
     return NULL;
 
+  case L2CAP_CID_CS:
+    ble_cs_l2cap_input(l2c, pb);
+    return pb;
+
   default:
     return handle_channel(l2c, pb, channel_id);
   }
+}
+
+// Weak default: no Channel Sounding built in. Overridden by nrf_sdc_cs.c.
+__attribute__((weak)) void
+ble_cs_l2cap_input(l2cap_t *l2c, pbuf_t *pb)
+{
+  (void)l2c;
+  (void)pb;
 }
 
 

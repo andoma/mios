@@ -74,6 +74,11 @@ extern sdc_ble_t g_sdc;
 void sdc_ltk_reply(l2cap_t *l2c, const uint8_t *ltk);
 uint8_t sdc_adv_enable(uint8_t on);
 
+// Optional board LED "CS activity" blink. Weak no-op in nrf_sdc_cs.c; a board
+// (e.g. nrf54l15-dk) may provide a strong override to toggle an LED on each
+// ranging update, so a battery-powered reflector shows it is alive and ranging.
+void board_cs_activity(void);
+
 // Channel Sounding hooks. Weak no-op stubs live in nrf_sdc.c; nrf_sdc_cs.c
 // overrides them when built. Called from the corresponding core paths.
 int  nrf_sdc_cs_configure(void);                       // sdc_support_*/cfg (init)

@@ -33,10 +33,26 @@ def load(path):
 
 
 def main():
-    if len(sys.argv) != 3:
-        sys.exit("usage: cs_distance.py <initiator_dump> <reflector_dump>")
-    a = load(sys.argv[1])
-    b = load(sys.argv[2])
+    # Optional calibration flags:
+    #   --offset M   subtract a known board/antenna offset (metres) from the result
+    #   --true M     print the offset needed so the result equals M (one-point cal)
+    argv = sys.argv[1:]
+    offset = 0.0
+    truth = None
+    files = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--offset":
+            offset = float(argv[i + 1]); i += 2
+        elif argv[i] == "--true":
+            truth = float(argv[i + 1]); i += 2
+        else:
+            files.append(argv[i]); i += 1
+    if len(files) != 2:
+        sys.exit("usage: cs_distance.py [--offset M | --true M] "
+                 "<initiator_dump> <reflector_dump>")
+    a = load(files[0])
+    b = load(files[1])
 
     pts = []  # (freq_mhz, phase)
     for ch in sorted(set(a) & set(b)):
@@ -78,7 +94,11 @@ def main():
     dist = -slope * (C / (4 * math.pi)) / 1e6
     print(f"tones used: {n}")
     print(f"phase slope: {slope:.4f} rad/MHz")
-    print(f"distance: {dist:.3f} m")
+    print(f"raw distance: {dist:.3f} m")
+    if truth is not None:
+        print(f"board offset (to read {truth:.3f} m): {dist - truth:.3f} m")
+    if offset:
+        print(f"calibrated distance: {dist - offset:.3f} m  (offset {offset:.3f} m)")
 
 
 if __name__ == "__main__":

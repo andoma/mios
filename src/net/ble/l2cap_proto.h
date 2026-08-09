@@ -6,6 +6,12 @@
 #define L2CAP_CID_ATT		0x0004
 #define L2CAP_CID_LE_SIGNALING	0x0005
 
+// Private fixed CID (RFU range) for the mios<->mios Channel Sounding tone
+// exchange. Not a SIG channel: both ends run the same firmware, so the
+// reflector ships its per-channel PCT tones straight to the initiator without a
+// CoC handshake (which mios cannot initiate). Test/demo transport only.
+#define L2CAP_CID_CS		0x0080
+
 
 #define L2CAP_DISCONNECTION_REQ                0x06
 #define L2CAP_DISCONNECTION_RSP                0x07
