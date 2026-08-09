@@ -22,6 +22,7 @@
 #include "irq.h"
 #include "net/pbuf.h"
 #include "net/ble/l2cap.h"
+#include "net/ble/ble.h"
 #include "util/crc32.h"
 
 #include <mios/sys.h>
@@ -1591,21 +1592,32 @@ sx1280_ble_adv_report(sx1280_t *s, struct stream *st)
            (int)a->rx_scan_req, (int)a->rx_conn_ind, (int)a->rx_misaddr,
            (int)a->rx_other, (int)a->rx_crc_errors,
            (int)a->max_turnaround);
+}
 
+// Stack hook for the shared ble_connections command; per-connection
+// LL state lives here, radio-level counters in the device print
+void
+ble_print_connections(struct stream *st)
+{
+  int n = 0;
   for(int i = 0; i < BLE_MAX_CONN; i++) {
-    const ble_conn_t *c = g_conns[i];
-    if(c == NULL)
+    ble_conn_t *c = g_conns[i];
+    if(c == NULL || !c->active)
       continue;
-    stprintf(st, "conn%d: %s peer:%02x:%02x:%02x:%02x:%02x:%02x "
-             "interval:%dus ev_rx:%d pdus:%d missed:%d crc:%d acked:%d "
-             "retrans:%d bad_seq:%d data:%d nak:%d etx:%d patch:%dus\n", i,
-             c->active ? (c->established ? "UP" : "establishing") : "closed",
-             c->peer_addr[5], c->peer_addr[4], c->peer_addr[3],
-             c->peer_addr[2], c->peer_addr[1], c->peer_addr[0],
-             (int)c->interval, (int)c->ev_rx, (int)c->rx_pdus,
-             (int)c->ev_missed, (int)c->ev_crc, (int)c->tx_acked,
-             (int)c->tx_retrans, (int)c->rx_bad_seq, (int)c->rx_data,
-             (int)c->rx_drops, (int)c->eff_tx, (int)c->max_patch);
+    n++;
+    ble_print_connection_header(st, i, c->peer_addr,
+                                c->established ? "UP" : "establishing",
+                                c->l2c.l2c_sec_level,
+                                c->interval, c->timeout);
+    stprintf(st, "  ll: ev_rx:%d missed:%d crc:%d pdus:%d acked:%d "
+             "retrans:%d bad_seq:%d data:%d nak:%d etx:%d patch:%dus\n",
+             (int)c->ev_rx, (int)c->ev_missed, (int)c->ev_crc,
+             (int)c->rx_pdus, (int)c->tx_acked, (int)c->tx_retrans,
+             (int)c->rx_bad_seq, (int)c->rx_data, (int)c->rx_drops,
+             (int)c->eff_tx, (int)c->max_patch);
+    l2cap_print(&c->l2c, st);
   }
+  if(n == 0)
+    stprintf(st, "No connections\n");
 }
 

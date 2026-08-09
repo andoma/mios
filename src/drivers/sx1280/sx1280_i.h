@@ -6,11 +6,13 @@
 #include "sx1280_regs.h"
 
 #include <mios/task.h>
+#include <mios/device.h>
 #include <sys/queue.h>
 
 LIST_HEAD(sx1280_slot_list, sx1280_slot);
 
 struct sx1280 {
+  device_t dev; // must be first (device_t * casts back to sx1280_t *)
   spi_t *bus;
   mutex_t mutex;
 

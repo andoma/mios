@@ -15,6 +15,7 @@
 #include "net/pbuf.h"
 #include "net/netif.h"
 #include "net/ble/l2cap.h"
+#include "net/ble/ble.h"
 #include "net/ble/smp.h"
 
 #include <malloc.h>
@@ -549,6 +550,8 @@ sdc_hci_signal(void)
 
 // --- Init -------------------------------------------------------------------
 
+// Radio-level info for the device hierarchy (`dev`); connections are
+// shown by ble_connections
 static void
 sdc_print_info(struct device *dev, struct stream *st)
 {
@@ -564,21 +567,9 @@ sdc_print_info(struct device *dev, struct stream *st)
     stprintf(st, "  BRING-UP FAILED at %s (status %d / 0x%x)\n",
              sb->sb_err_step, sb->sb_err_status, sb->sb_err_status);
 
-  if(sb->con.connected) {
-    stprintf(st, "  Peer: %02x:%02x:%02x:%02x:%02x:%02x  %s\n",
-             sb->con.peer[5], sb->con.peer[4], sb->con.peer[3],
-             sb->con.peer[2], sb->con.peer[1], sb->con.peer[0],
-             sb->con.encrypted ? "ENCRYPTED" : "unencrypted");
-    stprintf(st, "  interval: %dus  timeout: %dus  PHY rx:%s tx:%s\n",
-             sb->con.interval * 1250, sb->con.timeout * 10000,
-             sb->con.rx_phy == 2 ? "2M" : "1M",
-             sb->con.tx_phy == 2 ? "2M" : "1M");
-    stprintf(st, "  RX:%d  Drops:%d  TX:%d  Credits:%d  Qdepth:%d\n",
-             sb->stat.rx, sb->stat.rx_drops, sb->stat.tx,
-             sb->sb_tx_credits, sb->con.l2c.l2c_tx_queue_len);
-    l2cap_print(&sb->con.l2c, st);
-  }
-  stprintf(st, "  Stale:%d  Oversize:%d  Events:%d  SWI:%d\n",
+  stprintf(st, "  RX:%d  Drops:%d  TX:%d  Stale:%d  Oversize:%d  "
+           "Events:%d  SWI:%d\n",
+           sb->stat.rx, sb->stat.rx_drops, sb->stat.tx,
            sb->stat.rx_stale, sb->stat.rx_oversize,
            sb->stat.events, sb->stat.swi_runs);
 
@@ -586,6 +577,27 @@ sdc_print_info(struct device *dev, struct stream *st)
     stprintf(st, "  CS: active:%d  procedures:%d  last_steps:%d  last:%s(0x%x)\n",
              sb->cs.active, sb->cs.procedures, sb->cs.last_steps,
              sb->cs.step ? sb->cs.step : "-", sb->cs.status);
+}
+
+// Stack hook for the shared ble_connections command
+void
+ble_print_connections(struct stream *st)
+{
+  sdc_ble_t *sb = &g_sdc;
+
+  if(!sb->con.connected) {
+    stprintf(st, "No connections\n");
+    return;
+  }
+  ble_print_connection_header(st, 0, sb->con.peer, "UP",
+                              sb->con.l2c.l2c_sec_level,
+                              sb->con.interval * 1250,
+                              sb->con.timeout * 10000);
+  stprintf(st, "  phy: rx:%s tx:%s  hci: credits:%d qdepth:%d\n",
+           sb->con.rx_phy == 2 ? "2M" : "1M",
+           sb->con.tx_phy == 2 ? "2M" : "1M",
+           sb->sb_tx_credits, sb->con.l2c.l2c_tx_queue_len);
+  l2cap_print(&sb->con.l2c, st);
 }
 
 

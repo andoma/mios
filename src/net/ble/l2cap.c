@@ -1021,21 +1021,14 @@ l2cap_print(l2cap_t *l2c, stream_t *st)
 {
   l2cap_connection_t *lc = NULL;
   while((lc = l2cap_connection_next(l2c, lc)) != NULL) {
-    stprintf(st, "L2CAP: %s (PSM:0x%x)\n", lc->lc_name, lc->lc_psm);
-
-    stprintf(st, "  Local:  CID:%d Credits:%d\n",
-             lc->lc_local_cid,
-             lc->lc_local_credits);
-
-    stprintf(st, "  Remote: CID:%d MTU:%d MPS:%d Credits:%d\n",
-             lc->lc_remote_cid,
-             lc->lc_remote_mtu,
-             lc->lc_remote_mps,
-             lc->lc_remote_credits);
-    stprintf(st, "  RX credits: deficit:%d queued:%d\n",
-             lc->lc_credit_deficit,
-             lc->lc_queued_credits);
-    stprintf(st, "\n");
+    stprintf(st, "  l2cap: %s (PSM:0x%x)  CID local:%d remote:%d  "
+             "MTU:%d MPS:%d\n",
+             lc->lc_name, lc->lc_psm,
+             lc->lc_local_cid, lc->lc_remote_cid,
+             lc->lc_remote_mtu, lc->lc_remote_mps);
+    stprintf(st, "    credits: theirs:%d ours:%d deficit:%d queued:%d\n",
+             lc->lc_remote_credits, lc->lc_local_credits,
+             lc->lc_credit_deficit, lc->lc_queued_credits);
 
     pbuf_dump_stream("RXQ", STAILQ_FIRST(&lc->lc_rxq), 0, st);
     pbuf_dump_stream("RFQ", STAILQ_FIRST(&lc->lc_rfq), 0, st);

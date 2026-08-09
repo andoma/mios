@@ -81,7 +81,8 @@ SRCS-${ENABLE_NET_BLE} += \
 	${SRC}/net/ble/l2cap.c \
 	${SRC}/net/ble/smp.c \
 	${SRC}/net/ble/smp_lesc.c \
-	${SRC}/net/ble/ble_bond.c
+	${SRC}/net/ble/ble_bond.c \
+	${SRC}/net/ble/ble_cli.c
 
 # The LESC toolbox stack-allocates the 176-byte AES expanded key.
 ${MOS}/net/ble/smp_lesc.o : CFLAGS += -Wno-frame-larger-than

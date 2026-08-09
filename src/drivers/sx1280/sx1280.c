@@ -10,6 +10,7 @@
 #include "sx1280_sched.h"
 
 #include <mios/cli.h>
+#include <mios/device.h>
 #include <mios/eventlog.h>
 #include <mios/task.h>
 
@@ -224,6 +225,20 @@ sx1280_get_status(sx1280_t *s)
   return err ?: buf[0];
 }
 
+// Radio-level info for the device hierarchy (`dev`); connections are
+// shown by ble_connections
+static void
+sx1280_print_info(struct device *dev, struct stream *st)
+{
+  sx1280_t *s = (sx1280_t *)dev;
+  sx1280_ble_adv_report(s, st);
+}
+
+static const device_class_t sx1280_device_class = {
+  .dc_class_name = "radio",
+  .dc_print_info = sx1280_print_info,
+};
+
 sx1280_t *
 sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
               gpio_t busy, gpio_t dio1, gpio_t dio_txdone, const char *name)
@@ -262,6 +277,10 @@ sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
                 GPIO_RISING_EDGE, IRQ_LEVEL_IO);
 
   sx1280_sched_init(s);
+
+  s->dev.d_name = name;
+  s->dev.d_class = &sx1280_device_class;
+  device_register(&s->dev);
 
   sx1280_cli_instance = s;
   return s;
