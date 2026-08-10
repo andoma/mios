@@ -23,20 +23,20 @@ irq_forbid(unsigned int level)
   unsigned int pmr = IRQ_LEVEL_TO_PRI(level);
 
   asm volatile ("mrs %0, daif\n\t" : "=r" (daif));
-  asm volatile ("msr daifset, #2\n\t");
+  asm volatile ("msr daifset, #2\n\t" ::: "memory");
 
   asm volatile ("mrs %0, icc_pmr_el1\n\r" : "=r"(current));
   if(pmr < current) {
-    asm volatile ("msr icc_pmr_el1, %0\n\t" : : "r" (pmr));
+    asm volatile ("msr icc_pmr_el1, %0\n\t" : : "r" (pmr) : "memory");
   }
-  asm volatile ("msr daif, %0\n\t" : : "r" (daif));
+  asm volatile ("msr daif, %0\n\t" : : "r" (daif) : "memory");
   return current;
 }
 
 static inline void
 irq_permit(unsigned int old)
 {
-  asm volatile ("msr icc_pmr_el1, %0\n\t" : : "r" (old));
+  asm volatile ("msr icc_pmr_el1, %0\n\t" : : "r" (old) : "memory");
 }
 
 static inline unsigned int
@@ -44,14 +44,14 @@ irq_lower(void)
 {
   unsigned int current;
   asm volatile ("mrs %0, icc_pmr_el1\n\r" : "=r"(current));
-  asm volatile ("msr icc_pmr_el1, %0\n\t" : : "r" (0xff));
+  asm volatile ("msr icc_pmr_el1, %0\n\t" : : "r" (0xff) : "memory");
   return current;
 }
 
 static inline void
 irq_off(void)
 {
-  asm volatile ("msr daifset, #2\n\t");
+  asm volatile ("msr daifset, #2\n\t" ::: "memory");
 }
 
 static inline void  __attribute__((always_inline))
