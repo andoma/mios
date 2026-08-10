@@ -22,7 +22,7 @@
 inline void __attribute__((always_inline))
 irq_off(void)
 {
-  asm volatile ("cpsid i;isb;dsb");
+  asm volatile ("cpsid i;isb;dsb" ::: "memory");
 }
 
 #ifdef HAVE_BASEPRI
@@ -56,14 +56,14 @@ irq_forbid(unsigned int level)
 {
   unsigned int old;
   asm volatile ("mrs %0, basepri\n\t" : "=r" (old));
-  asm volatile ("msr basepri_max, %0\n\t" : : "r" (IRQ_LEVEL_TO_PRI(level)));
+  asm volatile ("msr basepri_max, %0\n\t" : : "r" (IRQ_LEVEL_TO_PRI(level)) : "memory");
   return old;
 }
 
 inline void  __attribute__((always_inline))
 irq_permit(unsigned int pri)
 {
-  asm volatile ("msr basepri, %0\n\t" : : "r" (pri));
+  asm volatile ("msr basepri, %0\n\t" : : "r" (pri) : "memory");
 }
 
 
@@ -72,7 +72,7 @@ irq_lower(void)
 {
   unsigned int old;
   asm volatile ("mrs %0, basepri\n\t" : "=r" (old));
-  asm volatile ("msr basepri, %0\n\t" : : "r" (0));
+  asm volatile ("msr basepri, %0\n\t" : : "r" (0) : "memory");
   return old;
 }
 
@@ -105,14 +105,14 @@ irq_forbid(int not_used)
 {
   unsigned int old;
   asm volatile ("mrs %0, primask\n\t" : "=r" (old));
-  asm volatile ("cpsid i");
+  asm volatile ("cpsid i" ::: "memory");
   return old;
 }
 
 inline void  __attribute__((always_inline))
 irq_permit(unsigned int old)
 {
-  asm volatile ("msr primask, %0\n\t" : : "r" (old));
+  asm volatile ("msr primask, %0\n\t" : : "r" (old) : "memory");
 }
 
 
@@ -121,7 +121,7 @@ irq_lower(void)
 {
   unsigned int old;
   asm volatile ("mrs %0, primask\n\t" : "=r" (old));
-  asm volatile ("cpsie i");
+  asm volatile ("cpsie i" ::: "memory");
   return old;
 }
 

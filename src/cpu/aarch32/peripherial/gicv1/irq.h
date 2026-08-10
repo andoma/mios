@@ -52,7 +52,7 @@ __attribute__((always_inline))
 inline void
 irq_off(void)
 {
-  asm volatile ("cpsid i;isb;dsb");
+  asm volatile ("cpsid i;isb;dsb" ::: "memory");
 }
 
 __attribute__((always_inline))
@@ -64,14 +64,14 @@ irq_forbid(unsigned int level)
   uint32_t pbase = cpu_get_periphbase();
 
   asm volatile ("mrs %0, cpsr\n\t" : "=r" (cpsr));
-  asm volatile ("msr cpsr, %0\n\r" :: "r" (cpsr | 0x80));
+  asm volatile ("msr cpsr, %0\n\r" :: "r" (cpsr | 0x80) : "memory");
 
   uint32_t pmr = reg_rd(pbase + ICCIPMR);
   if(pri < pmr) {
     reg_wr(pbase + ICCIPMR, pri);
     asm volatile("isb" ::: "memory");
   }
-  asm volatile ("msr cpsr, %0\n\r" :: "r" (cpsr));
+  asm volatile ("msr cpsr, %0\n\r" :: "r" (cpsr) : "memory");
   return pmr;
 }
 
@@ -80,6 +80,7 @@ static inline void
 irq_permit(unsigned int old)
 {
   uint32_t pbase = cpu_get_periphbase();
+  asm volatile("" ::: "memory");
   reg_wr(pbase + ICCIPMR, old);
 }
 
@@ -89,6 +90,7 @@ irq_lower(void)
 {
   uint32_t pbase = cpu_get_periphbase();
   uint32_t old = reg_rd(pbase + ICCIPMR);
+  asm volatile("" ::: "memory");
   reg_wr(pbase + ICCIPMR, 0xf8);
   asm volatile("isb" ::: "memory");
   return old;
