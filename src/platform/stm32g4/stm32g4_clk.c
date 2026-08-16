@@ -83,12 +83,15 @@ stm32g4_reinit_pll(void)
     pllcfgr |= (pdiv << 27);
   }
 
-  g_q_freq = fvco / 6;
+  // PLLQ = FVCO/4 = sysclk/2: an exact integer MHz for any even
+  // sysclk target. FVCO/6 is not (56.667 MHz at 170 MHz sysclk,
+  // reported as 56), which put FDCAN bit timing 1.2% off.
+  g_q_freq = fvco / 4;
 
   reg_wr(RCC_PLLCFGR,
          (1 << 24) |                   // PLLR enable
          (1 << 20) |                   // PLLQ Enable
-         (0b10 << 21) |                // PLLQ = FVCO / 6
+         (0b01 << 21) |                // PLLQ = FVCO / 4
          pllcfgr |
          ((pll_m - 1) << 4) |          // input division
          ((CPU_SYSCLK_MHZ / 2) << 8) | // PLL multiplication
