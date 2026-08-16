@@ -79,6 +79,10 @@
 
 #define CLK_FDCAN CLK_ID(RCC_APB1ENR1, 25)
 
+// APB1 bus clock, for clk_get_freq() lookup only (aliases CLK_TIM2
+// in clk_enable(): don't pass it there)
+#define CLK_PCLK1 CLK_ID(RCC_APB1ENR1, 0)
+
 #define CLK_DMA1    CLK_ID(RCC_AHB1ENR, 0)
 #define CLK_DMA2    CLK_ID(RCC_AHB1ENR, 1)
 #define CLK_DMAMUX1 CLK_ID(RCC_AHB1ENR, 2)

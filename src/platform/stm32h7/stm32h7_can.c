@@ -19,6 +19,12 @@
 #define FDCAN_ILS    0x058
 #define FDCAN_ILE    0x05c
 
+// Full M_CAN interrupt map; ILS routes per flag
+#define FDCAN_IRQ_RF0N (1 << 0)
+#define FDCAN_IRQ_RF1N (1 << 4)
+#define FDCAN_IRQ_BO   (1 << 25)
+#define FDCAN_ILS_RXFIFO1_TO_LINE1 (1 << 4)
+
 #define FDCAN_SIDFC  0x084
 #define FDCAN_XIDFC  0x088
 
@@ -125,6 +131,7 @@ stm32h7_can_init(int instance, gpio_t can_tx, gpio_t can_rx,
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate, data_bitrate,
                                  clk_get_freq(CLK_FDCAN),
+                                 0, // No tq clock constraint (yet)
                                  input_filter,
                                  output_filter,
                                  flags);

@@ -71,9 +71,9 @@ stm32_fdcan_irq1(void *arg)
   fdcan_t *fc = arg;
 
   uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
-  if(bits & (1 << 4)) {
+  if(bits & FDCAN_IRQ_RF1N) {
     // RX-Fifo 1 not empty
-    reg_wr(fc->reg_base + FDCAN_IR, (1 << 4));
+    reg_wr(fc->reg_base + FDCAN_IR, FDCAN_IRQ_RF1N);
 
     uint32_t rstatus = reg_rd(fc->reg_base + FDCAN_RXF1S);
     uint32_t get_index = (rstatus >> 8) & 3;
@@ -105,7 +105,7 @@ stm32_fdcan_irq0(void *arg)
   fdcan_t *fc = arg;
   uint32_t bits = reg_rd(fc->reg_base + FDCAN_IR);
 
-  if(bits & (1 << 0)) {
+  if(bits & FDCAN_IRQ_RF0N) {
     // RX-Fifo 0 not empty
 
     while(1) {
@@ -141,15 +141,14 @@ stm32_fdcan_irq0(void *arg)
       reg_wr(fc->reg_base + FDCAN_RXF0A, get_index);
       fc->rx_fifo0++;
     }
-    reg_wr(fc->reg_base + FDCAN_IR, (1 << 0));
+    reg_wr(fc->reg_base + FDCAN_IR, FDCAN_IRQ_RF0N);
   }
 
-  if(bits & (1 << 25)) {
-    // Bus off
-    reg_wr(fc->reg_base + FDCAN_IR, (1 << 25));
-    if(reg_rd(fc->reg_base + FDCAN_PSR) & 0x80) {
-      net_timer_arm(&fc->recovery_timer, clock_get_irq_blocked() + 250000);
-    }
+  if(bits & FDCAN_IRQ_BO) {
+    // Bus off entered (the flag is edge-tracking: no need to gate on
+    // PSR, whose error bits clear on read and can race other readers)
+    reg_wr(fc->reg_base + FDCAN_IR, FDCAN_IRQ_BO);
+    net_timer_arm(&fc->recovery_timer, clock_get_irq_blocked() + 250000);
   }
 }
 
@@ -273,13 +272,14 @@ typedef struct can_timing {
 
 static error_t
 fdcan_calculate_timings(int source_clk, int target_rate, int spa,
-                        int prescaler_max, int bs1_max, int bs2_max,
+                        int prescaler_min, int prescaler_max,
+                        int bs1_max, int bs2_max,
                         can_timing_t *out, const char *which)
 {
   int best_spa = INT32_MAX;
   error_t err = ERR_BAD_CONFIG;
 
-  for(int p = prescaler_max; p >= 1; p--) {
+  for(int p = prescaler_max; p >= prescaler_min; p--) {
     if(source_clk % (target_rate * p))
       continue;
     const int total = source_clk / (target_rate * p);
@@ -349,12 +349,17 @@ stm32_fdcan_recovery(void *opaque, uint64_t now)
 static error_t
 stm32_fdcan_init(fdcan_t *fc, const char *name,
                  uint32_t nominal_bitrate, uint32_t data_bitrate,
-                 uint32_t clockfreq,
+                 uint32_t clockfreq, uint32_t pclk,
                  const struct dsig_filter *dif,
                  const struct dsig_filter *dof,
                  uint32_t flags)
 {
   int stdidx = 0;
+
+  // The time quanta clock (kernel clock / prescaler) must not exceed
+  // the APB clock feeding the register interface. Callers pass 0 for
+  // no constraint.
+  const int prescaler_min = pclk ? (clockfreq + pclk - 1) / pclk : 1;
 
   fc->recovery_timer.t_cb = stm32_fdcan_recovery;
   fc->recovery_timer.t_opaque = fc;
@@ -394,25 +399,25 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
 
   reg_wr(fc->reg_base + FDCAN_ILE, 3); // Enable both IRQs
   reg_wr(fc->reg_base + FDCAN_IE,
-         (1 << 25) | // Bus off
-         (1 << 4)  | // RX Fifo 1 new message
-         (1 << 0)  | // RX Fifo 0 new message
+         FDCAN_IRQ_BO   |
+         FDCAN_IRQ_RF1N |
+         FDCAN_IRQ_RF0N |
          0);
 
-  reg_wr(fc->reg_base + FDCAN_ILS,
-         (1 << 4) | // RX fifo 1 to IRQ-1
-         0);
+  reg_wr(fc->reg_base + FDCAN_ILS, FDCAN_ILS_RXFIFO1_TO_LINE1);
 
   can_timing_t nom, data;
   error_t err;
 
   err = fdcan_calculate_timings(clockfreq, nominal_bitrate, 75,
-                                512, 256, 128, &nom, "nominal");
+                                prescaler_min, 512, 256, 128,
+                                &nom, "nominal");
   if(err)
     return err;
 
   err = fdcan_calculate_timings(clockfreq, data_bitrate, 75,
-                                32, 32, 16, &data, "data");
+                                prescaler_min, 32, 32, 16,
+                                &data, "data");
   if(err)
     return err;
 
@@ -439,6 +444,11 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
          ((nom.t2 - 1) << 0) |
          ((nom.t2 - 1) << 25) |
          0);
+
+  if(flags & FDCAN_ENABLE_LOOPBACK) {
+    reg_set_bit(fc->reg_base + FDCAN_CCCR, 7); // TEST mode access
+    reg_set_bit(fc->reg_base + FDCAN_TEST, 4); // LBCK
+  }
 
   // Enable FDCAN
   reg_set_bit(fc->reg_base + FDCAN_CCCR, 8);

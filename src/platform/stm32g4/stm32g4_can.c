@@ -27,6 +27,14 @@
 
 #define FDCAN_CKDIV  0x100
 
+// The G4 FDCAN interrupt map is compressed relative to full M_CAN
+// (no watermark bits): RF1N is bit 3 (not 4), BO is bit 19 (not 25),
+// and ILS selects interrupt line per GROUP, not per flag.
+#define FDCAN_IRQ_RF0N (1 << 0)
+#define FDCAN_IRQ_RF1N (1 << 3)
+#define FDCAN_IRQ_BO   (1 << 19)
+#define FDCAN_ILS_RXFIFO1_TO_LINE1 (1 << 1)
+
 #include "platform/stm32/stm32_fdcan.c"
 
 #define FDCAN_BASE(x) (0x40006000 + ((x) * 0x400))
@@ -36,7 +44,8 @@ void
 stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
                    unsigned int nominal_bitrate,
                    unsigned int data_bitrate,
-                   const struct dsig_filter *output_filter)
+                   const struct dsig_filter *output_filter,
+                   unsigned int flags)
 {
   if(instance != 1)
     panic("stm32g4_can: Only instance 1 is supported now");
@@ -62,8 +71,9 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate,
                                  data_bitrate, clk_get_freq(CLK_FDCAN),
+                                 clk_get_freq(CLK_PCLK1),
                                  NULL,
-                                 output_filter, 0);
+                                 output_filter, flags);
   if(err) {
     printf("%s: Failed to initialize\n", name);
     return;

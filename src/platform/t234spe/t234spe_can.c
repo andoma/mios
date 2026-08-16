@@ -35,6 +35,12 @@
 
 #define FDCAN_TXBAR  0x0d0
 
+// Full M_CAN interrupt map; ILS routes per flag
+#define FDCAN_IRQ_RF0N (1 << 0)
+#define FDCAN_IRQ_RF1N (1 << 4)
+#define FDCAN_IRQ_BO   (1 << 25)
+#define FDCAN_ILS_RXFIFO1_TO_LINE1 (1 << 4)
+
 #include "platform/stm32/stm32_fdcan.c"
 
 
@@ -90,6 +96,7 @@ tegra243_spe_can_init(unsigned int nominal_bitrate,
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate, data_bitrate,
                                  50000000,
+                                 0, // No tq clock constraint (yet)
                                  input_filter,
                                  output_filter,
                                  flags);
