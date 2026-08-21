@@ -10,6 +10,12 @@ SRCS-${ENABLE_MPU9250} += \
 SRCS-${ENABLE_BMI120} += \
 	${SRC}/drivers/bmi120.c
 
+SRCS-${ENABLE_ICM42688} += \
+	${SRC}/drivers/icm42688.c
+
+SRCS-${ENABLE_TOKMAS_BARO} += \
+	${SRC}/drivers/tokmas_baro.c
+
 SRCS-${ENABLE_A3G4250D} += \
 	${SRC}/drivers/a3g4250d.c
 
