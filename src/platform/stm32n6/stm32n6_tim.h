@@ -1,11 +1,13 @@
 #pragma once
 
+#define TIM1_BASE  0x42000000
 #define TIM2_BASE  0x40000000
 #define TIM3_BASE  0x40000400
 #define TIM4_BASE  0x40000800
 #define TIM5_BASE  0x40000c00
 #define TIM6_BASE  0x40001000
 #define TIM7_BASE  0x40001400
+#define TIM8_BASE  0x42000400
 #define TIM18_BASE 0x42003C00
 
 #define TIMx_CR1    0x0
@@ -27,3 +29,5 @@
 #define TIMx_CCR4   0x40
 
 #define TIMx_CCRx(x)  (0x30 + (x) * 4)
+
+#define TIMx_BDTR   0x44  // TIM1 and TIM8 only

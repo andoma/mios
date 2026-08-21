@@ -8,9 +8,31 @@
 static uint32_t apb_clk = 32000000;
 uint32_t stm32n6_hse_freq;
 
+// The timers are not clocked from the APB bus like the rest of the
+// APB1/APB2 peripherals: they are fed from sys_bus_ck through TIMPRE
+// (RM0486 14.10.5, timg_ck), which at the reset default of TIMPRE = 0
+// is sys_bus_ck undivided — twice the APB clock with HPRE at /2.
+static const uint16_t timer_clk_ids[] = {
+  CLK_TIM1,  CLK_TIM2,  CLK_TIM3,  CLK_TIM4,  CLK_TIM5,  CLK_TIM6,
+  CLK_TIM7,  CLK_TIM8,  CLK_TIM9,  CLK_TIM10, CLK_TIM11, CLK_TIM12,
+  CLK_TIM13, CLK_TIM14, CLK_TIM15, CLK_TIM16, CLK_TIM17, CLK_TIM18,
+};
+
 unsigned int
 clk_get_freq(uint16_t id)
 {
+  for(size_t i = 0; i < sizeof(timer_clk_ids) / sizeof(timer_clk_ids[0]); i++) {
+    if(timer_clk_ids[i] != id)
+      continue;
+
+    // PPREx are pinned to divide-by-1 (required by erratum), so
+    // apb_clk is sys_bus2_ck and sys_bus_ck is that shifted back up
+    // by HPRE.
+    const uint32_t cfgr2 = reg_rd(RCC_CFGR2);
+    const uint32_t hpre = (cfgr2 >> 20) & 7;
+    const uint32_t timpre = (cfgr2 >> 24) & 3;
+    return (apb_clk << hpre) >> timpre;
+  }
   return apb_clk;
 }
 
