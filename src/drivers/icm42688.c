@@ -62,7 +62,9 @@ icm42688_create(spi_t *bus, gpio_t nss)
   icm42688_t *dev = xalloc(sizeof(icm42688_t), 0, MEM_TYPE_DMA);
   dev->spi = bus;
   dev->nss = nss;
-  dev->spicfg = bus->get_config(bus, 0, 1000000);
+  // Datasheet max is 24MHz; leave some margin for clock tolerance/signal
+  // integrity on the real board rather than running at the exact edge.
+  dev->spicfg = bus->get_config(bus, 0, 20000000);
 
   gpio_conf_output(nss, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_set_output(nss, 1);
