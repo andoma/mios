@@ -19,12 +19,14 @@
  *       (default "shell"). Exit with Ctrl-B.
  *
  * Common options (before the subcommand):
- *   -t TRANSPORT  'udp' (default) or 'cansock'
+ *   -t TRANSPORT  'udp' (default), 'cansock', or 'usb'
  *   -g GROUP      udp multicast group  (default 239.255.213.22)
  *   -p PORT       udp port             (default 0xd516)
  *   -i IFNAME     udp bind interface OR cansock ifname (default: any / can0)
  *   -m MTU        vllp mtu             (default 64, for FDCAN)
  *   -T SECONDS    vllp timeout         (default 3)
+ *   -V VID:PID    usb vendor:product id, hex (default 6666:0, 0=any pid)
+ *   -S SUBCLASS   usb-dsig vendor-interface subclass (default 2)
  */
 
 #ifndef _GNU_SOURCE
@@ -33,6 +35,7 @@
 #include "dsig.h"
 #include "dsig_cansock.h"
 #include "dsig_udp.h"
+#include "dsig_usb.h"
 #include "dsig_vllp.h"
 #include "vllp.h"
 #include "vllp_logstream.h"
@@ -109,11 +112,13 @@ listen_cb(void *opaque, uint32_t signal, const void *data, size_t len)
 typedef struct {
   dsig_udp_t *udp;
   dsig_cansock_t *can;
+  dsig_usb_t *usbt;
 } transport_t;
 
 static int
 transport_open(transport_t *t, const char *kind,
                const char *group, uint16_t port, const char *ifname,
+               uint16_t usb_vid, uint16_t usb_pid, uint8_t usb_subclass,
                dsig_t **out_bus)
 {
   memset(t, 0, sizeof(*t));
@@ -154,6 +159,24 @@ transport_open(transport_t *t, const char *kind,
     }
     return 0;
   }
+  if(!strcasecmp(kind, "usb")) {
+    t->usbt = dsig_usb_create(usb_vid, usb_pid, usb_subclass);
+    if(t->usbt == NULL) {
+      fprintf(stderr, "dsig: failed to open USB transport\n");
+      return -1;
+    }
+    *out_bus = dsig_create(dsig_usb_tx, t->usbt);
+    if(*out_bus == NULL) {
+      dsig_usb_destroy(t->usbt);
+      return -1;
+    }
+    if(dsig_usb_start(t->usbt, *out_bus) < 0) {
+      dsig_destroy(*out_bus);
+      dsig_usb_destroy(t->usbt);
+      return -1;
+    }
+    return 0;
+  }
   fprintf(stderr, "dsig: unknown transport: %s\n", kind);
   return -1;
 }
@@ -161,9 +184,10 @@ transport_open(transport_t *t, const char *kind,
 static void
 transport_close(transport_t *t, dsig_t *bus)
 {
-  if(t->udp) dsig_udp_destroy(t->udp);
-  if(t->can) dsig_cansock_destroy(t->can);
-  if(bus)    dsig_destroy(bus);
+  if(t->udp)  dsig_udp_destroy(t->udp);
+  if(t->can)  dsig_cansock_destroy(t->can);
+  if(t->usbt) dsig_usb_destroy(t->usbt);
+  if(bus)     dsig_destroy(bus);
 }
 
 /* VLLP helpers */
@@ -208,13 +232,15 @@ usage(void)
 "usage: dsig [GLOBAL OPTIONS] COMMAND [ARGS...]\n"
 "\n"
 "GLOBAL OPTIONS\n"
-"  -t TRANSPORT   'udp' (default) or 'cansock'\n"
+"  -t TRANSPORT   'udp' (default), 'cansock', or 'usb'\n"
 "  -g GROUP       UDP multicast group       (default 239.255.213.22)\n"
 "  -p PORT        UDP port                  (default 0xd516 = 54550)\n"
 "  -i IFNAME      UDP bind interface, or cansock CAN ifname\n"
 "                 (UDP default: any; cansock default: $IFC or 'can0')\n"
 "  -m MTU         VLLP MTU                  (default 64; use 8 for legacy CAN)\n"
 "  -T SECONDS     VLLP link timeout         (default 3)\n"
+"  -V VID:PID     usb vendor:product id, hex (default 6666:0, 0=any pid)\n"
+"  -S SUBCLASS    usb-dsig vendor-interface subclass (default 2)\n"
 "\n"
 "Signal IDs accept C-style numeric literals (decimal, 0xHEX, 0OCT).\n"
 "All TXID/RXID arguments are from the *host* point of view:\n"
@@ -273,9 +299,12 @@ main(int argc, char **argv)
   const char *ifname = NULL;
   int mtu = 64;
   int timeout_s = 3;
+  uint16_t usb_vid = 0x6666;
+  uint16_t usb_pid = 0;
+  uint8_t usb_subclass = 2;
 
   int opt;
-  while((opt = getopt(argc, argv, "+t:g:p:i:m:T:h")) != -1) {
+  while((opt = getopt(argc, argv, "+t:g:p:i:m:T:V:S:h")) != -1) {
     switch(opt) {
     case 't': transport = optarg; break;
     case 'g': group = optarg; break;
@@ -283,6 +312,13 @@ main(int argc, char **argv)
     case 'i': ifname = optarg; break;
     case 'm': mtu = atoi(optarg); break;
     case 'T': timeout_s = atoi(optarg); break;
+    case 'V': {
+      char *colon = strchr(optarg, ':');
+      usb_vid = (uint16_t)strtoul(optarg, NULL, 16);
+      usb_pid = colon ? (uint16_t)strtoul(colon + 1, NULL, 16) : 0;
+      break;
+    }
+    case 'S': usb_subclass = (uint8_t)strtoul(optarg, NULL, 0); break;
     case 'h':
     default: usage(); return opt == 'h' ? 0 : 2;
     }
@@ -293,7 +329,8 @@ main(int argc, char **argv)
 
   transport_t tr;
   dsig_t *bus = NULL;
-  if(transport_open(&tr, transport, group, port, ifname, &bus) < 0)
+  if(transport_open(&tr, transport, group, port, ifname,
+                    usb_vid, usb_pid, usb_subclass, &bus) < 0)
     return 1;
 
   signal(SIGINT, on_sigint);

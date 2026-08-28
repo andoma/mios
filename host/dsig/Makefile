@@ -10,12 +10,14 @@
 
 O := build
 CC := gcc
-CFLAGS := -O2 -g -Wall -Werror -I. -I..
+CFLAGS := -O2 -g -Wall -Werror -I. -I.. $(shell pkg-config --cflags libusb-1.0)
+LIBUSB_LIBS := $(shell pkg-config --libs libusb-1.0)
 
 LIB_SRCS := \
 	dsig.c \
 	dsig_udp.c \
 	dsig_cansock.c \
+	dsig_usb.c \
 	dsig_vllp.c \
 	vllp.c \
 	vllp_alertstream.c \
@@ -44,7 +46,7 @@ $(LIB): $(LIB_OBJS)
 	ar rcs $@ $^
 
 $(TOOL): $(TOOL_OBJS) $(LIB)
-	$(CC) $(TOOL_OBJS) $(LIB) -lpthread -o $@
+	$(CC) $(TOOL_OBJS) $(LIB) -lpthread $(LIBUSB_LIBS) -o $@
 
 clean:
 	rm -rf $(O)
