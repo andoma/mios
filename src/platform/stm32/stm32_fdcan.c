@@ -421,11 +421,17 @@ stm32_fdcan_init(fdcan_t *fc, const char *name,
   if(err)
     return err;
 
+  // DSJW must always be strictly smaller than DTSEG2 (RM0440/RM0433
+  // FDCAN_DBTP), unlike NBTP's NSJW/NTSEG2 which has no such documented
+  // constraint. At 1Mbit-only this never mattered (DTSEG2 was large
+  // enough that DSJW==DTSEG2 stayed within spec by luck); it broke real
+  // reception once the data phase ran fast enough that a small DTSEG2
+  // made DSJW==DTSEG2 actually violate the constraint.
   uint32_t dbtp =
     ((data.prescaler - 1) << 16) |
     ((data.t1 - 1) << 8) |
     ((data.t2 - 1) << 4) |
-    ((data.t2 - 1) << 0) |
+    ((data.t2 > 1 ? data.t2 - 2 : 0) << 0) |
     0;
 
   if(flags & FDCAN_ENABLE_TDC) {
