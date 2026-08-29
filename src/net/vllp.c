@@ -301,6 +301,8 @@ static pbuf_t *
 vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len,
                 pbuf_t *pb)
 {
+  evlog(LOG_DEBUG, "VLLP syn, len=%zd", len);
+
   if(len != 7)
     return pb;
 

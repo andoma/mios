@@ -93,9 +93,12 @@ dsig_rx(device_t *d, usb_ep_t *ue, uint32_t bytes, uint32_t flags)
   }
 
   pb->pb_flags = PBUF_SOP | PBUF_EOP;
-  pb->pb_pktlen = bytes - 2;
+  // can_input() expects [4-byte LE id][payload] and drops the first 4
+  // bytes to recover the payload -- pktlen must span both, not just
+  // the (bytes - 2) actual USB-dsig payload.
+  pb->pb_pktlen = bytes + 2;
   pb->pb_offset = 0;
-  pb->pb_buflen = bytes - 2;
+  pb->pb_buflen = bytes + 2;
   uint32_t *u32 = pbuf_data(pb, 0);
   *u32 = id;
 
