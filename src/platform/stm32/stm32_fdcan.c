@@ -203,7 +203,8 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
   uint32_t w1 = 0;
 
   if(len > 8) {
-    w1 |= 1 << 21; // Enable FDCAN
+    w1 |= 1 << 21; // FD frame format
+    w1 |= 1 << 20; // Bitrate switching (only valid together with FDF)
 
     switch(len) {
     case 12:
@@ -245,7 +246,6 @@ stm32_fdcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
     reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 0), id | (1 << 30));
   }
 
-  w1 |= 1 << 20; // Bitrate switching
   reg_wr(fc->ram_base + FDCAN_TXBUF(bufidx, 1), w1);
 
   const uint32_t *u32 = data;
