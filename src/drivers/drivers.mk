@@ -16,6 +16,9 @@ SRCS-${ENABLE_ICM42688} += \
 SRCS-${ENABLE_TOKMAS_BARO} += \
 	${SRC}/drivers/tokmas_baro.c
 
+SRCS-${ENABLE_IST8310} += \
+	${SRC}/drivers/ist8310.c
+
 SRCS-${ENABLE_A3G4250D} += \
 	${SRC}/drivers/a3g4250d.c
 
