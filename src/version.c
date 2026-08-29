@@ -1,5 +1,6 @@
 #include <mios/version.h>
 #include <mios/eventlog.h>
+#include <mios/mcu_family.h>
 
 #include <stdio.h>
 #include <stdint.h>
@@ -8,6 +9,7 @@
 const char _appname[] __attribute__((section("appname"))) = APPNAME;
 uint8_t _miosversion[21] __attribute__((section("miosversion")));
 uint8_t _appversion[21] __attribute__((section("appversion")));
+const uint32_t _mcu_family __attribute__((section("mcufamily"))) = MCU_FAMILY;
 
 const char *
 mios_get_app_name(void)

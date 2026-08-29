@@ -567,6 +567,44 @@ write_cmdline(libusb_device_handle *h, uint32_t addr, uint32_t maxlen,
   return 0;
 }
 
+// STM32 ROM DFU exposes internal-flash erase geometry via the interface
+// string parsed by parse_geometry(); sector granularity alone tells an
+// STM32H7 (large sectors, e.g. 128K) apart from an STM32G4 (small pages,
+// e.g. 2K) -- no chip-specific register read needed. This exists to stop
+// an md1(G4)/fc1(H7) image ending up on the wrong physical board when
+// both are on the bench in DFU mode at once.
+#define FAMILY_SECTOR_THRESHOLD (16 * 1024)
+
+static int
+verify_mcu_family(uint32_t expected_family, int num_sector_sizes,
+                  const uint32_t *sectorsizes)
+{
+  if(expected_family == MCU_FAMILY_UNKNOWN)
+    return 0;
+
+  if(num_sector_sizes == 0) {
+    dfu_logf(LOG_WARNING, "Could not determine flash geometry; "
+             "skipping MCU family check");
+    return 0;
+  }
+
+  const int looks_like_h7 = sectorsizes[0] >= FAMILY_SECTOR_THRESHOLD;
+
+  if(expected_family == MCU_FAMILY_STM32H7 && !looks_like_h7) {
+    dfu_logf(LOG_ERR, "REFUSING TO FLASH: image is built for STM32H7 but "
+             "connected chip has %u-byte erase sectors (looks like a G4)",
+             sectorsizes[0]);
+    return -1;
+  }
+  if(expected_family == MCU_FAMILY_STM32G4 && looks_like_h7) {
+    dfu_logf(LOG_ERR, "REFUSING TO FLASH: image is built for STM32G4 but "
+             "connected chip has %u-byte erase sectors (looks like an H7)",
+             sectorsizes[0]);
+    return -1;
+  }
+  return 0;
+}
+
 static int
 stm32_dfu_flasher(const struct mios_image *mi,
                   libusb_device_handle *h,
@@ -622,6 +660,24 @@ stm32_dfu_flasher(const struct mios_image *mi,
     num_sector_sizes = parse_geometry(h, &flashstart,
                                       sectorsizes, num_sector_sizes,
                                       &xfer_size);
+
+    if(verify_mcu_family(mi->mcu_family, num_sector_sizes, sectorsizes)) {
+      // Leave the device running rather than stranded in the bootloader.
+      // Jump to the raw flash base (not mi->load_addr, which reflects the
+      // *wrong* ELF's memory layout) -- 0x08000000 is where every STM32
+      // starts fetching on a real hardware reset, bootloader-partitioned
+      // or not, so it's safe regardless of what's actually connected.
+      dfu_logf(LOG_INFO, "Leaving DFU without programming...");
+      ctrl_out(h, DFU_ABORT, 0, NULL, 0);
+      if(set_address_pointer(h, 0x08000000) == 0) {
+        ctrl_out(h, DFU_DNLOAD, 0, NULL, 0);
+        // The follow-up GETSTATUS poll is what actually drives the
+        // bootloader through dfuMANIFEST-SYNC -> dfuMANIFEST and triggers
+        // the jump; without it some ST bootloaders just sit in-protocol.
+        dfu_getstatus(h, &st);
+      }
+      return -1;
+    }
 
     if(num_sector_sizes == 0) {
       dfu_logf(LOG_INFO, "Mass erase ...");

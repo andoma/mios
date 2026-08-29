@@ -6,6 +6,9 @@ UNAME_S := $(shell uname -s)
 
 PLATFORM ?= lm3s811evb
 
+# Set by platform .mk files (see include/mios/mcu_family.h); 0 = unknown.
+MCU_FAMILY ?= 0
+
 O ?= build.${PLATFORM}
 
 # Base name for build artifacts. Apps set APPNAME so their outputs are
@@ -171,6 +174,7 @@ ${CONFIG_H}: ${GLOBALDEPS}
 	@echo "\tGEN\t$@"
 	@echo >$@ ${CONFIG_H_CONTENTS}
 	@echo >>$@ "#define APPNAME \"${APPNAME}\""
+	@echo >>$@ "#define MCU_FAMILY ${MCU_FAMILY}"
 
 clean::
 	rm -rf "${O}" build.host

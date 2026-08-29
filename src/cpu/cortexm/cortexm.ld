@@ -70,6 +70,12 @@ SECTIONS {
                 . = ALIGN(4);
                 PROVIDE(_appname = .);
                 KEEP(*(appname))
+        } >FLASH
+
+        .mcufamily : {
+                . = ALIGN(4);
+                PROVIDE(_mcu_family = .);
+                KEEP(*(mcufamily))
                 . = ALIGN(8);
                  _etext = .;
         } >FLASH

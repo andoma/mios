@@ -17,6 +17,18 @@
 
 #define OPENOCD_TCL_PORT 6666
 
+// Factory-programmed, read-only chip-identification addresses used to
+// confirm we're talking to the MCU family the ELF was actually built for
+// (see stm32h7.c/stm32g4.c for the same values used at runtime). This
+// exists to stop an md1(G4)/fc1(H7) image ending up on the wrong physical
+// board when both could be reached via OpenOCD.
+#define STM32H7_LINE_ID_ADDR    0x1ff1e8c0
+#define STM32H7_LINE_ID_H723    0x48373233
+#define STM32H7_LINE_ID_H725    0x48373235
+
+#define STM32G4_DBGMCU_IDCODE_ADDR 0xe0042000
+#define STM32G4_DEVID_MASK      0xfff
+
 // STM32 flash starts at 0x08000000. If the load address is elsewhere
 // (RAM, e.g. STM32N6) we use load_image instead of program.
 #define STM32_FLASH_BASE 0x08000000
@@ -112,6 +124,58 @@ is_ram_target(uint64_t load_addr)
   return (load_addr >> 28) != (STM32_FLASH_BASE >> 28);
 }
 
+// Send "mdw <addr>" and parse the "0x........: XXXXXXXX" reply.
+static int
+openocd_read_u32(int fd, uint32_t addr, uint32_t *out, flash_log_t *log)
+{
+  char cmd[64];
+  snprintf(cmd, sizeof(cmd), "mdw 0x%08x", addr);
+  flash_logf(log, "> %s", cmd);
+  char *resp = openocd_command(fd, cmd, 5000);
+  if(resp == NULL) {
+    flash_logf(log, "No response from OpenOCD (timeout?)");
+    return -1;
+  }
+  flash_logf(log, "%s", resp);
+  char *colon = strchr(resp, ':');
+  int ok = colon != NULL && sscanf(colon + 1, "%x", out) == 1;
+  free(resp);
+  return ok ? 0 : -1;
+}
+
+// Refuse to touch the target if the ELF's embedded MCU_FAMILY doesn't
+// match what's actually connected. Unknown/legacy images (mcu_family ==
+// MCU_FAMILY_UNKNOWN) are let through unchecked.
+static int
+verify_mcu_family(int fd, uint32_t expected_family, flash_log_t *log)
+{
+  uint32_t v;
+
+  if(expected_family == MCU_FAMILY_STM32H7) {
+    if(openocd_read_u32(fd, STM32H7_LINE_ID_ADDR, &v, log)) {
+      flash_logf(log, "Could not read chip line-ID to verify target family");
+      return -1;
+    }
+    if(v != STM32H7_LINE_ID_H723 && v != STM32H7_LINE_ID_H725) {
+      flash_logf(log, "REFUSING TO FLASH: image is built for STM32H7 but "
+                 "connected chip's line-ID is 0x%08x (not H72x/H73x)", v);
+      return -1;
+    }
+  } else if(expected_family == MCU_FAMILY_STM32G4) {
+    if(openocd_read_u32(fd, STM32G4_DBGMCU_IDCODE_ADDR, &v, log)) {
+      flash_logf(log, "Could not read DBGMCU_IDCODE to verify target family");
+      return -1;
+    }
+    v &= STM32G4_DEVID_MASK;
+    if(v != 0x468 && v != 0x469 && v != 0x479) {
+      flash_logf(log, "REFUSING TO FLASH: image is built for STM32G4 but "
+                 "connected chip's DBGMCU DEV_ID is 0x%03x (not a G4)", v);
+      return -1;
+    }
+  }
+  return 0;
+}
+
 int
 flash_openocd(const flash_params_t *p, flash_log_t *log)
 {
@@ -140,6 +204,7 @@ flash_openocd(const flash_params_t *p, flash_log_t *log)
     return -1;
   }
   const int ram_target = is_ram_target(mi->load_addr);
+  const uint32_t mcu_family = mi->mcu_family;
   free(mi);
 
   char cmd[1024];
@@ -148,6 +213,12 @@ flash_openocd(const flash_params_t *p, flash_log_t *log)
   // Always reset halt first: safe for all targets, required for RAM targets
   if(openocd_cmd(fd, "reset halt", 5000, log))
     goto out;
+
+  if(verify_mcu_family(fd, mcu_family, log)) {
+    // Leave the target running rather than halted indefinitely.
+    openocd_cmd(fd, "reset run", 5000, log);
+    goto out;
+  }
 
   if(ram_target) {
     flash_logf(log, "RAM target detected (load addr not in flash)");

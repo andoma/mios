@@ -2,6 +2,9 @@ P := ${SRC}/platform/stm32g4
 
 GLOBALDEPS += ${P}/stm32g4.mk
 
+# See include/mios/mcu_family.h
+MCU_FAMILY := 2
+
 CPPFLAGS += -iquote${P} -include stm32g4.h
 
 LDSCRIPT ?= ${P}/stm32g4$(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),_bootloader,).ld

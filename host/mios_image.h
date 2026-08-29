@@ -3,12 +3,19 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// Quoted+relative on purpose: this tree's includes are compiled as
+// ordinary host code (no -nostdinc), so we deliberately avoid adding
+// mios/include to the -I search path -- it shadows libc headers
+// (string.h, errno.h, ...) with mios's freestanding versions.
+#include "../include/mios/mcu_family.h"
+
 typedef struct mios_image {
   const char *appname;      // Points into image[]
   uint8_t app_version[21];  // 20 bytes SHA1 + 1 byte dirty flag
   uint8_t mios_version[21]; // 20 bytes SHA1 + 1 byte dirty flag
   uint8_t buildid[20];      // 20 byte SHA1 from toolchain
   uint64_t buildid_paddr;   // Physical address of buildid on chip
+  uint32_t mcu_family;      // MCU_FAMILY_* the ELF was built for (0 = unknown)
 
   uint64_t load_addr;       // Where to start writing image to flash
 

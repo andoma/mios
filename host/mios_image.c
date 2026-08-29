@@ -221,6 +221,10 @@ mios_image_from_elf_mem32(const void *elf, size_t elfsize,
       mi->appname = (const char *)mi->image + shdr->addr - image_begin;
     }
 
+    if(!strcmp(nam, ".mcufamily")) {
+      memcpy(&mi->mcu_family, elf + shdr->offset, sizeof(mi->mcu_family));
+    }
+
     if(!strcmp(nam, ".cmdline_info")) {
       uint32_t info[2];
       memcpy(info, elf + shdr->offset, sizeof(info));
@@ -346,6 +350,10 @@ mios_image_from_elf_mem64(const void *elf, size_t elfsize,
       uint64_t paddr = vtop64(elf, shdr->addr);
       if(paddr != 0)
         mi->appname = (const char *)mi->image + paddr - image_begin;
+    }
+
+    if(!strcmp(nam, ".mcufamily")) {
+      memcpy(&mi->mcu_family, elf + shdr->offset, sizeof(mi->mcu_family));
     }
 
     if(!strcmp(nam, ".cmdline_info")) {

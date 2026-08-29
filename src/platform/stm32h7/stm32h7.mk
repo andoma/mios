@@ -2,6 +2,9 @@ P := ${SRC}/platform/stm32h7
 
 GLOBALDEPS += ${P}/stm32h7.mk
 
+# See include/mios/mcu_family.h
+MCU_FAMILY := 1
+
 CPPFLAGS += -iquote${P} -include ${P}/stm32h7.h
 
 LDSCRIPT ?= ${P}/stm32h7$(if $(subst no,,${ENABLE_BUILTIN_BOOTLOADER}),_bootloader,).ld
