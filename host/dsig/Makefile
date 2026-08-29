@@ -13,6 +13,10 @@ CC := gcc
 CFLAGS := -O2 -g -Wall -Werror -I. -I.. $(shell pkg-config --cflags libusb-1.0)
 LIBUSB_LIBS := $(shell pkg-config --libs libusb-1.0)
 
+# vllp_ota.c needs mios_image.c, which lives one level up (shared with
+# host/flash and host/mcp).
+VPATH := ..
+
 LIB_SRCS := \
 	dsig.c \
 	dsig_udp.c \
@@ -25,7 +29,8 @@ LIB_SRCS := \
 	vllp_ota.c \
 	vllp_rpc.c \
 	vllp_telnetd.c \
-	vllp_term.c
+	vllp_term.c \
+	mios_image.c
 
 LIB_OBJS := $(LIB_SRCS:%.c=$(O)/%.o)
 

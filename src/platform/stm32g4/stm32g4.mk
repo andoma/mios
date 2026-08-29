@@ -36,6 +36,7 @@ SRCS += ${C}/entry-xip.s \
 ${MO}/src/platform/stm32g4/%.o : CFLAGS += ${NOFPU}
 
 SRCS-${ENABLE_BUILTIN_BOOTLOADER} += \
+	${P}/stm32g4_ota.c \
 	${P}/boot/stm32g4_bootloader.c \
 	${P}/boot/isr.s \
 

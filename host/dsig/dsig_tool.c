@@ -18,6 +18,10 @@
  *       Open a VLLP client and attach an interactive shell on CHANNEL
  *       (default "shell"). Exit with Ctrl-B.
  *
+ *   dsig ota      TXID RXID ELFPATH
+ *       Open a VLLP client on the "ota" service and push ELFPATH to the
+ *       target, which reboots into it on success.
+ *
  * Common options (before the subcommand):
  *   -t TRANSPORT  'udp' (default), 'cansock', or 'usb'
  *   -g GROUP      udp multicast group  (default 239.255.213.22)
@@ -39,6 +43,7 @@
 #include "dsig_vllp.h"
 #include "vllp.h"
 #include "vllp_logstream.h"
+#include "vllp_ota.h"
 #include "vllp_term.h"
 
 #include <ctype.h>
@@ -270,6 +275,10 @@ usage(void)
 "      Open a VLLP client and attach an interactive shell on CHANNEL\n"
 "      (default 'shell'). Exit with Ctrl-B.\n"
 "\n"
+"  ota TXID RXID ELFPATH\n"
+"      Push ELFPATH to the target over the 'ota' service. The target\n"
+"      reboots into it on success; a no-op if it's already running.\n"
+"\n"
 "EXAMPLES\n"
 "  Watch every frame on the default UDP group:\n"
 "      dsig listen\n"
@@ -287,7 +296,10 @@ usage(void)
 "      dsig log 0x201 0x200\n"
 "\n"
 "  Same idea over real CAN with the MTU-8 server (device tx=0x210, rx=0x211):\n"
-"      dsig -t cansock -i can0 -m 8 term 0x211 0x210\n");
+"      dsig -t cansock -i can0 -m 8 term 0x211 0x210\n"
+"\n"
+"  Push a firmware upgrade over real CAN-FD (device tx=0x210, rx=0x211):\n"
+"      dsig -t cansock -i can0 -m 64 ota 0x211 0x210 build.myapp/myapp.elf\n");
 }
 
 int
@@ -424,6 +436,27 @@ main(int argc, char **argv)
     }
     /* vllp_terminal() takes over stdin/stdout and exit()s when done. */
     vllp_terminal(dsig_vllp_get_vllp(dv), chan);
+    dsig_vllp_destroy(dv);
+
+  } else if(!strcasecmp(cmd, "ota")) {
+    if(optind + 2 >= argc) { usage(); rc = 2; goto out; }
+    uint32_t txid = (uint32_t)strtoul(argv[optind++], NULL, 0);
+    uint32_t rxid = (uint32_t)strtoul(argv[optind++], NULL, 0);
+    const char *elfpath = argv[optind++];
+    uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+    dsig_vllp_t *dv = dsig_vllp_client_create(bus, txid, rxid, mtu, timeout_s,
+                                              flags, NULL, on_vllp_log);
+    if(dv == NULL) {
+      fprintf(stderr, "dsig: failed to create vllp client\n");
+      rc = 1; goto out;
+    }
+    const char *errstr = vllp_ota(dsig_vllp_get_vllp(dv), elfpath);
+    if(errstr) {
+      fprintf(stderr, "dsig: ota failed: %s\n", errstr);
+      rc = 1;
+    } else {
+      fprintf(stderr, "dsig: ota complete (or already running)\n");
+    }
     dsig_vllp_destroy(dv);
 
   } else {
