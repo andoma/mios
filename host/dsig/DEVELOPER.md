@@ -123,8 +123,13 @@ dsig_emitter_destroy(e);                         // stops
 
 Matches the guest-side `src/net/dsig_udp.c` byte-for-byte: each datagram
 carries `[u32 LE signal_id][payload]`. Defaults to multicast group
-`239.255.213.22:54550`. Multicast loopback is enabled so two processes
-on the same host can talk to each other.
+`239.255.213.22:54550`. Multicast loopback is always enabled, so
+multiple local processes on the same host can talk to each other --
+there's no socket option for "loop back to other local sockets but not
+the sender," so a process that relays between this bus and another
+transport (e.g. fcmon bridging USB<->UDP) will see its own forwarded
+frames echo straight back here, and needs to recognize and drop them
+itself (see fcmon's `relay_usb_to_udp`/`relay_udp_to_usb`).
 
 ```c
 dsig_udp_t *udp = dsig_udp_create("239.255.213.22", 0xd516, /*ifname=*/NULL);

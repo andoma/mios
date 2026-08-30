@@ -35,6 +35,14 @@ typedef struct dsig_udp dsig_udp_t;
  * the multicast group is joined on that specific interface and outgoing
  * multicast goes out the same interface. Pass NULL group or 0 port to use
  * defaults. Returns NULL on failure.
+ *
+ * Multicast loopback is always enabled, so multiple local processes on the
+ * same host (e.g. dsig_tool instances) can see each other's traffic. A
+ * process that relays between this bus and another transport (e.g. fcmon
+ * bridging USB<->UDP) will see its own forwarded frames echo straight back
+ * on this bus -- there's no socket option that loops back to other local
+ * sockets but not the sender, so such a relay needs to recognize and drop
+ * its own echo itself (see fcmon's relay_usb_to_udp/relay_udp_to_usb).
  */
 dsig_udp_t *dsig_udp_create(const char *group, uint16_t port,
                             const char *bind_ifname);

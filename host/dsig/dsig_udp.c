@@ -21,6 +21,7 @@ struct dsig_udp {
   dsig_t *bus;
   pthread_t rx_tid;
   int rx_running;
+  volatile int stop;
 };
 
 dsig_udp_t *
@@ -81,8 +82,22 @@ dsig_udp_create(const char *group, uint16_t port, const char *bind_ifname)
     setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &ifa, sizeof(ifa));
   }
 
+  // Loopback enabled: lets other local processes on this host (e.g.
+  // another dsig CLI instance) see traffic on this group, at the cost of
+  // also seeing your own sends echoed back -- callers relaying between
+  // this bus and another transport need to recognize and drop their own
+  // echo themselves (there's no socket option that loops back to other
+  // local sockets but not the sender; it's an all-or-nothing gate on
+  // local delivery). See fcmon's relay_usb_to_udp/relay_udp_to_usb.
   int loop = 1;
   setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+
+  // shutdown() on a UDP socket doesn't reliably unblock a thread parked
+  // in recv() (unlike TCP) -- dsig_udp_destroy() instead sets t->stop
+  // and waits for this timeout to let rx_thread notice and exit, rather
+  // than joining a thread that may never wake up.
+  struct timeval rcvtimeo = { 0, 200000 };
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rcvtimeo, sizeof(rcvtimeo));
 
   dsig_udp_t *t = calloc(1, sizeof(*t));
   if(t == NULL) {
@@ -118,11 +133,11 @@ rx_thread(void *arg)
 {
   dsig_udp_t *t = arg;
   uint8_t buf[4 + 1500];
-  while(1) {
+  while(!t->stop) {
     ssize_t n = recv(t->fd, buf, sizeof(buf), 0);
     if(n < 0) {
-      if(errno == EINTR)
-        continue;
+      if(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+        continue; // EAGAIN/EWOULDBLOCK: SO_RCVTIMEO fired, recheck t->stop
       break;
     }
     if(n < 4)
@@ -152,7 +167,7 @@ dsig_udp_destroy(dsig_udp_t *t)
   if(t == NULL)
     return;
   if(t->rx_running) {
-    shutdown(t->fd, SHUT_RDWR);
+    t->stop = 1;
     pthread_join(t->rx_tid, NULL);
   }
   close(t->fd);
