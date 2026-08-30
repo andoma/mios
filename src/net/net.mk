@@ -108,6 +108,9 @@ SRCS-${ENABLE_NET_STACK} += \
 SRCS-${ENABLE_RPC} += \
 	${SRC}/net/service/svc_rpc.c \
 
+SRCS-${ENABLE_MCP} += \
+	${SRC}/net/service/svc_mcp.c \
+
 SRCS-${ENABLE_NET_IPV4} += \
 	${SRC}/net/service/svc_telnet.c \
 

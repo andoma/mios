@@ -21,8 +21,18 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
   while(1) {
 
     char c;
-    if(stream_read(s, &c, 1, len < 1 ? wait : 1) == 0)
-      return 0;
+    ssize_t r = stream_read(s, &c, 1, len < 1 ? wait : 1);
+    // <=0 means the stream ended or errored (e.g. ERR_INTERRUPTED on a
+    // closed pushpull channel) -- propagate immediately rather than
+    // looping. A prior version only checked for ==0, so a stream that
+    // returns a negative error code on closure (instead of 0) fell
+    // through into the switch on garbage and looped straight back into
+    // another stream_read() forever: a 100%-CPU spin, not just a stuck
+    // read, on any transport where the stream can actually close after
+    // the first successful read (unlike this function's original
+    // permanent-UART use case, which never does).
+    if(r <= 0)
+      return r;
 
     switch(c) {
     case 0x7e:
@@ -31,7 +41,9 @@ hdlc_read_to_buf(stream_t *s, uint8_t *buf, size_t max_frame_size, int wait)
       len = 0;
       break;
     case 0x7d:
-      stream_read(s, &c, 1, 1);
+      r = stream_read(s, &c, 1, 1);
+      if(r <= 0)
+        return r;
       c ^= 0x20;
     default:
       if(len >= 0) {

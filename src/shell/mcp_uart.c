@@ -33,12 +33,29 @@ typedef struct mcp_uart {
 
   mutex_t tx_mutex;      // serializes frames from the command and hello paths
 
+  uint8_t closing;       // set once, tells mcp_hello_thread to stop
+  uint8_t refcnt;        // 2 while both threads are alive, free() at 0
+
   uint16_t txoff;        // fill level of txbuf (byte 0 = message type)
 
   uint8_t txbuf[MCP_MAX_FRAME];
   uint8_t rxbuf[MCP_MAX_FRAME + 1]; // +1 so we can NUL-terminate a full frame
 
 } mcp_uart_t;
+
+
+// Both threads below share one mcp_uart_t and can exit independently
+// (the reader on stream closure, the hello beacon on noticing that) --
+// whichever exits last frees it.
+static void
+mcp_uart_release(mcp_uart_t *m)
+{
+  mutex_lock(&m->tx_mutex);
+  int last = --m->refcnt == 0;
+  mutex_unlock(&m->tx_mutex);
+  if(last)
+    free(m);
+}
 
 
 // Send one complete frame, serialized against the hello beacon so frames
@@ -152,14 +169,27 @@ mcp_uart_thread(void *arg)
 
   while(1) {
     int len = hdlc_read_to_buf(m->uart, m->rxbuf, MCP_MAX_FRAME, 1);
-    if(len > 0)
+    if(len > 0) {
       mcp_handle(m, m->rxbuf, len);
+      continue;
+    }
+    if(len < 0)
+      break; // stream closed/errored -- was previously an infinite
+             // 100%-CPU spin here on any transport whose stream can
+             // actually close (unlike a permanent UART)
   }
+
+  mutex_lock(&m->tx_mutex);
+  m->closing = 1;
+  mutex_unlock(&m->tx_mutex);
+  mcp_uart_release(m);
+  thread_exit(NULL);
 }
 
 
 // Periodic beacon: lets the host auto-detect the MCP port, and (being
 // printable) harmlessly identifies the port if opened in a terminal.
+// Exits once mcp_uart_thread notices the stream has closed.
 __attribute__((noreturn))
 static void *
 mcp_hello_thread(void *arg)
@@ -170,9 +200,16 @@ mcp_hello_thread(void *arg)
   while(1) {
     usleep(MCP_HELLO_PERIOD_US);
     mutex_lock(&m->tx_mutex);
+    if(m->closing) {
+      mutex_unlock(&m->tx_mutex);
+      break;
+    }
     hdlc_send_printable(m->uart, hello, sizeof(hello));
     mutex_unlock(&m->tx_mutex);
   }
+
+  mcp_uart_release(m);
+  thread_exit(NULL);
 }
 
 
@@ -183,6 +220,7 @@ mcp_uart_create(stream_t *s)
   m->stream.vtable = &mcp_stream_vtable;
   m->uart = s;
   m->txoff = 1;
+  m->refcnt = 2;
   mutex_init(&m->tx_mutex, "mcptx");
 
   thread_create_shell(mcp_uart_thread, m, "mcp-uart", &m->stream);

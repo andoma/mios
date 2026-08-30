@@ -13,6 +13,12 @@ SRCS-${ENABLE_PERFTEST} += \
 SRCS-${ENABLE_VCON} += \
 	${SRC}/shell/cmd_vcon.c \
 
+# mcp_uart.c is transport-agnostic (any HDLC-framed stream_t) despite the
+# name -- nrf54l.mk also pulls it in directly, unconditionally, for its
+# UART use case, independent of this flag.
+SRCS-${ENABLE_MCP} += \
+	${SRC}/shell/mcp_uart.c \
+
 ${MOS}/shell/cli.o : CFLAGS += ${NOFPU}
 ${MOS}/shell/cli_edit.o : CFLAGS += ${NOFPU}
 ${MOS}/shell/monitor.o : CFLAGS += ${NOFPU}
