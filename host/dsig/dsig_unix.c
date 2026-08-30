@@ -4,25 +4,44 @@
 #include "dsig_unix.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
-#define MAX_PEERS 16
+// AF_UNIX SOCK_STREAM, framed as [u32 LE frame_len][u32 LE signal][payload],
+// where frame_len counts everything after itself (4 + payload length).
+// SOCK_SEQPACKET would avoid needing the length prefix, but macOS never
+// implemented it for AF_UNIX -- STREAM is the portable choice.
+
+#define MAX_CONNS 16
+#define MAX_PAYLOAD 1500
+#define MAX_FRAME_BODY (4 + MAX_PAYLOAD)
+#define RX_BUF_SIZE 4096
+
+struct unix_conn {
+  int fd;
+  uint8_t buf[RX_BUF_SIZE];
+  size_t len;
+};
 
 struct dsig_unix {
-  int fd;
-  char bind_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+  int is_server;
+  int listen_fd; // server only
 
-  pthread_mutex_t peer_lock;
-  struct sockaddr_un peers[MAX_PEERS];
-  socklen_t peer_lens[MAX_PEERS];
-  int num_peers;
+  char bind_path[sizeof(((struct sockaddr_un *)0)->sun_path)]; // server only
+  char peer_path[sizeof(((struct sockaddr_un *)0)->sun_path)]; // client only
+
+  pthread_mutex_t conn_lock;
+  struct unix_conn conns[MAX_CONNS];
+  int num_conns;
 
   dsig_t *bus;
   pthread_t rx_tid;
@@ -30,19 +49,12 @@ struct dsig_unix {
   volatile int stop;
 };
 
-// Caller holds peer_lock.
-static void
-add_peer_locked(dsig_unix_t *t, const struct sockaddr_un *addr, socklen_t len)
+static int64_t
+now_ms(void)
 {
-  for(int i = 0; i < t->num_peers; i++) {
-    if(t->peer_lens[i] == len && !memcmp(&t->peers[i], addr, len))
-      return; // already known
-  }
-  if(t->num_peers >= MAX_PEERS)
-    return; // best-effort: drop silently, existing peers still work
-  t->peers[t->num_peers] = *addr;
-  t->peer_lens[t->num_peers] = len;
-  t->num_peers++;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 dsig_unix_t *
@@ -51,107 +63,225 @@ dsig_unix_create(const char *bind_path, const char *peer_path)
   if(bind_path == NULL && peer_path == NULL)
     return NULL;
 
-  int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-  if(fd < 0)
-    return NULL;
-
   dsig_unix_t *t = calloc(1, sizeof(*t));
-  if(t == NULL) {
-    close(fd);
+  if(t == NULL)
     return NULL;
-  }
-  t->fd = fd;
-  pthread_mutex_init(&t->peer_lock, NULL);
+  t->listen_fd = -1;
+  pthread_mutex_init(&t->conn_lock, NULL);
 
-  char generated[64];
-  if(bind_path == NULL) {
-    snprintf(generated, sizeof(generated), "/tmp/dsig-%d.sock", (int)getpid());
-    bind_path = generated;
-  }
+  t->is_server = (peer_path == NULL);
 
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", bind_path);
+  if(t->is_server) {
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if(fd < 0) {
+      pthread_mutex_destroy(&t->conn_lock);
+      free(t);
+      return NULL;
+    }
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", bind_path);
 
-  unlink(bind_path); // clear a stale socket file left by a prior instance
-  if(bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    close(fd);
-    pthread_mutex_destroy(&t->peer_lock);
-    free(t);
-    return NULL;
-  }
-  snprintf(t->bind_path, sizeof(t->bind_path), "%s", bind_path);
-
-  struct timeval rcvtimeo = { 0, 200000 };
-  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &rcvtimeo, sizeof(rcvtimeo));
-
-  if(peer_path != NULL) {
-    struct sockaddr_un paddr;
-    memset(&paddr, 0, sizeof(paddr));
-    paddr.sun_family = AF_UNIX;
-    snprintf(paddr.sun_path, sizeof(paddr.sun_path), "%s", peer_path);
-    pthread_mutex_lock(&t->peer_lock);
-    add_peer_locked(t, &paddr, sizeof(paddr));
-    pthread_mutex_unlock(&t->peer_lock);
+    unlink(bind_path); // clear a stale socket file left by a prior instance
+    if(bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+       listen(fd, MAX_CONNS) < 0) {
+      close(fd);
+      pthread_mutex_destroy(&t->conn_lock);
+      free(t);
+      return NULL;
+    }
+    snprintf(t->bind_path, sizeof(t->bind_path), "%s", bind_path);
+    t->listen_fd = fd;
+  } else {
+    snprintf(t->peer_path, sizeof(t->peer_path), "%s", peer_path);
+    // Connection is established lazily by the rx thread (retried until
+    // the server -- e.g. fcmon -- is actually up), not here.
   }
 
   return t;
+}
+
+// Caller holds conn_lock. Swap-with-last removal: safe when walking the
+// conns array from the highest index down (see rx_thread()).
+static void
+remove_conn_locked(dsig_unix_t *t, int idx)
+{
+  close(t->conns[idx].fd);
+  t->conns[idx] = t->conns[t->num_conns - 1];
+  t->num_conns--;
 }
 
 void
 dsig_unix_tx(void *opaque, uint32_t signal, const void *data, size_t len)
 {
   dsig_unix_t *t = opaque;
-  uint8_t buf[4 + 1500];
-  if(len > sizeof(buf) - 4)
+  if(len > MAX_PAYLOAD)
     return;
-  buf[0] = signal;
-  buf[1] = signal >> 8;
-  buf[2] = signal >> 16;
-  buf[3] = signal >> 24;
-  if(len)
-    memcpy(buf + 4, data, len);
 
-  pthread_mutex_lock(&t->peer_lock);
-  for(int i = 0; i < t->num_peers; i++) {
-    sendto(t->fd, buf, 4 + len, 0,
-           (struct sockaddr *)&t->peers[i], t->peer_lens[i]);
+  uint8_t frame[4 + MAX_FRAME_BODY];
+  uint32_t body_len = 4 + (uint32_t)len;
+  frame[0] = body_len;
+  frame[1] = body_len >> 8;
+  frame[2] = body_len >> 16;
+  frame[3] = body_len >> 24;
+  frame[4] = signal;
+  frame[5] = signal >> 8;
+  frame[6] = signal >> 16;
+  frame[7] = signal >> 24;
+  if(len)
+    memcpy(frame + 8, data, len);
+  size_t total = 4 + body_len;
+
+  // Only the rx thread ever removes/closes a connection (it's the one
+  // that observes EOF/errors via poll()); a write() failure here just
+  // means that peer is already dead and about to be reaped there, so
+  // we don't touch the array, just skip it.
+  pthread_mutex_lock(&t->conn_lock);
+  for(int i = 0; i < t->num_conns; i++) {
+    size_t off = 0;
+    while(off < total) {
+      ssize_t n = send(t->conns[i].fd, frame + off, total - off, MSG_NOSIGNAL);
+      if(n < 0) {
+        if(errno == EINTR)
+          continue;
+        break;
+      }
+      off += (size_t)n;
+    }
   }
-  pthread_mutex_unlock(&t->peer_lock);
+  pthread_mutex_unlock(&t->conn_lock);
+}
+
+// Caller holds conn_lock. Drains as many complete frames as are buffered.
+static void
+process_conn_data(dsig_unix_t *t, struct unix_conn *c)
+{
+  for(;;) {
+    if(c->len < 4)
+      return;
+    uint32_t body_len = (uint32_t)c->buf[0] | ((uint32_t)c->buf[1] << 8) |
+      ((uint32_t)c->buf[2] << 16) | ((uint32_t)c->buf[3] << 24);
+    if(body_len < 4 || body_len > MAX_FRAME_BODY) {
+      c->len = 0; // desynced stream, nothing sane to recover -- drop it all
+      return;
+    }
+    if(c->len < 4 + body_len)
+      return; // wait for the rest of this frame
+    uint32_t signal = (uint32_t)c->buf[4] | ((uint32_t)c->buf[5] << 8) |
+      ((uint32_t)c->buf[6] << 16) | ((uint32_t)c->buf[7] << 24);
+    dsig_input(t->bus, signal, c->buf + 8, body_len - 4);
+    size_t consumed = 4 + body_len;
+    memmove(c->buf, c->buf + consumed, c->len - consumed);
+    c->len -= consumed;
+  }
+}
+
+static void
+try_connect(dsig_unix_t *t)
+{
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if(fd < 0)
+    return;
+  struct sockaddr_un addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", t->peer_path);
+  if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    close(fd);
+    return;
+  }
+  pthread_mutex_lock(&t->conn_lock);
+  t->conns[0].fd = fd;
+  t->conns[0].len = 0;
+  t->num_conns = 1;
+  pthread_mutex_unlock(&t->conn_lock);
 }
 
 static void *
 rx_thread(void *arg)
 {
   dsig_unix_t *t = arg;
-  uint8_t buf[4 + 1500];
+  int64_t next_connect_attempt = 0;
+
   while(!t->stop) {
-    struct sockaddr_un from;
-    socklen_t fromlen = sizeof(from);
-    ssize_t n = recvfrom(t->fd, buf, sizeof(buf), 0,
-                        (struct sockaddr *)&from, &fromlen);
-    if(n < 0) {
-      if(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-        continue; // EAGAIN/EWOULDBLOCK: SO_RCVTIMEO fired, recheck t->stop
+    if(!t->is_server && t->num_conns == 0) {
+      int64_t now = now_ms();
+      if(now >= next_connect_attempt) {
+        try_connect(t);
+        next_connect_attempt = now + 500;
+      }
+      if(t->num_conns == 0) {
+        usleep(100000);
+        continue;
+      }
+    }
+
+    struct pollfd pfds[1 + MAX_CONNS];
+    int nfds = 0;
+    int listen_idx = -1;
+    int conn_base;
+
+    pthread_mutex_lock(&t->conn_lock);
+    if(t->is_server) {
+      pfds[nfds].fd = t->listen_fd;
+      pfds[nfds].events = POLLIN;
+      listen_idx = nfds++;
+    }
+    conn_base = nfds;
+    for(int i = 0; i < t->num_conns; i++) {
+      pfds[nfds].fd = t->conns[i].fd;
+      pfds[nfds].events = POLLIN;
+      nfds++;
+    }
+    pthread_mutex_unlock(&t->conn_lock);
+
+    int r = poll(pfds, nfds, 200);
+    if(r < 0) {
+      if(errno == EINTR)
+        continue;
       break;
     }
-    if(n < 4)
+    if(r == 0)
       continue;
 
-    // A peer with no bound address of its own (shouldn't happen for our
-    // own tools, which always bind) has nothing useful to reply to.
-    if(fromlen > (socklen_t)sizeof(sa_family_t)) {
-      pthread_mutex_lock(&t->peer_lock);
-      add_peer_locked(t, &from, fromlen);
-      pthread_mutex_unlock(&t->peer_lock);
+    if(listen_idx >= 0 && (pfds[listen_idx].revents & POLLIN)) {
+      int newfd = accept(t->listen_fd, NULL, NULL);
+      if(newfd >= 0) {
+        pthread_mutex_lock(&t->conn_lock);
+        if(t->num_conns < MAX_CONNS) {
+          t->conns[t->num_conns].fd = newfd;
+          t->conns[t->num_conns].len = 0;
+          t->num_conns++;
+        } else {
+          close(newfd); // best-effort cap, same spirit as the old MAX_PEERS
+        }
+        pthread_mutex_unlock(&t->conn_lock);
+      }
     }
 
-    uint32_t signal = (uint32_t)buf[0]        |
-                      ((uint32_t)buf[1] << 8) |
-                      ((uint32_t)buf[2] << 16)|
-                      ((uint32_t)buf[3] << 24);
-    dsig_input(t->bus, signal, buf + 4, n - 4);
+    pthread_mutex_lock(&t->conn_lock);
+    // Walk downward: remove_conn_locked() only ever swaps in an element
+    // at or below the current index, so already-visited (higher) slots
+    // are never disturbed.
+    for(int i = t->num_conns - 1; i >= 0; i--) {
+      int pi = conn_base + i;
+      if(pi >= nfds || !(pfds[pi].revents & (POLLIN | POLLERR | POLLHUP)))
+        continue;
+      struct unix_conn *c = &t->conns[i];
+      if(c->len == sizeof(c->buf)) {
+        remove_conn_locked(t, i); // no complete frame ever drained: desynced
+        continue;
+      }
+      ssize_t n = read(c->fd, c->buf + c->len, sizeof(c->buf) - c->len);
+      if(n <= 0) {
+        remove_conn_locked(t, i); // EOF or error: a real disconnect
+        continue;
+      }
+      c->len += (size_t)n;
+      process_conn_data(t, c);
+    }
+    pthread_mutex_unlock(&t->conn_lock);
   }
   return NULL;
 }
@@ -175,8 +305,12 @@ dsig_unix_destroy(dsig_unix_t *t)
     t->stop = 1;
     pthread_join(t->rx_tid, NULL);
   }
-  close(t->fd);
-  unlink(t->bind_path);
-  pthread_mutex_destroy(&t->peer_lock);
+  for(int i = 0; i < t->num_conns; i++)
+    close(t->conns[i].fd);
+  if(t->is_server) {
+    close(t->listen_fd);
+    unlink(t->bind_path);
+  }
+  pthread_mutex_destroy(&t->conn_lock);
   free(t);
 }

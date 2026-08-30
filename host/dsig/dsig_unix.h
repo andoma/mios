@@ -1,30 +1,28 @@
 /*
- * AF_UNIX SOCK_DGRAM transport for host-side DSIG.
+ * AF_UNIX SOCK_STREAM transport for host-side DSIG.
  *
- * Message-oriented like UDP (each datagram is exactly one dsig frame,
- * [u32 LE signal][payload]), but local-machine-only and immune to the
- * self-echo problem IP multicast has -- AF_UNIX has no group/loopback
- * concept at all, so a sender can never get its own datagram back.
+ * Local-machine-only, immune to the self-echo problem IP multicast has
+ * (AF_UNIX has no group/loopback concept, so a sender can never get its
+ * own frame back), and -- unlike the SOCK_DGRAM version this replaced --
+ * connection-oriented: a peer going away is a real, detectable event
+ * (EOF/error on its fd) instead of an address that just silently stops
+ * answering. SOCK_SEQPACKET would avoid needing to frame messages
+ * ourselves, but macOS never implemented it for AF_UNIX, so this uses
+ * plain STREAM with a [u32 LE frame_len][u32 LE signal][payload] framing
+ * on top.
  *
- * Unlike a UDP multicast group (where the OS fans a datagram out to
- * every member automatically), AF_UNIX has no broadcast: this transport
- * tracks known peers itself. A peer becomes known either by being given
- * explicitly at creation (the "connect to this known server" case, e.g.
- * dsig_tool talking to fcmon) or by being the sender of a received
- * datagram (the "peers register themselves" case, e.g. fcmon, which
- * doesn't know its clients up front) -- either way, every subsequent
- * send goes out to every known peer.
+ * One side binds+listens+accepts (the server, e.g. fcmon, fanning every
+ * frame out to all connected clients); the other side connects (the
+ * client, e.g. dsig_tool), retrying in the background until the server
+ * is up. Which role a dsig_unix_t plays is inferred from which argument
+ * to dsig_unix_create() is non-NULL.
  *
- * Both ends need their own bound socket path so the other side has an
- * address to reply to; dsig_unix_create() always binds one (auto-
- * generated under /tmp if bind_path is NULL), and unlinks it on destroy.
- *
- * Usage (server, e.g. fcmon -- unknown peers, discovered on receive):
+ * Usage (server, e.g. fcmon -- accepts any number of clients):
  *   dsig_unix_t *u = dsig_unix_create("/tmp/fcmon.sock", NULL);
  *   dsig_t *bus = dsig_create(dsig_unix_tx, u);
  *   dsig_unix_start(u, bus);
  *
- * Usage (client, e.g. dsig_tool -- one already-known peer):
+ * Usage (client, e.g. dsig_tool -- one known server to connect to):
  *   dsig_unix_t *u = dsig_unix_create(NULL, "/tmp/fcmon.sock");
  *   dsig_t *bus = dsig_create(dsig_unix_tx, u);
  *   dsig_unix_start(u, bus);
@@ -45,27 +43,32 @@ extern "C" {
 
 typedef struct dsig_unix dsig_unix_t;
 
-/* bind_path: where this end's own socket lives (peers reply here). NULL
- * auto-generates a path under /tmp (based on pid), unlinked on destroy.
- * peer_path: an already-known peer to seed the send list with (e.g. a
- * server's well-known path). NULL if peers should only be discovered by
- * receiving from them. At least one of bind_path/peer_path must be
- * non-NULL. Returns NULL on failure.
+/* bind_path: run as a server, bind+listen on this path (unlinked on
+ * destroy). Fails immediately (returns NULL) if the bind/listen fails.
+ * peer_path: run as a client, connecting to this well-known path.
+ * Exactly one of bind_path/peer_path must be non-NULL. Returns NULL on
+ * failure (server mode only -- a client always "succeeds", connecting
+ * lazily in the background; see dsig_unix_start()).
  */
 dsig_unix_t *dsig_unix_create(const char *bind_path, const char *peer_path);
 
-/* Spawns the rx thread, which calls dsig_input(bus, ...) for every
- * received datagram and adds its sender to the peer list if new.
+/* Spawns the rx thread. Server: accepts any number of clients and calls
+ * dsig_input(bus, ...) for every frame from any of them. Client: connects
+ * to peer_path, retrying every 500ms until the server is up, and
+ * reconnects the same way if the connection ever drops.
  * Returns 0 on success, -1 on failure.
  */
 int dsig_unix_start(dsig_unix_t *t, dsig_t *bus);
 
-/* Stops the rx thread, closes the socket, unlinks the bind path, frees
- * the transport.
+/* Stops the rx thread, closes all sockets, unlinks the bind path (server
+ * only), frees the transport.
  */
 void dsig_unix_destroy(dsig_unix_t *t);
 
-/* TX callback matching dsig_tx_fn: sends to every known peer. */
+/* TX callback matching dsig_tx_fn: sends to every connected peer
+ * (server: all connected clients; client: the one server connection, if
+ * currently connected -- silently dropped otherwise).
+ */
 void dsig_unix_tx(void *opaque, uint32_t signal, const void *data, size_t len);
 
 #ifdef __cplusplus
