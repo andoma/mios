@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/param.h>
 #include <unistd.h>
 
 #define USB_CLASS_VENDOR 0xff
@@ -207,28 +208,42 @@ dsig_usb_tx(void *opaque, uint32_t signal, const void *data, size_t len)
 {
   dsig_usb_t *t = opaque;
 
-  if(signal > 0xfff || len > EP_SIZE - 2)
+  // RX_BUF_SIZE mirrors what this side can reassemble on receive; used
+  // here too so send/receive limits stay symmetric.
+  if(signal > 0xfff || len > RX_BUF_SIZE - 2)
     return;
 
-  uint8_t frame[EP_SIZE];
-  frame[0] = signal;
-  frame[1] = ((signal >> 8) & 0xf) | 0xc0 | ((t->cnt & 0x3) << 4);
-  memcpy(frame + 2, data, len);
+  // A logical message can exceed one USB max-size packet (62 bytes of
+  // payload after the 2-byte dsig-over-usb header) -- this used to be a
+  // hard reject above EP_SIZE-2, silently dropping anything larger with
+  // no error at all (found via: every VLLP data fragment near the MTU
+  // was silently eaten here, since VLLP's wire frames run up to the
+  // full MTU of 64 bytes, 2 over that old cap -- VLLP retried forever
+  // against a transport quietly dropping every retry). Fragment into
+  // <=EP_SIZE-byte chunks instead, mirroring the guest's own
+  // usb_dsig_output(): build one combined [header][payload] buffer and
+  // slice it. A transfer that's an exact multiple of EP_SIZE has no
+  // natural short packet to mark its end; the loop below sends that
+  // case's trailing zero-length chunk as a real ZLP automatically.
+  uint8_t combined[2 + RX_BUF_SIZE];
+  combined[0] = signal;
+  combined[1] = ((signal >> 8) & 0xf) | 0xc0 | ((t->cnt & 0x3) << 4);
+  memcpy(combined + 2, data, len);
+  const size_t total = 2 + len;
 
   pthread_mutex_lock(&t->lock);
   if(t->connected) {
     t->cnt++;
-    int transferred;
-    int r = libusb_bulk_transfer(t->h, t->ep_out, frame, len + 2,
-                                 &transferred, IO_TIMEOUT_MS);
-    // A transfer that's an exact multiple of the max packet size has
-    // no natural short packet to mark its end -- the guest's usb_dsig.c
-    // waits for one to know the logical transfer is complete, so send
-    // an explicit ZLP terminator (len + 2 can only ever equal EP_SIZE
-    // once, since len is capped at EP_SIZE - 2 above).
-    if(r == 0 && len + 2 == EP_SIZE) {
-      r = libusb_bulk_transfer(t->h, t->ep_out, NULL, 0,
+    int r = 0;
+    for(size_t off = 0; off <= total; off += EP_SIZE) {
+      size_t chunk = MIN(total - off, (size_t)EP_SIZE);
+      int transferred;
+      r = libusb_bulk_transfer(t->h, t->ep_out, combined + off, chunk,
                                &transferred, IO_TIMEOUT_MS);
+      if(r != 0)
+        break;
+      if(off + EP_SIZE > total)
+        break; // just sent the final (possibly zero-length) fragment
     }
     if(r != 0)
       disconnect_locked(t);
