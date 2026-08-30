@@ -31,6 +31,7 @@
  *   -T SECONDS    vllp timeout         (default 3)
  *   -V VID:PID    usb vendor:product id, hex (default 6666:0, 0=any pid)
  *   -S SUBCLASS   usb-dsig vendor-interface subclass (default 2)
+ *   -d            dump every raw TX/RX dsig frame to stderr
  */
 
 #ifndef _GNU_SOURCE
@@ -112,6 +113,44 @@ listen_cb(void *opaque, uint32_t signal, const void *data, size_t len)
   print_signal(signal, data, len);
 }
 
+/* -d: dump every raw dsig frame the transport actually sends/receives,
+ * independent of whatever subcommand (ota/log/term/...) is running. */
+
+static int g_debug;
+
+static void
+dbg_dump(const char *dir, uint32_t signal, const void *data, size_t len)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  fprintf(stderr, "[%lld.%06ld] %s 0x%08" PRIx32 " (%zu)",
+         (long long)ts.tv_sec, ts.tv_nsec / 1000, dir, signal, len);
+  const uint8_t *p = data;
+  for(size_t i = 0; i < len; i++)
+    fprintf(stderr, " %02x", p[i]);
+  fprintf(stderr, "\n");
+}
+
+static dsig_tx_fn g_real_tx;
+static void *g_real_tx_opaque;
+
+static void
+debug_tx_thunk(void *opaque, uint32_t signal, const void *data, size_t len)
+{
+  (void)opaque;
+  dbg_dump("TX", signal, data, len);
+  g_real_tx(g_real_tx_opaque, signal, data, len);
+}
+
+static void
+debug_rx_cb(void *opaque, uint32_t signal, const void *data, size_t len)
+{
+  (void)opaque;
+  if(data == NULL && len == 0)
+    return; // subscription timeout tick, not a real packet
+  dbg_dump("RX", signal, data, len);
+}
+
 /* Transport plumbing */
 
 typedef struct {
@@ -133,7 +172,13 @@ transport_open(transport_t *t, const char *kind,
       fprintf(stderr, "dsig: failed to open UDP transport\n");
       return -1;
     }
-    *out_bus = dsig_create(dsig_udp_tx, t->udp);
+    if(g_debug) {
+      g_real_tx = dsig_udp_tx;
+      g_real_tx_opaque = t->udp;
+      *out_bus = dsig_create(debug_tx_thunk, NULL);
+    } else {
+      *out_bus = dsig_create(dsig_udp_tx, t->udp);
+    }
     if(*out_bus == NULL) {
       dsig_udp_destroy(t->udp);
       return -1;
@@ -152,7 +197,13 @@ transport_open(transport_t *t, const char *kind,
               ifname ? ifname : "can0");
       return -1;
     }
-    *out_bus = dsig_create(dsig_cansock_tx, t->can);
+    if(g_debug) {
+      g_real_tx = dsig_cansock_tx;
+      g_real_tx_opaque = t->can;
+      *out_bus = dsig_create(debug_tx_thunk, NULL);
+    } else {
+      *out_bus = dsig_create(dsig_cansock_tx, t->can);
+    }
     if(*out_bus == NULL) {
       dsig_cansock_destroy(t->can);
       return -1;
@@ -170,7 +221,13 @@ transport_open(transport_t *t, const char *kind,
       fprintf(stderr, "dsig: failed to open USB transport\n");
       return -1;
     }
-    *out_bus = dsig_create(dsig_usb_tx, t->usbt);
+    if(g_debug) {
+      g_real_tx = dsig_usb_tx;
+      g_real_tx_opaque = t->usbt;
+      *out_bus = dsig_create(debug_tx_thunk, NULL);
+    } else {
+      *out_bus = dsig_create(dsig_usb_tx, t->usbt);
+    }
     if(*out_bus == NULL) {
       dsig_usb_destroy(t->usbt);
       return -1;
@@ -246,6 +303,8 @@ usage(void)
 "  -T SECONDS     VLLP link timeout         (default 3)\n"
 "  -V VID:PID     usb vendor:product id, hex (default 6666:0, 0=any pid)\n"
 "  -S SUBCLASS    usb-dsig vendor-interface subclass (default 2)\n"
+"  -d             Dump every raw TX/RX dsig frame (signal+hex) to stderr,\n"
+"                 regardless of which command is running underneath.\n"
 "\n"
 "Signal IDs accept C-style numeric literals (decimal, 0xHEX, 0OCT).\n"
 "All TXID/RXID arguments are from the *host* point of view:\n"
@@ -316,7 +375,7 @@ main(int argc, char **argv)
   uint8_t usb_subclass = 2;
 
   int opt;
-  while((opt = getopt(argc, argv, "+t:g:p:i:m:T:V:S:h")) != -1) {
+  while((opt = getopt(argc, argv, "+t:g:p:i:m:T:V:S:dh")) != -1) {
     switch(opt) {
     case 't': transport = optarg; break;
     case 'g': group = optarg; break;
@@ -331,6 +390,7 @@ main(int argc, char **argv)
       break;
     }
     case 'S': usb_subclass = (uint8_t)strtoul(optarg, NULL, 0); break;
+    case 'd': g_debug = 1; break;
     case 'h':
     default: usage(); return opt == 'h' ? 0 : 2;
     }
@@ -344,6 +404,10 @@ main(int argc, char **argv)
   if(transport_open(&tr, transport, group, port, ifname,
                     usb_vid, usb_pid, usb_subclass, &bus) < 0)
     return 1;
+
+  dsig_sub_t *dbg_sub = NULL;
+  if(g_debug)
+    dbg_sub = dsig_sub(bus, 0, 0, 0, debug_rx_cb, NULL);
 
   signal(SIGINT, on_sigint);
   signal(SIGTERM, on_sigint);
@@ -466,6 +530,8 @@ main(int argc, char **argv)
   }
 
 out:
+  if(dbg_sub)
+    dsig_unsub(dbg_sub);
   transport_close(&tr, bus);
   return rc;
 }
