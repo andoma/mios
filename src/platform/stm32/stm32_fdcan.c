@@ -277,12 +277,28 @@ fdcan_calculate_timings(int source_clk, int target_rate, int spa,
                         can_timing_t *out, const char *which)
 {
   int best_spa = INT32_MAX;
+  int best_error_ppm = INT32_MAX;
   error_t err = ERR_BAD_CONFIG;
 
+  // Tolerate up to ~1% bit-rate error instead of requiring the core
+  // clock to divide the target rate exactly. Needed once the FDCAN
+  // core clock no longer lines up perfectly (e.g. via FDCAN_CKDIV) --
+  // real CAN transceivers/nodes tolerate combined oscillator error
+  // well above this.
+  const int max_error_ppm = 20000;
+
   for(int p = prescaler_max; p >= prescaler_min; p--) {
-    if(source_clk % (target_rate * p))
+    const int denom = target_rate * p;
+    const int total = (source_clk + denom / 2) / denom;
+    if(total < 1)
       continue;
-    const int total = source_clk / (target_rate * p);
+
+    const int actual_rate = source_clk / (total * p);
+    const int error_ppm =
+      (int64_t)abs(actual_rate - target_rate) * 1000000 / target_rate;
+    if(error_ppm > max_error_ppm)
+      continue;
+
     for(int bs2 = 1; bs2 <= bs2_max; bs2++) {
       const int bs1 = total - bs2 - 1;
       if(bs1 < 1 || bs1 > bs1_max)
@@ -291,10 +307,18 @@ fdcan_calculate_timings(int source_clk, int target_rate, int spa,
       const int actual_spa = 100 * (1 + bs1) / total;
       const int diff = abs(actual_spa - spa);
 
-      if(diff > best_spa) {
+      // Bit-rate accuracy always wins first: an exact-division p (the
+      // only kind that used to exist pre-CKDIV) can never be beaten by
+      // an approximate one just because it has a better sample point.
+      // Sample-point match only breaks ties between equally-accurate
+      // candidates -- this makes the outcome identical to the old,
+      // exact-only code whenever a perfect division exists at all.
+      if(error_ppm > best_error_ppm)
         continue;
-      }
+      if(error_ppm == best_error_ppm && diff > best_spa)
+        continue;
 
+      best_error_ppm = error_ppm;
       best_spa = diff;
 
       out->prescaler = p;
