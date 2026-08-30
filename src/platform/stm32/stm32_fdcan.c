@@ -162,6 +162,12 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
   uint32_t ecr = reg_rd(fc->reg_base + FDCAN_ECR);
   uint32_t rec = ecr >> 8 & 0x7f;
   uint32_t tec = ecr & 0xff;
+  // CEL (CAN Error Logging, ECR[23:16]): increments on every protocol
+  // error that bumps TEC/REC, independent of TEC/REC's *current* value
+  // -- unlike them it isn't masked by a later successful transfer, so
+  // it can catch errors that TEC/REC already recovered from between
+  // polls. Reset on read, like LEC below.
+  uint32_t cel = ecr >> 16 & 0xff;
   uint32_t psr = reg_rd(fc->reg_base + FDCAN_PSR);
 
   stprintf(st, "Received packets, Fifo0:%u  Fifo1:%u  NoPbufs:%u\n",
@@ -171,6 +177,7 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
 
   stprintf(st, "Receive error counter:%d  Transmit error counter:%d\n",
            rec, tec);
+  stprintf(st, "Error logging counter (since last read):%u\n", cel);
   stprintf(st, "Bus off recovery attempts:%u\n",
            fc->recovery_attempts);
   stprintf(st, "Bus state: O%s, ", psr & 0x80 ? "ff" : "n");
@@ -182,6 +189,10 @@ stm32_fdcan_print_info(struct device *dev, struct stream *st)
   stprintf(st, "Last error code: %s\n",
            strtbl("None\0Stuffing\0Form\0AckErr\0Bit1Err\0Big0Err\0CRC\0NoChange\0\0",
                   psr & 7));
+  stprintf(st, "Data phase last error code: %s\n",
+           strtbl("None\0Stuffing\0Form\0AckErr\0Bit1Err\0Bit0Err\0CRC\0NoChange\0\0",
+                  (psr >> 8) & 7));
+  stprintf(st, "Protocol exception event: %s\n", psr & (1 << 14) ? "Yes" : "No");
 }
 
 
