@@ -9,6 +9,13 @@
 #define USB_CLASS_VENDOR 0xff
 #define EP_SIZE 64
 
+// A logical dsig-over-usb message can span multiple EP_SIZE packets
+// (see usb_dsig.c's fragmentation on the guest side); libusb/the OS
+// USB stack accumulates packets into one bulk-IN completion up to
+// this buffer size or until a short packet ends the transfer, so this
+// just needs to be >= the largest message we'll ever receive.
+#define RX_BUF_SIZE 512
+
 // Read/write timeout: also doubles as the poll interval for "should this
 // thread stop" and "should we retry discovery", so keep it short.
 #define IO_TIMEOUT_MS 300
@@ -107,7 +114,7 @@ static void *
 rx_thread(void *arg)
 {
   dsig_usb_t *t = arg;
-  uint8_t buf[EP_SIZE];
+  uint8_t buf[RX_BUF_SIZE];
 
   while(t->running) {
     pthread_mutex_lock(&t->lock);
@@ -214,6 +221,15 @@ dsig_usb_tx(void *opaque, uint32_t signal, const void *data, size_t len)
     int transferred;
     int r = libusb_bulk_transfer(t->h, t->ep_out, frame, len + 2,
                                  &transferred, IO_TIMEOUT_MS);
+    // A transfer that's an exact multiple of the max packet size has
+    // no natural short packet to mark its end -- the guest's usb_dsig.c
+    // waits for one to know the logical transfer is complete, so send
+    // an explicit ZLP terminator (len + 2 can only ever equal EP_SIZE
+    // once, since len is capped at EP_SIZE - 2 above).
+    if(r == 0 && len + 2 == EP_SIZE) {
+      r = libusb_bulk_transfer(t->h, t->ep_out, NULL, 0,
+                               &transferred, IO_TIMEOUT_MS);
+    }
     if(r != 0)
       disconnect_locked(t);
   }
