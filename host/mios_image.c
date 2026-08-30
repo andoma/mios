@@ -218,7 +218,15 @@ mios_image_from_elf_mem32(const void *elf, size_t elfsize,
     }
 
     if(!strcmp(nam, ".appname")) {
-      mi->appname = (const char *)mi->image + shdr->addr - image_begin;
+      // The linker script aligns the real content to 4 bytes *within*
+      // this section (`. = ALIGN(4)` before `KEEP(*(appname))`), so
+      // shdr->addr can point at 0-3 bytes of zero padding rather than
+      // the string itself -- skip over it.
+      const char *p = (const char *)mi->image + shdr->addr - image_begin;
+      const char *end = p + shdr->size;
+      while(p < end && *p == '\0')
+        p++;
+      mi->appname = p;
     }
 
     if(!strcmp(nam, ".mcufamily")) {
@@ -347,9 +355,16 @@ mios_image_from_elf_mem64(const void *elf, size_t elfsize,
     }
 
     if(!strcmp(nam, ".appname")) {
+      // See the 32-bit path above: skip the linker's alignment padding
+      // within the section to find the actual string.
       uint64_t paddr = vtop64(elf, shdr->addr);
-      if(paddr != 0)
-        mi->appname = (const char *)mi->image + paddr - image_begin;
+      if(paddr != 0) {
+        const char *p = (const char *)mi->image + paddr - image_begin;
+        const char *end = p + shdr->size;
+        while(p < end && *p == '\0')
+          p++;
+        mi->appname = p;
+      }
     }
 
     if(!strcmp(nam, ".mcufamily")) {
