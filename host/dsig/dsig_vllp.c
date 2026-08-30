@@ -4,6 +4,25 @@
 #include "dsig_vllp.h"
 
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+// Over a loopback-enabled transport (UDP multicast -- see dsig_udp.h),
+// a client sees its own transmitted frame echo straight back to itself
+// microseconds later, with no real round trip to the device involved.
+// VLLP has no way to tell that apart from a genuine (if suspiciously
+// fast) reply and gets stuck waiting for one that already "arrived" --
+// observed hanging an OTA transfer indefinitely. CAN/USB-dsig transports
+// have no such echo (there's nothing to filter there), so this is cheap
+// insurance rather than a real cost on those paths.
+#define DV_RECENT_FRAMES 8
+#define DV_RECENT_WINDOW_US 200000
+
+struct dv_recent {
+  uint32_t hash;
+  uint32_t len;
+  int64_t t_us;
+};
 
 struct dsig_vllp {
   dsig_t *bus;
@@ -11,16 +30,64 @@ struct dsig_vllp {
   vllp_t *vllp;
   dsig_sub_t *sub;
 
+  struct dv_recent recent[DV_RECENT_FRAMES];
+  int recent_idx;
+
   void *user_opaque;
   void (*user_log)(void *opaque, int level, const char *msg);
   open_channel_result_t (*user_open_channel)(void *opaque, const char *name,
                                              vllp_channel_t *vc);
 };
 
+static uint32_t
+dv_fnv1a(const void *data, size_t len)
+{
+  const uint8_t *p = data;
+  uint32_t h = 2166136261u;
+  for(size_t i = 0; i < len; i++) {
+    h ^= p[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
+static int64_t
+dv_now_us(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static void
+dv_remember_sent(dsig_vllp_t *dv, const void *data, size_t len)
+{
+  struct dv_recent *r = &dv->recent[dv->recent_idx];
+  r->hash = dv_fnv1a(data, len);
+  r->len = (uint32_t)len;
+  r->t_us = dv_now_us();
+  dv->recent_idx = (dv->recent_idx + 1) % DV_RECENT_FRAMES;
+}
+
+static int
+dv_was_recently_sent(dsig_vllp_t *dv, const void *data, size_t len)
+{
+  uint32_t h = dv_fnv1a(data, len);
+  int64_t now = dv_now_us();
+  for(int i = 0; i < DV_RECENT_FRAMES; i++) {
+    struct dv_recent *r = &dv->recent[i];
+    if(r->len == (uint32_t)len && r->hash == h &&
+       (now - r->t_us) < DV_RECENT_WINDOW_US)
+      return 1;
+  }
+  return 0;
+}
+
 static void
 dv_tx(void *opaque, const void *data, size_t len)
 {
   dsig_vllp_t *dv = opaque;
+  dv_remember_sent(dv, data, len);
   dsig_send(dv->bus, dv->txid, data, len);
 }
 
@@ -46,6 +113,8 @@ dv_rx(void *opaque, uint32_t signal, const void *data, size_t len)
   (void)signal;
   if(data == NULL || len == 0)
     return;  // ttl timeout sentinel — ignored
+  if(dv_was_recently_sent(dv, data, len))
+    return; // self-echo (e.g. UDP multicast loopback), not a real reply
   vllp_input(dv->vllp, data, len);
 }
 
