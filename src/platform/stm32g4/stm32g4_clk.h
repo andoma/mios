@@ -117,6 +117,17 @@ clk_disable(uint16_t id)
 
 int clk_get_freq(uint16_t id);
 
+__attribute__((always_inline))
+static inline void
+reset_peripheral(uint16_t id)
+{
+  id -= 0x2000; // ENR and RSTR registers are the same, just offset by 0x20
+  reg_set_bit(RCC_BASE + (id >> 8), id & 0xff);
+  asm volatile("dmb");
+  reg_clr_bit(RCC_BASE + (id >> 8), id & 0xff);
+  asm volatile("dmb");
+}
+
 void stm32g4_init_pll(uint8_t hse_freq, uint8_t p_freq);
 
 void stm32g4_reinit_pll(void);
