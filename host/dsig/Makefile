@@ -19,6 +19,7 @@ VPATH := ..
 
 LIB_SRCS := \
 	dsig.c \
+	dsig_transport.c \
 	dsig_udp.c \
 	dsig_unix.c \
 	dsig_cansock.c \

@@ -59,6 +59,7 @@
 #include "dsig_udp.h"
 #include "dsig_unix.h"
 #include "dsig_usb.h"
+#include "dsig_transport.h"
 #include "dsig_vllp.h"
 #include "vllp.h"
 #include "vllp_logstream.h"
@@ -279,17 +280,6 @@ dbg_dump(const char *dir, uint32_t signal, const void *data, size_t len)
     vllp_decode_dump(data, len);
 }
 
-static dsig_tx_fn g_real_tx;
-static void *g_real_tx_opaque;
-
-static void
-debug_tx_thunk(void *opaque, uint32_t signal, const void *data, size_t len)
-{
-  (void)opaque;
-  dbg_dump("TX", signal, data, len);
-  g_real_tx(g_real_tx_opaque, signal, data, len);
-}
-
 static void
 debug_rx_cb(void *opaque, uint32_t signal, const void *data, size_t len)
 {
@@ -299,135 +289,15 @@ debug_rx_cb(void *opaque, uint32_t signal, const void *data, size_t len)
   dbg_dump("RX", signal, data, len);
 }
 
-/* Transport plumbing */
-
-typedef struct {
-  dsig_udp_t *udp;
-  dsig_cansock_t *can;
-  dsig_usb_t *usbt;
-  dsig_unix_t *unx;
-} transport_t;
-
-#define UNIX_SOCKET_PREFIX "file://"
-
-static int
-transport_open(transport_t *t, const char *kind,
-               const char *group, uint16_t port, const char *ifname,
-               uint16_t usb_vid, uint16_t usb_pid, uint8_t usb_subclass,
-               dsig_t **out_bus)
-{
-  memset(t, 0, sizeof(*t));
-  if(!strncmp(kind, UNIX_SOCKET_PREFIX, strlen(UNIX_SOCKET_PREFIX))) {
-    const char *path = kind + strlen(UNIX_SOCKET_PREFIX);
-    t->unx = dsig_unix_create(NULL, path);
-    if(t->unx == NULL) {
-      fprintf(stderr, "dsig: failed to open unix socket transport (%s)\n",
-              path);
-      return -1;
-    }
-    if(g_debug) {
-      g_real_tx = dsig_unix_tx;
-      g_real_tx_opaque = t->unx;
-      *out_bus = dsig_create(debug_tx_thunk, NULL);
-    } else {
-      *out_bus = dsig_create(dsig_unix_tx, t->unx);
-    }
-    if(*out_bus == NULL) {
-      dsig_unix_destroy(t->unx);
-      return -1;
-    }
-    if(dsig_unix_start(t->unx, *out_bus) < 0) {
-      dsig_destroy(*out_bus);
-      dsig_unix_destroy(t->unx);
-      return -1;
-    }
-    return 0;
-  }
-  if(!strcasecmp(kind, "udp")) {
-    t->udp = dsig_udp_create(group, port, ifname);
-    if(t->udp == NULL) {
-      fprintf(stderr, "dsig: failed to open UDP transport\n");
-      return -1;
-    }
-    if(g_debug) {
-      g_real_tx = dsig_udp_tx;
-      g_real_tx_opaque = t->udp;
-      *out_bus = dsig_create(debug_tx_thunk, NULL);
-    } else {
-      *out_bus = dsig_create(dsig_udp_tx, t->udp);
-    }
-    if(*out_bus == NULL) {
-      dsig_udp_destroy(t->udp);
-      return -1;
-    }
-    if(dsig_udp_start(t->udp, *out_bus) < 0) {
-      dsig_destroy(*out_bus);
-      dsig_udp_destroy(t->udp);
-      return -1;
-    }
-    return 0;
-  }
-  if(!strcasecmp(kind, "cansock") || !strcasecmp(kind, "can")) {
-    t->can = dsig_cansock_create(ifname);
-    if(t->can == NULL) {
-      fprintf(stderr, "dsig: failed to open cansock transport (ifname=%s)\n",
-              ifname ? ifname : "can0");
-      return -1;
-    }
-    if(g_debug) {
-      g_real_tx = dsig_cansock_tx;
-      g_real_tx_opaque = t->can;
-      *out_bus = dsig_create(debug_tx_thunk, NULL);
-    } else {
-      *out_bus = dsig_create(dsig_cansock_tx, t->can);
-    }
-    if(*out_bus == NULL) {
-      dsig_cansock_destroy(t->can);
-      return -1;
-    }
-    if(dsig_cansock_start(t->can, *out_bus) < 0) {
-      dsig_destroy(*out_bus);
-      dsig_cansock_destroy(t->can);
-      return -1;
-    }
-    return 0;
-  }
-  if(!strcasecmp(kind, "usb")) {
-    t->usbt = dsig_usb_create(usb_vid, usb_pid, usb_subclass);
-    if(t->usbt == NULL) {
-      fprintf(stderr, "dsig: failed to open USB transport\n");
-      return -1;
-    }
-    if(g_debug) {
-      g_real_tx = dsig_usb_tx;
-      g_real_tx_opaque = t->usbt;
-      *out_bus = dsig_create(debug_tx_thunk, NULL);
-    } else {
-      *out_bus = dsig_create(dsig_usb_tx, t->usbt);
-    }
-    if(*out_bus == NULL) {
-      dsig_usb_destroy(t->usbt);
-      return -1;
-    }
-    if(dsig_usb_start(t->usbt, *out_bus) < 0) {
-      dsig_destroy(*out_bus);
-      dsig_usb_destroy(t->usbt);
-      return -1;
-    }
-    return 0;
-  }
-  fprintf(stderr, "dsig: unknown transport: %s\n", kind);
-  return -1;
-}
+/* Transport plumbing: dsig_transport_open()/close() (dsig_transport.h) do
+ * the actual work now, shared with other host tools (e.g. mios-mcp). */
 
 static void
-transport_close(transport_t *t, dsig_t *bus)
+tx_debug_adapter(void *opaque, const char *dir, uint32_t signal,
+                 const void *data, size_t len)
 {
-  if(t->udp)  dsig_udp_destroy(t->udp);
-  if(t->can)  dsig_cansock_destroy(t->can);
-  if(t->usbt) dsig_usb_destroy(t->usbt);
-  if(t->unx)  dsig_unix_destroy(t->unx);
-  if(bus)     dsig_destroy(bus);
+  (void)opaque;
+  dbg_dump(dir, signal, data, len);
 }
 
 /* VLLP helpers */
@@ -645,10 +515,12 @@ main(int argc, char **argv)
   if(optind >= argc) { usage(); return 2; }
   const char *cmd = argv[optind++];
 
-  transport_t tr;
   dsig_t *bus = NULL;
-  if(transport_open(&tr, transport, group, port, ifname,
-                    usb_vid, usb_pid, usb_subclass, &bus) < 0)
+  dsig_transport_t *tr = dsig_transport_open(transport, group, port, ifname,
+                                             usb_vid, usb_pid, usb_subclass,
+                                             g_debug ? tx_debug_adapter : NULL,
+                                             NULL, &bus);
+  if(tr == NULL)
     return 1;
 
   dsig_sub_t *dbg_sub = NULL;
@@ -864,6 +736,6 @@ main(int argc, char **argv)
 out:
   if(dbg_sub)
     dsig_unsub(dbg_sub);
-  transport_close(&tr, bus);
+  dsig_transport_close(tr, bus);
   return rc;
 }
