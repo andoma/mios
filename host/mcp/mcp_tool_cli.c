@@ -231,7 +231,10 @@ device_probe(mcp_context_t *ctx, const mcp_device_t *d)
   int alive = 0;
   if(mcp_xport_send(x, &pkt, 1) == 0) {
     uint8_t resp[64];
-    int r = mcp_xport_recv(x, resp, sizeof(resp), 800);
+    // Generous: covers the whole VLLP handshake (SYN/ACK, channel
+    // open-request/response) plus the actual exchange, not just one
+    // hop's worth of latency -- 800ms measured too tight in practice.
+    int r = mcp_xport_recv(x, resp, sizeof(resp), 2500);
     alive = r >= 1 && (resp[0] == MCP_CLI_COMPLETE || resp[0] == MCP_CLI_RESPONSE);
   }
   mcp_xport_close(x);
@@ -267,7 +270,7 @@ tool_scan(mcp_context_t *ctx, const cJSON *params, const char **errstr)
                     "or empty).\n");
   } else {
     pos += snprintf(out + pos, cap - pos,
-                    "\n%d VLLP device%s configured (probing each, ~1s):\n",
+                    "\n%d VLLP device%s configured (probing each, ~2.5s):\n",
                     ctx->num_devices, ctx->num_devices == 1 ? "" : "s");
     for(int i = 0; i < ctx->num_devices; i++) {
       const mcp_device_t *d = &ctx->devices[i];
