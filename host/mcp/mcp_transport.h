@@ -5,9 +5,15 @@
 #include <stdint.h>
 
 // Transport abstraction for the MCP message protocol (type byte + payload).
-// Two backends:
-//   - USB:   one bulk transfer per message (default)
+// Three backends:
+//   - USB:    one bulk transfer per message (default)
 //   - Serial: one HDLC frame (CRC32) per message, used when ctx->serial is set
+//   - VLLP:   one HDLC frame (CRC32) per message over a VLLP "mcp" channel
+//             riding a dsig_t bus, used when ctx->vllp_transport is set.
+//             HDLC framing here isn't for VLLP's benefit (it's already a
+//             reliable, ordered link) -- it's what the guest's mcp_uart.c
+//             speaks on ANY stream_t, VLLP-backed or a real UART, so the
+//             host has to match it to interoperate.
 //
 // Each tool call opens a transport, exchanges messages, and closes it.
 

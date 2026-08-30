@@ -15,6 +15,10 @@
 #include <zlib.h>
 #include <libusb.h>
 
+#include "dsig_transport.h"
+#include "dsig_vllp.h"
+#include "vllp.h"
+
 #define USB_CLASS_VENDOR 0xff
 #define SERIAL_MAX_FRAME 256
 
@@ -23,6 +27,7 @@
 
 struct mcp_xport {
   int is_serial;
+  int is_vllp;
 
   // USB backend
   libusb_device_handle *h;
@@ -30,6 +35,18 @@ struct mcp_xport {
 
   // Serial backend
   int fd;
+
+  // VLLP backend: an HDLC byte stream (see the framing note in
+  // mcp_transport.h) riding a VLLP channel, which is itself message-
+  // (not byte-) oriented -- rxbuf below accumulates whatever chunking
+  // vllp_channel_read() happens to hand back until hdlc_deframe() finds
+  // a complete frame.
+  dsig_transport_t *dxport;
+  dsig_t *bus;
+  dsig_vllp_t *dv;
+  vllp_channel_t *vc;
+
+  // Serial + VLLP share the same HDLC accumulation buffer/logic.
   uint8_t rxbuf[1024];
   size_t rxlen;
 
@@ -138,18 +155,20 @@ serial_open(const char *path)
   return fd;
 }
 
+// Pure framing: msg+len -> a flag-delimited, escaped, CRC32-suffixed HDLC
+// frame in out (cap must be at least 2 * (SERIAL_MAX_FRAME + 4) + 2).
+// Returns the frame length, or -1 if msg is too long to frame at all.
 static int
-serial_send(int fd, const uint8_t *msg, size_t len)
+hdlc_frame_encode(const uint8_t *msg, size_t len, uint8_t *out)
 {
-  uint32_t crc = ~crc32(0, msg, len);
-  uint8_t body[SERIAL_MAX_FRAME + 4];
   if(len > SERIAL_MAX_FRAME)
     return -1;
+  uint32_t crc = ~crc32(0, msg, len);
+  uint8_t body[SERIAL_MAX_FRAME + 4];
   memcpy(body, msg, len);
   memcpy(body + len, &crc, 4);  // little-endian host
   size_t blen = len + 4;
 
-  uint8_t out[2 * (SERIAL_MAX_FRAME + 4) + 2];
   size_t o = 0;
   out[o++] = 0x7e;
   for(size_t i = 0; i < blen; i++) {
@@ -161,9 +180,19 @@ serial_send(int fd, const uint8_t *msg, size_t len)
     }
   }
   out[o++] = 0x7e;
+  return (int)o;
+}
+
+static int
+serial_send(int fd, const uint8_t *msg, size_t len)
+{
+  uint8_t out[2 * (SERIAL_MAX_FRAME + 4) + 2];
+  int o = hdlc_frame_encode(msg, len, out);
+  if(o < 0)
+    return -1;
 
   size_t written = 0;
-  while(written < o) {
+  while(written < (size_t)o) {
     ssize_t n = write(fd, out + written, o - written);
     if(n < 0) {
       if(errno == EAGAIN)
@@ -349,6 +378,107 @@ serial_recv(mcp_xport_t *x, uint8_t *buf, size_t cap, int timeout_ms)
 }
 
 
+// ---------------- VLLP backend (HDLC over a "mcp" VLLP channel) ----------------
+
+static int
+vllp_send(vllp_channel_t *vc, const uint8_t *msg, size_t len)
+{
+  uint8_t out[2 * (SERIAL_MAX_FRAME + 4) + 2];
+  int o = hdlc_frame_encode(msg, len, out);
+  if(o < 0)
+    return -1;
+  vllp_channel_send(vc, out, o);
+  return 0;
+}
+
+// Pulls one message's worth of bytes from the VLLP channel into x->rxbuf.
+// Returns bytes added, 0 on timeout, -1 if the channel closed/errored.
+static int
+vllp_pump(mcp_xport_t *x, int timeout_ms)
+{
+  void *data;
+  size_t len;
+  int r = vllp_channel_read(x->vc, &data, &len, (long)timeout_ms * 1000);
+  if(r == VLLP_ERR_TIMEOUT)
+    return 0;
+  if(r) // includes VLLP_ERR_NOT_READY: the far end has no "mcp" service open
+    return -1;
+  if(data == NULL)
+    return -1; // channel closed
+  if(len > sizeof(x->rxbuf) - x->rxlen)
+    len = sizeof(x->rxbuf) - x->rxlen; // shouldn't happen for well-formed frames
+  memcpy(x->rxbuf + x->rxlen, data, len);
+  x->rxlen += len;
+  free(data);
+  return (int)len;
+}
+
+static int
+vllp_recv(mcp_xport_t *x, uint8_t *buf, size_t cap, int timeout_ms)
+{
+  struct timespec t0;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+
+  while(1) {
+    int r = hdlc_deframe(x->rxbuf, &x->rxlen, buf, cap);
+    if(r >= 0)
+      return r;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed = (now.tv_sec - t0.tv_sec) * 1000 +
+                   (now.tv_nsec - t0.tv_nsec) / 1000000;
+    long remain = timeout_ms - elapsed;
+    if(remain <= 0)
+      return 0;
+
+    if(x->rxlen >= sizeof(x->rxbuf)) {
+      x->rxlen = 0; // overflow, resync
+      continue;
+    }
+    if(vllp_pump(x, (int)remain) < 0)
+      return -1;
+  }
+}
+
+static void
+xport_log(void *opaque, int level, const char *msg)
+{
+  (void)opaque;
+  (void)level;
+  (void)msg; // MCP tool calls are one-shot; nowhere useful to surface this
+}
+
+static int
+xport_open_vllp(mcp_xport_t *x, mcp_context_t *ctx, const char **errstr)
+{
+  x->dxport = dsig_transport_open(ctx->vllp_transport, NULL, 0, NULL,
+                                  0, 0, 0, NULL, NULL, &x->bus);
+  if(x->dxport == NULL) {
+    *errstr = "Failed to open dsig transport for VLLP";
+    return -1;
+  }
+
+  int mtu = ctx->vllp_mtu ? ctx->vllp_mtu : 64;
+  int timeout_s = ctx->vllp_timeout_s ? ctx->vllp_timeout_s : 3;
+  uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+
+  x->dv = dsig_vllp_client_create(x->bus, ctx->vllp_tx, ctx->vllp_rx,
+                                  mtu, timeout_s, flags, NULL, xport_log);
+  if(x->dv == NULL) {
+    dsig_transport_close(x->dxport, x->bus);
+    *errstr = "Failed to create VLLP client";
+    return -1;
+  }
+
+  x->vc = vllp_channel_create(dsig_vllp_get_vllp(x->dv), "mcp", 0,
+                              NULL, NULL, NULL, NULL);
+  x->is_vllp = 1;
+  x->max_payload = SERIAL_MAX_FRAME - 1;
+  return 0;
+}
+
+
 // ---------------- Public API ----------------
 
 static int
@@ -403,6 +533,16 @@ mcp_xport_open(mcp_context_t *ctx, uint8_t subclass, const char **errstr)
 {
   mcp_xport_t *x = calloc(1, sizeof(*x));
 
+  // Explicit VLLP target, set via configure(device: ...) or
+  // configure(transport: ..., vllp_tx: ..., vllp_rx: ...).
+  if(ctx->vllp_transport) {
+    if(xport_open_vllp(x, ctx, errstr)) {
+      free(x);
+      return NULL;
+    }
+    return x;
+  }
+
   // Explicit serial device path
   if(ctx->serial && ctx->serial[0] && strcmp(ctx->serial, "auto")) {
     if(xport_open_serial_path(x, ctx->serial, errstr)) {
@@ -445,6 +585,8 @@ mcp_xport_max_payload(mcp_xport_t *x)
 int
 mcp_xport_send(mcp_xport_t *x, const uint8_t *msg, size_t len)
 {
+  if(x->is_vllp)
+    return vllp_send(x->vc, msg, len);
   if(x->is_serial)
     return serial_send(x->fd, msg, len);
 
@@ -456,6 +598,8 @@ mcp_xport_send(mcp_xport_t *x, const uint8_t *msg, size_t len)
 int
 mcp_xport_recv(mcp_xport_t *x, uint8_t *buf, size_t cap, int timeout_ms)
 {
+  if(x->is_vllp)
+    return vllp_recv(x, buf, cap, timeout_ms);
   if(x->is_serial)
     return serial_recv(x, buf, cap, timeout_ms);
 
@@ -471,7 +615,11 @@ mcp_xport_recv(mcp_xport_t *x, uint8_t *buf, size_t cap, int timeout_ms)
 void
 mcp_xport_close(mcp_xport_t *x)
 {
-  if(x->is_serial) {
+  if(x->is_vllp) {
+    vllp_channel_close(x->vc, 0, 1);
+    dsig_vllp_destroy(x->dv);
+    dsig_transport_close(x->dxport, x->bus);
+  } else if(x->is_serial) {
     if(x->fd >= 0)
       close(x->fd);
   } else {

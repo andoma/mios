@@ -45,11 +45,19 @@ mcp_text_resultf(const char *fmt, ...)
 
 // --- configure tool ---
 
+static void
+set_vllp_target(mcp_context_t *ctx, const char *transport,
+                uint32_t tx, uint32_t rx)
+{
+  free(ctx->vllp_transport);
+  ctx->vllp_transport = strdup(transport);
+  ctx->vllp_tx = tx;
+  ctx->vllp_rx = rx;
+}
+
 static cJSON *
 tool_configure(mcp_context_t *ctx, const cJSON *params, const char **errstr)
 {
-  (void)errstr;
-
   const cJSON *v = cJSON_GetObjectItem(params, "vid");
   if(cJSON_IsNumber(v))
     ctx->usb_vid = (uint16_t)v->valuedouble;
@@ -63,6 +71,51 @@ tool_configure(mcp_context_t *ctx, const cJSON *params, const char **errstr)
     free(ctx->serial);
     ctx->serial = s->valuestring[0] ? strdup(s->valuestring) : NULL;
   }
+
+  const cJSON *mtu = cJSON_GetObjectItem(params, "vllp_mtu");
+  if(cJSON_IsNumber(mtu))
+    ctx->vllp_mtu = (int)mtu->valuedouble;
+
+  const cJSON *to = cJSON_GetObjectItem(params, "vllp_timeout_s");
+  if(cJSON_IsNumber(to))
+    ctx->vllp_timeout_s = (int)to->valuedouble;
+
+  // Named device: looked up from $MIOS_MCP_DEVICES.
+  const cJSON *device = cJSON_GetObjectItem(params, "device");
+  if(cJSON_IsString(device)) {
+    if(device->valuestring[0] == '\0') {
+      free(ctx->vllp_transport);
+      ctx->vllp_transport = NULL;
+    } else {
+      const mcp_device_t *d = mcp_devices_find(ctx->devices, ctx->num_devices,
+                                               device->valuestring);
+      if(d == NULL) {
+        *errstr = "Unknown device name (see the scan tool for what's "
+          "configured in $MIOS_MCP_DEVICES)";
+        return NULL;
+      }
+      set_vllp_target(ctx, d->transport, d->vllp_tx, d->vllp_rx);
+    }
+  }
+
+  // Raw VLLP override, for a target not in the device list. transport
+  // alone with no vllp_tx/vllp_rx (or vice versa) is a usage error --
+  // all three are needed to make sense together.
+  const cJSON *transport = cJSON_GetObjectItem(params, "transport");
+  const cJSON *tx = cJSON_GetObjectItem(params, "vllp_tx");
+  const cJSON *rx = cJSON_GetObjectItem(params, "vllp_rx");
+  if(transport || tx || rx) {
+    if(!cJSON_IsString(transport) || !cJSON_IsNumber(tx) || !cJSON_IsNumber(rx)) {
+      *errstr = "transport, vllp_tx and vllp_rx must all be given together";
+      return NULL;
+    }
+    set_vllp_target(ctx, transport->valuestring, (uint32_t)tx->valuedouble,
+                    (uint32_t)rx->valuedouble);
+  }
+
+  if(ctx->vllp_transport)
+    return mcp_text_resultf("Configured: VLLP transport=%s tx=0x%x rx=0x%x",
+                            ctx->vllp_transport, ctx->vllp_tx, ctx->vllp_rx);
 
   return mcp_text_resultf("Configured: VID=0x%04x PID=0x%04x transport=%s%s",
                           ctx->usb_vid, ctx->usb_pid,
@@ -249,6 +302,19 @@ main(int argc, char **argv)
   if(env_serial && env_serial[0])
     ctx.serial = strdup(env_serial);
 
+  // Named VLLP devices, entirely project-defined -- mios itself never
+  // hardcodes a board name or transport address.
+  const char *devices_path = getenv("MIOS_MCP_DEVICES");
+  if(devices_path && devices_path[0]) {
+    const char *errstr = NULL;
+    int n = mcp_devices_load(devices_path, &ctx.devices, &errstr);
+    if(n < 0) {
+      fprintf(stderr, "mios-mcp: %s (%s)\n", errstr, devices_path);
+    } else {
+      ctx.num_devices = n;
+    }
+  }
+
   if(libusb_init(&ctx.usb)) {
     fprintf(stderr, "libusb_init failed\n");
     return 1;
@@ -272,15 +338,47 @@ main(int argc, char **argv)
     "      \"type\": \"string\","
     "      \"description\": \"Serial device path (e.g. /dev/ttyACM4) for "
     "HDLC-framed MCP over UART. Empty string reverts to USB.\""
+    "    },"
+    "    \"device\": {"
+    "      \"type\": \"string\","
+    "      \"description\": \"Name of a device from $MIOS_MCP_DEVICES to "
+    "reach over VLLP (see the scan tool for what's configured). Empty "
+    "string reverts to USB/serial.\""
+    "    },"
+    "    \"transport\": {"
+    "      \"type\": \"string\","
+    "      \"description\": \"Raw VLLP target not in the device list: a "
+    "dsig transport address, e.g. 'file:///tmp/fcmon.sock', 'usb', 'udp', "
+    "or 'cansock'. Must be given together with vllp_tx and vllp_rx.\""
+    "    },"
+    "    \"vllp_tx\": {"
+    "      \"type\": \"integer\","
+    "      \"description\": \"dsig signal id for host->device (raw VLLP "
+    "target only)\""
+    "    },"
+    "    \"vllp_rx\": {"
+    "      \"type\": \"integer\","
+    "      \"description\": \"dsig signal id for device->host (raw VLLP "
+    "target only)\""
+    "    },"
+    "    \"vllp_mtu\": {"
+    "      \"type\": \"integer\","
+    "      \"description\": \"VLLP link MTU (default 64, for FDCAN)\""
+    "    },"
+    "    \"vllp_timeout_s\": {"
+    "      \"type\": \"integer\","
+    "      \"description\": \"VLLP retransmit timeout in seconds (default 3)\""
     "    }"
     "  }"
     "}");
 
   static mcp_tool_t cfg_tool = {
     .name = "configure",
-    .description = "Set the USB VID and PID used to find MIOS devices. "
-      "Affects all subsequent tool calls (cli, read_memory, sigcapture, "
-      "flash_dfu). Default VID is 0x6666, PID is 0 (match any).",
+    .description = "Set how subsequent tool calls (cli, read_memory, "
+      "sigcapture, flash_dfu) reach a MIOS device: directly over USB "
+      "(vid/pid, default VID 0x6666 PID 0=any), over serial (serial), or "
+      "over VLLP riding a dsig bus (device, or transport+vllp_tx+vllp_rx "
+      "for a target not in the device list).",
     .handler = tool_configure,
   };
   cfg_tool.input_schema = cfg_schema;

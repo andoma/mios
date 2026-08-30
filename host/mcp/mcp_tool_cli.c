@@ -200,26 +200,86 @@ tool_read_memory(mcp_context_t *ctx, const cJSON *params, const char **errstr)
 }
 
 
+// Briefly opens a VLLP transport to `d` and exercises the exact path
+// tool_cli() would use (an empty CLI command), to check whether anything
+// is actually alive on the far end -- a VLLP channel can be created
+// without a live peer (SYN retries happen in the background), so
+// "opened successfully" alone says nothing about reachability.
+// ctx->vllp_* is saved/restored around the probe, leaving the caller's
+// own configuration untouched.
+static int
+device_probe(mcp_context_t *ctx, const mcp_device_t *d)
+{
+  char *saved_transport = ctx->vllp_transport;
+  uint32_t saved_tx = ctx->vllp_tx, saved_rx = ctx->vllp_rx;
+
+  ctx->vllp_transport = d->transport;
+  ctx->vllp_tx = d->vllp_tx;
+  ctx->vllp_rx = d->vllp_rx;
+
+  const char *errstr;
+  mcp_xport_t *x = mcp_xport_open(ctx, 0, &errstr);
+
+  ctx->vllp_transport = saved_transport;
+  ctx->vllp_tx = saved_tx;
+  ctx->vllp_rx = saved_rx;
+
+  if(x == NULL)
+    return 0; // transport itself unreachable (e.g. fcmon not running)
+
+  uint8_t pkt = MCP_CLI_EXECUTE; // empty command, just eliciting a reply
+  int alive = 0;
+  if(mcp_xport_send(x, &pkt, 1) == 0) {
+    uint8_t resp[64];
+    int r = mcp_xport_recv(x, resp, sizeof(resp), 800);
+    alive = r >= 1 && (resp[0] == MCP_CLI_COMPLETE || resp[0] == MCP_CLI_RESPONSE);
+  }
+  mcp_xport_close(x);
+  return alive;
+}
+
 static cJSON *
 tool_scan(mcp_context_t *ctx, const cJSON *params, const char **errstr)
 {
-  (void)ctx;
   (void)params;
   (void)errstr;
 
+  size_t cap = 4096;
+  char *out = malloc(cap);
+  int pos = 0;
+
   char paths[16][256];
   int n = mcp_serial_scan(paths, 16);
+  if(n == 0) {
+    pos += snprintf(out + pos, cap - pos,
+                    "No MCP serial ports found (no hello beacon seen on "
+                    "any /dev/ttyACM*//dev/ttyUSB*).\n");
+  } else {
+    pos += snprintf(out + pos, cap - pos, "Found %d MCP serial port%s:\n",
+                    n, n == 1 ? "" : "s");
+    for(int i = 0; i < n; i++)
+      pos += snprintf(out + pos, cap - pos, "  %s\n", paths[i]);
+  }
 
-  if(n == 0)
-    return mcp_text_result("No MCP serial ports found (no hello beacon "
-                           "seen on any /dev/ttyACM*//dev/ttyUSB*).");
-
-  size_t cap = 64 + n * 280;
-  char *out = malloc(cap);
-  int pos = snprintf(out, cap, "Found %d MCP serial port%s:\n",
-                     n, n == 1 ? "" : "s");
-  for(int i = 0; i < n; i++)
-    pos += snprintf(out + pos, cap - pos, "  %s\n", paths[i]);
+  if(ctx->num_devices == 0) {
+    pos += snprintf(out + pos, cap - pos,
+                    "\nNo VLLP devices configured ($MIOS_MCP_DEVICES unset "
+                    "or empty).\n");
+  } else {
+    pos += snprintf(out + pos, cap - pos,
+                    "\n%d VLLP device%s configured (probing each, ~1s):\n",
+                    ctx->num_devices, ctx->num_devices == 1 ? "" : "s");
+    for(int i = 0; i < ctx->num_devices; i++) {
+      const mcp_device_t *d = &ctx->devices[i];
+      int alive = device_probe(ctx, d);
+      pos += snprintf(out + pos, cap - pos,
+                      "  %-20s %s tx=0x%x rx=0x%x  [%s]\n",
+                      d->name, d->transport, d->vllp_tx, d->vllp_rx,
+                      alive ? "alive" : "no response");
+    }
+    pos += snprintf(out + pos, cap - pos,
+                    "\nUse configure(device: \"<name>\") to target one.\n");
+  }
 
   cJSON *r = mcp_text_result(out);
   free(out);
@@ -310,8 +370,10 @@ mcp_tool_cli_init(mcp_context_t *ctx)
   static mcp_tool_t scan_tool = {
     .name = "scan",
     .description = "Scan serial ports (/dev/ttyACM*, /dev/ttyUSB*) for MIOS "
-      "devices emitting an MCP hello beacon. Returns matching device paths; "
-      "use one with configure(serial: ...), or configure(serial: \"auto\").",
+      "devices emitting an MCP hello beacon, and probe every VLLP device "
+      "configured in $MIOS_MCP_DEVICES for a live response. Use a result "
+      "with configure(serial: ...)/configure(serial: \"auto\") or "
+      "configure(device: \"<name>\").",
     .handler = tool_scan,
   };
   scan_tool.input_schema = scan_schema;
