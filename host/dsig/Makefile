@@ -20,6 +20,7 @@ VPATH := ..
 LIB_SRCS := \
 	dsig.c \
 	dsig_udp.c \
+	dsig_unix.c \
 	dsig_cansock.c \
 	dsig_usb.c \
 	dsig_vllp.c \
