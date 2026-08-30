@@ -14,7 +14,7 @@
 
 static const char *
 vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc,
-            int *rebooting)
+            int *rebooting, int force)
 {
   int result;
 
@@ -79,7 +79,7 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc,
     return "Mismatching appname";
   }
 
-  if(!memcmp(hdr + 4, mi->buildid, sizeof(mi->buildid))) {
+  if(!force && !memcmp(hdr + 4, mi->buildid, sizeof(mi->buildid))) {
     vllp_logf(v, LOG_DEBUG, "OTA: build-id match. Nothing to do");
     free(mi);
     return NULL;
@@ -129,12 +129,12 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc,
 
 
 const char *
-vllp_ota(struct vllp *v, const char *elfpath)
+vllp_ota(struct vllp *v, const char *elfpath, int force)
 {
   vllp_channel_t *vc = vllp_channel_create(v, "ota", 0, NULL, NULL, NULL, NULL);
 
   int rebooting = 0;
-  const char *errstr = vllp_do_ota(v, elfpath, vc, &rebooting);
+  const char *errstr = vllp_do_ota(v, elfpath, vc, &rebooting, force);
 
   if(rebooting) {
     // The target reboots into the new image: newer firmware closes the
