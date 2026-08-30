@@ -55,11 +55,28 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
   gpio_conf_af(can_tx, 9, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_conf_af(can_rx, 9, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
 
+  reset_peripheral(CLK_FDCAN);
+
   fdcan_t *fc = calloc(1, sizeof(fdcan_t));
   fc->reg_base = FDCAN_BASE(instance);
   fc->ram_base = FDCAN_RAM(instance);
 
   stm32_fdcan_cce(fc, NULL);
+
+  // The Bosch M_CAN User's Manual (section 1.3, Dual Clock Sources)
+  // requires the Host clock (fdcan_pclk, APB1, 42.5MHz here) to be >=
+  // the CAN clock (fdcan_ker_ck, 85MHz via PLLQ) for stable operation.
+  // That was violated outright -- Host clock was half the CAN clock.
+  // FDCAN_CKDIV divides fdcan_ker_ck down before it reaches the CAN
+  // core; PDIV=0b0001 (divide by 2) brings it to 42.5MHz, exactly
+  // matching the Host clock. /4 was also considered but discarded: at
+  // 21.25MHz neither target bitrate divides evenly anymore (worst-case
+  // error grows to ~5.6%, vs. an exact match at /2 for the data phase
+  // and ~1.16% for nominal -- see fdcan_calculate_timings()'s
+  // tolerance in stm32_fdcan.c).
+  // Protected-write bit, only valid while CCE+INIT are set (true here).
+  reg_wr(fc->reg_base + FDCAN_CKDIV, 0b0001);
+  const uint32_t core_clk = clk_get_freq(CLK_FDCAN) / 2;
 
   for(size_t i = 0; i < 0x350; i += 4) {
     reg_wr(fc->ram_base + i, 0);
@@ -70,7 +87,7 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
 
   error_t err = stm32_fdcan_init(fc, name,
                                  nominal_bitrate,
-                                 data_bitrate, clk_get_freq(CLK_FDCAN),
+                                 data_bitrate, core_clk,
                                  clk_get_freq(CLK_PCLK1),
                                  NULL,
                                  output_filter, flags);
