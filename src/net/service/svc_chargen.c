@@ -8,29 +8,30 @@
 
 
 typedef struct svc_chargen {
-  void *sc_opaque;
-  int sc_cnt;
   pushpull_t *sc_sock;
-
 } svc_chargen_t;
 
 
+// Runs at full speed until the peer closes the channel (classic RFC 864
+// semantics) -- a throughput/reliability test, not a content test, so
+// each packet is filled to the transport's own max fragment size with a
+// cheap, position-derived byte pattern rather than small formatted text.
 static pbuf_t *
 chargen_pull(void *opaque)
 {
   svc_chargen_t *sc = opaque;
+  pushpull_t *s = sc->sc_sock;
 
-  if(sc->sc_cnt == 100) {
-    sc->sc_sock->net->event(sc->sc_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
+  pbuf_t *pb = pbuf_make(s->preferred_offset, 0);
+  if(pb == NULL)
     return NULL;
-  }
-  sc->sc_cnt++;
-  pbuf_t *pb = pbuf_make(sc->sc_sock->preferred_offset, 0);
-  if(pb != NULL) {
-    int len = snprintf(pbuf_data(pb, 0), 20, "%d\n", sc->sc_cnt);
-    pb->pb_pktlen = len;
-    pb->pb_buflen = len;
-  }
+
+  const size_t len = s->max_fragment_size;
+  uint8_t *data = pbuf_data(pb, 0);
+  for(size_t i = 0; i < len; i++)
+    data[i] = (uint8_t)i;
+  pb->pb_pktlen = len;
+  pb->pb_buflen = len;
   return pb;
 }
 
@@ -40,7 +41,6 @@ chargen_close(void *opaque, const char *reason)
 {
   free(opaque);
 }
-
 
 
 static const pushpull_app_fn_t chargen_fn = {
@@ -55,7 +55,6 @@ chargen_open(pushpull_t *s)
   svc_chargen_t *sc = xalloc(sizeof(svc_chargen_t), 0, MEM_MAY_FAIL);
   if(sc == NULL)
     return ERR_NO_MEMORY;
-  sc->sc_cnt = 0;
   sc->sc_sock = s;
   s->app = &chargen_fn;
   s->app_opaque = sc;
