@@ -11,9 +11,9 @@
  * from libgcc which is not useful for us
  */
 
-void __aeabi_unwind_cpp_pr0(void) {}
-void __aeabi_unwind_cpp_pr1(void) {}
-void __aeabi_unwind_cpp_pr2(void) {}
+__attribute__((used)) void __aeabi_unwind_cpp_pr0(void) {}
+__attribute__((used)) void __aeabi_unwind_cpp_pr1(void) {}
+__attribute__((used)) void __aeabi_unwind_cpp_pr2(void) {}
 
 
 struct exidx_entry {
