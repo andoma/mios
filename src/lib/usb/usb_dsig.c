@@ -287,7 +287,8 @@ static const device_class_t usb_dsig_device_class = {
 
 void
 usb_dsig_create(struct usb_interface_queue *q,
-                uint8_t usb_sub_class)
+                uint8_t usb_sub_class,
+                const struct dsig_filter *output_filter)
 {
   usb_dsig_t *um = calloc(1, sizeof(usb_dsig_t));
   um->um_usb_sub_class = usb_sub_class;
@@ -308,5 +309,5 @@ usb_dsig_create(struct usb_interface_queue *q,
   um->cni.cni_ni.ni_buffers_avail = buffers_avail;
 
   can_netif_attach(&um->cni, "usbdsig",
-                   &usb_dsig_device_class, NULL);
+                   &usb_dsig_device_class, output_filter);
 }

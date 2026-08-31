@@ -143,8 +143,15 @@ void usb_cdc_create_shell(struct usb_interface_queue *q);
 void usb_mbus_create(struct usb_interface_queue *q,
                      uint8_t usb_sub_class);
 
+struct dsig_filter;
+
+// output_filter: NULL passes every locally-emitted/relayed dsig signal
+// (the historical default); otherwise an allowlist exactly like
+// can_netif_attach()'s -- first prefix match wins, no match means this
+// signal never goes out over USB.
 void usb_dsig_create(struct usb_interface_queue *q,
-                     uint8_t usb_sub_class);
+                     uint8_t usb_sub_class,
+                     const struct dsig_filter *output_filter);
 
 typedef void (*usb_dfu_detach_cb_t)(void);
 
