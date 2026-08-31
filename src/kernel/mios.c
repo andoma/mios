@@ -41,6 +41,9 @@ hostname_set(const char *name)
 }
 
 
+// Every app's main() must match this exact signature: main_trampoline()
+// below calls main() with zero args, and LTO's whole-program type
+// checking (-Wlto-type-mismatch) hard-errors on any mismatch.
 int  __attribute__((weak))
 main(void)
 {
