@@ -1486,6 +1486,13 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
                 "channel %d: no close-response from peer, "
                 "forcing local close",
                 vc->id);
+      // A dead link never drains the queued EOF, so the channel can still
+      // sit on the active list; take it off before marking it closed, or
+      // the tx loop asserts on a non-ACTIVE channel there.
+      if(vc->state == VLLP_CHANNEL_STATE_ACTIVE) {
+        TAILQ_REMOVE(&v->active_channels, vc, qlink);
+        vllp_channel_release(vc, "close-timeout-active");
+      }
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
       if(is_client(v))
         v->available_channel_ids |= (1 << vc->id);
