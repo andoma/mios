@@ -38,6 +38,11 @@ typedef struct ptp_ether_state {
   int64_t pes_offset;
   int pes_one_way_delay;
 
+  // From Announce: originTimestamp timescale offset from UTC (TAI-UTC,
+  // currently 37 s) in ns. Zero when the master uses the ARB timescale.
+  int64_t pes_utc_offset_ns;
+  uint8_t pes_utc_offset_valid;
+
   clock_realtime_t pes_clock;
   clock_servo_t pes_servo;
 

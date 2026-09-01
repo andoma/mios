@@ -44,6 +44,24 @@ struct ptp_hdr {
 
 } __attribute__((packed));
 
+struct ptp_announce {
+  struct ptp_hdr hdr;
+
+  int16_t current_utc_offset;
+  uint8_t reserved;
+  uint8_t grandmaster_priority1;
+
+  uint8_t clock_class;
+  uint8_t clock_accuracy;
+  uint16_t offset_scaled_log_variance;
+
+  uint8_t grandmaster_priority2;
+  uint8_t grandmaster_identity[8];
+  uint16_t steps_removed;
+  uint8_t time_source;
+
+} __attribute__((packed));
+
 #define PTP_NSEC_PER_SEC 1000000000LL
 
 static int64_t
@@ -58,6 +76,13 @@ calc(ether_netif_t *eni)
 {
   ptp_ether_state_t *pes = &eni->eni_ptp;
 
+  // Master timestamps are in the master's timescale, typically TAI.
+  // The realtime clock should track UTC, so wait for an Announce to
+  // tell us the UTC offset before adjusting anything. Otherwise we
+  // would first lock to TAI and then step -37 s.
+  if(!pes->pes_utc_offset_valid)
+    return;
+
   const int64_t t1 = ptp_ts_to_ns(&pes->pes_t1);
   const int64_t t2 = ptp_ts_to_ns(&pes->pes_t2);
   const int64_t t3 = ptp_ts_to_ns(&pes->pes_t3);
@@ -67,7 +92,7 @@ calc(ether_netif_t *eni)
   const int64_t d_sm = t4 - t3 - (pes->pes_t4_cf >> 16);
 
   const int64_t one_way_delay = (d_sm + d_ms) / 2;
-  const int64_t offset        = (d_sm - d_ms) / 2;
+  const int64_t offset        = (d_sm - d_ms) / 2 - pes->pes_utc_offset_ns;
 
   if(pes->pes_clock.clk_class != NULL)
     clock_servo_adjust(&pes->pes_servo, offset, 1);
@@ -164,6 +189,30 @@ ptpv2_handle_sync(ether_netif_t *eni, pbuf_t *pb, pbuf_timestamp_t *pt,
 
 
 static pbuf_t *
+ptpv2_handle_announce(ether_netif_t *eni, pbuf_t *pb,
+                      const struct ptp_announce *p,
+                      size_t ether_header_size)
+{
+  ptp_ether_state_t *pes = &eni->eni_ptp;
+
+  if(pb->pb_pktlen < ether_header_size + sizeof(struct ptp_announce))
+    return pb;
+
+  // On the PTP timescale (TAI), currentUtcOffset is the TAI-UTC
+  // difference. The ARB timescale carries no defined UTC relation;
+  // track the master's timestamps as-is.
+  if(p->hdr.flags & ntohs(PTP_TIMESCALE)) {
+    const int16_t utc_offset = ntohs(p->current_utc_offset);
+    pes->pes_utc_offset_ns = utc_offset * PTP_NSEC_PER_SEC;
+  } else {
+    pes->pes_utc_offset_ns = 0;
+  }
+  pes->pes_utc_offset_valid = 1;
+  return pb;
+}
+
+
+static pbuf_t *
 ptpv2_handle_delay_resp(ether_netif_t *eni, pbuf_t *pb, pbuf_timestamp_t *pt,
                         struct ptp_hdr *p, ether_hdr_t *eh)
 {
@@ -195,6 +244,9 @@ ptpv2_input(ether_netif_t *eni, pbuf_t *pb, pbuf_timestamp_t *pt,
     return ptpv2_handle_followup(eni, pb, pt, p, eh);
   case MSGTYPE_DELAY_RESP:
     return ptpv2_handle_delay_resp(eni, pb, pt, p, eh);
+  case MSGTYPE_ANNOUNCE:
+    return ptpv2_handle_announce(eni, pb, (const struct ptp_announce *)p,
+                                 ether_header_size);
   default:
     return pb;
   }
