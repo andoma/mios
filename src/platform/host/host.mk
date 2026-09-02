@@ -27,4 +27,7 @@ SRCS += ${P}/host.c \
 	${P}/console.c \
 	${P}/selftest.c \
 	${P}/passt.c \
+	${P}/hostnet.c \
+	${P}/hosttest.c \
+	${P}/vnet.c \
 

@@ -169,6 +169,13 @@ static stream_t console_stream = { &console_vtable };
 static void __attribute__((constructor(110)))
 console_init(void)
 {
+  stdio = &console_stream;
+
+  // Test suites are driven by code, not by stdin. Leave the terminal
+  // alone and don't wire up input interrupts.
+  if(host_test_mode())
+    return;
+
   if(linux_syscall(SYS_ioctl, STDIN_FD, TCGETS, &console_saved_termios) == 0) {
     console_is_tty = 1;
     struct linux_termios raw = console_saved_termios;
@@ -186,14 +193,14 @@ console_init(void)
 
   // Pick up anything already buffered (piped input)
   host_irq_raise(console_irq);
-
-  stdio = &console_stream;
 }
 
 
 static void __attribute__((destructor(110)))
 console_fini(void)
 {
+  if(host_test_mode())
+    return;
   host_irq_detach_fd(STDIN_FD);
   if(console_is_tty)
     linux_syscall(SYS_ioctl, STDIN_FD, TCSETS, &console_saved_termios);

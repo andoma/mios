@@ -19,6 +19,8 @@
  *                  Arguments after "--" are appended to passt's
  *                  command line, e.g.  mios -- -t 2323:23
  *   --no-net       don't
+ *
+ * Not used when running a test suite (see hosttest.h).
  */
 
 #include <stdio.h>
@@ -37,6 +39,7 @@
 #include "irq.h"
 #include "cpu.h"
 #include "linux.h"
+#include "hostnet.h"
 
 #define SYS_getrandom 318
 
@@ -139,52 +142,6 @@ passt_output(struct ether_netif *eni, pbuf_t *pkt,
 }
 
 
-// Copy one received frame into a pbuf chain and queue it for the net
-// thread. Runs at IRQ_LEVEL_NET.
-static void
-passt_rx_frame(passt_eth_t *pe, const uint8_t *frame, size_t len)
-{
-  ether_netif_t *eni = &pe->pe_eni;
-  struct pbuf_queue pbq;
-  STAILQ_INIT(&pbq);
-
-  // Leave 2 bytes so the IP header after the 14 byte Ethernet header
-  // ends up 4-byte aligned, same as the hardware drivers do.
-  size_t offset = 2;
-  size_t pos = 0;
-  int first = 1;
-
-  while(pos < len) {
-    pbuf_t *pb = pbuf_get(0);
-    void *buf = pb ? pbuf_data_get(0) : NULL;
-    if(buf == NULL) {
-      if(pb)
-        pbuf_put(pb);
-      pbuf_free_queue_irq_blocked(&pbq);
-      eni->eni_stats.rx_sw_qdrop++;
-      return;
-    }
-    const size_t chunk = MIN(len - pos, PBUF_DATA_SIZE - offset);
-    memcpy(buf + offset, frame + pos, chunk);
-    pb->pb_data = buf;
-    pb->pb_offset = offset;
-    pb->pb_buflen = chunk;
-    pb->pb_flags = first ? PBUF_SOP : 0;
-    pb->pb_pktlen = len;
-    STAILQ_INSERT_TAIL(&pbq, pb, pb_link);
-    pos += chunk;
-    offset = 0;
-    first = 0;
-  }
-  STAILQ_LAST(&pbq, pbuf, pb_link)->pb_flags |= PBUF_EOP;
-
-  eni->eni_stats.rx_pkt++;
-  eni->eni_stats.rx_byte += len;
-  pe->pe_rx_frames++;
-  STAILQ_CONCAT(&eni->eni_ni.ni_rx_queue, &pbq);
-}
-
-
 static void
 passt_disconnect(passt_eth_t *pe, const char *why)
 {
@@ -239,7 +196,8 @@ passt_irq(void *arg)
       if(flen > 14 + 1500 + 4) {
         pe->pe_rx_oversize++;
       } else {
-        passt_rx_frame(pe, p + 4, flen);
+        host_ether_rx(&pe->pe_eni, p + 4, flen);
+        pe->pe_rx_frames++;
         wakeup = 1;
       }
       pos += 4 + flen;
@@ -373,7 +331,8 @@ passt_spawn(void)
 static void  __attribute__((constructor(400)))
 passt_init(void)
 {
-  if(host_arg("no-net") != NULL)
+  // Test suites bring their own (virtual) network
+  if(host_arg("no-net") != NULL || host_arg("list") != NULL || host_test_mode())
     return;
 
   int fd;

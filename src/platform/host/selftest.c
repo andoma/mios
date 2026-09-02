@@ -17,6 +17,8 @@
 #include <mios/task.h>
 #include <mios/error.h>
 
+#include "hosttest.h"
+
 // ---- 1. Preemption of a spinning thread by a timer wakeup ----
 
 static volatile int spin_stop;
@@ -31,7 +33,7 @@ spinner(void *arg)
 }
 
 static int
-test_preempt(cli_t *cli)
+test_preempt(void)
 {
   spin_stop = 0;
   spin_count = 0;
@@ -55,7 +57,7 @@ test_preempt(cli_t *cli)
   thread_join(t);
 
   const int ok = total < (uint64_t)rounds * period * 5 && spin_count > 0;
-  cli_printf(cli, "preempt:   %s  %d x usleep(%d) took %d us, worst late %d us, spinner ran %d loops\n",
+  hosttest_log("preempt:   %s  %d x usleep(%d) took %d us, worst late %d us, spinner ran %d loops",
              ok ? "PASS" : "FAIL", rounds, period, (int)total, (int)worst,
              (int)spin_count);
   return ok;
@@ -87,7 +89,7 @@ pingpong(void *arg)
 }
 
 static int
-test_pingpong(cli_t *cli)
+test_pingpong(void)
 {
   pp_turn = 0;
   pp_count[0] = pp_count[1] = 0;
@@ -101,7 +103,7 @@ test_pingpong(cli_t *cli)
   const uint64_t total = clock_get() - t0;
 
   const int ok = pp_count[0] == PP_ROUNDS && pp_count[1] == PP_ROUNDS;
-  cli_printf(cli, "pingpong:  %s  %d+%d handovers in %d us\n",
+  hosttest_log("pingpong:  %s  %d+%d handovers in %d us",
              ok ? "PASS" : "FAIL", pp_count[0], pp_count[1], (int)total);
   return ok;
 }
@@ -118,20 +120,20 @@ args_thread(long a, long b, long c, long d)
 }
 
 static int
-test_args(cli_t *cli)
+test_args(void)
 {
   args_result = 0;
   thread_t *t = thread_createv(args_thread, 0, "args", 0, 3, 11, 22, 33, 44);
   thread_join(t);
   const int ok = args_result == 11223344;
-  cli_printf(cli, "args:      %s  got %ld\n", ok ? "PASS" : "FAIL", args_result);
+  hosttest_log("args:      %s  got %ld\n", ok ? "PASS" : "FAIL", args_result);
   return ok;
 }
 
 // ---- 4. Timed waits ----
 
 static int
-test_timeout(cli_t *cli)
+test_timeout(void)
 {
   mutex_t m = MUTEX_INITIALIZER("timeout");
   cond_t c;
@@ -144,21 +146,32 @@ test_timeout(cli_t *cli)
   mutex_unlock(&m);
 
   const int ok = r == 1 && took >= 20000 && took < 100000;
-  cli_printf(cli, "timeout:   %s  cond_wait_timeout(20ms) -> %d (1=timeout) after %d us\n",
+  hosttest_log("timeout:   %s  cond_wait_timeout(20ms) -> %d (1=timeout) after %d us",
              ok ? "PASS" : "FAIL", r, (int)took);
   return ok;
 }
 
 
+static int
+run_sched(void)
+{
+  int fails = 0;
+  fails += !test_args();
+  fails += !test_timeout();
+  fails += !test_pingpong();
+  fails += !test_preempt();
+  return fails;
+}
+
+// The preempt test needs a spinning thread to be interrupted by the
+// clock, which only happens in real time.
+HOSTTEST_SUITE("sched", run_sched, HOSTTEST_REALTIME);
+
 static error_t
 cmd_hosttest(cli_t *cli, int argc, char **argv)
 {
-  int fails = 0;
-  fails += !test_args(cli);
-  fails += !test_timeout(cli);
-  fails += !test_pingpong(cli);
-  fails += !test_preempt(cli);
-  cli_printf(cli, "hosttest: %s\n", fails ? "FAILED" : "ALL PASS");
+  int fails = run_sched();
+  hosttest_log("hosttest: %s", fails ? "FAILED" : "ALL PASS");
   return fails ? ERR_OPERATION_FAILED : 0;
 }
 
