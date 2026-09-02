@@ -7,6 +7,10 @@
  * to layer services (vllp_channel_create, vllp_logstream_create, ...) on
  * top.
  *
+ * vllp_flags: VLLP_FDCAN_ADAPTATION when mtu > 8. Add
+ * VLLP_FILTER_SELF_ECHO only when the bus echoes our own frames back to
+ * us (UDP multicast); see vllp.h for why it must stay off on CAN/USB.
+ *
  * Link with: host/dsig.c, host/dsig_vllp.c, host/vllp.c, -lpthread
  */
 

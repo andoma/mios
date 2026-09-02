@@ -61,7 +61,18 @@ typedef struct vllp_channel vllp_channel_t;
 #define VLLP_ERR_NO_ROUTE               -50
 
 
+/* Flags for vllp_create_client() / vllp_create_server() (and the
+ * dsig_vllp_*_create() wrappers, which pass them straight through). */
 #define VLLP_FDCAN_ADAPTATION 0x1
+
+/* Drop received frames that are byte-identical to a frame this endpoint
+ * itself sent within the last few hundred ms. Only for transports that
+ * echo the sender's own frames back to it (UDP multicast loopback, see
+ * dsig_udp.h). Never set this on CAN/USB-dsig: VLLP ACK frames are
+ * symmetric (same SE bits, flow word and CRC IV on both ends), so on a
+ * non-echoing link the filter eats the peer's real ACKs and stalls the
+ * link. Interpreted by dsig_vllp.c, ignored by vllp.c itself. */
+#define VLLP_FILTER_SELF_ECHO 0x2
 
 vllp_t *vllp_create_client(int mtu, int timeout, uint32_t flags, void *opaque,
                            void (*tx)(void *opaque, const void *data,

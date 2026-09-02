@@ -302,6 +302,18 @@ tx_debug_adapter(void *opaque, const char *dir, uint32_t signal,
 
 /* VLLP helpers */
 
+/* vllp_flags for a client on the given transport: FDCAN adaptation for
+ * MTU > 8, and the self-echo filter only where the transport actually
+ * echoes (UDP multicast loopback). See VLLP_FILTER_SELF_ECHO in vllp.h. */
+static uint32_t
+vllp_flags_for(const char *transport, int mtu)
+{
+  uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+  if(!strcasecmp(transport, "udp"))
+    flags |= VLLP_FILTER_SELF_ECHO;
+  return flags;
+}
+
 static const char *
 log_level_name(int level)
 {
@@ -583,7 +595,7 @@ main(int argc, char **argv)
     if(optind + 1 >= argc) { usage(); rc = 2; goto out; }
     uint32_t txid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     uint32_t rxid = (uint32_t)strtoul(argv[optind++], NULL, 0);
-    uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+    uint32_t flags = vllp_flags_for(transport, mtu);
     dsig_vllp_t *dv = dsig_vllp_client_create(bus, txid, rxid, mtu, timeout_s,
                                               flags, NULL, on_vllp_log);
     if(dv == NULL) {
@@ -609,7 +621,7 @@ main(int argc, char **argv)
     uint32_t txid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     uint32_t rxid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     const char *chan = optind < argc ? argv[optind++] : "shell";
-    uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+    uint32_t flags = vllp_flags_for(transport, mtu);
     dsig_vllp_t *dv = dsig_vllp_client_create(bus, txid, rxid, mtu, timeout_s,
                                               flags, NULL, on_vllp_log);
     if(dv == NULL) {
@@ -625,7 +637,7 @@ main(int argc, char **argv)
     uint32_t txid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     uint32_t rxid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     const char *elfpath = argv[optind++];
-    uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+    uint32_t flags = vllp_flags_for(transport, mtu);
     dsig_vllp_t *dv = dsig_vllp_client_create(bus, txid, rxid, mtu, timeout_s,
                                               flags, NULL, on_vllp_log);
     if(dv == NULL) {
@@ -646,7 +658,7 @@ main(int argc, char **argv)
     uint32_t txid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     uint32_t rxid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     int duration_s = optind < argc ? atoi(argv[optind++]) : 5;
-    uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+    uint32_t flags = vllp_flags_for(transport, mtu);
     dsig_vllp_t *dv = dsig_vllp_client_create(bus, txid, rxid, mtu, timeout_s,
                                               flags, NULL, on_vllp_log);
     if(dv == NULL) {
@@ -684,7 +696,7 @@ main(int argc, char **argv)
     uint32_t txid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     uint32_t rxid = (uint32_t)strtoul(argv[optind++], NULL, 0);
     int duration_s = optind < argc ? atoi(argv[optind++]) : 5;
-    uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+    uint32_t flags = vllp_flags_for(transport, mtu);
     dsig_vllp_t *dv = dsig_vllp_client_create(bus, txid, rxid, mtu, timeout_s,
                                               flags, NULL, on_vllp_log);
     if(dv == NULL) {
