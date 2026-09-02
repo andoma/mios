@@ -107,6 +107,8 @@ test_basic(void)
         sc->srv.tx_offer, sc->srv.tx_ack);
   CHECK(sc->srv.last_requested_ip == sc->srv.pool_ip, "REQUEST option 50");
   CHECK(sc->srv.last_server_id == sc->srv.server_ip, "REQUEST option 54");
+  CHECK(sc->srv.last_request_xid == sc->srv.last_discover_xid,
+        "REQUEST must reuse the xid of the DISCOVER/OFFER transaction");
   CHECK(sc->eni->eni_ni.ni_ipv4_local_prefixlen == 24, "prefixlen=%d",
         sc->eni->eni_ni.ni_ipv4_local_prefixlen);
   CHECK(took < 100000, "binding took %d us", (int)took);
@@ -132,6 +134,8 @@ test_slow_server(void)
   report(sc);
 
   CHECK(sc->srv.rx_discover == 4, "discovers=%d", sc->srv.rx_discover);
+  CHECK(sc->srv.discover_xid_changes == 0,
+        "retransmitted DISCOVERs changed xid %d times", sc->srv.discover_xid_changes);
   CHECK(took >= 1500000 && took < 1700000,
         "bound after %d us, expected ~1.5 s", (int)took);
 }
@@ -202,6 +206,9 @@ test_renew_silent(void)
   // 1 initial REQUEST + 5 retries (0.5+1+1.5+2+2.5 s = 7.5 s) after T1=10 s
   CHECK(sc->srv.rx_request == 6, "requests=%d, expected 1 + 5 retries",
         sc->srv.rx_request);
+  CHECK(sc->srv.request_xid_changes == 1,
+        "renewal REQUESTs: xid changed %d times, expected 1 (new transaction, then retries)",
+        sc->srv.request_xid_changes);
   CHECK(pred_unbound(sc), "address kept after giving up on the server");
 
   sc->srv.silent = 0;
@@ -247,21 +254,19 @@ test_delayed_server(void)
 }
 
 
-// 8. Informational: a server slower than the retransmit interval. Each
-//    retransmitted DISCOVER carries a fresh xid, so every OFFER arrives
-//    stale and the client never binds. RFC 2131 permits either keeping
-//    or changing xid on retransmit; this documents what Mios does.
+// 8. Server slower than the 500 ms retransmit interval. The retransmit
+//    keeps the xid, so the late OFFER is still valid and the client binds.
 static void
 test_slower_than_retry(void)
 {
-  scenario_t *sc = scenario_begin(8, "slower-than-retry (informational)");
+  scenario_t *sc = scenario_begin(8, "slower-than-retry");
   sc->srv.reply_delay = 600000;
   scenario_start(sc);
 
-  const int bound = hosttest_wait(pred_bound, sc, 3 * SEC);
+  CHECK(hosttest_wait(pred_bound, sc, 5 * SEC), "client did not bind");
   report(sc);
-  hosttest_log("  600 ms server: %s after 3 s (%d OFFERs discarded as stale)",
-               bound ? "bound" : "NOT bound", sc->srv.tx_offer - bound);
+  CHECK(sc->srv.rx_discover == 2, "discovers=%d", sc->srv.rx_discover);
+  CHECK(sc->srv.discover_xid_changes == 0, "xid changed on retransmit");
 }
 
 

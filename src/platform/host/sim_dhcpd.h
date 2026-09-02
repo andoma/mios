@@ -42,14 +42,22 @@ typedef struct sim_dhcpd {
   int tx_ack;
   int tx_nak;
   uint32_t last_xid;
+  uint32_t last_discover_xid;
+  uint32_t last_request_xid;
+  int discover_xid_changes;    // DISCOVERs whose xid differed from the previous one
+  int request_xid_changes;     // same for REQUESTs
   uint32_t last_ciaddr;
   uint32_t last_requested_ip;
   uint32_t last_server_id;
 
   // Internals
-  uint8_t pending[600];        // Delayed reply
-  size_t pending_len;
-  uint64_t pending_at;
+  struct {                     // Delayed replies, in order of arrival
+    uint64_t at;
+    uint16_t len;
+    uint8_t frame[600];
+  } pending[8];
+  int pending_rd;
+  int pending_wr;
   uint16_t ip_id;
   uint8_t rxframe[2048];
 } sim_dhcpd_t;

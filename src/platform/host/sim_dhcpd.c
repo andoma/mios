@@ -54,11 +54,16 @@ sim_dhcpd_send(sim_dhcpd_t *d, const uint8_t *frame, size_t len)
     vnet_peer_send(d->vnet, frame, len);
     return;
   }
-  // One pending reply is enough for the scenarios we model; the
-  // thread's receive loop delivers it when pending_at is reached.
-  memcpy(d->pending, frame, len);
-  d->pending_len = len;
-  d->pending_at = clock_get() + d->reply_delay;
+  // Queue it; the receive loop sends it when its time comes. Constant
+  // delay means arrival order is send order, so a ring is enough.
+  const int n = sizeof(d->pending) / sizeof(d->pending[0]);
+  if(d->pending_wr - d->pending_rd == n)
+    return; // Full, drop
+  __typeof__(d->pending[0]) *p = &d->pending[d->pending_wr % n];
+  memcpy(p->frame, frame, len);
+  p->len = len;
+  p->at = clock_get() + d->reply_delay;
+  d->pending_wr++;
 }
 
 
@@ -204,6 +209,9 @@ sim_dhcpd_dhcp(sim_dhcpd_t *d, const uint8_t *frame, const uint8_t *dh,
 
   switch(msgtype) {
   case DHCPDISCOVER:
+    if(d->rx_discover && xid != d->last_discover_xid)
+      d->discover_xid_changes++;
+    d->last_discover_xid = xid;
     d->rx_discover++;
     if(d->silent)
       return;
@@ -215,6 +223,9 @@ sim_dhcpd_dhcp(sim_dhcpd_t *d, const uint8_t *frame, const uint8_t *dh,
     break;
 
   case DHCPREQUEST:
+    if(d->rx_request && xid != d->last_request_xid)
+      d->request_xid_changes++;
+    d->last_request_xid = xid;
     d->rx_request++;
     if(!memcmp(frame, d->mac, 6))
       d->rx_request_unicast++;
@@ -279,16 +290,24 @@ sim_dhcpd_thread(void *arg)
   sim_dhcpd_t *d = arg;
   uint8_t *frame = d->rxframe;
 
+  const int nslots = sizeof(d->pending) / sizeof(d->pending[0]);
+
   while(1) {
-    const uint64_t deadline = d->pending_len ? d->pending_at : SIM_NEVER;
-    const ssize_t n = vnet_peer_recv(d->vnet, frame, sizeof(d->rxframe), deadline);
-    if(n < 0) {
-      // Deadline: send the delayed reply
-      vnet_peer_send(d->vnet, d->pending, d->pending_len);
-      d->pending_len = 0;
-      continue;
+    // Send every delayed reply that is due, then wait for the next
+    // frame or the next due time, whichever comes first.
+    uint64_t deadline = SIM_NEVER;
+    while(d->pending_rd != d->pending_wr) {
+      __typeof__(d->pending[0]) *p = &d->pending[d->pending_rd % nslots];
+      if(p->at > clock_get()) {
+        deadline = p->at;
+        break;
+      }
+      vnet_peer_send(d->vnet, p->frame, p->len);
+      d->pending_rd++;
     }
-    sim_dhcpd_rx(d, frame, n);
+    const ssize_t n = vnet_peer_recv(d->vnet, frame, sizeof(d->rxframe), deadline);
+    if(n >= 0)
+      sim_dhcpd_rx(d, frame, n);
   }
 }
 
