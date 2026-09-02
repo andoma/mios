@@ -45,7 +45,27 @@ void cpu_jump_stack(void *sp, void (*fn)(void)) __attribute__((noreturn));
 
 void cpu_thread_start(void);
 
+// ---- Virtual time (see timer.c) ----
+
+extern int host_vtime;         // 1: clock only advances when idle
+
+uint64_t host_timer_next(void);     // next Mios timer deadline, UINT64_MAX if none
+void host_vclock_set(uint64_t now); // advance the virtual clock (never backwards)
+void host_timer_fire(void);         // raise the timer IRQ
+
+// Platform hook: should this test suite run in virtual time? (weak, 0)
+int host_platform_vtime(const char *suite);
+
+// Switch rand() to a deterministic sequence (see rnd.c)
+void host_rand_seed(uint32_t seed);
+
 // ---- Command line / environment (see cpu.c) ----
+
+// n:th positional argument (not starting with '-', before "--"), or NULL.
+// The first one names a test suite, see platform/host/hosttest.c
+const char *host_positional(int n);
+
+static inline int host_test_mode(void) { return host_positional(0) != NULL; }
 
 // "--name=value" or "--name value" -> value, "--name" alone -> "",
 // absent -> NULL. Parsing stops at "--".

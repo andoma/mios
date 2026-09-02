@@ -9,6 +9,7 @@
 #include "cpu.h"
 #include "irq.h"
 #include "linux.h"
+#include "sim.h"
 
 struct cpu cpu0;
 
@@ -82,7 +83,11 @@ void __attribute__((noreturn))
 cpu_idle(void)
 {
   while(1) {
-    linux_sigsuspend_all();
+    if(host_vtime) {
+      sim_idle();
+    } else {
+      linux_sigsuspend_all();
+    }
   }
 }
 
@@ -99,10 +104,20 @@ cpu_idle_entry(void)
 }
 
 
+int __attribute__((weak))
+host_platform_vtime(const char *suite)
+{
+  return 0;
+}
+
+
 void __attribute__((noreturn))
 host_start(long *sp)
 {
   host_boot_sp = sp;
+  const char *suite = host_positional(0);
+  if(suite != NULL)
+    host_vtime = host_platform_vtime(suite);
   host_irq_init();
   init();
   cpu_jump_stack(idle_sp, cpu_idle_entry);
@@ -171,6 +186,27 @@ host_arg(const char *name)
     if(argv[i + 1] != NULL && argv[i + 1][0] != '-')
       return argv[i + 1];
     return "";
+  }
+  return NULL;
+}
+
+const char *
+host_positional(int n)
+{
+  char **argv = host_argv();
+  for(int i = 1; argv[i] != NULL; i++) {
+    const char *a = argv[i];
+    if(!strcmp(a, "--"))
+      break;
+    if(a[0] == '-') {
+      // "--name value" consumes the following non-dash word, mirror host_arg()
+      if(a[1] == '-' && strchr(a, '=') == NULL &&
+         argv[i + 1] != NULL && argv[i + 1][0] != '-')
+        i++;
+      continue;
+    }
+    if(n-- == 0)
+      return a;
   }
   return NULL;
 }

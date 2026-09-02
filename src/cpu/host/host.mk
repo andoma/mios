@@ -51,6 +51,7 @@ SRCS += ${C}/entry.s \
 	${C}/irq.c \
 	${C}/timer.c \
 	${C}/rnd.c \
+	${C}/sim.c \
 
 run: ${O}/${ARTIFACT}.elf
 	${O}/${ARTIFACT}.elf

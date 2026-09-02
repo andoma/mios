@@ -143,8 +143,17 @@ void host_irq_detach_fd(int fd);
 // Mark the line as driven by a POSIX timer (SIGALRM)
 void host_irq_attach_timer(int irq);
 
-// Software-raise an IRQ line
+// Software-raise an IRQ line (dispatches immediately if unmasked)
 void host_irq_raise(int irq);
+
+// Mark an IRQ line pending without dispatching. The only way another
+// Linux thread (a simulation peer) may signal Mios; the CPU thread
+// dispatches when it resumes.
+static inline void
+host_irq_pend(int irq)
+{
+  __atomic_fetch_or(&irq_pending, 1u << irq, __ATOMIC_SEQ_CST);
+}
 
 // Signals used for IRQ delivery. Standard (non-queuing) signals; SIGIO
 // cannot tell us which fd fired, so every fd line gets polled.

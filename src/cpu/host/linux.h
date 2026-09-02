@@ -17,6 +17,7 @@
 #define SYS_open              2
 #define SYS_close             3
 #define SYS_mmap              9
+#define SYS_mprotect         10
 #define SYS_munmap           11
 #define SYS_rt_sigaction     13
 #define SYS_rt_sigprocmask   14
@@ -299,3 +300,35 @@ struct linux_sockaddr_un {
   unsigned short sun_family;
   char sun_path[108];
 };
+
+// ---- Threads / futex (virtual time simulation threads, sim.c) ----
+
+#define SYS_clone   56
+#define SYS_exit    60
+#define SYS_futex  202
+
+#define CLONE_VM       0x00000100
+#define CLONE_FS       0x00000200
+#define CLONE_FILES    0x00000400
+#define CLONE_SIGHAND  0x00000800
+#define CLONE_THREAD   0x00010000
+#define CLONE_SYSVSEM  0x00040000
+
+#define FUTEX_WAIT 0
+#define FUTEX_WAKE 1
+
+// entry.S: clone a thread on the given stack and run fn(arg) on it
+long linux_clone_thread(unsigned long flags, void *child_sp,
+                        void (*fn)(void *arg), void *arg);
+
+static inline void
+linux_futex_wait(volatile uint32_t *addr, uint32_t expected)
+{
+  linux_syscall(SYS_futex, addr, FUTEX_WAIT, expected, NULL, NULL, 0);
+}
+
+static inline void
+linux_futex_wake(volatile uint32_t *addr)
+{
+  linux_syscall(SYS_futex, addr, FUTEX_WAKE, 1, NULL, NULL, 0);
+}

@@ -59,6 +59,12 @@ SECTIONS {
                 _fini_array_end = .;
 
                 INCLUDE cpu/section_arrays.ld
+
+                /* Host test suites, see platform/host/hosttest.h */
+                . = ALIGN(8);
+                _hosttest_array_begin = .;
+                KEEP(*(SORT_BY_NAME(hosttest.*)))
+                _hosttest_array_end = .;
         }
 
         .miosversion : {

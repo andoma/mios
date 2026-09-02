@@ -80,4 +80,31 @@ cpu_jump_stack:
         call    *%rsi
         ud2
 
+// long linux_clone_thread(unsigned long flags, void *child_sp,
+//                         void (*fn)(void *arg), void *arg)
+//   Returns the tid in the parent. The child runs fn(arg) on child_sp
+//   and exits when it returns. Used for simulation peers (sim.c).
+        .global linux_clone_thread
+linux_clone_thread:
+        sub     $16, %rsi
+        mov     %rdx, 0(%rsi)           // fn
+        mov     %rcx, 8(%rsi)           // arg
+        mov     $56, %eax               // clone
+        xor     %edx, %edx              // parent_tid
+        xor     %r10d, %r10d            // child_tid
+        xor     %r8d, %r8d              // tls
+        syscall
+        test    %rax, %rax
+        jnz     1f
+        // Child
+        xor     %ebp, %ebp
+        pop     %rax
+        pop     %rdi
+        call    *%rax
+        mov     $60, %eax               // exit
+        xor     %edi, %edi
+        syscall
+        ud2
+1:      ret
+
         .section .note.GNU-stack,"",@progbits
