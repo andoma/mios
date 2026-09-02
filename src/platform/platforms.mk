@@ -11,6 +11,11 @@ ALLPLATFORMS := \
 	nrf54l15-dk \
 	nrf52840-dongle \
 
+# The host platform is a native Linux x86-64 process
+ifeq ($(shell uname -sm),Linux x86_64)
+ALLPLATFORMS += host
+endif
+
 ${ALLPLATFORMS}:
 	$(MAKE) PLATFORM=$@
 

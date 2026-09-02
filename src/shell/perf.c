@@ -66,7 +66,7 @@ cmd_perftest(cli_t *cli, int argc, char **argv)
     rounds++;
   }
 
-  cli_printf(cli, "sqrtf()/second:    %d  [result:%f]\n", rounds * 10000, v);
+  cli_printf(cli, "sqrtf()/second:    %zd  [result:%f]\n", rounds * 10000, v);
 #endif
   free(buf);
   return 0;

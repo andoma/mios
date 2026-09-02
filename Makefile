@@ -37,7 +37,9 @@ include ${SRC}/platform/${PLATFORM}/${PLATFORM}.mk
 
 OPTLEVEL ?= 2
 
-CFLAGS += -Wframe-larger-than=192
+# Stack frame limit. MCU targets are tight; host overrides it.
+FRAME_LIMIT ?= 192
+CFLAGS += -Wframe-larger-than=${FRAME_LIMIT}
 
 CFLAGS += ${CFLAGS-yes}
 
@@ -45,7 +47,9 @@ CFLAGS += -g3 -O${OPTLEVEL} -nostdinc -Wall -Werror -D__mios__
 
 CPPFLAGS += -I${T}include -I${SRC} -I${O} -I${O}/include -include ${O}/include/config.h
 
-LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc -n
+# -n (nmagic) skips page alignment, right for MCU images. Host unsets it.
+LD_NMAGIC ?= -n
+LDFLAGS += -nostartfiles -nodefaultlibs ${CFLAGS} -lgcc ${LD_NMAGIC}
 CFLAGS += -ffunction-sections -fdata-sections -Wno-attributes
 LDFLAGS += -Wl,--gc-sections -Wl,--build-id=sha1
 
