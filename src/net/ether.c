@@ -46,7 +46,9 @@ static error_t
 ether_output(ether_netif_t *eni, pbuf_t *pb,
              uint16_t ether_type, const uint8_t *dstmac)
 {
-  pb = pbuf_prepend(pb, 14, 1, 0);
+  pb = pbuf_prepend(pb, 14, 0, 0); // net thread: never block on pbufs
+  if(pb == NULL)
+    return ERR_NO_BUFFER;
 
   uint8_t *eh = pbuf_data(pb, 0);
   memcpy(eh, dstmac, 6);
@@ -245,7 +247,9 @@ ether_periodic(void *opaque, uint64_t expire)
 static error_t
 ether_ipv4_output_mcast(ether_netif_t *eni, pbuf_t *pb, uint32_t ipv4_addr)
 {
-  pb = pbuf_prepend(pb, 14, 1, 0);
+  pb = pbuf_prepend(pb, 14, 0, 0); // net thread: never block on pbufs
+  if(pb == NULL)
+    return ERR_NO_BUFFER;
 
   uint8_t *eh = pbuf_data(pb, 0);
   eh[0] = 0x01;

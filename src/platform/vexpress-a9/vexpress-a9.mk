@@ -12,6 +12,9 @@ GLOBALDEPS += ${P}/${PLATFORM}.mk
 
 CPPFLAGS += -I${P} -include ${PLATFORM}.h
 
+# Enough packet buffers for many concurrent VLLP channels reassembling at once
+CPPFLAGS += -DPBUF_DEFAULT_COUNT=48
+
 LDSCRIPT = ${P}/vexpress-a9.ld
 
 include ${SRC}/cpu/aarch32/aarch32.mk

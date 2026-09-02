@@ -1,20 +1,23 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "vllp_sim.h"
 #include "vllp.h"
 
 #include <assert.h>
 #include <sys/queue.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <sys/param.h>
+
+#ifndef VLLP_SIM
+#include <pthread.h>
 #include <errno.h>
 #include <syslog.h>
-#include <stdarg.h>
-
 #include <sys/random.h>
-#include <sys/param.h>
+#endif
 
 #define VLLP_ACK_INTERVAL 1000000
 #define VLLP_RTX_TIMEOUT  25000
@@ -63,6 +66,17 @@ struct vllp {
   pthread_mutex_t mutex;
   pthread_cond_t cond;
 
+  // Loop-body inactivity deadline (moved out of the thread stack so the
+  // loop body can be shared by the pthread thread and the sim pump).
+  int64_t rx_timeout;
+
+#ifdef VLLP_SIM
+  uint32_t sim_rng;
+  void *sim_tr;
+  vsim_recv_fn sim_recv;
+  uint32_t sim_rxid;
+#endif
+
   uint32_t flags;
 
   uint32_t crc_IV;
@@ -77,6 +91,14 @@ struct vllp {
   uint8_t SE;
   uint8_t mtu;
   uint8_t timeout;
+
+  // A received data fragment must be acknowledged promptly. The E bit
+  // can ride on any data frame we send, but the peer's flow bit for the
+  // channel it just used is only restored by a pure ACK or by a data
+  // frame on that same channel. So: piggyback only when our next data
+  // frame is on ack_channel, otherwise send a pure ACK first.
+  uint8_t ack_pending;
+  uint8_t ack_channel;
 
   uint32_t refcount;
 };
@@ -151,6 +173,8 @@ struct vllp_channel {
   uint8_t id;
   uint8_t rx_thread_run;
   uint8_t is_closed;
+  uint8_t close_queued;      /* a CLOSE is queued or sent for this channel */
+  uint8_t close_is_response; /* our CLOSE answers the peer's CLOSE */
   uint32_t closed_status;
 };
 
@@ -163,6 +187,9 @@ static void vllp_release(vllp_t *v);
 static int64_t
 get_ts(void)
 {
+#ifdef VLLP_SIM
+  return (int64_t)clock_get();
+#else
   struct timespec tv;
 #ifdef __linux__
   clock_gettime(CLOCK_MONOTONIC, &tv);
@@ -170,12 +197,13 @@ get_ts(void)
   clock_gettime(CLOCK_REALTIME, &tv);
 #endif
   return (int64_t)tv.tv_sec * 1000000LL + (tv.tv_nsec / 1000);
+#endif
 }
 
 
 
 static void __attribute__((unused))
-hexdump(const char *pfx, const void *data_, int len)
+vllp_dbg_hexdump(const char *pfx, const void *data_, int len)
 {
   int i, j, k;
   const uint8_t *data = data_;
@@ -311,6 +339,17 @@ vllp_disconnect(vllp_t *v, int error)
     default:
       break;
     }
+    // The channel is gone as far as the link is concerned. Mark it
+    // CLOSED so a later vllp_channel_close() from the app does not queue
+    // a CLOSE that would go out on the next session, where the id may
+    // already belong to a new channel.
+    vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
+
+    // Channels without an rx thread are consumed via vllp_channel_read();
+    // they learn about the teardown through an EOF in the rx queue.
+    if(vc->rx == NULL)
+      channel_enq_rx_meta(vc, error, VLLP_PKT_EOF);
+
     LIST_REMOVE(vc, link);
     LIST_INSERT_HEAD(&tmp, vc, link);
 
@@ -587,6 +626,10 @@ channel_send_message(vllp_t *v, vllp_channel_t *vc,
 static void
 channel_send_close(vllp_t *v, vllp_channel_t *vc, int error_code)
 {
+  if(vc->close_queued)
+    return; // Already closing, never put two CLOSEs on the wire
+  vc->close_queued = 1;
+
   vllp_channel_retain(vc, __FUNCTION__);
 
   // We always make place for CRC
@@ -713,7 +756,10 @@ vllp_handle_rx(vllp_t *v, vllp_pkt_t *vp, int64_t now)
 
       v->SE ^= VLLP_HDR_E;
     }
-    v->next_ack = MIN(v->next_ack, now + 1000);
+    // Accepted or duplicate: either way the peer needs our E bit (and
+    // its flow bit for this channel) as soon as possible.
+    v->ack_pending = 1;
+    v->ack_channel = channel_id;
 
     // Update flow status for this channel
     v->remote_flow_status =
@@ -773,6 +819,26 @@ handle_pending_channels(vllp_t *v, int64_t now)
 }
 
 
+// First active channel we are allowed to transmit on right now. A
+// queued EOF (close) is always sendable since it goes out on the CMC.
+static vllp_channel_t *
+pick_tx_channel(vllp_t *v)
+{
+  vllp_channel_t *vc;
+  TAILQ_FOREACH(vc, &v->active_channels, qlink) {
+    assert(vc->state == VLLP_CHANNEL_STATE_ACTIVE);
+    fragment(v, vc);
+    vllp_pkt_t *vp = TAILQ_FIRST(&vc->txq);
+    assert(vp != NULL);
+    if(vp->type == VLLP_PKT_EOF)
+      return vc;
+    if(v->remote_flow_status & (1 << vc->id))
+      return vc;
+  }
+  return NULL;
+}
+
+
 static int64_t
 vllp_tx(vllp_t *v, int64_t now)
 {
@@ -791,6 +857,25 @@ vllp_tx(vllp_t *v, int64_t now)
     return v->next_ack;
   }
 
+  if(v->ack_pending) {
+    int piggyback = 0;
+    if(v->current_tx == NULL) {
+      vllp_channel_t *next = pick_tx_channel(v);
+      if(next != NULL && next->id == v->ack_channel &&
+         TAILQ_FIRST(&next->txq)->type != VLLP_PKT_EOF)
+        piggyback = 1;
+    }
+    if(!piggyback) {
+      // Send the ACK now and fall through: the ACK does not consume the
+      // sequence bit, so our own data can follow immediately. Returning
+      // here would let a peer that floods us starve our transmit side,
+      // since the rx queue is always served before tx.
+      v->ack_pending = 0;
+      v->next_ack = now + VLLP_ACK_INTERVAL;
+      vllp_send_ack(v);
+    }
+  }
+
   if(v->current_tx) {
 
     // We have an outstanding packet
@@ -805,15 +890,10 @@ vllp_tx(vllp_t *v, int64_t now)
 
 
   // Try to find something to send
-  vllp_channel_t *vc;
-  TAILQ_FOREACH(vc, &v->active_channels, qlink) {
-
-    assert(vc->state == VLLP_CHANNEL_STATE_ACTIVE);
-
-    fragment(v, vc);
+  vllp_channel_t *vc = pick_tx_channel(v);
+  if(vc != NULL) {
 
     vllp_pkt_t *vp = TAILQ_FIRST(&vc->txq);
-    assert(vp != NULL);
 
     if(vp->type == VLLP_PKT_EOF) {
       uint8_t pkt[3];
@@ -835,14 +915,20 @@ vllp_tx(vllp_t *v, int64_t now)
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSE_SENT);
       free(vp);
 
+      if(vc->close_is_response) {
+        // This CLOSE answers the peer's CLOSE; nothing more will arrive
+        // for the channel, so it is done here. Drop it from the channel
+        // list and free the id so the peer can reuse it.
+        vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
+        if(is_client(v))
+          v->available_channel_ids |= (1 << vc->id);
+        LIST_REMOVE(vc, link);
+        vllp_channel_release(vc, "close-response-queued");
+      }
+
       vllp_channel_release(vc, "close-sent");
 
       return vllp_tx(v, now);
-    }
-
-    if(!(v->remote_flow_status & (1 << vc->id))) {
-      // may not send on this channel
-      continue;
     }
 
     TAILQ_REMOVE(&vc->txq, vp, link);
@@ -850,6 +936,7 @@ vllp_tx(vllp_t *v, int64_t now)
 
     v->remote_flow_status &= ~(1 << vc->id);
     v->current_tx = vp;
+    v->ack_pending = 0; // E bit rides on this frame
     v->SE ^= VLLP_HDR_S;
     v->next_rtx = now + VLLP_RTX_TIMEOUT;
     v->next_ack = now + VLLP_ACK_INTERVAL;
@@ -879,44 +966,132 @@ vllp_tx(vllp_t *v, int64_t now)
 }
 
 
+// One pass of the protocol loop. Returns the next wakeup deadline, 0 to
+// be called again immediately, or INT64_MAX to sleep until woken. Shared
+// by the pthread thread and the sim pump. Caller holds the mutex (a
+// no-op under VLLP_SIM).
+static int64_t
+vllp_step(vllp_t *v, int64_t now)
+{
+  if(v->connected)
+    handle_pending_channels(v, now);
+
+  if(v->rx_timeout && now > v->rx_timeout) {
+    vllp_log(v, LOG_WARNING, "Timeout");
+    vllp_disconnect(v, VLLP_ERR_TIMEOUT);
+    v->rx_timeout = 0;
+    return 0;
+  }
+
+  if(TAILQ_FIRST(&v->rxq) != NULL) {
+    vllp_pkt_t *vp = TAILQ_FIRST(&v->rxq);
+    TAILQ_REMOVE(&v->rxq, vp, link);
+    if(vllp_handle_rx(v, vp, now) == 0)
+      v->rx_timeout = now + v->timeout * 1000000;
+    else
+      vllp_disconnect(v, VLLP_ERR_MALFORMED);
+    free(vp);
+    return 0;
+  }
+
+  return vllp_tx(v, now);
+}
+
+// Release the cmc and unlink it (end-of-life bookkeeping). Caller holds
+// the mutex.
+static void
+vllp_teardown(vllp_t *v)
+{
+  vllp_channel_t *vc = v->cmc;
+  if(vc->state == VLLP_CHANNEL_STATE_ACTIVE) {
+    TAILQ_REMOVE(&v->active_channels, vc, qlink);
+    vllp_channel_release(vc, "end-of-thread");
+  }
+  vllp_channel_unlink(vc);
+  vllp_channel_release(vc, "cmc ownership");
+}
+
+#ifdef VLLP_SIM
+// One unit of cooperative progress: run the loop body once, then, if it
+// asked to wait, pull at most one inbound frame from the transport
+// (advancing virtual time to its arrival). Callers loop on this.
+static void
+sim_pump_once(vllp_t *v, int64_t deadline)
+{
+  int64_t now = get_ts();
+  int64_t wk = vllp_step(v, now);
+  if(wk == 0)
+    return;
+  int64_t d = wk < deadline ? wk : deadline;
+  uint32_t id;
+  uint8_t f[80];
+  long n = v->sim_recv(v->sim_tr, &id, f, sizeof(f), d);
+  if(n >= 0 && id == v->sim_rxid)
+    vllp_input(v, f, n);
+}
+
+void
+hvllp_sim_run(vllp_t *v, int64_t deadline)
+{
+  while(get_ts() < deadline)
+    sim_pump_once(v, deadline);
+}
+
+// One cooperative step, bounded by deadline. Lets a suite pump until a
+// predicate (e.g. connected) holds without burning to a fixed deadline.
+void
+hvllp_sim_poll(vllp_t *v, int64_t deadline)
+{
+  sim_pump_once(v, deadline);
+}
+
+// Free a buffer returned by hvllp_channel_read (client's private heap).
+void
+hvllp_sim_free(void *p)
+{
+  free(p); // vsim_free under VLLP_SIM
+}
+
+void
+hvllp_sim_setup(vllp_t *v, uint64_t seed, void *tr, vsim_recv_fn recv,
+                uint32_t rxid)
+{
+  v->sim_rng = (uint32_t)(seed ? seed : 1);
+  v->sim_tr = tr;
+  v->sim_recv = recv;
+  v->sim_rxid = rxid;
+}
+
+// Block (cooperatively) until vc->rxq has a packet, or the deadline
+// passes (deadline == 0 means wait forever). Returns VLLP_ERR_TIMEOUT on
+// timeout, else 0.
+static int
+sim_wait_rxq(vllp_channel_t *vc, int64_t deadline)
+{
+  vllp_t *v = vc->vllp;
+  while(TAILQ_FIRST(&vc->rxq) == NULL) {
+    if(deadline && get_ts() >= deadline)
+      return VLLP_ERR_TIMEOUT;
+    sim_pump_once(v, deadline ? deadline : get_ts() + 3600LL * 1000000);
+  }
+  return 0;
+}
+#endif // VLLP_SIM
+
+#ifndef VLLP_SIM
 static void *
 vllp_thread(void *arg)
 {
   vllp_t *v = arg;
-  vllp_pkt_t *vp;
-  int64_t timeout = 0;
   v->next_ack = 0;
   v->next_rtx = INT64_MAX;
+  v->rx_timeout = 0;
 
   pthread_mutex_lock(&v->mutex);
 
   while(v->run) {
     const int64_t now = get_ts();
-
-    if(v->connected) {
-      handle_pending_channels(v, now);
-    }
-
-    if(timeout && now > timeout) {
-      vllp_log(v, LOG_WARNING, "Timeout");
-      vllp_disconnect(v, VLLP_ERR_TIMEOUT);
-      timeout = 0;
-      continue;
-    }
-
-    if(TAILQ_FIRST(&v->rxq) != NULL) {
-      vp = TAILQ_FIRST(&v->rxq);
-      TAILQ_REMOVE(&v->rxq, vp, link);
-      if(vllp_handle_rx(v, vp, now) == 0) {
-        timeout = now + v->timeout * 1000000;
-      } else {
-        vllp_disconnect(v, VLLP_ERR_MALFORMED);
-      }
-      free(vp);
-      continue;
-    }
-
-    int64_t wakeup = vllp_tx(v, now);
+    int64_t wakeup = vllp_step(v, now);
     if(wakeup == 0)
       continue;
 
@@ -930,21 +1105,11 @@ vllp_thread(void *arg)
     }
   }
 
-  vllp_channel_t *vc = v->cmc;
-
-  if(vc->state == VLLP_CHANNEL_STATE_ACTIVE) {
-    TAILQ_REMOVE(&v->active_channels, vc, qlink);
-    vllp_channel_release(vc, "end-of-thread");
-  }
-
-  vllp_channel_unlink(vc);
-
+  vllp_teardown(v);
   pthread_mutex_unlock(&v->mutex);
-
-  vllp_channel_release(vc, "cmc ownership");
-
   return NULL;
 }
+#endif // !VLLP_SIM
 
 
 static vllp_channel_t *
@@ -961,6 +1126,7 @@ channel_make(vllp_t *v, int id, int state)
   vc->vllp = v;
   vllp_retain(v);
 
+#ifndef VLLP_SIM
   pthread_cond_init(&vc->state_cond, NULL);
 
   pthread_condattr_t cond_attr;
@@ -969,6 +1135,7 @@ channel_make(vllp_t *v, int id, int state)
   pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
 #endif
   pthread_cond_init(&vc->rxq_cond, &cond_attr);
+#endif
   return vc;
 }
 
@@ -1025,14 +1192,19 @@ cmc_handle_open_response(vllp_t *v, int target_channel,
 {
   vllp_channel_t *vc = channel_find(v, target_channel);
 
+  // A stray open-response (e.g. one in flight from a session that has
+  // since been reset) is not a protocol violation -- ignore it rather
+  // than tearing the link down, which would cascade into another reset.
   if(vc == NULL) {
-    vllp_log(v, LOG_ERR, "channel_open_ressponse on unknown channel");
-    return VLLP_ERR_BAD_STATE;
+    vllp_logf(v, LOG_INFO, "open-response for unknown channel %d, ignoring",
+              target_channel);
+    return 0;
   }
 
   if(vc->state != VLLP_CHANNEL_STATE_OPEN_SENT) {
-    vllp_log(v, LOG_ERR, "channel_open_response on channel in unexpected state");
-    return VLLP_ERR_BAD_STATE;
+    vllp_logf(v, LOG_INFO, "open-response for channel %d in state %d, ignoring",
+              target_channel, vc->state);
+    return 0;
   }
 
   if(len != 2) {
@@ -1105,10 +1277,24 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
     return 0;
 
   case VLLP_CHANNEL_STATE_ACTIVE:
-  case VLLP_CHANNEL_STATE_ESTABLISHED:
+  case VLLP_CHANNEL_STATE_ESTABLISHED: {
+    // The peer is closing: whatever we still have queued for this
+    // channel is thrown away on arrival, so drop it here and let the
+    // CLOSE response go out right away instead of behind the backlog.
+    vllp_pkt_t *vp;
+    while((vp = TAILQ_FIRST(&vc->mtxq)) != NULL) {
+      TAILQ_REMOVE(&vc->mtxq, vp, link);
+      free(vp);
+    }
+    while((vp = TAILQ_FIRST(&vc->txq)) != NULL) {
+      TAILQ_REMOVE(&vc->txq, vp, link);
+      free(vp);
+    }
+    vc->close_is_response = 1;
     channel_send_close(v, vc, error_code);
     channel_enq_rx_meta(vc, error_code, VLLP_PKT_EOF);
     return 0;
+  }
 
   case VLLP_CHANNEL_STATE_CLOSE_SENT:
     vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSED);
@@ -1203,12 +1389,14 @@ vllp_create(int mtu, int timeout, uint32_t flags, void *opaque,
 
   pthread_mutex_init(&v->mutex, NULL);
 
+#ifndef VLLP_SIM
   pthread_condattr_t cond_attr;
   pthread_condattr_init(&cond_attr);
 #ifdef __linux__
   pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
 #endif
   pthread_cond_init(&v->cond, &cond_attr);
+#endif
   return v;
 }
 
@@ -1245,7 +1433,14 @@ vllp_create_server(int mtu, int timeout, uint32_t flags, void *opaque,
 void
 vllp_start(vllp_t *v)
 {
+#ifdef VLLP_SIM
+  // No background thread; the sim pump drives the loop cooperatively.
+  v->next_ack = 0;
+  v->next_rtx = INT64_MAX;
+  v->rx_timeout = 0;
+#else
   pthread_create(&v->tid, NULL, vllp_thread, v);
+#endif
 }
 
 
@@ -1274,6 +1469,7 @@ vllp_input(vllp_t *v, const void *data, size_t len)
 }
 
 
+#ifndef VLLP_SIM
 static void *
 vllp_channel_rx_thread(void *arg)
 {
@@ -1326,9 +1522,16 @@ vllp_channel_rx_thread(void *arg)
 }
 
 
+#endif // !VLLP_SIM  (vllp_channel_rx_thread)
+
 void
 vllp_destroy(vllp_t *v)
 {
+#ifdef VLLP_SIM
+  v->run = 0;
+  vllp_teardown(v);
+  vllp_release(v);
+#else
   pthread_mutex_lock(&v->mutex);
   v->run = 0;
   pthread_cond_signal(&v->cond);
@@ -1336,6 +1539,7 @@ vllp_destroy(vllp_t *v)
 
   pthread_join(v->tid, NULL);
   vllp_release(v);
+#endif
 }
 
 static void
@@ -1377,6 +1581,11 @@ vllp_channel_create(vllp_t *v, const char *name, uint32_t flags,
   if(!rx != !eof)
     return NULL;   // Both must be set or cleared
 
+#ifdef VLLP_SIM
+  if(rx != NULL)
+    return NULL; // sim mode has no rx-dispatch thread; use vllp_channel_read
+#endif
+
   pthread_mutex_lock(&v->mutex);
 
   if(v->available_channel_ids) {
@@ -1393,11 +1602,13 @@ vllp_channel_create(vllp_t *v, const char *name, uint32_t flags,
     vllp_channel_retain(vc, "initial-pending-open");
     pthread_cond_signal(&v->cond);
 
+#ifndef VLLP_SIM
     if(rx) {
       vllp_channel_retain(vc, "rx-dispatch");
       vc->rx_thread_run = 1;
       pthread_create(&vc->rx_thread, NULL, vllp_channel_rx_thread, vc);
     }
+#endif
 
   }
 
@@ -1472,6 +1683,11 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
     // path on the host. On timeout, force the close locally: mirror the
     // close-response bookkeeping (state, id pool, unlink) so no further
     // rx/eof dispatch can reach the channel and the id is not leaked.
+#ifdef VLLP_SIM
+    int64_t cdl = get_ts() + 3LL * 1000000;
+    while(vc->state != VLLP_CHANNEL_STATE_CLOSED && get_ts() < cdl)
+      sim_pump_once(v, cdl);
+#else
     struct timespec deadline;
     clock_gettime(CLOCK_REALTIME, &deadline);
     deadline.tv_sec += 3;
@@ -1481,6 +1697,7 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
          ETIMEDOUT)
         timed_out = 1;
     }
+#endif
     if(vc->state != VLLP_CHANNEL_STATE_CLOSED) {
       vllp_logf(v, LOG_WARNING,
                 "channel %d: no close-response from peer, "
@@ -1508,10 +1725,51 @@ vllp_channel_close(vllp_channel_t *vc, int error_code, int wait)
 
 
 int
+vllp_channel_tx_pending(vllp_channel_t *vc)
+{
+  vllp_t *v = vc->vllp;
+  int n = 0;
+  vllp_pkt_t *vp;
+  pthread_mutex_lock(&v->mutex);
+  TAILQ_FOREACH(vp, &vc->mtxq, link)
+    if(vp->type == VLLP_PKT_MSG)
+      n++;
+  // txq holds fragments; count a message as pending while any fragment of
+  // it remains (the last fragment carries the L bit)
+  TAILQ_FOREACH(vp, &vc->txq, link)
+    if(vp->type == VLLP_PKT_MSG && (vp->data[0] & VLLP_HDR_L))
+      n++;
+  if(v->current_tx != NULL && (v->current_tx->data[0] & 0xf) == vc->id &&
+     (v->current_tx->data[0] & VLLP_HDR_L))
+    n++;
+  pthread_mutex_unlock(&v->mutex);
+  return n;
+}
+
+int
+vllp_is_connected(vllp_t *v)
+{
+  pthread_mutex_lock(&v->mutex);
+  int c = v->connected;
+  pthread_mutex_unlock(&v->mutex);
+  return c;
+}
+
+int
+vllp_channel_id(vllp_channel_t *vc)
+{
+  return vc->id;
+}
+
+
+int
 vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
 {
   int err;
   vllp_t *v = vc->vllp;
+#ifdef VLLP_SIM
+  (void)v;
+#endif
 
   vllp_pkt_t *vp;
 
@@ -1529,6 +1787,19 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
 
   while(1) {
 
+#ifdef VLLP_SIM
+    if(sim_wait_rxq(vc, deadline) == VLLP_ERR_TIMEOUT) {
+      pthread_mutex_unlock(&v->mutex);
+      *data = NULL;
+      *lenp = 0;
+      // A timed-out read leaves the channel unusable: a later read could
+      // pick up the data this one was waiting for. Treat it as closed.
+      vc->is_closed = 1;
+      vc->closed_status = VLLP_ERR_TIMEOUT;
+      return VLLP_ERR_TIMEOUT;
+    }
+    vp = TAILQ_FIRST(&vc->rxq);
+#else
     if(deadline == 0) {
       while((vp = TAILQ_FIRST(&vc->rxq)) == NULL) {
         pthread_cond_wait(&vc->rxq_cond, &v->mutex);
@@ -1559,6 +1830,7 @@ vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeout)
         continue;
       }
     }
+#endif
 
     TAILQ_REMOVE(&vc->rxq, vp, link);
 
@@ -1700,7 +1972,7 @@ static const char errmsg[] = {
 
 
 static const char *
-strtbl(const char *str, size_t index)
+vllp_strtbl(const char *str, size_t index)
 {
   while(1) {
     if(!index)
@@ -1716,7 +1988,7 @@ strtbl(const char *str, size_t index)
 const char *
 vllp_strerror(int error)
 {
-  return strtbl(errmsg, -error);
+  return vllp_strtbl(errmsg, -error);
 }
 
 
@@ -1726,6 +1998,12 @@ vllp_logf(vllp_t *v, int level, const char *fmt, ...)
 {
   va_list ap;
   va_start(ap, fmt);
+#ifdef VLLP_SIM
+  char out[256];
+  vsnprintf(out, sizeof(out), fmt, ap);
+  va_end(ap);
+  vllp_log(v, level, out);
+#else
   char *out = NULL;
   if(vasprintf(&out, fmt, ap) < 0)
     out = NULL;
@@ -1733,4 +2011,143 @@ vllp_logf(vllp_t *v, int level, const char *fmt, ...)
   if(out)
     vllp_log(v, level, out);
   free(out);
+#endif
 }
+
+
+#ifdef VLLP_SIM
+// ---- Private allocator ---------------------------------------------------
+// mios malloc takes a task mutex and is unusable from a simulation thread,
+// so the sim-built client carries its own heap: an implicit free list over
+// a static arena, first-fit with a coalescing pass on free. Ample for the
+// test workloads; not a general allocator.
+
+#define VSIM_ARENA_SIZE (16 * 1024 * 1024)
+#define VSIM_ALIGN 16
+
+typedef struct vsim_hdr {
+  size_t size;   // total block size incl. header, multiple of VSIM_ALIGN
+  size_t used;
+} vsim_hdr_t;
+
+static uint8_t vsim_arena[VSIM_ARENA_SIZE] __attribute__((aligned(VSIM_ALIGN)));
+static int vsim_inited;
+
+static size_t
+vsim_round(size_t n)
+{
+  return (n + VSIM_ALIGN - 1) & ~(size_t)(VSIM_ALIGN - 1);
+}
+
+static void
+vsim_init(void)
+{
+  vsim_hdr_t *h = (vsim_hdr_t *)vsim_arena;
+  h->size = VSIM_ARENA_SIZE;
+  h->used = 0;
+  vsim_inited = 1;
+}
+
+static void
+vsim_coalesce(void)
+{
+  uint8_t *p = vsim_arena;
+  uint8_t *end = vsim_arena + VSIM_ARENA_SIZE;
+  while(p < end) {
+    vsim_hdr_t *h = (vsim_hdr_t *)p;
+    uint8_t *next = p + h->size;
+    if(!h->used) {
+      while(next < end) {
+        vsim_hdr_t *nh = (vsim_hdr_t *)next;
+        if(nh->used)
+          break;
+        h->size += nh->size;
+        next = p + h->size;
+      }
+    }
+    p += h->size;
+  }
+}
+
+void *
+vsim_malloc(size_t size)
+{
+  if(!vsim_inited)
+    vsim_init();
+  const size_t need = vsim_round(sizeof(vsim_hdr_t)) + vsim_round(size ? size : 1);
+
+  uint8_t *p = vsim_arena;
+  uint8_t *end = vsim_arena + VSIM_ARENA_SIZE;
+  while(p < end) {
+    vsim_hdr_t *h = (vsim_hdr_t *)p;
+    if(!h->used && h->size >= need) {
+      if(h->size >= need + sizeof(vsim_hdr_t) + VSIM_ALIGN) {
+        vsim_hdr_t *nh = (vsim_hdr_t *)(p + need);
+        nh->size = h->size - need;
+        nh->used = 0;
+        h->size = need;
+      }
+      h->used = 1;
+      return p + vsim_round(sizeof(vsim_hdr_t));
+    }
+    p += h->size;
+  }
+  panic("hvllp: sim heap exhausted (need %zu)", size);
+}
+
+void *
+vsim_calloc(size_t nmemb, size_t size)
+{
+  size_t n = nmemb * size;
+  void *p = vsim_malloc(n);
+  memset(p, 0, n);
+  return p;
+}
+
+void
+vsim_free(void *ptr)
+{
+  if(ptr == NULL)
+    return;
+  vsim_hdr_t *h = (vsim_hdr_t *)((uint8_t *)ptr - vsim_round(sizeof(vsim_hdr_t)));
+  h->used = 0;
+  vsim_coalesce();
+}
+
+void *
+vsim_realloc(void *ptr, size_t size)
+{
+  if(ptr == NULL)
+    return vsim_malloc(size);
+  vsim_hdr_t *h = (vsim_hdr_t *)((uint8_t *)ptr - vsim_round(sizeof(vsim_hdr_t)));
+  size_t old = h->size - vsim_round(sizeof(vsim_hdr_t));
+  if(old >= size)
+    return ptr;
+  void *n = vsim_malloc(size);
+  memcpy(n, ptr, old < size ? old : size);
+  vsim_free(ptr);
+  return n;
+}
+
+char *
+vsim_strdup(const char *src)
+{
+  size_t n = strlen(src) + 1;
+  char *d = vsim_malloc(n);
+  memcpy(d, src, n);
+  return d;
+}
+
+uint32_t
+vsim_rand32(void)
+{
+  // Per-call state would need the client; a single global xorshift keyed
+  // by whichever client seeded last is enough: cookies only need to be
+  // distinct and reproducible within a run.
+  static uint32_t st = 0x1234abcd;
+  st ^= st << 13;
+  st ^= st >> 17;
+  st ^= st << 5;
+  return st;
+}
+#endif // VLLP_SIM

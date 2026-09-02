@@ -73,6 +73,10 @@ echo_pull(void *opaque)
   svc_echo_t *se = opaque;
   pushpull_t *s = se->se_sock;
   pbuf_t *pb = se->se_pb;
+  if(pb == NULL)
+    return NULL;   // Nothing to echo; don't raise a spurious PUSH (which
+                   // would re-arm this pull and spin the tx loop while a
+                   // multi-fragment request is still being reassembled).
   se->se_pb = NULL;
   s->net->event(s->net_opaque, PUSHPULL_EVENT_PUSH);
   return pb;

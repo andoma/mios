@@ -12,6 +12,7 @@ ENABLE_TASK_DEBUG := yes
 ENABLE_PERFTEST := yes
 ENABLE_NET_IPV4 := yes
 ENABLE_NET_DSIG_UDP := yes
+ENABLE_NET_CAN := yes
 
 P := ${SRC}/platform/host
 
@@ -30,6 +31,14 @@ SRCS += ${P}/host.c \
 	${P}/hostnet.c \
 	${P}/hosttest.c \
 	${P}/vnet.c \
+	${P}/vcan.c \
 	${P}/sim_dhcpd.c \
 	${P}/suite_dhcp.c \
+	${P}/suite_vllp.c \
+	${T}host/dsig/vllp.c \
 
+
+# The real host VLLP client, compiled into the test binary in single-
+# threaded virtual-time mode (VLLP_SIM). Lets suites exercise the actual
+# production host stack against the guest server.
+${O}/${T}host/dsig/vllp.o : CFLAGS += -DVLLP_SIM -iquote${T}host/dsig

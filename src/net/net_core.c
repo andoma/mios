@@ -31,12 +31,20 @@ static struct net_task_queue net_tasks = STAILQ_HEAD_INITIALIZER(net_tasks);
 static struct timer_list net_timers;
 
 static void
-net_task_cancel(net_task_t *nt)
+net_task_cancel_sched_locked(net_task_t *nt)
 {
   if(nt->nt_signals) {
     STAILQ_REMOVE(&net_tasks, nt, net_task, nt_link);
     nt->nt_signals = 0;
   }
+}
+
+void
+net_task_cancel(net_task_t *nt)
+{
+  int q = irq_forbid(IRQ_LEVEL_SCHED);
+  net_task_cancel_sched_locked(nt);
+  irq_permit(q);
 }
 
 
@@ -62,7 +70,7 @@ netif_detach_task(netif_t *ni)
 
 
   int q = irq_forbid(IRQ_LEVEL_SCHED);
-  net_task_cancel(&ni->ni_task);
+  net_task_cancel_sched_locked(&ni->ni_task);
   pbuf_free_queue_irq_blocked(&ni->ni_rx_queue);
   ni->ni_flags |= NETIF_F_ZOMBIE;
   task_wakeup_sched_locked(&netif_detach_waitq, 1);

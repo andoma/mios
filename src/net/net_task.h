@@ -13,5 +13,8 @@ typedef struct net_task {
 
 void net_task_raise(net_task_t *nt, uint32_t signals);
 
+// Drop a pending raise, e.g. before freeing the object embedding the task
+void net_task_cancel(net_task_t *nt);
+
 void net_timer_arm(timer_t *t, uint64_t deadline);
 

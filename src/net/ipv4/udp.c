@@ -42,7 +42,11 @@ udp_send(netif_t *ni, pbuf_t *pb, uint32_t dst_addr, nexthop_t *nh,
     ni = nh->nh_netif;
   }
 
-  pb = pbuf_prepend(pb, sizeof(udp_hdr_t), 1, sizeof(ipv4_header_t));
+  // Never block here: this runs on the net thread, which is also the
+  // one that would free buffers. Under exhaustion the datagram is dropped.
+  pb = pbuf_prepend(pb, sizeof(udp_hdr_t), 0, sizeof(ipv4_header_t));
+  if(pb == NULL)
+    return;
 
   udp_hdr_t *udp = pbuf_data(pb, 0);
   udp->dst_port = htons(dst_port);
@@ -58,7 +62,9 @@ udp_send(netif_t *ni, pbuf_t *pb, uint32_t dst_addr, nexthop_t *nh,
                       pb, 0, pb->pb_pktlen);
   }
 
-  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
+  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 0, 0);
+  if(pb == NULL)
+    return;
   ipv4_header_t *ip = pbuf_data(pb, 0);
 
   ip->ver_ihl = 0x45;

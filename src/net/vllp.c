@@ -57,6 +57,14 @@ typedef struct vllp {
   uint8_t SE;
   uint8_t mtu;
   uint8_t timeout;
+
+  // A received data fragment must be acknowledged promptly. The E bit
+  // rides on any frame we send, but the peer's tx-flow-bit for the
+  // channel it just used is only restored by a pure ACK or by a data
+  // frame on that same channel. So: piggyback only if our next data
+  // frame is on ack_channel, otherwise send a pure ACK first.
+  uint8_t ack_pending;
+  uint8_t ack_channel;
 } vllp_t;
 
 
@@ -80,6 +88,10 @@ struct vllp_channel {
 
   pushpull_t pp;
 
+  // Message pulled from the app that could not be taken on (no pbuf
+  // for the CRC). Retried before pulling anything new.
+  pbuf_t *stalled_tx;
+
   uint32_t tx_crc_IV;
   uint32_t rx_crc_IV;
 
@@ -87,10 +99,29 @@ struct vllp_channel {
   uint8_t state;
   uint8_t app_closed;
   uint8_t net_closed;
+  int16_t close_error; // Error code carried in the CLOSE we send
 };
 
 
 #define VLLP_VERSION 2
+
+// Headroom in transmitted pbufs. Must cover whatever the transport puts
+// in front of the VLLP frame (DSIG id + UDP + IPv4 + Ethernet = 46
+// bytes) so no second pbuf is needed for headers.
+#ifndef VLLP_TX_HEADROOM
+#define VLLP_TX_HEADROOM 64
+#endif
+
+// Reassembly limits. A message is at most this many pbufs; a peer
+// sending more gets its channel closed with ERR_MTU_EXCEEDED instead of
+// starving the rest of the system. Reassembly also never takes the
+// last VLLP_PBUF_RESERVE buffers so ACKs and rx keep working.
+#ifndef VLLP_MAX_MESSAGE_PBUFS
+#define VLLP_MAX_MESSAGE_PBUFS 4
+#endif
+#ifndef VLLP_PBUF_RESERVE
+#define VLLP_PBUF_RESERVE 2
+#endif
 
 #define VLLP_SYN   0x0f
 
@@ -152,9 +183,12 @@ vllp_gen_channel_crc(vllp_t *v)
 static void
 vllp_channel_destroy(vllp_t *v, vllp_channel_t *vc)
 {
+  net_task_cancel(&vc->task);
   int q = irq_forbid(IRQ_LEVEL_NET);
   pbuf_free_queue_irq_blocked(&vc->txq);
   pbuf_free_queue_irq_blocked(&vc->rxq);
+  if(vc->stalled_tx)
+    pbuf_free_irq_blocked(vc->stalled_tx);
   irq_permit(q);
   evlog(LOG_DEBUG, "VLLP: channel %d closed", vc->id);
   free(vc);
@@ -203,7 +237,11 @@ vllp_refresh_local_flow_status(vllp_t *v)
     if(vc->net_closed)
       continue;
 
-    if(!vc->pp.app->may_push || !vc->pp.app->may_push(vc->pp.app_opaque))
+    // No may_push means the app never rejects input (send-only or
+    // always-ready service); keep the rx-flow-bit set. Clearing it told
+    // the peer "do not send here", which for a pull-only channel like
+    // chargen is simply wrong and confused the peer's flow bookkeeping.
+    if(vc->pp.app->may_push && !vc->pp.app->may_push(vc->pp.app_opaque))
       bits &= ~(1 << vc->id);
   }
 
@@ -218,11 +256,11 @@ static pbuf_t *
 vllp_tx_ack(vllp_t *v, pbuf_t *pb)
 {
   if(pb == NULL) {
-    pb = pbuf_make(4, 0); /* offset: 4 bytes for ID prefix in dsig.c */
+    pb = pbuf_make(VLLP_TX_HEADROOM, 0);
     if(pb == NULL)
       return NULL;
   } else {
-    pbuf_reset(pb, 4, 0);
+    pbuf_reset(pb, VLLP_TX_HEADROOM, 0);
   }
 
   uint8_t *pkt = pbuf_append(pb, 7);
@@ -251,17 +289,25 @@ vllp_channel_maybe_destroy(vllp_t *v, vllp_channel_t *vc)
   return 0;
 }
 
-static void
+// Returns 1 if the channel was destroyed
+static int
 vllp_channel_net_close(vllp_t *v, vllp_channel_t *vc,
                        const char *reason)
 {
   if(vc->net_closed)
-    return;
+    return 0;
 
   vc->pp.app->close(vc->pp.app_opaque, reason);
   vc->net_closed = 1;
   LIST_REMOVE(vc, link);
-  vllp_channel_maybe_destroy(v, vc);
+
+  // The app is gone whether or not it raises PUSHPULL_EVENT_CLOSE, so
+  // from here the channel behaves as app-closed: a CLOSE (response) is
+  // transmitted by vllp_maybe_tx() and the channel is destroyed.
+  if(vc->app_closed == 0)
+    vc->app_closed = 1;
+
+  return vllp_channel_maybe_destroy(v, vc);
 }
 
 
@@ -283,8 +329,21 @@ vllp_disconnect(vllp_t *v, const char *reason)
     n = LIST_NEXT(vc, link);
     if(vc == v->cmc)
       continue;
-    vllp_channel_net_close(v, vc, reason);
+    if(vllp_channel_net_close(v, vc, reason))
+      continue;
+    // No session to send a CLOSE on; the channel is simply gone
+    TAILQ_REMOVE(&v->established_channels, vc, qlink);
+    vc->app_closed = 2;
+    vllp_channel_destroy(v, vc);
   }
+
+  // Anything queued on the CMC belongs to the old session
+  {
+    int q = irq_forbid(IRQ_LEVEL_NET);
+    pbuf_free_queue_irq_blocked(&v->cmc->txq);
+    irq_permit(q);
+  }
+  v->ack_pending = 0;
 
   if(v->current_tx_buf) {
     pbuf_free(v->current_tx_buf);
@@ -482,44 +541,48 @@ vllp_channel_receive(vllp_t *v, int channel_id,
   }
 
   const int fragment_len = len;
-  pbuf_t *pb = STAILQ_LAST(&vc->rxq, pbuf, pb_link);
-  if(pb != NULL) {
-    pbuf_t *next = NULL;
-    // Squeeze in as much data as possible at end
-    size_t avail = PBUF_DATA_SIZE - pb->pb_buflen;
-    size_t to_copy = MIN(avail, len);
 
-    if(to_copy > len) {
-      // Can't fit all, if we need to alloc.
-      next = pbuf_make(0, 0);
-      if(next == NULL) {
-        // No buffers, bail out
-        return ERR_NO_BUFFER;
-      }
-      next->pb_flags = 0;
+  // Reserve space before copying anything so a failed allocation leaves
+  // the reassembly state untouched (the peer will retransmit).
+  pbuf_t *tail = STAILQ_LAST(&vc->rxq, pbuf, pb_link);
+  size_t avail = tail ? PBUF_DATA_SIZE - tail->pb_offset - tail->pb_buflen : 0;
+  pbuf_t *next = NULL;
+  if(tail == NULL || len > avail) {
+    int queued = 0;
+    STAILQ_FOREACH(next, &vc->rxq, pb_link)
+      queued++;
+    if(queued >= VLLP_MAX_MESSAGE_PBUFS) {
+      evlog(LOG_WARNING, "VLLP: channel %d: message larger than %d bytes, "
+            "closing channel", vc->id,
+            VLLP_MAX_MESSAGE_PBUFS * PBUF_DATA_SIZE - 4);
+      vc->close_error = ERR_MTU_EXCEEDED;
+      vllp_channel_net_close(v, vc, "message too large");
+      return 0; // Fragment consumed (dropped); the rest follow suit
     }
+    if(pbuf_buffer_avail() <= VLLP_PBUF_RESERVE)
+      return ERR_NO_BUFFER;
+    next = pbuf_make(0, 0);
+    if(next == NULL)
+      return ERR_NO_BUFFER;
+    next->pb_flags = 0;
+  }
 
-    memcpy(pb->pb_data + pb->pb_buflen, data, to_copy);
-    pb->pb_buflen += to_copy;
+  if(tail != NULL) {
+    size_t to_copy = MIN(avail, len);
+    memcpy(tail->pb_data + tail->pb_offset + tail->pb_buflen, data, to_copy);
+    tail->pb_buflen += to_copy;
     data += to_copy;
     len -= to_copy;
-    pb = next;
-  } else {
-    pb = pbuf_make(0, 0);
-    if(pb == NULL)
-      return ERR_NO_BUFFER;
-    pb->pb_flags = 0;
   }
 
-  if(pb != NULL) {
-
+  if(next != NULL) {
     assert(len <= PBUF_DATA_SIZE);
-    STAILQ_INSERT_TAIL(&vc->rxq, pb, pb_link);
-
-    memcpy(pb->pb_data, data, len);
-    pb->pb_buflen += len;
+    memcpy(next->pb_data, data, len);
+    next->pb_buflen = len;
+    STAILQ_INSERT_TAIL(&vc->rxq, next, pb_link);
   }
 
+  pbuf_t *pb;
   pb = STAILQ_FIRST(&vc->rxq);
   pb->pb_pktlen += fragment_len;
 
@@ -578,9 +641,9 @@ vllp_tx(vllp_t *v, pbuf_t *pb)
     return pb;
 
   if(pb == NULL) {
-    pb = pbuf_make(4, 0); /* offset: 4 bytes for ID prefix in dsig.c */
+    pb = pbuf_make(VLLP_TX_HEADROOM, 0);
   } else {
-    pbuf_reset(pb, 4, 0);
+    pbuf_reset(pb, VLLP_TX_HEADROOM, 0);
   }
 
   if(pb != NULL) {
@@ -638,9 +701,27 @@ vllp_fragment(vllp_t *v, pbuf_t *pb)
 static pbuf_t *
 vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb, pbuf_t *reuse)
 {
+  // The CRC goes at the end of the (possibly chained) message; make
+  // sure the last pbuf has room for it.
+  pbuf_t *tail = pb;
+  while(tail->pb_next != NULL)
+    tail = tail->pb_next;
+
+  if(tail->pb_offset + tail->pb_buflen + 4 > PBUF_DATA_SIZE) {
+    pbuf_t *extra = pbuf_make(0, 0);
+    if(extra == NULL) {
+      // Keep the message and retry once buffers are back
+      vc->stalled_tx = pb;
+      net_timer_arm(&v->rtx_timer, clock_get() + 25000);
+      return reuse;
+    }
+    extra->pb_flags = tail->pb_flags & PBUF_EOP;
+    tail->pb_flags &= ~PBUF_EOP;
+    tail->pb_next = extra;
+  }
+
   uint32_t crc32 = calc_crc32(pb, vc->tx_crc_IV);
   vc->tx_crc_IV++;
-  // Fix this for chained PBUFs, pbuf_append() will assert for now tho
   uint8_t *crcbuf = pbuf_append(pb, 4);
   crcbuf[0] = crc32;
   crcbuf[1] = crc32 >> 8;
@@ -672,7 +753,8 @@ vllp_tx_close(vllp_t *v, vllp_channel_t *vc)
   if(pb == NULL)
     return ERR_NO_BUFFER;
 
-  send_cmc_message(v, v->cmc, pb, VLLP_CMC_OPCODE_CLOSE, vc->id, 0);
+  send_cmc_message(v, v->cmc, pb, VLLP_CMC_OPCODE_CLOSE, vc->id,
+                   vc->close_error);
   pb = pbuf_splice(&v->cmc->txq);
   vllp_channel_tx(v, v->cmc, pb, NULL);
   return 0;
@@ -682,41 +764,70 @@ vllp_tx_close(vllp_t *v, vllp_channel_t *vc)
 static pbuf_t *
 vllp_maybe_tx(vllp_t *v, pbuf_t *reuse)
 {
-  if(v->current_tx_buf)
+  if(!v->connected)
     return reuse;
+
+  if(v->current_tx_buf) {
+    // Waiting for the peer to accept our outstanding frame. An ACK we
+    // owe can not ride on anything, so send it by itself.
+    if(v->ack_pending) {
+      v->ack_pending = 0;
+      return vllp_tx_ack(v, reuse);
+    }
+    return reuse;
+  }
 
   vllp_channel_t *vc;
   TAILQ_FOREACH(vc, &v->established_channels, qlink) {
     pbuf_t *out;
-    if(vc->pp.app != NULL) {
 
-      if(vc->app_closed == 1) {
-        if(vllp_tx_close(v, vc))
-          continue; // Close failed (no buffers), retry later
-
-        // Ok we sent something
-        vc->app_closed = 2;
-        vllp_channel_maybe_destroy(v, vc);
-        return reuse;
-
-      } else {
-
-        if(vc->net_closed)
-          continue;
-
-        out = vc->pp.app->pull(vc->pp.app_opaque);
+    if(vc->pp.app != NULL && vc->app_closed == 1) {
+      // Close goes out on the CMC, so it can not carry the F bit for
+      // the channel the pending ACK is for
+      if(v->ack_pending) {
+        v->ack_pending = 0;
+        reuse = vllp_tx_ack(v, reuse);
       }
+      if(vllp_tx_close(v, vc))
+        continue; // Close failed (no buffers), retry later
 
+      // Ok we sent something
+      vc->app_closed = 2;
+      vllp_channel_maybe_destroy(v, vc);
+      return reuse;
+    }
+
+    if(vc->net_closed)
+      continue;
+
+    // Peer has told us not to send on this channel (tx-flow-bit)
+    if(!((1 << vc->id) & v->remote_flow_status))
+      continue;
+
+    if(vc->pp.app != NULL) {
+      out = vc->stalled_tx;
+      vc->stalled_tx = NULL;
+      if(out == NULL)
+        out = vc->pp.app->pull(vc->pp.app_opaque);
     } else {
       out = pbuf_splice(&vc->txq);
     }
 
     if(out == NULL)
       continue;
+
+    if(v->ack_pending && vc->id != v->ack_channel) {
+      // Data on another channel does not restore the peer's flow bit
+      // for ack_channel; give it a pure ACK first, then our data.
+      reuse = vllp_tx_ack(v, reuse);
+    }
+    v->ack_pending = 0; // E bit (and F for this channel) ride on the frame
     return vllp_channel_tx(v, vc, out, reuse);
   }
 
-  if(v->transmitted_local_flow_status != v->local_flow_status) {
+  if(v->ack_pending ||
+     v->transmitted_local_flow_status != v->local_flow_status) {
+    v->ack_pending = 0;
     return vllp_tx_ack(v, reuse);
   }
   return reuse;
@@ -789,8 +900,6 @@ vllp_rx(vllp_t *v, pbuf_t *pb)
 
   if(channel_id != 0xf) {
 
-    int ack_delay = 1000;
-
     if(we_can_accept) {
 
       error_t err = vllp_channel_receive(v, channel_id, u8, len);
@@ -799,9 +908,11 @@ vllp_rx(vllp_t *v, pbuf_t *pb)
       case 0:
         v->transmitted_local_flow_status &= ~(1 << channel_id);
         v->SE ^= VLLP_HDR_E;
+        v->ack_pending = 1;
+        v->ack_channel = channel_id;
         break;
       case ERR_NO_BUFFER:
-        ack_delay = 10000; // Ease off a bit as we're low on bufs
+        // Not acknowledged; the peer retransmits in 25ms
         break;
       case ERR_CHECKSUM_ERROR:
         vllp_disconnect(v, "Invalid CRC");
@@ -812,12 +923,14 @@ vllp_rx(vllp_t *v, pbuf_t *pb)
       default:
         panic("vllp_channel_receive");
       }
+    } else {
+      // Duplicate (S bit mismatch): tell the peer what we expect
+      v->ack_pending = 1;
+      v->ack_channel = channel_id;
     }
 
     v->remote_flow_status = (v->remote_flow_status & ~(1 << channel_id)) |
       (u8[0] & VLLP_HDR_F ? (1 << channel_id) : 0);
-
-    net_timer_arm(&v->ack_timer, clock_get() + ack_delay);
   }
 
   if(v->current_tx_buf != NULL) {
@@ -846,7 +959,12 @@ vllp_rtx_timer(void *opaque, uint64_t expire)
 {
   vllp_t *v = opaque;
   vllp_refresh_local_flow_status(v);
-  vllp_tx(v, NULL);
+  if(v->current_tx_buf) {
+    vllp_tx(v, NULL);
+  } else {
+    // Armed by vllp_channel_tx() when a message could not be taken on
+    vllp_maybe_tx(v, NULL);
+  }
 }
 
 

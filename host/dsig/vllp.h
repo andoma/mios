@@ -123,6 +123,17 @@ int vllp_channel_read(vllp_channel_t *vc, void **data, size_t *lenp, long timeou
 
 void vllp_channel_close(vllp_channel_t *vc, int error_code, int wait);
 
+/* Introspection, mainly for tests and for pacing senders:
+ * vllp_channel_send() has no backpressure, so a bulk sender should keep
+ * vllp_channel_tx_pending() (messages queued but not yet fully acked)
+ * bounded itself.
+ */
+int vllp_channel_tx_pending(vllp_channel_t *vc);
+
+int vllp_is_connected(vllp_t *v);
+
+int vllp_channel_id(vllp_channel_t *vc);
+
 const char *vllp_strerror(int error);
 
 uint32_t vllp_crc32(uint32_t crc, const void *data, size_t len);

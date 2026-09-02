@@ -131,10 +131,14 @@ igmp_group_join(uint32_t group)
 static void
 igmp_output(uint32_t group, uint32_t dst, uint8_t type)
 {
-  pbuf_t *pb = pbuf_make(IGMP_PBUF_HEADROOM, 1);
+  pbuf_t *pb = pbuf_make(IGMP_PBUF_HEADROOM, 0);
+  if(pb == NULL)
+    return;
   netif_t *ni = SLIST_FIRST(&netifs);
 
-  pb = pbuf_prepend(pb, sizeof(igmp_packet_t), 1, 0);
+  pb = pbuf_prepend(pb, sizeof(igmp_packet_t), 0, 0);
+  if(pb == NULL)
+    return;
   igmp_packet_t *iq = pbuf_data(pb, 0);
   iq->group = group;
   iq->type = type;
@@ -142,7 +146,9 @@ igmp_output(uint32_t group, uint32_t dst, uint8_t type)
   iq->checksum = 0;
   iq->checksum = ipv4_cksum_pbuf(0, pb, 0, sizeof(igmp_packet_t));
 
-  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 1, 0);
+  pb = pbuf_prepend(pb, sizeof(ipv4_header_t), 0, 0);
+  if(pb == NULL)
+    return;
   ipv4_header_t *ip = pbuf_data(pb, 0);
 
   ip->ver_ihl = 0x45;
