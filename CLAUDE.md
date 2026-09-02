@@ -27,13 +27,21 @@ make PLATFORM=stm32h7-nucleo144 BTS=1
 # Host-side CLI test (compiles shell for host)
 make cli_test    # build only
 make cli_run     # build and run interactive
+
+# Run Mios as a native Linux x86-64 process (kernel, timers, shell on stdio,
+# Ethernet via passt if installed; DHCP, TCP etc. go through the host stack)
+make PLATFORM=host run
+echo ps | build.host/mios.elf              # scripted: exits on stdin EOF
+build.host/mios.elf -- -t 2323:23          # passt args after "--": forward telnet
+build.host/mios.elf --no-net               # or --passt=/path/to/socket
+echo hosttest | build.host/mios.elf        # scheduler/preemption self-test
 ```
 
 Output goes to `build.${PLATFORM}/` (e.g., `build.stm32h7-nucleo144/build.elf`).
 
 ## Supported Platforms
 
-lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144, nrf54l15-dk. Additional platforms (aarch64-virt, spike, t234 variants, nrf52, stm32wb55-nucleo64) exist but are not in the `allplatforms` CI target.
+lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144, nrf54l15-dk. `host` (Linux x86-64, added to `allplatforms` when building on such a machine). Additional platforms (aarch64-virt, spike, t234 variants, nrf52, stm32wb55-nucleo64) exist but are not in the `allplatforms` CI target.
 
 ## Compiler Flags
 
@@ -82,6 +90,7 @@ Custom libc, crypto (RSA/ECDSA/AES/SHA), LittleFS filesystem, USB stack (CDC/HID
 - ARM Cortex-M: `arm-none-eabi-`
 - AArch64: `aarch64-none-elf-` (Linux) / `aarch64-elf-` (Darwin)
 - RISC-V: `riscv64-linux-gnu-`
+- host: native `gcc`, static and freestanding (`src/cpu/host/` provides raw Linux syscalls, IRQs are signals, context switch is in `entry.S`). Networking is `src/platform/host/passt.c`, qemu-style length-prefixed frames over a UNIX socket to passt (unprivileged). Read the comment blocks in `irq.c` and `host.mk` before touching signal handling or compiler flags: the choices there (no `SA_NODEFER`, `-malign-data=abi`) fix real crashes.
 
 ## CI
 
