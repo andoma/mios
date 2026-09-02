@@ -100,10 +100,18 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc,
   free(mi);
   mi = NULL;
 
+  // vllp_channel_send() only queues; the whole image is still in flight
+  // when we get here, and every frame is stop-and-wait acked by the peer
+  // (~1 ms on CAN). At MTU 8 a 155 kB image is ~22k frames and takes
+  // ~25 s, so a 10 s wait always expired. Allow 5 minutes: a target that
+  // reboots or dies is caught earlier by the link timeout anyway, this
+  // only bounds a target that stays up but never finishes.
+  const int64_t response_timeout_us = 5 * 60 * 1000 * 1000LL;
+
   vllp_logf(v, LOG_DEBUG, "OTA: Waiting for response");
 
   size_t finsize;
-  result = vllp_channel_read(vc, &buf, &finsize, 10*1000*1000);
+  result = vllp_channel_read(vc, &buf, &finsize, response_timeout_us);
   if(result)
     return vllp_strerror(result);
   if(buf == NULL)
