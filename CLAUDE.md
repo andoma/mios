@@ -34,7 +34,8 @@ make PLATFORM=host run
 echo ps | build.host/mios.elf              # scripted: exits on stdin EOF
 build.host/mios.elf -- -t 2323:23          # passt args after "--": forward telnet
 build.host/mios.elf --no-net               # or --passt=/path/to/socket
-echo hosttest | build.host/mios.elf        # scheduler/preemption self-test
+build.host/mios.elf --list                 # test suites
+build.host/mios.elf dhcp-client            # run a suite (virtual time), exit 0/1
 ```
 
 Output goes to `build.${PLATFORM}/` (e.g., `build.stm32h7-nucleo144/build.elf`).
@@ -94,4 +95,4 @@ Custom libc, crypto (RSA/ECDSA/AES/SHA), LittleFS filesystem, USB stack (CDC/HID
 
 ## CI
 
-GitHub Actions runs `make -j$(nproc) allplatforms` on Ubuntu with `gcc-arm-none-eabi`. There are no automated tests beyond successful compilation of all platforms.
+GitHub Actions runs `make -j$(nproc) allplatforms` on Ubuntu with `gcc-arm-none-eabi`. Behavioural tests exist only for the host platform (`build.host/mios.elf <suite>`, see `src/platform/host/hosttest.h`); they are not yet run in CI. Suites run in virtual time by default: the clock jumps to the next deadline when everything is idle, so a minute of protocol timeouts takes milliseconds and runs are deterministic. Peers (for example the DHCP server in `sim_dhcpd.c`) are simulation threads written as blocking receive loops (`src/cpu/host/sim.h`); they run in lockstep with Mios and talk to it only through rings and an IRQ line (`vnet.h`).
