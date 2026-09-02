@@ -9,7 +9,7 @@ Mios is a lightweight embedded operating system written in C for microcontroller
 ## Build Commands
 
 ```bash
-# Build for a specific platform (default: lm3s811evb)
+# Build for a specific platform (default: host)
 make PLATFORM=stm32h7-nucleo144
 
 # Build all supported platforms (this is what CI runs)

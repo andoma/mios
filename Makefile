@@ -4,7 +4,7 @@ UNAME_S := $(shell uname -s)
 
 -include local.mk
 
-PLATFORM ?= lm3s811evb
+PLATFORM ?= host
 
 # Set by platform .mk files (see include/mios/mcu_family.h); 0 = unknown.
 MCU_FAMILY ?= 0
