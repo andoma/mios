@@ -462,6 +462,10 @@ xport_open_vllp(mcp_xport_t *x, mcp_context_t *ctx, const char **errstr)
   int mtu = ctx->vllp_mtu ? ctx->vllp_mtu : 64;
   int timeout_s = ctx->vllp_timeout_s ? ctx->vllp_timeout_s : 3;
   uint32_t flags = (mtu > 8) ? VLLP_FDCAN_ADAPTATION : 0;
+  // Only UDP multicast echoes our own frames back; on CAN/USB the filter
+  // would drop the peer's (byte-identical) ACKs. See vllp.h.
+  if(ctx->vllp_transport && !strcasecmp(ctx->vllp_transport, "udp"))
+    flags |= VLLP_FILTER_SELF_ECHO;
 
   x->dv = dsig_vllp_client_create(x->bus, ctx->vllp_tx, ctx->vllp_rx,
                                   mtu, timeout_s, flags, NULL, xport_log);

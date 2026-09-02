@@ -184,6 +184,13 @@ vllp_logstream_t *ls = vllp_logstream_create(dsig_vllp_get_vllp(dv),
 (see `docs/vllp.txt` "CAN network adaptation" for what that does). Pass
 `0` for legacy 8-byte CAN.
 
+Add `VLLP_FILTER_SELF_ECHO` only when the bus is UDP multicast, where the
+kernel loops our own frames back to us and VLLP would otherwise mistake
+them for replies. Leave it off on CAN and USB: VLLP ACK frames are
+symmetric (same SE bits, flow word and CRC IV on both ends), so on a
+non-echoing link the filter discards the peer's real ACKs and stalls
+transfers.
+
 ### Server (host pretends to be the device)
 
 ```c

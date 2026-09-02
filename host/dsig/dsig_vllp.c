@@ -12,9 +12,15 @@
 // microseconds later, with no real round trip to the device involved.
 // VLLP has no way to tell that apart from a genuine (if suspiciously
 // fast) reply and gets stuck waiting for one that already "arrived" --
-// observed hanging an OTA transfer indefinitely. CAN/USB-dsig transports
-// have no such echo (there's nothing to filter there), so this is cheap
-// insurance rather than a real cost on those paths.
+// observed hanging an OTA transfer indefinitely.
+//
+// The filter is opt-in (VLLP_FILTER_SELF_ECHO) because it is NOT free on
+// non-echoing transports: VLLP ACK frames carry only the SE bits, the
+// flow word and a CRC over a shared IV, so the peer's ACK is frequently
+// byte-identical to the ACK we sent a moment earlier (whenever both
+// sides' S bits agree and both flow words are 0xffff). With the filter
+// always on, the PMD's flow-resume and keepalive ACKs over CAN were
+// dropped as "echo" and OTA transfers stalled into timeout.
 #define DV_RECENT_FRAMES 8
 #define DV_RECENT_WINDOW_US 200000
 
@@ -30,6 +36,7 @@ struct dsig_vllp {
   vllp_t *vllp;
   dsig_sub_t *sub;
 
+  int filter_echo; // VLLP_FILTER_SELF_ECHO requested at create
   struct dv_recent recent[DV_RECENT_FRAMES];
   int recent_idx;
 
@@ -87,7 +94,8 @@ static void
 dv_tx(void *opaque, const void *data, size_t len)
 {
   dsig_vllp_t *dv = opaque;
-  dv_remember_sent(dv, data, len);
+  if(dv->filter_echo)
+    dv_remember_sent(dv, data, len);
   dsig_send(dv->bus, dv->txid, data, len);
 }
 
@@ -113,8 +121,8 @@ dv_rx(void *opaque, uint32_t signal, const void *data, size_t len)
   (void)signal;
   if(data == NULL || len == 0)
     return;  // ttl timeout sentinel — ignored
-  if(dv_was_recently_sent(dv, data, len))
-    return; // self-echo (e.g. UDP multicast loopback), not a real reply
+  if(dv->filter_echo && dv_was_recently_sent(dv, data, len))
+    return; // self-echo (UDP multicast loopback), not a real reply
   vllp_input(dv->vllp, data, len);
 }
 
@@ -149,6 +157,7 @@ dsig_vllp_client_create(dsig_t *bus, uint32_t txid, uint32_t rxid,
   dv->txid = txid;
   dv->user_opaque = log_opaque;
   dv->user_log = log;
+  dv->filter_echo = !!(vllp_flags & VLLP_FILTER_SELF_ECHO);
   dv->vllp = vllp_create_client(mtu, timeout, vllp_flags, dv,
                                 dv_tx, dv_log_thunk);
   return finish_setup(dv, rxid);
@@ -172,6 +181,7 @@ dsig_vllp_server_create(dsig_t *bus, uint32_t txid, uint32_t rxid,
   dv->user_opaque = opaque;
   dv->user_log = log;
   dv->user_open_channel = open_channel;
+  dv->filter_echo = !!(vllp_flags & VLLP_FILTER_SELF_ECHO);
   dv->vllp = vllp_create_server(mtu, timeout, vllp_flags, dv,
                                 dv_tx, dv_log_thunk, dv_open_channel_thunk);
   return finish_setup(dv, rxid);
