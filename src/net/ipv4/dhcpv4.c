@@ -181,7 +181,10 @@ dhcpv4_make(ether_netif_t *eni)
   dh->op = 1;
   dh->htype = 1;
   dh->hlen = 6;
-  eni->eni_dhcp_xid = rand();
+  // xid is per transaction, not per message: retransmissions and the
+  // REQUEST following an OFFER reuse it (RFC 2131 4.4.1), otherwise a
+  // reply arriving after our retransmit timer is discarded as stale.
+  // A new one is picked when a DISCOVER or renewal cycle starts.
   dh->xid = eni->eni_dhcp_xid;
   dh->ciaddr = eni->eni_ni.ni_ipv4_local_addr;
   memcpy(dh->chaddr, eni->eni_addr, 6);
@@ -275,6 +278,7 @@ dhcpv4_discover(ether_netif_t *eni)
 #endif
     evlog(LOG_INFO, "dhcp: selecting (vcid:%s)", vcid);
     eni->eni_dhcp_state = DHCP_STATE_SELECTING;
+    eni->eni_dhcp_xid = rand();
   }
   eni->eni_ni.ni_ipv4_local_addr = 0;
   eni->eni_dhcp_server_ip = 0;
@@ -290,6 +294,8 @@ static void
 dhcpv4_request(ether_netif_t *eni)
 {
   if(eni->eni_dhcp_state != DHCP_STATE_REQUESTING) {
+    if(eni->eni_dhcp_state == DHCP_STATE_BOUND)
+      eni->eni_dhcp_xid = rand(); // Renewal is a new transaction
     eni->eni_dhcp_state = DHCP_STATE_REQUESTING;
     eni->eni_dhcp_retries = 0;
   }
