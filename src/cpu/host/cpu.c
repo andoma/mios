@@ -10,10 +10,96 @@
 #include "irq.h"
 #include "linux.h"
 #include "sim.h"
+#include <unistd.h>   /* clock_get */
 
 struct cpu cpu0;
 
 static void *idle_sp;
+
+// ---- Library mode --------------------------------------------------------
+// mios built as a shared object, boot-to-idle and resumed cooperatively by
+// a host harness on the harness's own thread (no signals, virtual time).
+// The harness and the mios kernel are one OS thread, swapped by
+// cpu_coswitch().  See src/platform/hostlib.
+// These survive init()'s .bss clear (the forward coswitch saves
+// g_harness_sp before init() runs), so keep them in .data like
+// host_boot_sp.
+int host_lib_mode __attribute__((section(".data")));
+static void *g_harness_sp __attribute__((section(".data")));
+static void *g_mios_sp __attribute__((section(".data")));
+static uint64_t g_lib_target __attribute__((section(".data")));
+
+void cpu_coswitch(void **save_sp, void *resume_sp);
+
+// timer.c (virtual clock helpers, also used by sim.c)
+uint64_t host_timer_next(void);
+void host_timer_fire(void);
+void host_vclock_set(uint64_t now);
+
+extern volatile uint32_t irq_pending;
+void irq_dispatch(void);
+static void cpu_idle_entry(void);
+
+// One idle turn in library mode. Mirrors sim_idle(): dispatch a pending
+// IRQ and let threads run, else advance the virtual clock toward the
+// harness's step target, firing due timers; when nothing is due before
+// the target, hand the CPU back to the harness until the next step.
+static void
+lib_idle(void)
+{
+  if(__atomic_load_n(&irq_pending, __ATOMIC_SEQ_CST)) {
+    irq_dispatch();
+    return;
+  }
+  uint64_t nt = host_timer_next();
+  if(nt <= g_lib_target) {
+    host_vclock_set(nt);
+    host_timer_fire();   // pends the timer IRQ, dispatched next turn
+    return;
+  }
+  host_vclock_set(g_lib_target);
+  cpu_coswitch(&g_mios_sp, g_harness_sp);   // back to harness; resumes on step
+}
+
+static void
+mios_lib_entry(void)
+{
+  extern void init(void);
+  init();                                   // clears bss, runs ctors, starts main
+  cpu_jump_stack(idle_sp, cpu_idle_entry);  // enter the (library) idle loop
+}
+
+// Exported (via the platform ABI) boot + step.
+void
+host_lib_boot(void)
+{
+  host_lib_mode = 1;
+  host_vtime = 1;      // virtual time; no signal-driven timers
+
+  const size_t ss = 1 << 20;
+  uint8_t *stk = linux_mmap(NULL, ss, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  // Land in mios_lib_entry with the SysV entry contract rsp%16==8 (as if
+  // reached by a call). After cpu_coswitch pops 6 saved regs and rets, rsp
+  // equals this base, so make the base %16==8.
+  uint64_t *sp = (uint64_t *)(((uintptr_t)(stk + ss) & ~(uintptr_t)15) - 8);
+  *--sp = (uint64_t)mios_lib_entry;   // return address for the first coswitch
+  *--sp = 0;                          // rbp
+  *--sp = 0;                          // rbx
+  *--sp = 0;                          // r12
+  *--sp = 0;                          // r13
+  *--sp = 0;                          // r14
+  *--sp = 0;                          // r15
+  g_mios_sp = sp;
+  cpu_coswitch(&g_harness_sp, g_mios_sp);   // run mios to first idle, then return
+}
+
+void
+host_lib_step(uint64_t dt_us)
+{
+  g_lib_target = clock_get() + dt_us;
+  cpu_coswitch(&g_harness_sp, g_mios_sp);
+}
 
 // Captured before init() clears .bss, hence in .data
 static long *host_boot_sp __attribute__((section(".data")));
@@ -83,7 +169,9 @@ void __attribute__((noreturn))
 cpu_idle(void)
 {
   while(1) {
-    if(host_vtime) {
+    if(host_lib_mode) {
+      lib_idle();
+    } else if(host_vtime) {
       sim_idle();
     } else {
       linux_sigsuspend_all();
@@ -121,6 +209,21 @@ host_start(long *sp)
   host_irq_init();
   init();
   cpu_jump_stack(idle_sp, cpu_idle_entry);
+}
+
+
+// Map an anonymous heap and hand it to the allocator. Shared by the host
+// packagings (executable and shared object); each provides its own tiny
+// constructor that picks the size.
+void
+host_map_heap(size_t size)
+{
+  void *heap = linux_mmap(NULL, size, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if(heap == NULL || heap == (void *)-1)
+    panic("host: unable to map heap");
+  heap_add_mem((long)heap, (long)heap + size,
+               MEM_TYPE_LOCAL | MEM_TYPE_DMA, 10);
 }
 
 

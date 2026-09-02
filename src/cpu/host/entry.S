@@ -107,4 +107,27 @@ linux_clone_thread:
         ud2
 1:      ret
 
+// void cpu_coswitch(void **save_sp, void *resume_sp)
+//   Symmetric coroutine swap: save callee-saved regs + return address,
+//   store rsp to *save_sp, load rsp from resume_sp, restore, return into
+//   whoever last saved there. Used to hand the single CPU thread back and
+//   forth between the host harness and the mios kernel in library mode.
+        .global cpu_coswitch
+cpu_coswitch:
+        push    %rbp
+        push    %rbx
+        push    %r12
+        push    %r13
+        push    %r14
+        push    %r15
+        mov     %rsp, (%rdi)            // *save_sp = rsp
+        mov     %rsi, %rsp             // rsp = resume_sp
+        pop     %r15
+        pop     %r14
+        pop     %r13
+        pop     %r12
+        pop     %rbx
+        pop     %rbp
+        ret
+
         .section .note.GNU-stack,"",@progbits

@@ -1,0 +1,12 @@
+/* Export only the sim ABI; hide mios's own libc (malloc/printf/...) so it
+   cannot interpose on, or be interposed by, the host process's glibc. */
+{
+  global:
+    mios_sim_boot;
+    mios_sim_step;
+    mios_sim_time;
+    mios_sim_i2c_set;
+    mios_sim_i2c_get;
+  local:
+    *;
+};

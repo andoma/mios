@@ -77,3 +77,6 @@ char **host_argv_tail(void);
 const char *host_env(const char *name);
 
 char **host_envp(void);
+
+// Map a size-byte anonymous heap and register it with the allocator.
+void host_map_heap(size_t size);
