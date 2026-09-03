@@ -22,7 +22,7 @@ typedef struct sc_pkt_preamble {
   uint16_t depth;
   uint32_t nominal_frequency;
   int16_t trig_offset;
-} sc_pkt_preamble_t;
+} __attribute__((packed)) sc_pkt_preamble_t;  // 10 bytes on the wire
 
 typedef struct sc_pkt_channel {
   uint8_t pkt_type;  // channel index
