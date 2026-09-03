@@ -243,9 +243,18 @@ halt(const char *msg)
 }
 
 
+// Test hook: when set, reboot() calls this instead of re-exec'ing the
+// process. Lets a virtual-time suite observe an OTA-triggered reboot
+// (svc_ota calls reboot() on success) without tearing down the harness.
+// See platform/host/suite_ota.c. The hook must not return.
+void (*host_test_reboot_hook)(void);
+
 void
 reboot(void)
 {
+  if(host_test_reboot_hook != NULL)
+    host_test_reboot_hook();   // does not return
+
   irq_off();
   fini();
 

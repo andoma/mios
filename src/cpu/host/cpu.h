@@ -39,6 +39,10 @@ cpu_cycle_counter(void)
 // Terminate the process: run destructors (restores the terminal) and exit
 void host_exit(int code) __attribute__((noreturn));
 
+// Test-only reboot hook (see cpu.c / platform/host/suite_ota.c). When
+// non-NULL, reboot() calls it instead of re-exec'ing.
+extern void (*host_test_reboot_hook)(void);
+
 void cpu_switch(void);
 
 void cpu_jump_stack(void *sp, void (*fn)(void)) __attribute__((noreturn));
