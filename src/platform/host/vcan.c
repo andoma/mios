@@ -197,3 +197,18 @@ vcan_peer_send(vcan_t *v, uint32_t id, const void *payload, size_t len)
   ring_put(&v->v_rx, id, payload, len);
   host_irq_pend(v->v_irq);
 }
+
+
+ssize_t
+vcan_peer_poll(vcan_t *v, uint32_t *id, void *buf, size_t buflen)
+{
+  const vcan_slot_t *s = ring_peek(&v->v_tx);
+  if(s == NULL)
+    return -1;
+  const size_t len = s->len < buflen ? s->len : buflen;
+  if(id != NULL)
+    *id = s->id;
+  memcpy(buf, s->data, len);
+  ring_pop(&v->v_tx);
+  return len;
+}

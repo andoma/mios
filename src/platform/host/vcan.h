@@ -14,7 +14,9 @@
  * API exchanges id and payload separately so tests never hand-assemble
  * that prefix.
  *
- * Only available in virtual time mode (test suites).
+ * Two peer APIs: the blocking one below is for simulation threads in the
+ * host test suites; vcan_peer_poll() is the non-blocking variant a hostlib
+ * harness uses from outside mios between steps (platform/hostlib).
  */
 
 #include <stdint.h>
@@ -39,5 +41,10 @@ struct can_netif *vcan_cni(vcan_t *v);
 ssize_t vcan_peer_recv(vcan_t *v, uint32_t *id, void *buf, size_t buflen,
                        uint64_t deadline);
 
-// Deliver a DSIG frame to mios.
+// Deliver a DSIG frame to mios. Callable from a simulation thread or from
+// a hostlib harness (between steps); never from the mios CPU thread.
 void vcan_peer_send(vcan_t *v, uint32_t id, const void *payload, size_t len);
+
+// Non-blocking vcan_peer_recv(): returns -1 immediately if nothing is
+// queued. For hostlib harnesses, which have no simulation threads.
+ssize_t vcan_peer_poll(vcan_t *v, uint32_t *id, void *buf, size_t buflen);

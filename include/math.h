@@ -66,6 +66,8 @@ float sinf(float) __attribute__ ((const));
 
 float cosf(float) __attribute__ ((const));
 
+void sincosf(float x, float *s, float *c);
+
 float tanf(float) __attribute__ ((const));
 
 float frexprf(float x, int *e)  __attribute__ ((const));

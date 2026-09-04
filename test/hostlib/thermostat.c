@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <mios/io.h>
 
-i2c_t *vi2c_bus(void);   /* provided by the hostlib platform */
+#include "hostlib.h"       /* the platform's virtual buses */
 
 #define SENSOR_ADDR   0x48   /* LM75-style temperature sensor            */
 #define SENSOR_TEMP   0x00   /* 2 bytes, big-endian, 1/256 C             */

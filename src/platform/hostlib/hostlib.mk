@@ -10,16 +10,19 @@
 #
 
 ENABLE_TASK_DEBUG := yes
+# The virtual CAN interface is a real can_netif (platform/host/vcan.c), so
+# the DSIG stack comes with the platform.
+ENABLE_NET_CORE := yes
+ENABLE_NET_CAN := yes
 
 P := ${SRC}/platform/hostlib
 C := ${SRC}/cpu/host
 
 PLATFORM := hostlib
-ARTIFACT := mios
 
 GLOBALDEPS += ${P}/hostlib.mk ${C}/host.mk ${C}/host_shared.ld ${P}/hostlib.syms
 
-CPPFLAGS += -iquote${C} -iquote${P}
+CPPFLAGS += -iquote${C} -iquote${P} -iquote${SRC}/platform/host
 CPPFLAGS += -include ${C}/host.h
 
 TOOLCHAIN :=
@@ -34,7 +37,9 @@ FRAME_LIMIT := 1024
 
 LDSCRIPT = ${C}/host_shared.ld
 LD_NMAGIC :=
-LDFLAGS += -shared -Wl,-z,noexecstack
+# -z defs: the object must be self-contained (it has no NEEDED libraries),
+# so an unresolved symbol is a link error here, not a dlopen failure later.
+LDFLAGS += -shared -Wl,-z,noexecstack -Wl,-z,defs
 LDFLAGS += -Wl,--version-script=${P}/hostlib.syms
 
 SRCS += ${C}/entry.s \
@@ -47,6 +52,8 @@ SRCS += ${C}/entry.s \
 SRCS += ${P}/hostlib.c \
 	${P}/console_lib.c \
 	${P}/vi2c.c \
+	${P}/vspi.c \
 	${P}/libmios.c \
+	${SRC}/platform/host/vcan.c \
 
 SRCS += ${HOSTLIB_APP}

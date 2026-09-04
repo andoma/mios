@@ -7,6 +7,10 @@
     mios_sim_time;
     mios_sim_i2c_set;
     mios_sim_i2c_get;
+    mios_sim_spi_set;
+    mios_sim_spi_get;
+    mios_sim_can_recv;
+    mios_sim_can_send;
   local:
     *;
 };

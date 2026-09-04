@@ -12,7 +12,11 @@ struct vi2c {
   uint8_t regs[128][256];
 };
 
-static struct vi2c g_vi2c;
+/* In .data, not .bss: mios's init() clears .bss when the object boots, and
+   a harness must be able to preset registers (chip ids, ready bits,
+   calibration) before mios_sim_boot() so the drivers' probe sequences in
+   main() find a plausible chip. */
+static struct vi2c g_vi2c __attribute__((section(".data")));
 
 /* Register-file semantics: an optional write of [reg, data...] then an
    optional read of N bytes from the (last) register pointer. */
