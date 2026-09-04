@@ -188,10 +188,23 @@ dsig_create(dsig_tx_fn tx, void *tx_opaque)
   if(d == NULL)
     return NULL;
 
+#ifdef __linux__
   if(pipe2(d->wakeup_pipe, O_CLOEXEC | O_NONBLOCK)) {
     free(d);
     return NULL;
   }
+#else
+  // macOS has no pipe2(); set the flags separately (no exec in this process,
+  // so the non-atomic CLOEXEC is fine)
+  if(pipe(d->wakeup_pipe)) {
+    free(d);
+    return NULL;
+  }
+  for(int i = 0; i < 2; i++) {
+    fcntl(d->wakeup_pipe[i], F_SETFD, FD_CLOEXEC);
+    fcntl(d->wakeup_pipe[i], F_SETFL, O_NONBLOCK);
+  }
+#endif
 
   pthread_mutex_init(&d->mtx, NULL);
   TAILQ_INIT(&d->subs);

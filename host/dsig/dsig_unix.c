@@ -21,6 +21,10 @@
 // SOCK_SEQPACKET would avoid needing the length prefix, but macOS never
 // implemented it for AF_UNIX -- STREAM is the portable choice.
 
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0 // macOS: no atomic CLOEXEC on socket(); acceptable here
+#endif
+
 #define MAX_CONNS 16
 #define MAX_PAYLOAD 1500
 #define MAX_FRAME_BODY (4 + MAX_PAYLOAD)

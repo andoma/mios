@@ -5,6 +5,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -52,9 +53,17 @@ dsig_udp_create(const char *group, uint16_t port, const char *bind_ifname)
     close(probe);
   }
 
+#ifdef SOCK_CLOEXEC
   int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
   if(fd < 0)
     return NULL;
+#else
+  // macOS: no atomic CLOEXEC on socket(), set it after the fact
+  int fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if(fd < 0)
+    return NULL;
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
 
   int one = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));

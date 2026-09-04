@@ -3,6 +3,8 @@
 #endif
 #include "dsig_cansock.h"
 
+#ifdef __linux__
+
 #include <errno.h>
 #include <linux/can.h>
 #include <linux/can/raw.h>
@@ -129,3 +131,41 @@ dsig_cansock_destroy(dsig_cansock_t *t)
   close(t->fd);
   free(t);
 }
+
+#else /* !__linux__ */
+
+/* SocketCAN is Linux-only. Provide stubs so the library builds on other
+ * hosts (macOS); dsig_transport reports "failed to open cansock transport".
+ */
+
+dsig_cansock_t *
+dsig_cansock_create(const char *ifname)
+{
+  (void)ifname;
+  return NULL;
+}
+
+int
+dsig_cansock_start(dsig_cansock_t *t, dsig_t *bus)
+{
+  (void)t;
+  (void)bus;
+  return -1;
+}
+
+void
+dsig_cansock_destroy(dsig_cansock_t *t)
+{
+  (void)t;
+}
+
+void
+dsig_cansock_tx(void *opaque, uint32_t signal, const void *data, size_t len)
+{
+  (void)opaque;
+  (void)signal;
+  (void)data;
+  (void)len;
+}
+
+#endif /* __linux__ */

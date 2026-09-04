@@ -14,9 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/queue.h>
-#include <sys/epoll.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <errno.h>
+
+#ifndef ECOMM
+#define ECOMM EIO // macOS has no ECOMM
+#endif
 
 typedef struct vllp_telnetd_sock {
   LIST_ENTRY(vllp_telnetd_sock) link;
@@ -30,8 +34,12 @@ struct vllp_telnetd {
   char *service;
   LIST_HEAD(, vllp_telnetd_sock) sockets;
   pthread_t tid;
-  int pfd;
 };
+
+/* Upper bound on simultaneously open telnet connections (plus the
+ * listening socket). Connections beyond this are still accepted but
+ * won't be polled until another one closes. */
+#define VTD_MAX_POLLFDS 32
 
 
 static int
@@ -57,10 +65,6 @@ vtd_add_fd(vllp_telnetd_t *vtd, int fd)
 {
   vllp_telnetd_sock_t *vts = calloc(1, sizeof(vllp_telnetd_sock_t));
   vts->fd = fd;
-  struct epoll_event ev;
-  ev.events = EPOLLIN;
-  ev.data.ptr = vts;
-  epoll_ctl(vtd->pfd, EPOLL_CTL_ADD, fd, &ev);
   LIST_INSERT_HEAD(&vtd->sockets, vts, link);
   return vts;
 }
@@ -96,8 +100,6 @@ static void
 vts_close(vllp_telnetd_t *vtd, vllp_telnetd_sock_t *vts)
 {
   vllp_channel_close(vts->vc, 0, 0);
-
-  epoll_ctl(vtd->pfd, EPOLL_CTL_DEL, vts->fd, NULL);
 
   LIST_REMOVE(vts, link);
   close(vts->fd);
@@ -167,20 +169,49 @@ vtd_thread(void *arg)
     struct sockaddr_in remote;
     socklen_t slen = sizeof(remote);
 
-    struct epoll_event ev;
+    struct pollfd pfds[VTD_MAX_POLLFDS];
+    vllp_telnetd_sock_t *socks[VTD_MAX_POLLFDS];
+    int nfds = 0;
+    vllp_telnetd_sock_t *vts;
+    LIST_FOREACH(vts, &vtd->sockets, link) {
+      if(nfds == VTD_MAX_POLLFDS)
+        break;
+      pfds[nfds].fd = vts->fd;
+      pfds[nfds].events = POLLIN;
+      pfds[nfds].revents = 0;
+      socks[nfds] = vts;
+      nfds++;
+    }
+
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    int n = epoll_wait(vtd->pfd, &ev, 1, -1);
+    int n = poll(pfds, nfds, -1);
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
     if(n == -1) {
-      perror("epoll_wait");
+      if(errno == EINTR)
+        continue;
+      perror("poll");
       sleep(1);
       continue;
     }
-    if(n == 1) {
-      vllp_telnetd_sock_t *vts = ev.data.ptr;
+
+    // Handle only the first ready fd per iteration; vts_close() mutates
+    // the socket list, so we rebuild the pollfd set before continuing.
+    int i;
+    for(i = 0; i < nfds; i++)
+      if(pfds[i].revents)
+        break;
+
+    if(i < nfds) {
+      vts = socks[i];
       if(vts->vc == NULL) {
 
+#ifdef __linux__
         int fd = accept4(vts->fd, (struct sockaddr *)&remote, &slen, SOCK_CLOEXEC);
+#else
+        int fd = accept(vts->fd, (struct sockaddr *)&remote, &slen);
+        if(fd != -1)
+          fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
         if(fd == -1) {
           perror("accept(vllp telnetd socket)");
           sleep(1);
@@ -226,7 +257,13 @@ vtd_thread(void *arg)
 vllp_telnetd_t *
 vllp_telnetd_create(struct vllp *v, const char *service, int port)
 {
+#ifdef SOCK_CLOEXEC
   int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if(fd != -1)
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
   if(fd == -1) {
     perror("socket");
     return NULL;
@@ -256,7 +293,6 @@ vllp_telnetd_create(struct vllp *v, const char *service, int port)
   vllp_telnetd_t *vtd = calloc(1, sizeof(vllp_telnetd_t));
   vtd->v = v;
   vtd->service = strdup(service);
-  vtd->pfd = epoll_create1(EPOLL_CLOEXEC);
 
   vtd_add_fd(vtd, fd);
 
@@ -285,6 +321,5 @@ vllp_telnetd_destroy(struct vllp_telnetd *vtd)
 
   }
 
-  close(vtd->pfd);
   free(vtd);
 }

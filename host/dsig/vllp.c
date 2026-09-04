@@ -442,7 +442,7 @@ vllp_send_syn(vllp_t *v)
   if(getrandom(&v->crc_IV, sizeof(v->crc_IV), GRND_INSECURE) != sizeof(v->crc_IV))
     return;
 #else
-  v->crc_IV_ = rand() ^ time(NULL);
+  arc4random_buf(&v->crc_IV, sizeof(v->crc_IV));
 #endif
 
   // We've generated a new SYN (and CRC), nothing will match in the
