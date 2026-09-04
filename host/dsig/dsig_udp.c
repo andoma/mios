@@ -67,6 +67,14 @@ dsig_udp_create(const char *group, uint16_t port, const char *bind_ifname)
 
   int one = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+#if defined(SO_REUSEPORT) && !defined(__linux__)
+  // BSD/macOS only honour SO_REUSEADDR for a bind to the multicast address
+  // itself, and we bind INADDR_ANY, so a second local instance would
+  // otherwise fail with EADDRINUSE. Not needed on Linux, where SO_REUSEADDR
+  // already allows this and SO_REUSEPORT would additionally load-balance
+  // unicast traffic aimed at the port across the sockets.
+  setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+#endif
 
   struct sockaddr_in bind_addr;
   memset(&bind_addr, 0, sizeof(bind_addr));
