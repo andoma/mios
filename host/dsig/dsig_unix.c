@@ -47,6 +47,7 @@ struct dsig_unix {
   pthread_t rx_tid;
   int rx_running;
   volatile int stop;
+  unsigned int tx_stalls;  // peers dropped for not reading, see dsig_unix_tx()
 };
 
 static int64_t
@@ -137,20 +138,41 @@ dsig_unix_tx(void *opaque, uint32_t signal, const void *data, size_t len)
   // that observes EOF/errors via poll()); a write() failure here just
   // means that peer is already dead and about to be reaped there, so
   // we don't touch the array, just skip it.
+  //
+  // Never block. A peer that has stopped reading (a stuck GUI, a tool
+  // that only publishes, a relay wedged on *its* peer) fills its socket
+  // buffer in seconds, and a blocking send() here would then stall the
+  // caller -- while holding conn_lock, which also stalls the rx thread,
+  // which stalls whoever is sending to us: that is how two peers relaying
+  // to each other once froze together. Framing is a byte stream, so a frame cannot
+  // be half-sent and dropped; instead the slow peer is shut down and the
+  // rx thread reaps it on the next poll(). dsig is lossy pub/sub, a peer
+  // that far behind has already lost.
   pthread_mutex_lock(&t->conn_lock);
   for(int i = 0; i < t->num_conns; i++) {
     size_t off = 0;
     while(off < total) {
-      ssize_t n = send(t->conns[i].fd, frame + off, total - off, MSG_NOSIGNAL);
+      ssize_t n = send(t->conns[i].fd, frame + off, total - off,
+                       MSG_NOSIGNAL | MSG_DONTWAIT);
       if(n < 0) {
         if(errno == EINTR)
           continue;
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+          t->tx_stalls++;
+          shutdown(t->conns[i].fd, SHUT_RDWR);
+        }
         break;
       }
       off += (size_t)n;
     }
   }
   pthread_mutex_unlock(&t->conn_lock);
+}
+
+unsigned int
+dsig_unix_tx_stalls(const dsig_unix_t *t)
+{
+  return t->tx_stalls;
 }
 
 // Caller holds conn_lock. Drains as many complete frames as are buffered.

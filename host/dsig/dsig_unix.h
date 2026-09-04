@@ -67,9 +67,14 @@ void dsig_unix_destroy(dsig_unix_t *t);
 
 /* TX callback matching dsig_tx_fn: sends to every connected peer
  * (server: all connected clients; client: the one server connection, if
- * currently connected -- silently dropped otherwise).
+ * currently connected -- silently dropped otherwise). Never blocks: a
+ * peer whose socket buffer is full (it stopped reading) is disconnected
+ * instead, see dsig_unix_tx_stalls().
  */
 void dsig_unix_tx(void *opaque, uint32_t signal, const void *data, size_t len);
+
+/* Number of peers dropped so far for not keeping up. */
+unsigned int dsig_unix_tx_stalls(const dsig_unix_t *t);
 
 #ifdef __cplusplus
 }
