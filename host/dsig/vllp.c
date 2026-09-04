@@ -370,6 +370,35 @@ vllp_disconnect(vllp_t *v, int error)
 
   v->next_ack = get_ts() + VLLP_ACK_INTERVAL;
   v->next_rtx = INT64_MAX;
+
+  // A reconnected peer resets its per-session CRC IVs, so any fragment we
+  // still hold was built with the old IV and fails CRC on the new link --
+  // the peer drops it and the link never recovers. Drop the in-flight
+  // fragment and flush every surviving channel's pending tx (the CMC and
+  // any reconnecting channels). Reconnect re-drives the CMC and re-opens
+  // reconnecting channels, so nothing needed is lost.
+  if(v->current_tx != NULL) {
+    free(v->current_tx);
+    v->current_tx = NULL;
+  }
+  vllp_channel_t *pc;
+  LIST_FOREACH(pc, &v->channels, link) {
+    if(pc->state == VLLP_CHANNEL_STATE_ACTIVE) {
+      TAILQ_REMOVE(&v->active_channels, pc, qlink);
+      vllp_channel_set_state(pc, VLLP_CHANNEL_STATE_ESTABLISHED);
+      vllp_channel_release(pc, "disconnect-flush");
+    }
+    vllp_pkt_t *fp;
+    while((fp = TAILQ_FIRST(&pc->txq)) != NULL) {
+      TAILQ_REMOVE(&pc->txq, fp, link);
+      free(fp);
+    }
+    while((fp = TAILQ_FIRST(&pc->mtxq)) != NULL) {
+      TAILQ_REMOVE(&pc->mtxq, fp, link);
+      free(fp);
+    }
+  }
+
   v->connected = 0;
   v->SE = VLLP_HDR_E;
 }
