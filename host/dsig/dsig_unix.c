@@ -175,7 +175,8 @@ dsig_unix_tx_stalls(const dsig_unix_t *t)
   return t->tx_stalls;
 }
 
-// Caller holds conn_lock. Drains as many complete frames as are buffered.
+// rx thread only (the sole writer of conn buffers). Drains as many
+// complete frames as are buffered.
 static void
 process_conn_data(dsig_unix_t *t, struct unix_conn *c)
 {
@@ -245,6 +246,7 @@ rx_thread(void *arg)
     int conn_base;
 
     pthread_mutex_lock(&t->conn_lock);
+    const int nconns_before = t->num_conns;
     if(t->is_server) {
       pfds[nfds].fd = t->listen_fd;
       pfds[nfds].events = POLLIN;
@@ -282,6 +284,15 @@ rx_thread(void *arg)
       }
     }
 
+    // Read under conn_lock (the array may be reshaped here), but dispatch
+    // frames to the bus *without* it: dsig_input() takes the bus lock,
+    // and the bus holds that lock while calling dsig_unix_tx(), which
+    // takes conn_lock -- dispatching under conn_lock is a lock-order
+    // inversion that deadlocks the moment a frame arrives while an
+    // emitter fires. Safe without the lock because only this thread ever
+    // modifies the conns array or a conn's buffer; tx only reads fds.
+    int dispatch[MAX_CONNS];
+    int ndispatch = 0;
     pthread_mutex_lock(&t->conn_lock);
     // Walk downward: remove_conn_locked() only ever swaps in an element
     // at or below the current index, so already-visited (higher) slots
@@ -301,9 +312,20 @@ rx_thread(void *arg)
         continue;
       }
       c->len += (size_t)n;
-      process_conn_data(t, c);
+      dispatch[ndispatch++] = i;
     }
     pthread_mutex_unlock(&t->conn_lock);
+
+    // A removal above swapped the last element into a lower slot, which
+    // may itself be in dispatch[] under its old index; both indexes then
+    // point at valid conns (the walk is downward, removals only move
+    // elements down), and a frame parsed twice is harmless only if it is
+    // not -- so simply skip dispatch when anything was removed this round
+    // and let the next poll() deliver it.
+    if(ndispatch > 0 && t->num_conns == nconns_before) {
+      for(int k = 0; k < ndispatch; k++)
+        process_conn_data(t, &t->conns[dispatch[k]]);
+    }
   }
   return NULL;
 }
