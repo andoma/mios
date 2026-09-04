@@ -773,6 +773,105 @@ sc_link_timeout(peer_t *p, const scenario_opts_t *o)
   expect_server_idle(p, "link_timeout");
 }
 
+/* Reproduces a livelock seen in the field (a rotary-positioner MCU that
+ * reboots faster than the client's keep-alive timeout).
+ *
+ * The trap: the client has a channel-open in flight (its CMC fragment is
+ * current_tx, un-ACKed) when the link goes down. On disconnect the client
+ * keeps that fragment. When it re-SYNs, the peer resets its per-session
+ * CRC IVs, but the client retransmits the stale current_tx first -- so the
+ * peer fails CRC on the CMC channel (which always exists) and drops the
+ * link. current_tx is never ACKed, so it survives every reconnect and the
+ * link never recovers.
+ *
+ * We stage it by blacking out both directions and then opening a channel:
+ * its CMC open is sent but never ACKed, and the client times out with that
+ * fragment pending. Clearing the fault must let the link recover; a client
+ * that does not flush pending tx on disconnect livelocks here. */
+static void
+sc_reconnect_stale_tx(peer_t *p, const scenario_opts_t *o)
+{
+  (void)o;
+
+  /* Start connected and idle with one clean echo. */
+  vllp_channel_t *vc = open_sync(p, "echo", 0);
+  if(vc == NULL) {
+    TST_FAIL("channel_create failed");
+    return;
+  }
+  echo_roundtrip(vc, 20, 1, ECHO_TIMEOUT_US, "echo before");
+  close_timed(vc, "echo before", 1500000);
+
+  peer_log_reset(p);
+
+  /* Black out both ways, then open a channel. Its CMC open goes out but is
+     never ACKed, so it stays as the client's in-flight current_tx. */
+  fault_cfg_t blackout = { .blackout = 1 };
+  peer_set_faults_both(p, &blackout);
+
+  vllp_channel_t *stuck = open_sync(p, "echo", 0);
+  if(stuck == NULL) {
+    TST_FAIL("channel_create (stuck) failed");
+    return;
+  }
+
+  /* Wait past the link timeout: the client disconnects with the CMC open
+     still pending. */
+  int64_t deadline = tst_now_us() + (p->timeout + 2) * 1000000L;
+  while(vllp_is_connected(p->v) && tst_now_us() < deadline)
+    tst_sleep_us(50000);
+  TST_CHECK(!vllp_is_connected(p->v),
+            "client did not disconnect under blackout within timeout+2s");
+
+  /* Drain the stuck channel's EOF and close it, so only the stale
+     current_tx is left to poison the reconnect. */
+  void *d;
+  size_t l;
+  vllp_channel_read(stuck, &d, &l, 500000);
+  vllp_channel_close(stuck, 0, 0);
+
+  peer_clear_faults(p);
+
+  /* The link must recover and make progress -- reconnect AND a fresh echo
+     within a bounded time. A client that retransmits the stale CMC
+     fragment livelocks and never gets here. */
+  int64_t rec0 = tst_now_us();
+  int64_t rdeadline = rec0 + (p->timeout + 6) * 1000000L;
+  int recovered = 0;
+  while(!recovered && tst_now_us() < rdeadline) {
+    if(peer_wait_connected(p, 500000) != 0)
+      continue;
+    /* Quiet probe: try one echo without asserting, so intermediate
+       failures while the link is still flapping are not counted. */
+    vllp_channel_t *vc2 = open_sync(p, "echo", 0);
+    if(vc2 == NULL) {
+      tst_sleep_us(200000);
+      continue;
+    }
+    uint8_t msg[30];
+    fill_msg(msg, sizeof(msg), 2);
+    vllp_channel_send(vc2, msg, sizeof(msg));
+    void *rx = NULL;
+    size_t rxlen = 0;
+    int err = vllp_channel_read(vc2, &rx, &rxlen, 1000000);
+    if(err == 0 && rx != NULL && rxlen == sizeof(msg)) {
+      recovered = 1;
+      free(rx);
+      close_timed(vc2, "echo after", 1500000);
+    } else {
+      if(rx != NULL)
+        free(rx);
+      vllp_channel_close(vc2, 0, 0);
+      tst_sleep_us(200000);
+    }
+  }
+  TST_CHECK(recovered,
+            "link did not recover after stale-tx reconnect (livelock)");
+  if(recovered)
+    tst_logf("  recovered in %.3fs", (tst_now_us() - rec0) / 1e6);
+  expect_server_idle(p, "reconnect_stale_tx");
+}
+
 /* Mixed load under a fault profile. Data integrity must hold and the
  * link must never drop. */
 static void
@@ -944,6 +1043,7 @@ const scenario_t scenarios[] = {
   { "idle",            "long",         "12s idle, keepalive only", sc_idle },
   { "reconnect",       "link",         "fresh SYN with channel open on server", sc_reconnect },
   { "link_timeout",    "link",         "blackout > timeout, recovery", sc_link_timeout },
+  { "reconnect_stale_tx", "link",      "reconnect with pending tx (livelock repro)", sc_reconnect_stale_tx },
   { "loss_1",          "faults",       "1% loss both ways", sc_loss_1 },
   { "loss_5",          "faults",       "5% loss both ways", sc_loss_5 },
   { "loss_20",         "faults",       "20% loss both ways", sc_loss_20 },
