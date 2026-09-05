@@ -37,6 +37,17 @@ backtrace_print_thread(struct stream *st, struct thread *t)
 }
 
 
+// Whether to drop into an interactive crash shell after printing the
+// panic. Right on a target being debugged; wrong for a batch run, where
+// there is no operator and reading EOF in a loop turns a failure into a
+// hang. Overridden by the host test harness.
+int __attribute__((weak))
+panic_enter_console(void)
+{
+  return 1;
+}
+
+
 static void
 panicv(void *frame, const char *fmt, va_list ap)
 {
@@ -52,7 +63,8 @@ panicv(void *frame, const char *fmt, va_list ap)
   backtrace_print_frame(st, frame);
 
   stream_write(st, NULL, 0, 0); // Stream flush
-  cli_console('#');
+  if(panic_enter_console())
+    cli_console('#');
 }
 
 void

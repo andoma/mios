@@ -27,11 +27,20 @@ typedef struct hosttest_suite {
   const char *name;
   int (*run)(void);
   uint32_t flags;
+  // Pbuf buffer size this suite needs, or 0 for the platform default.
+  // Declared rather than set at run time because the pool is carved
+  // before any suite starts. Lets one binary cover both a roomy pool and
+  // the tight one a constrained target uses, which matters because a
+  // transmit path that is fine against 512 can overrun 72.
+  uint16_t pbuf_data_size;
 } hosttest_suite_t;
 
-#define HOSTTEST_SUITE(name, fn, flags)                                 \
+#define HOSTTEST_SUITE_EX(name, fn, flags, pbufsz)                      \
   static const hosttest_suite_t MIOS_JOIN(hosttest_, __LINE__)          \
-  __attribute__((used, section("hosttest." name))) = { name, fn, flags }
+  __attribute__((used, section("hosttest." name))) =                    \
+  { name, fn, flags, pbufsz }
+
+#define HOSTTEST_SUITE(name, fn, flags) HOSTTEST_SUITE_EX(name, fn, flags, 0)
 
 // Log with a timestamp prefix
 void hosttest_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

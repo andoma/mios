@@ -1,5 +1,10 @@
 #pragma once
 
+// Whether panic() should drop into an interactive crash shell. Weak,
+// returns 1; a batch harness overrides it to 0 so a panic exits instead
+// of waiting for an operator who is not there.
+int panic_enter_console(void);
+
 void panic(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 
 void panic_frame(void *frame, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));

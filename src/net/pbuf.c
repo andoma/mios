@@ -115,9 +115,35 @@ pbuf_pool_add(pbuf_pool_t *pp, void *start, void *end, size_t item_size)
 #endif
 
 
+#ifdef ENABLE_PBUF_DYNAMIC_SIZE
+
+static int pbuf_data_size_cur = 512;
+static int pbuf_data_size_locked;
+
+int
+pbuf_data_size(void)
+{
+  return pbuf_data_size_cur;
+}
+
+void
+pbuf_set_data_size(int size)
+{
+  if(pbuf_data_size_locked)
+    panic("pbuf_set_data_size() after the pool was created");
+  if(size < (int)sizeof(pbuf_t))
+    panic("pbuf_set_data_size(%d): too small", size);
+  pbuf_data_size_cur = size;
+}
+
+#endif
+
 void
 pbuf_data_add(void *start, void *end)
 {
+#ifdef ENABLE_PBUF_DYNAMIC_SIZE
+  pbuf_data_size_locked = 1;
+#endif
   if(end == NULL) {
     if(pbuf_datas.pp_avail)
       return;

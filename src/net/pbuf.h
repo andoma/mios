@@ -6,8 +6,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef ENABLE_PBUF_DYNAMIC_SIZE
+
+// Buffer size chosen once at startup instead of compiled in, so a single
+// binary can exercise the stack at the sizes different targets actually
+// use -- a path that is fine against a roomy pool can overrun a tight
+// one, and that difference is invisible if every build uses the same
+// constant.
+//
+// Deliberately opt-in and NOT the default: constrained targets want the
+// compile-time constant, both for the code it generates on a hot path and
+// for the _Static_assert()s that check a driver's minimum against it
+// (see src/drivers/rtl8168.c). Enable per platform, never globally.
+int pbuf_data_size(void);
+
+// Must be called before the first pool is created; panics otherwise,
+// since buffers already carved at the old size would be mis-sized.
+void pbuf_set_data_size(int size);
+
+#define PBUF_DATA_SIZE pbuf_data_size()
+
+#else
+
 #ifndef PBUF_DATA_SIZE
 #define PBUF_DATA_SIZE 512
+#endif
+
 #endif
 
 #ifdef PBUF_ORIGIN_TRACE

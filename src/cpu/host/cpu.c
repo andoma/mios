@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <malloc.h>
 
+#include "net/pbuf.h"   // pbuf_set_data_size()
+
 #include <mios/mios.h>
 #include <mios/task.h>
 
@@ -199,13 +201,29 @@ host_platform_vtime(const char *suite)
 }
 
 
+// Pbuf buffer size this suite wants, 0 for the platform default. Asked
+// before init() because the pool is carved during it, so a suite cannot
+// choose its own size once it is running.
+int __attribute__((weak))
+host_platform_pbuf_data_size(const char *suite)
+{
+  return 0;
+}
+
+
 void __attribute__((noreturn))
 host_start(long *sp)
 {
   host_boot_sp = sp;
   const char *suite = host_positional(0);
-  if(suite != NULL)
+  if(suite != NULL) {
     host_vtime = host_platform_vtime(suite);
+#ifdef ENABLE_PBUF_DYNAMIC_SIZE
+    const int pbuf_size = host_platform_pbuf_data_size(suite);
+    if(pbuf_size)
+      pbuf_set_data_size(pbuf_size);
+#endif
+  }
   host_irq_init();
   init();
   cpu_jump_stack(idle_sp, cpu_idle_entry);

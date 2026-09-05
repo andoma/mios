@@ -57,6 +57,7 @@ typedef struct vllp {
   uint8_t SE;
   uint8_t mtu;
   uint8_t timeout;
+  uint8_t tx_headroom;   // see vllp_server_create()
 
   // A received data fragment must be acknowledged promptly. The E bit
   // rides on any frame we send, but the peer's tx-flow-bit for the
@@ -108,9 +109,18 @@ struct vllp_channel {
 // Headroom in transmitted pbufs. Must cover whatever the transport puts
 // in front of the VLLP frame (DSIG id + UDP + IPv4 + Ethernet = 46
 // bytes) so no second pbuf is needed for headers.
+// Headroom reserved on every tx pbuf for the transport headers that get
+// prepended below dsig. Sized for the worst case: dsig over UDP prepends
+// ethernet + ip + udp. Over CAN only dsig's own 4-byte signal id is
+// prepended, so this is mostly dead space there -- see v->tx_headroom,
+// which clamps it to what the configured pbuf size can actually spare.
 #ifndef VLLP_TX_HEADROOM
 #define VLLP_TX_HEADROOM 64
 #endif
+
+// What dsig_emit_pbuf() itself prepends (the LE signal id). The floor for
+// any usable headroom, whatever the transport underneath.
+#define VLLP_DSIG_PREPEND 4
 
 // Reassembly limits. A message is at most this many pbufs; a peer
 // sending more gets its channel closed with ERR_MTU_EXCEEDED instead of
@@ -256,11 +266,11 @@ static pbuf_t *
 vllp_tx_ack(vllp_t *v, pbuf_t *pb)
 {
   if(pb == NULL) {
-    pb = pbuf_make(VLLP_TX_HEADROOM, 0);
+    pb = pbuf_make(v->tx_headroom, 0);
     if(pb == NULL)
       return NULL;
   } else {
-    pbuf_reset(pb, VLLP_TX_HEADROOM, 0);
+    pbuf_reset(pb, v->tx_headroom, 0);
   }
 
   uint8_t *pkt = pbuf_append(pb, 7);
@@ -554,7 +564,7 @@ vllp_channel_receive(vllp_t *v, int channel_id,
     if(queued >= VLLP_MAX_MESSAGE_PBUFS) {
       evlog(LOG_WARNING, "VLLP: channel %d: message larger than %d bytes, "
             "closing channel", vc->id,
-            VLLP_MAX_MESSAGE_PBUFS * PBUF_DATA_SIZE - 4);
+            (int)vllp_max_message_size());
       vc->close_error = ERR_MTU_EXCEEDED;
       vllp_channel_net_close(v, vc, "message too large");
       return 0; // Fragment consumed (dropped); the rest follow suit
@@ -641,9 +651,9 @@ vllp_tx(vllp_t *v, pbuf_t *pb)
     return pb;
 
   if(pb == NULL) {
-    pb = pbuf_make(VLLP_TX_HEADROOM, 0);
+    pb = pbuf_make(v->tx_headroom, 0);
   } else {
-    pbuf_reset(pb, VLLP_TX_HEADROOM, 0);
+    pbuf_reset(pb, v->tx_headroom, 0);
   }
 
   if(pb != NULL) {
@@ -1016,10 +1026,40 @@ vllp_timeout_timer(void *opaque, uint64_t now)
 }
 
 
+size_t
+vllp_max_message_size(void)
+{
+  return VLLP_MAX_MESSAGE_PBUFS * PBUF_DATA_SIZE - 4;
+}
+
+
 vllp_t *
 vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
                    uint8_t timeout)
 {
+  // Reserve headroom for the headers prepended below us, but never so
+  // much that a full frame no longer fits the buffer. VLLP_TX_HEADROOM
+  // is the IP-transport worst case; a pool sized for a single CAN-FD
+  // frame cannot hold that as well, and a target that small is not
+  // carrying dsig over IP anyway -- the ethernet drivers _Static_assert
+  // PBUF_DATA_SIZE >= 1536. So clamp instead of overrunning the buffer.
+  //
+  // Getting this wrong is not a graceful failure: the tx path writes the
+  // frame at pb_offset and would run off the end of the buffer, which is
+  // caught (if at all) by an assert in pbuf_append() on a later line, in
+  // the net thread, long after the corruption.
+  const int adj_mtu = mtu > 8 ? mtu - 1 : mtu;  // FDCAN adaptation, below
+  const int maxframe = fdcan_adapation_pad_ladder(adj_mtu + 1);
+  int headroom = (int)PBUF_DATA_SIZE - maxframe;
+  if(headroom > VLLP_TX_HEADROOM)
+    headroom = VLLP_TX_HEADROOM;
+  if(headroom < VLLP_DSIG_PREPEND) {
+    evlog(LOG_ERR, "vllp: mtu %d needs %d byte frames, pbuf size %d "
+          "leaves no room for the %d byte signal id",
+          mtu, maxframe, (int)PBUF_DATA_SIZE, VLLP_DSIG_PREPEND);
+    return NULL;
+  }
+
   vllp_t *v = xalloc(sizeof(vllp_t), 0, MEM_MAY_FAIL | MEM_CLEAR);
   if(v == NULL)
     return NULL;
@@ -1040,6 +1080,7 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
     mtu--; // For FDCAN adaptation
 
   v->mtu = mtu;
+  v->tx_headroom = headroom;
   v->timeout = timeout;
   v->rtx_timer.t_cb = vllp_rtx_timer;
   v->rtx_timer.t_opaque = v;

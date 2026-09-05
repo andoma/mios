@@ -158,11 +158,22 @@ open_echo(scenario_t *sc)
   return hvllp_channel_create(sc->v, "echo", 0, NULL, NULL, NULL, NULL);
 }
 
+#define ECHO_BUF_SIZE 4096
+
+/* Largest message that both the server can reassemble and this file's
+   scratch buffers can hold. */
+static size_t
+echo_max_len(void)
+{
+  const size_t m = vllp_max_message_size();
+  return m > ECHO_BUF_SIZE ? ECHO_BUF_SIZE : m;
+}
+
 /* One echo round trip. 0 = ok, 1 = payload mismatch, 2 = link/timeout. */
 static int
 echo_rt(scenario_t *sc, hvllp_channel_t *ch, size_t len, uint32_t seq)
 {
-  static uint8_t tx[4096];
+  static uint8_t tx[ECHO_BUF_SIZE];
   fill_msg(tx, len, seq);
   hvllp_channel_send(ch, tx, len);
 
@@ -187,9 +198,33 @@ phase_echo_sizes(scenario_t *sc)
   SCHECK(sc, ch != NULL, "echo_sizes: open failed");
   if(ch == NULL)
     return;
-  static const size_t sizes[] = { 0, 1, 7, 8, 9, 62, 63, 64, 100, 500, 508,
-                                  600, 1000, 2000 };
-  for(size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+
+  // Sizes are derived, not fixed. The reassembly limit scales with
+  // PBUF_DATA_SIZE (VLLP_MAX_MESSAGE_PBUFS buffers' worth), so a list
+  // that fits a roomy pool asks for the impossible on a tight one -- and
+  // exceeding it CLOSES the channel (ERR_MTU_EXCEEDED), so the first
+  // oversize message makes every later size fail too, which reads as a
+  // pile of unrelated breakage rather than one bad assumption.
+  //
+  // Deriving also tests the interesting sizes at whatever the limit
+  // happens to be, instead of only at the one the author had in mind.
+  const size_t maxmsg = echo_max_len();
+  const size_t fixed[] = { 0, 1, 7, 8, 9, 62, 63, 64, 100, 500, 508, 1000 };
+  size_t sizes[sizeof(fixed) / sizeof(fixed[0]) + 3];
+  size_t n = 0;
+  for(size_t i = 0; i < sizeof(fixed) / sizeof(fixed[0]); i++) {
+    if(fixed[i] <= maxmsg)
+      sizes[n++] = fixed[i];
+  }
+  // The boundary itself, which no fixed list would hit by luck.
+  if(maxmsg > 1)
+    sizes[n++] = maxmsg / 2;
+  if(maxmsg > 0)
+    sizes[n++] = maxmsg - 1;
+  sizes[n++] = maxmsg;
+
+  hosttest_log("   max message %zu bytes, %zu sizes", maxmsg, n);
+  for(size_t i = 0; i < n; i++) {
     int r = echo_rt(sc, ch, sizes[i], i + 1);
     SCHECK(sc, r == 0, "echo_sizes: len %zu -> %s", sizes[i],
            r == 1 ? "mismatch" : "no reply");
@@ -319,11 +354,17 @@ phase_discard(scenario_t *sc)
   SCHECK(sc, ch != NULL, "discard: open failed");
   if(ch == NULL)
     return;
+  // Same reasoning as phase_echo_sizes(): 508 is over the limit once the
+  // pool is tight, and an oversize message closes the channel rather
+  // than being dropped, so the upload stalls on the very first message.
   static uint8_t buf[508];
+  const size_t len = echo_max_len() < sizeof(buf) ? echo_max_len()
+                                                  : sizeof(buf);
   memset(buf, 0xa5, sizeof(buf));
+  hosttest_log("   %zu byte messages", len);
   int sent = 0;
   for(int i = 0; i < 200; i++) {
-    hvllp_channel_send(ch, buf, sizeof(buf));
+    hvllp_channel_send(ch, buf, len);
     sent++;
     int64_t dl = clock_get() + 3 * SEC;
     while(hvllp_channel_tx_pending(ch) > 0 && clock_get() < dl)
@@ -500,4 +541,19 @@ test_vllp(void)
   return sc->failures;
 }
 
-HOSTTEST_SUITE("vllp", test_vllp, 0);
+// Registered twice, same test function, different pool sizes. Both
+// matter and they exercise different code:
+//
+//   vllp        the platform default (512), a roomy pool. Messages up to
+//               2044 bytes, generous tx headroom, few fragments.
+//   vllp-tight  72, which is what a CAN-only target ends up with when
+//               sized for one max-size CAN-FD payload (64) plus dsig's
+//               4-byte signal-id prefix. Every frame nearly fills a
+//               buffer, so the tx path has almost no headroom to reserve
+//               and messages fragment across the reassembly limit.
+//
+// The tight case is the one that catches things: a transmit path that
+// reserves generous headroom is perfectly happy against 512 and overruns
+// 72. Keep both green.
+HOSTTEST_SUITE_EX("vllp", test_vllp, 0, 0);
+HOSTTEST_SUITE_EX("vllp-tight", test_vllp, 0, 72);

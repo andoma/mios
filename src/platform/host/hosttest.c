@@ -14,6 +14,12 @@ extern const hosttest_suite_t _hosttest_array_end[];
 
 static int hosttest_fails;
 
+// Set once a suite is running. panic() normally drops into an
+// interactive crash shell, which is what you want on a target but spins
+// on EOF in a batch run -- so a panic inside a suite would hang the run
+// instead of failing it. See panic_enter_console() below.
+static int hosttest_running;
+
 
 static const hosttest_suite_t *
 hosttest_find(const char *name)
@@ -33,6 +39,25 @@ host_platform_vtime(const char *suite)
 {
   const hosttest_suite_t *s = hosttest_find(suite);
   return s != NULL && !(s->flags & HOSTTEST_REALTIME);
+}
+
+
+// cpu layer asks before boot how big this suite wants its pbufs
+int
+host_platform_pbuf_data_size(const char *suite)
+{
+  const hosttest_suite_t *s = hosttest_find(suite);
+  return s != NULL ? s->pbuf_data_size : 0;
+}
+
+
+// Overrides the weak default in kernel/panic.c: a panic while a suite is
+// running must terminate the process (halt() exits non-zero) rather than
+// wait for input that is never coming.
+int
+panic_enter_console(void)
+{
+  return !hosttest_running;
 }
 
 
@@ -113,7 +138,9 @@ main(void)
          host_vtime ? "virtual" : "real", seed);
 
   const uint64_t t0 = clock_get();
+  hosttest_running = 1;
   int fails = s->run();
+  hosttest_running = 0;
   fails += hosttest_fails;
   const uint64_t elapsed = clock_get() - t0;
 

@@ -18,6 +18,11 @@ P := ${SRC}/platform/host
 
 GLOBALDEPS += ${P}/host.mk
 
+# Buffer size picked at startup instead of compiled in, so one binary can
+# run each test suite at the pool size that suite cares about. Host only;
+# see the rationale in src/net/pbuf.h.
+ENABLE_PBUF_DYNAMIC_SIZE := yes
+
 CPPFLAGS += -iquote${P} -include ${P}/host.h
 
 LDSCRIPT = ${SRC}/cpu/host/host.ld
