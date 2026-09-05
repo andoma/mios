@@ -19,6 +19,8 @@
 
 #include <mios/vllp.h>          /* guest server: vllp_server_create() */
 
+#include "net/pbuf.h"           /* pool occupancy, for the starved variant */
+
 #include "hosttest.h"
 #include "sim.h"
 #include "vcan.h"
@@ -525,7 +527,30 @@ pred_done(void *arg)
 static int
 test_vllp(void)
 {
-  hosttest_log("---- real host client vs mios server, over vcan ----");
+  // How much room this configuration actually has. Captured before any
+  // traffic so it reflects the pool, not the high-water mark.
+  const int pool_total = pbuf_buffer_avail();
+  const unsigned int fails_at_start = pbuf_alloc_fail_count();
+
+  // The starved registration is the one that asks for a small pool, and
+  // it is also the one that wants injected allocation failures -- a
+  // small pool alone does not produce them, see the check at the end.
+  const int stress = pool_total <= 32;
+#ifdef ENABLE_PBUF_FAULT_INJECT
+  // 5%, which yields several hundred real failures across the run. Not
+  // higher: at 15% the stack still behaves correctly but everything runs
+  // an order of magnitude slower, and the chargen phase then exceeds its
+  // own 3 s read timeout and reports a stall that is not one. Measured,
+  // not guessed -- 15% fails only that phase while the identical download
+  // inside the bidirectional phase still completes, because the traffic
+  // the other direction generates keeps things moving. Push the rate up
+  // only together with the read timeouts.
+  if(stress)
+    pbuf_fault_inject(5, 1);
+#endif
+
+  hosttest_log("---- real host client vs mios server, over vcan ----%s",
+               stress ? " [5% of buffer allocations forced to fail]" : "");
 
   vcan_t *vcan = vcan_create("vcan0", MTU);
   vllp_server_create(DEV_TXID, DEV_RXID, MTU, 3);
@@ -538,6 +563,27 @@ test_vllp(void)
 
   CHECK(hosttest_wait(pred_done, sc, 120 * SEC), "scenario did not finish");
   hosttest_log("  finished at t=%u us virtual time", (unsigned)clock_get());
+
+  const unsigned int fails = pbuf_alloc_fail_count() - fails_at_start;
+  hosttest_log("  pool %d buffers, %u allocation failures", pool_total,
+               fails);
+
+  // A pool this small is only worth running to exercise what happens
+  // when it runs dry, so require that it actually did. Without this the
+  // starved variant silently degenerates into a duplicate of the others
+  // the moment anything reduces buffer demand -- passing, meaningless,
+  // and indistinguishable from real coverage.
+  if(stress) {
+    CHECK(fails > 0, "no allocation ever failed -- this configuration is "
+          "meant to be under pressure, so it is testing nothing");
+  } else {
+    // The roomy configurations should not be starving. If they are, the
+    // pool sizing or the demand has changed and the numbers above are no
+    // longer measuring what they claim to.
+    CHECK(fails == 0, "%u allocation failures on a %d buffer pool, which "
+          "was not supposed to be under pressure", fails, pool_total);
+  }
+
   return sc->failures;
 }
 
@@ -557,3 +603,22 @@ test_vllp(void)
 // 72. Keep both green.
 HOSTTEST_SUITE_EX("vllp", test_vllp, 0, 0);
 HOSTTEST_SUITE_EX("vllp-tight", test_vllp, 0, 72);
+
+// Same scenarios again under buffer starvation: a 12-buffer pool AND 5%
+// of non-blocking allocations forced to fail (see test_vllp()). Both,
+// because neither alone is enough --
+//
+//   the small pool on its own produced ZERO failures. This suite is
+//   request/response and cooperatively scheduled, so only a couple of
+//   buffers are ever in flight and 12 is plenty. Measured, after writing
+//   the obvious version of this test and finding it vacuous.
+//
+//   the injector on its own would exercise the failure branches but not
+//   the interaction with a genuinely tight pool.
+//
+// The assertion is not that allocations never fail -- they must, and the
+// suite checks that they did -- but that the link still makes progress
+// and every phase completes. Exhaustion wedging the net thread is the
+// class of bug 9dd4499f fixed by hand, with nothing until now to keep it
+// fixed.
+HOSTTEST_SUITE_POOL("vllp-starved", test_vllp, 0, 72, 12);

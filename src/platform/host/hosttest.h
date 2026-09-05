@@ -33,12 +33,20 @@ typedef struct hosttest_suite {
   // the tight one a constrained target uses, which matters because a
   // transmit path that is fine against 512 can overrun 72.
   uint16_t pbuf_data_size;
+  // How many buffers to give the pool, 0 for the platform default. A
+  // small number puts the stack under real allocation pressure, which
+  // reaches the out-of-buffers paths (non-blocking callers get NULL,
+  // blocking ones sleep) that a roomy pool never touches.
+  uint16_t pbuf_pool_count;
 } hosttest_suite_t;
 
-#define HOSTTEST_SUITE_EX(name, fn, flags, pbufsz)                      \
+#define HOSTTEST_SUITE_POOL(name, fn, flags, pbufsz, pbufcnt)           \
   static const hosttest_suite_t MIOS_JOIN(hosttest_, __LINE__)          \
   __attribute__((used, section("hosttest." name))) =                    \
-  { name, fn, flags, pbufsz }
+  { name, fn, flags, pbufsz, pbufcnt }
+
+#define HOSTTEST_SUITE_EX(name, fn, flags, pbufsz)                      \
+  HOSTTEST_SUITE_POOL(name, fn, flags, pbufsz, 0)
 
 #define HOSTTEST_SUITE(name, fn, flags) HOSTTEST_SUITE_EX(name, fn, flags, 0)
 

@@ -51,6 +51,15 @@ host_platform_pbuf_data_size(const char *suite)
 }
 
 
+// ...and how many of them
+int
+host_platform_pbuf_pool_count(const char *suite)
+{
+  const hosttest_suite_t *s = hosttest_find(suite);
+  return s != NULL ? s->pbuf_pool_count : 0;
+}
+
+
 // Overrides the weak default in kernel/panic.c: a panic while a suite is
 // running must terminate the process (halt() exits non-zero) rather than
 // wait for input that is never coming.

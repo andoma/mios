@@ -24,6 +24,13 @@ int pbuf_data_size(void);
 // since buffers already carved at the old size would be mis-sized.
 void pbuf_set_data_size(int size);
 
+// How many buffers the default pool gets, overriding PBUF_DEFAULT_COUNT.
+// Same ordering rule as above. A deliberately small pool is how you
+// exercise what the stack does when it runs out, which is a different
+// code path from the one a roomy pool ever reaches -- non-blocking
+// callers start getting NULL and blocking ones sleep.
+void pbuf_set_pool_count(int count);
+
 #define PBUF_DATA_SIZE pbuf_data_size()
 
 #else
@@ -142,6 +149,30 @@ __attribute__((warn_unused_result))
 int pbuf_memcmp_at(pbuf_t *pb, const void *data, size_t offset, size_t len);
 
 int pbuf_buffer_avail(void);
+
+// Non-blocking allocations that failed for want of a buffer, since boot.
+// Nonzero means the pool ran dry at least once. Worth checking from a
+// stress test rather than assuming it got the pressure it asked for: a
+// pool that turns out to be big enough makes such a test vacuous.
+unsigned int pbuf_alloc_fail_count(void);
+
+#ifdef ENABLE_PBUF_FAULT_INJECT
+
+// Fail this percentage of non-blocking buffer allocations, on purpose.
+//
+// Simply shrinking the pool does not reliably produce exhaustion: a
+// request/response test holds only a couple of buffers at a time, so it
+// passes with a tiny pool having never once run dry. Forcing the failure
+// reaches the out-of-buffers branches directly, and at a rate you choose
+// rather than one you hope for.
+//
+// Deterministic: its own seeded generator, so a failing run reproduces
+// and it does not perturb whatever else is drawing random numbers. pct 0
+// disables. Only the non-blocking path is affected -- making the
+// blocking path fail would deadlock callers that are entitled to wait.
+void pbuf_fault_inject(unsigned int pct, uint32_t seed);
+
+#endif
 
 int pbuf_buffer_total(void);
 

@@ -34,6 +34,41 @@ pbuf_buffer_avail(void)
   return pbuf_datas.pp_avail;
 }
 
+static unsigned int pbuf_alloc_fails;
+
+unsigned int
+pbuf_alloc_fail_count(void)
+{
+  return pbuf_alloc_fails;
+}
+
+#ifdef ENABLE_PBUF_FAULT_INJECT
+
+// Non-zero initialisers so these survive init()'s .bss clear if a caller
+// sets them early -- same trap as the geometry above.
+static unsigned int pbuf_fault_pct = 0xffff;   // 0xffff = off
+static uint32_t pbuf_fault_rng = 0x2545f491;
+
+void
+pbuf_fault_inject(unsigned int pct, uint32_t seed)
+{
+  pbuf_fault_pct = pct;
+  pbuf_fault_rng = seed ? seed : 0x2545f491;
+}
+
+static int
+pbuf_fault_now(void)
+{
+  if(pbuf_fault_pct == 0xffff || pbuf_fault_pct == 0)
+    return 0;
+  uint32_t x = pbuf_fault_rng;
+  x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+  pbuf_fault_rng = x;
+  return (x % 100) < pbuf_fault_pct;
+}
+
+#endif
+
 int
 pbuf_buffer_total(void)
 {
@@ -74,8 +109,15 @@ pbuf_pool_get(pbuf_pool_t *pp, int wait PBUF_ORIGIN_ARG_DECL)
       return NULL;
     }
 #endif
+#ifdef ENABLE_PBUF_FAULT_INJECT
+    if(pbuf_fault_now()) {
+      pbuf_alloc_fails++;
+      return NULL;
+    }
+#endif
     // Always have some spare capacity for waiters
     if(pp->pp_avail < 2) {
+      pbuf_alloc_fails++;
       return NULL;
     }
 
@@ -117,7 +159,17 @@ pbuf_pool_add(pbuf_pool_t *pp, void *start, void *end, size_t item_size)
 
 #ifdef ENABLE_PBUF_DYNAMIC_SIZE
 
+// Both of these are assigned BEFORE init() clears .bss, so both must
+// live in .data -- which means both need a non-zero initialiser, and the
+// "unset" sentinel cannot be 0. Getting this wrong is quiet: the value is
+// accepted, then zeroed on the way up, and the default is used instead.
+// The same trap is called out in cpu/host/{cpu,irq,timer}.c.
+#define PBUF_GEOMETRY_UNSET (-1)
+
 static int pbuf_data_size_cur = 512;
+static int pbuf_pool_count_cur = PBUF_GEOMETRY_UNSET;
+// Not subject to the .data rule above: it must read 0 until the pool is
+// created, and both the ELF load and init()'s clear give it that.
 static int pbuf_data_size_locked;
 
 int
@@ -136,6 +188,16 @@ pbuf_set_data_size(int size)
   pbuf_data_size_cur = size;
 }
 
+void
+pbuf_set_pool_count(int count)
+{
+  if(pbuf_data_size_locked)
+    panic("pbuf_set_pool_count() after the pool was created");
+  if(count < 4)
+    panic("pbuf_set_pool_count(%d): too small to make progress", count);
+  pbuf_pool_count_cur = count;
+}
+
 #endif
 
 void
@@ -147,7 +209,12 @@ pbuf_data_add(void *start, void *end)
   if(end == NULL) {
     if(pbuf_datas.pp_avail)
       return;
-    const size_t size = PBUF_DATA_SIZE * PBUF_DEFAULT_COUNT;
+    int pool_count = PBUF_DEFAULT_COUNT;
+#ifdef ENABLE_PBUF_DYNAMIC_SIZE
+    if(pbuf_pool_count_cur != PBUF_GEOMETRY_UNSET)
+      pool_count = pbuf_pool_count_cur;
+#endif
+    const size_t size = PBUF_DATA_SIZE * pool_count;
     start = xalloc(size, CACHE_LINE_SIZE, MEM_TYPE_DMA);
     end = start + size;
   }
@@ -667,7 +734,8 @@ void
 pbuf_status(stream_t *st)
 {
   stprintf(st, "pbuf size:%d\n", (int)PBUF_DATA_SIZE);
-  stprintf(st, "pbuf: %d avail\n", pbufs.pp_avail);
+  stprintf(st, "pbuf: %d avail, %u alloc failures\n", pbufs.pp_avail,
+           pbuf_alloc_fails);
   stprintf(st, "pbuf_data: %d avail\n", pbuf_datas.pp_avail);
 }
 

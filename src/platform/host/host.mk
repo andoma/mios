@@ -23,6 +23,9 @@ GLOBALDEPS += ${P}/host.mk
 # see the rationale in src/net/pbuf.h.
 ENABLE_PBUF_DYNAMIC_SIZE := yes
 
+# Let a test force buffer-allocation failures; see src/net/pbuf.h.
+ENABLE_PBUF_FAULT_INJECT := yes
+
 CPPFLAGS += -iquote${P} -include ${P}/host.h
 
 LDSCRIPT = ${SRC}/cpu/host/host.ld

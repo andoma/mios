@@ -201,11 +201,18 @@ host_platform_vtime(const char *suite)
 }
 
 
-// Pbuf buffer size this suite wants, 0 for the platform default. Asked
+// Pbuf pool geometry this suite wants, 0 for the platform default. Asked
 // before init() because the pool is carved during it, so a suite cannot
-// choose its own size once it is running.
+// choose either once it is running.
 int __attribute__((weak))
 host_platform_pbuf_data_size(const char *suite)
+{
+  return 0;
+}
+
+
+int __attribute__((weak))
+host_platform_pbuf_pool_count(const char *suite)
 {
   return 0;
 }
@@ -222,6 +229,9 @@ host_start(long *sp)
     const int pbuf_size = host_platform_pbuf_data_size(suite);
     if(pbuf_size)
       pbuf_set_data_size(pbuf_size);
+    const int pbuf_count = host_platform_pbuf_pool_count(suite);
+    if(pbuf_count)
+      pbuf_set_pool_count(pbuf_count);
 #endif
   }
   host_irq_init();
