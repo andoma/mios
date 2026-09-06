@@ -3,6 +3,8 @@
 #include "stm32g4_reg.h"
 #include "stm32g4_clk.h"
 
+#include <stdbool.h>
+
 #define FDCAN_CREL   0x000
 #define FDCAN_DBTP   0x00c
 #define FDCAN_TEST   0x010
@@ -40,6 +42,10 @@
 #define FDCAN_BASE(x) (0x40006000 + ((x) * 0x400))
 #define FDCAN_RAM(x)  (0x4000a000 + ((x) * 0x400))
 
+// Interrupt lines per instance (RM0440 NVIC table): IT0/IT1.
+static const uint8_t fdcan_irq0[3] = { 21, 86, 88 };
+static const uint8_t fdcan_irq1[3] = { 22, 87, 89 };
+
 void
 stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
                    unsigned int nominal_bitrate,
@@ -47,15 +53,21 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
                    const struct dsig_filter *output_filter,
                    unsigned int flags)
 {
-  if(instance != 1)
-    panic("stm32g4_can: Only instance 1 is supported now");
+  if(instance < 1 || instance > 3)
+    panic("stm32g4_can: Invalid instance %d", instance);
 
-  clk_enable(CLK_FDCAN);
+  // One clock-enable and one reset bit are shared by all FDCAN
+  // instances, so the reset must only happen once: doing it again for
+  // a second instance would wipe the first one's configuration.
+  static bool fdcan_clocked;
+  if(!fdcan_clocked) {
+    clk_enable(CLK_FDCAN);
+    reset_peripheral(CLK_FDCAN);
+    fdcan_clocked = true;
+  }
 
   gpio_conf_af(can_tx, 9, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
   gpio_conf_af(can_rx, 9, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-
-  reset_peripheral(CLK_FDCAN);
 
   fdcan_t *fc = calloc(1, sizeof(fdcan_t));
   fc->reg_base = FDCAN_BASE(instance);
@@ -74,8 +86,14 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
   // error grows to ~5.6%, vs. an exact match at /2 for the data phase
   // and ~1.16% for nominal -- see fdcan_calculate_timings()'s
   // tolerance in stm32_fdcan.c).
-  // Protected-write bit, only valid while CCE+INIT are set (true here).
-  reg_wr(fc->reg_base + FDCAN_CKDIV, 0b0001);
+  //
+  // FDCAN_CKDIV exists only in FDCAN1's register block and is common
+  // to all instances (RM0440, FDCAN register map). Protected write:
+  // FDCAN1's CCCR must have INIT+CCE set. INIT is FDCAN1's reset state
+  // and, for instance 1, stm32_fdcan_cce() above already set both; for
+  // the other instances set CCE on the (otherwise untouched) FDCAN1.
+  reg_set_bit(FDCAN_BASE(1) + FDCAN_CCCR, 1);
+  reg_wr(FDCAN_BASE(1) + FDCAN_CKDIV, 0b0001);
   const uint32_t core_clk = clk_get_freq(CLK_FDCAN) / 2;
 
   for(size_t i = 0; i < 0x350; i += 4) {
@@ -96,8 +114,10 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
     return;
   }
 
-  irq_enable_fn_arg(21, IRQ_LEVEL_NET, stm32_fdcan_irq0, fc);
-  irq_enable_fn_arg(22, IRQ_LEVEL_NET, stm32_fdcan_irq1, fc);
+  irq_enable_fn_arg(fdcan_irq0[instance - 1], IRQ_LEVEL_NET,
+                    stm32_fdcan_irq0, fc);
+  irq_enable_fn_arg(fdcan_irq1[instance - 1], IRQ_LEVEL_NET,
+                    stm32_fdcan_irq1, fc);
 
   printf("%s: Initialized. Nominal bitrate:%d Data bitrate:%d\n",
          name, nominal_bitrate, data_bitrate);
