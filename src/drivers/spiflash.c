@@ -6,6 +6,7 @@
 #include <mios/eventlog.h>
 #include <mios/device.h>
 #include <mios/type_macros.h>
+#include <mios/error.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -368,30 +369,20 @@ calc_erase_time(uint32_t v)
   return (1 + (v & 0x1f)) * erase_time_multipliers[(v >> 5) & 3];
 }
 
-block_iface_t *
-spiflash_create(spi_t *spi, gpio_t cs)
+
+// Reads the SFDP tables. Returns the device size in bytes, or 0 if the
+// device has no (valid) SFDP.
+static uint32_t
+probe_sfdp(spiflash_t *sf, int id)
 {
-  spiflash_t *sf = xalloc(sizeof(spiflash_t), 0, MEM_TYPE_DMA | MEM_MAY_FAIL);
-  if(sf == NULL)
-    return NULL;
-  memset(sf, 0, sizeof(spiflash_t));
-  gpio_conf_output(cs, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
-  gpio_set_output(cs, 1);
-
-  sf->spi = spi;
-  sf->cs = cs;
-
-  sf->spicfg = spi->get_config(spi, 0, 10000000);
-
-  int id = spiflash_id(sf);
-  printf("spiflash: ID:0x%x  ", id);
-  if(id < 0)
-    goto bad;
-
   uint32_t sfdp_signature = read_sfdp(sf, 0);
   if(sfdp_signature != 0x50444653) {
-    printf("Invalid SFDP signature [0x%x] ", sfdp_signature);
-    goto bad;
+    // 0x00 or 0xff from both reads means nothing answered on the bus at
+    // all (device unpowered, not selected, or wrong pins), as opposed to
+    // a device that answers but has no SFDP table (see probe_jedec()).
+    evlog(LOG_DEBUG, "spiflash: ID:0x%02x SFDP signature 0x%08x invalid",
+          id, sfdp_signature);
+    return 0;
   }
   uint32_t hdr2 = read_sfdp(sf, 4);
   int nph = ((hdr2 >> 16) & 0xff);
@@ -408,26 +399,17 @@ spiflash_create(spi_t *spi, gpio_t cs)
   }
 
   if(ptpj == 0) {
-    printf("Missing Flash Parameters  ");
-    goto bad;
+    evlog(LOG_ERR, "spiflash: ID:0x%02x SFDP has no JEDEC parameter table "
+          "(%d headers)", id, nph + 1);
+    return 0;
   }
 
   uint32_t density = read_sfdp(sf, ptpj + 4);
-  uint32_t size = 0;
   if(density & 0x80000000) {
-    printf("Unsupported density %x  ", density);
-    goto bad;
+    evlog(LOG_ERR, "spiflash: ID:0x%02x unsupported density 0x%08x",
+          id, density);
+    return 0;
   }
-
-  size = (density + 1) >> 3;
-  sf->block_shift = 12;
-
-  sf->sectors = size >> sf->block_shift;
-  sf->iface.num_blocks = size >> sf->block_shift;
-  sf->iface.block_size = 1 << sf->block_shift;
-
-  printf("%d kB (%zd sectors)  ", size >> 10, sf->iface.num_blocks);
-
 
   uint32_t w = read_sfdp(sf, ptpj + 0x1c);
 
@@ -460,6 +442,110 @@ spiflash_create(spi_t *spi, gpio_t cs)
     sf->erase_commands[3].cmd4 = 0xff;
   }
 
+  return (density + 1) >> 3;
+}
+
+
+// Older/low-end parts have no SFDP table. Those are identified by their
+// JEDEC id (9Fh: manufacturer, memory type, capacity) instead. For every
+// part listed here the capacity byte is log2(size in bytes) and erase is
+// the classic 20h/52h/D8h (4K/32K/64K, 3-byte addressing only), so the
+// table only has to supply the typical erase times, which drive how long
+// spiflash_wait_ready() sleeps before it starts polling. Ten bytes per
+// entry, all byte-sized fields so it packs without padding.
+static const struct {
+  uint8_t mfr;
+  uint8_t type;
+  uint8_t erase_10ms[3]; // typical 4K / 32K / 64K erase, in units of 10 ms
+  char name[5];
+} legacy_parts[] = {
+  // W25X40CL datasheet (rev F) AC characteristics: tSE/tBE1/tBE2 typ
+  { 0xef, 0x30, { 3, 12, 15 }, "W25X" },
+};
+
+static uint32_t
+probe_jedec(spiflash_t *sf, int id)
+{
+  struct iovec tx[2] = {{sf->tx, 1}, {NULL, 3}};
+  struct iovec rx[2] = {{NULL, 0}, {sf->rx, 0}};
+
+  sf->tx[0] = 0x9f;
+  error_t err = sf->spi->rwv(sf->spi, tx, rx, 2, sf->cs, sf->spicfg);
+  if(err) {
+    evlog(LOG_ERR, "spiflash: ID:0x%02x JEDEC id read failed: %s",
+          id, error_to_string(err));
+    return 0;
+  }
+  const uint8_t mfr = sf->rx[0];
+  const uint8_t type = sf->rx[1];
+  const uint8_t capacity = sf->rx[2];
+
+  for(size_t i = 0; i < ARRAYSIZE(legacy_parts); i++) {
+    if(legacy_parts[i].mfr != mfr || legacy_parts[i].type != type)
+      continue;
+
+    // Sanity bound: 64 kB .. 16 MB (anything bigger needs 4-byte
+    // addressing, which none of these parts have)
+    if(capacity < 16 || capacity > 24)
+      break;
+
+    static const uint8_t sizes[3] = { 12, 15, 16 };
+    static const uint8_t cmds[3] = { 0x20, 0x52, 0xd8 };
+    for(int j = 0; j < 3; j++) {
+      sf->erase_commands[j].size = sizes[j];
+      sf->erase_commands[j].cmd3 = cmds[j];
+      sf->erase_commands[j].cmd4 = 0xff;
+      sf->erase_commands[j].delay = legacy_parts[i].erase_10ms[j] * 10;
+    }
+    sf->erase_commands[3].cmd4 = 0xff;
+
+    evlog(LOG_INFO, "spiflash: %s (JEDEC %02x%02x%02x, no SFDP)",
+          legacy_parts[i].name, mfr, type, capacity);
+    return 1u << capacity;
+  }
+
+  evlog(LOG_ERR, "spiflash: ID:0x%02x no SFDP and unknown JEDEC id "
+        "%02x%02x%02x", id, mfr, type, capacity);
+  return 0;
+}
+
+
+block_iface_t *
+spiflash_create(spi_t *spi, gpio_t cs)
+{
+  spiflash_t *sf = xalloc(sizeof(spiflash_t), 0, MEM_TYPE_DMA | MEM_MAY_FAIL);
+  if(sf == NULL)
+    return NULL;
+  memset(sf, 0, sizeof(spiflash_t));
+  gpio_conf_output(cs, GPIO_PUSH_PULL, GPIO_SPEED_LOW, GPIO_PULL_NONE);
+  gpio_set_output(cs, 1);
+
+  sf->spi = spi;
+  sf->cs = cs;
+
+  sf->spicfg = spi->get_config(spi, 0, 10000000);
+
+  // Probe errors go to the event log (not stdout): the flash is usually
+  // brought up before any console is attached, and the log is what a
+  // remote shell can read back afterwards.
+  int id = spiflash_id(sf);
+  if(id < 0) {
+    evlog(LOG_ERR, "spiflash: ID read failed: %s", error_to_string(id));
+    goto bad;
+  }
+
+  uint32_t size = probe_sfdp(sf, id);
+  if(size == 0)
+    size = probe_jedec(sf, id);
+  if(size == 0)
+    goto bad;
+
+  sf->block_shift = 12;
+
+  sf->sectors = size >> sf->block_shift;
+  sf->iface.num_blocks = size >> sf->block_shift;
+  sf->iface.block_size = 1 << sf->block_shift;
+
   // Capture the electronic id now (device awake, bus warm) as the reference
   // the deep-power-down wake polls against.
   sf->id = spiflash_id(sf);
@@ -469,7 +555,8 @@ spiflash_create(spi_t *spi, gpio_t cs)
   sf->iface.write = spiflash_write;
   sf->iface.read = spiflash_read;
   sf->iface.ctrl = spiflash_ctrl;
-  printf("OK\n");
+  evlog(LOG_INFO, "spiflash: ID:0x%02x %d kB (%zd sectors)",
+        id, size >> 10, sf->iface.num_blocks);
 
   sf->dev.d_name = "spiflash";
   sf->dev.d_class = &spiflash_device_class;
@@ -479,6 +566,5 @@ spiflash_create(spi_t *spi, gpio_t cs)
 
  bad:
   free(sf);
-  printf("Not configured\n");
   return NULL;
 }
