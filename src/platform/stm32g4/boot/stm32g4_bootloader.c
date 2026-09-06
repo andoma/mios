@@ -198,6 +198,9 @@ static const uint32_t reginit[] = {
 #ifdef SPI1_PB3_PB4_PB5
   GPIO_BITQUAD(3, 5) | GPIO_BITQUAD(4, 5) | GPIO_BITQUAD(5, 5) |
 #endif
+#ifdef SPI3_PB3_PB4_PB5
+  GPIO_BITQUAD(3, 6) | GPIO_BITQUAD(4, 6) | GPIO_BITQUAD(5, 6) |
+#endif
 #ifdef SPI3_PC10_PC11_PB5
   GPIO_BITQUAD(5, 6) |
 #endif
@@ -211,6 +214,9 @@ static const uint32_t reginit[] = {
 
   GPIO_MODER(PB),
 #ifdef SPI1_PB3_PB4_PB5
+  GPIO_BITPAIR(3, 2) | GPIO_BITPAIR(4, 2) | GPIO_BITPAIR(5, 2) |
+#endif
+#ifdef SPI3_PB3_PB4_PB5
   GPIO_BITPAIR(3, 2) | GPIO_BITPAIR(4, 2) | GPIO_BITPAIR(5, 2) |
 #endif
 #ifdef SPI3_PC10_PC11_PB5
