@@ -38,6 +38,7 @@ SRCS += ${P}/host.c \
 	${P}/passt.c \
 	${P}/hostnet.c \
 	${P}/hosttest.c \
+	${P}/suite_snprintf.c \
 	${P}/vnet.c \
 	${P}/vcan.c \
 	${P}/sim_dhcpd.c \

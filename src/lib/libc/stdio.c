@@ -800,8 +800,12 @@ snbuf_cb(void *aux, const char *s, size_t len)
 {
   snbuf_t *b = aux;
 
-  size_t avail = b->size - b->used;
-  if(avail > 0) {
+  // The last byte of the buffer belongs to the terminator that
+  // vsnprintf() appends, so it is never available for content. Keeping
+  // that reservation here is what bounds b->used to size - 1.
+  if(b->size > 0) {
+
+    size_t avail = b->size - 1 - b->used;
 
     size_t to_copy = len;
     if(avail < to_copy)
@@ -811,6 +815,8 @@ snbuf_cb(void *aux, const char *s, size_t len)
 
     b->used += to_copy;
   }
+  // Regardless of how much was kept: the caller is told how long the
+  // output would have been, which is what makes truncation detectable
   return len;
 }
 
@@ -822,7 +828,7 @@ vsnprintf(char *str, size_t size, const char *format, va_list ap)
   int r = fmtv(snbuf_cb, &buf, format, ap);
 
   if(buf.size > 0)
-    str[buf.used] = 0;
+    str[buf.used] = 0;  // In bounds: snbuf_cb() reserved this byte
   return r;
 }
 
