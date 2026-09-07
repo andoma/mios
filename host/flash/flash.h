@@ -33,7 +33,8 @@ typedef struct flash_params {
   const char *elf_path;     // Required unless FLASH_RESET_ONLY
   const char *method;       // "jlink", "dfu", "openocd" or NULL/"auto"
   const char *cmdline;      // Boot cmdline deposited in RAM (dfu)
-  const char *serial;       // Probe USB serial number (jlink)
+  const char *serial;       // Select the target by USB serial number:
+                            // the probe's (jlink) or the board's (dfu)
   const char *openocd_host; // NULL = 127.0.0.1
   int openocd_port;         // 0 = 6666
   unsigned int swd_khz;     // 0 = 4000

@@ -739,11 +739,69 @@ stm32_dfu_flasher(const struct mios_image *mi,
 }
 
 
+// True if the open device's iSerialNumber string equals `want`, or if
+// `want` is NULL (no selection asked for). Compared case-insensitively:
+// the ST bootloader reports upper-case hex while lsusb and udev print it
+// lower case, and they are the same board.
+//
+// This only became a usable selector once the application-side USB
+// serial matched what the ROM bootloader reports -- before that a board
+// changed identity across a DFU cycle, so there was nothing stable to
+// name it by.
+static int
+dfu_serial_matches(libusb_device_handle *h, uint8_t index, const char *want)
+{
+  if(want == NULL)
+    return 1;
+  if(index == 0)
+    return 0;
+
+  unsigned char buf[128];
+  int n = libusb_get_string_descriptor_ascii(h, index, buf, sizeof(buf));
+  if(n <= 0)
+    return 0;
+  return !strcasecmp((const char *)buf, want);
+}
+
+
+// Open a device by vid:pid, optionally requiring a specific USB serial.
+static libusb_device_handle *
+dfu_open_vid_pid(libusb_context *ctx, uint16_t vid, uint16_t pid,
+                 const char *serial)
+{
+  libusb_device **devlist;
+  ssize_t cnt = libusb_get_device_list(ctx, &devlist);
+  libusb_device_handle *found = NULL;
+
+  for(ssize_t i = 0; i < cnt && found == NULL; i++) {
+    struct libusb_device_descriptor desc;
+    if(libusb_get_device_descriptor(devlist[i], &desc) != 0)
+      continue;
+    if(desc.idVendor != vid || desc.idProduct != pid)
+      continue;
+
+    libusb_device_handle *h;
+    if(libusb_open(devlist[i], &h) != 0)
+      continue;
+
+    if(dfu_serial_matches(h, desc.iSerialNumber, serial))
+      found = h;
+    else
+      libusb_close(h);
+  }
+
+  libusb_free_device_list(devlist, 1);
+  return found;
+}
+
+
 // Scan USB devices for a DFU Runtime interface.
 // Returns a handle to the device (with the runtime interface claimed),
 // or NULL if not found. Sets *iface_num to the interface number.
+// With `serial` non-NULL, only that board is considered.
 static libusb_device_handle *
-find_dfu_runtime_device(libusb_context *ctx, int *iface_num)
+find_dfu_runtime_device(libusb_context *ctx, int *iface_num,
+                        const char *serial)
 {
   libusb_device **devlist;
   ssize_t cnt = libusb_get_device_list(ctx, &devlist);
@@ -797,11 +855,16 @@ find_dfu_runtime_device(libusb_context *ctx, int *iface_num)
     libusb_free_config_descriptor(cfg);
 
     if(found_iface >= 0) {
+      struct libusb_device_descriptor desc;
       libusb_device_handle *h;
-      if(libusb_open(devlist[i], &h) == 0) {
-        *iface_num = found_iface;
-        libusb_free_device_list(devlist, 1);
-        return h;
+      if(libusb_get_device_descriptor(devlist[i], &desc) == 0 &&
+         libusb_open(devlist[i], &h) == 0) {
+        if(dfu_serial_matches(h, desc.iSerialNumber, serial)) {
+          *iface_num = found_iface;
+          libusb_free_device_list(devlist, 1);
+          return h;
+        }
+        libusb_close(h);
       }
     }
   }
@@ -815,7 +878,7 @@ find_dfu_runtime_device(libusb_context *ctx, int *iface_num)
 // as the ST DFU bootloader.
 static libusb_device_handle *
 detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
-                int iface_num)
+                int iface_num, const char *serial)
 {
   dfu_logf(LOG_INFO, "Found DFU Runtime device, sending DFU_DETACH...");
 
@@ -851,8 +914,7 @@ detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
   // Poll for the ST DFU bootloader to appear
   for(int attempt = 0; attempt < 20; attempt++) {
     usleep(250000);
-    libusb_device_handle *h =
-      libusb_open_device_with_vid_pid(ctx, 0x483, 0xdf11);
+    libusb_device_handle *h = dfu_open_vid_pid(ctx, 0x483, 0xdf11, serial);
     if(h != NULL) {
       dfu_logf(LOG_INFO, "Device is now in DFU mode");
       return h;
@@ -867,18 +929,21 @@ detach_and_wait(libusb_context *ctx, libusb_device_handle *rt_handle,
 // Open a DFU device — either already in bootloader mode, or by
 // finding a running device with DFU Runtime and sending DFU_DETACH.
 static libusb_device_handle *
-dfu_open(libusb_context *ctx)
+dfu_open(libusb_context *ctx, const char *serial)
 {
   // First, check if a device is already in DFU bootloader mode
-  libusb_device_handle *h =
-    libusb_open_device_with_vid_pid(ctx, 0x483, 0xdf11);
+  libusb_device_handle *h = dfu_open_vid_pid(ctx, 0x483, 0xdf11, serial);
 
   if(h == NULL) {
-    // Not in DFU mode — look for a running device with DFU Runtime interface
+    // Not in DFU mode — look for a running device with DFU Runtime
+    // interface. Without a serial this takes the first DFU-capable
+    // device on the bus, which is the wrong board as soon as two are
+    // plugged in; pass one when that is a possibility.
     int iface_num;
-    libusb_device_handle *rt = find_dfu_runtime_device(ctx, &iface_num);
+    libusb_device_handle *rt = find_dfu_runtime_device(ctx, &iface_num,
+                                                       serial);
     if(rt != NULL) {
-      h = detach_and_wait(ctx, rt, iface_num);
+      h = detach_and_wait(ctx, rt, iface_num, serial);
     }
   }
 
@@ -1251,11 +1316,12 @@ n6_provision(libusb_device_handle *h, const char *elf_path, const char *cmdline)
 // Returns NULL on success, or a static error string on failure.
 static const char *
 dfu_flash_elf(libusb_context *ctx, const char *elf_path, int force_flash,
-              const char *cmdline)
+              const char *cmdline, const char *serial)
 {
-  libusb_device_handle *h = dfu_open(ctx);
+  libusb_device_handle *h = dfu_open(ctx, serial);
   if(h == NULL)
-    return "No DFU device found (neither bootloader nor runtime)";
+    return serial ? "No DFU device with that serial number found"
+                  : "No DFU device found (neither bootloader nor runtime)";
 
   // Autodetect the flash mechanism from the DFU interface string: "@FSBL"
   // is the STM32N6 boot ROM (no internal flash), anything else is a normal

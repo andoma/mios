@@ -26,7 +26,8 @@ flash_dfu(const flash_params_t *p, flash_log_t *log)
   dfu_set_logger(dfu_to_flash_log, log);
 
   const char *err = dfu_flash_elf(usb, p->elf_path,
-                                  !!(p->flags & FLASH_FORCE), p->cmdline);
+                                  !!(p->flags & FLASH_FORCE), p->cmdline,
+                                  p->serial);
   dfu_set_logger(NULL, NULL);
   libusb_exit(usb);
 
