@@ -294,6 +294,16 @@ void
 pbuf_free_queue_irq_blocked(struct pbuf_queue *pq)
 {
   pbuf_free_irq_blocked(STAILQ_FIRST(pq));
+  // Leave the queue empty, not dangling. Most callers throw the
+  // containing object away immediately afterwards and never notice, but
+  // some flush a queue and keep using it (vllp_disconnect() on the
+  // management channel, which outlives the session; l2cap's reassembly
+  // flush, which lets the channel starve out). Those used to be left
+  // pointing at freed buffers, so the next flush freed them a second
+  // time and corrupted the pool free list -- which then shows up as a
+  // crash somewhere else entirely, in whatever unlucky code allocated
+  // next.
+  STAILQ_INIT(pq);
 }
 
 

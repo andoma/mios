@@ -485,6 +485,70 @@ phase_faults(scenario_t *sc, const char *name, faults_t f, int expect_resets)
 }
 
 
+/* Buffer accounting across heavy payload corruption.
+ *
+ * A message that reassembles completely and only then fails its CRC takes
+ * a different path from a frame that is rejected on arrival: the chain has
+ * already been detached from the channel, so whoever holds it last has to
+ * free it. That path leaked the entire message, permanently, once per bad
+ * CRC.
+ *
+ * Made deliberately harsh -- a high corruption rate on multi-fragment
+ * messages -- because the gentle corrupt-1 phase only ever loses a single
+ * one-fragment message, which is small enough to hide inside any sane
+ * tolerance. This is the phase that makes such a leak obvious.
+ */
+static void
+phase_corrupt_leak(scenario_t *sc)
+{
+  hosttest_log("-- corruption buffer accounting");
+
+  const int pool_before = pbuf_buffer_avail();
+  const size_t len = echo_max_len() < 500 ? echo_max_len() : 500;
+
+  hvllp_channel_t *ch = open_echo(sc);
+  SCHECK(sc, ch != NULL, "corrupt_leak: open failed");
+  if(ch == NULL)
+    return;
+
+  sc->ctx.f = (faults_t){ .corrupt = 10 };
+
+  int completed = 0;
+  for(int i = 0; i < 40; i++) {
+    if(ch == NULL) {
+      sc->ctx.f = (faults_t){0};
+      if(!wait_connected(sc, 6 * SEC))
+        break;
+      sc->ctx.f = (faults_t){ .corrupt = 10 };
+      ch = open_echo(sc);
+      if(ch == NULL)
+        break;
+    }
+    if(echo_rt(sc, ch, len, i) == 0)
+      completed++;
+    else {
+      hvllp_channel_close(ch, 0, 0);
+      ch = NULL;
+    }
+  }
+
+  sc->ctx.f = (faults_t){0};
+  if(ch != NULL)
+    hvllp_channel_close(ch, 0, 1);
+
+  /* Let the link settle so nothing is still legitimately in flight. */
+  hvllp_sim_run(sc->v, clock_get() + 5 * SEC);
+
+  const int pool_after = pbuf_buffer_avail();
+  hosttest_log("   %d/40 round trips, pool %d -> %d", completed, pool_before,
+               pool_after);
+  SCHECK(sc, pool_after >= pool_before - 2,
+         "corrupt_leak: %d buffers lost across %d corrupted round trips -- "
+         "a message that fails its CRC after full reassembly is leaking "
+         "its whole chain", pool_before - pool_after, 40 - completed);
+}
+
+
 static void
 scenario_fn(void *arg)
 {
@@ -510,6 +574,7 @@ scenario_fn(void *arg)
   phase_faults(sc, "loss-20", (faults_t){ .drop = 20 }, 0);
   phase_faults(sc, "dup-10", (faults_t){ .dup = 10 }, 0);
   phase_faults(sc, "corrupt-1", (faults_t){ .corrupt = 1 }, 1);
+  phase_corrupt_leak(sc);
 
   SCHECK(sc, hvllp_is_connected(v), "link not up at end");
 
@@ -567,6 +632,20 @@ test_vllp(void)
   const unsigned int fails = pbuf_alloc_fail_count() - fails_at_start;
   hosttest_log("  pool %d buffers, %u allocation failures", pool_total,
                fails);
+
+  // Every channel has been closed and the link is idle, so every buffer
+  // the stack took must be back. This is a blunt instrument on purpose:
+  // it does not care where a leak is, only that the run did not lose
+  // buffers, and it covers the paths the fault phases above reach that
+  // nothing else does. A leak on an error path is invisible in normal
+  // operation and then bricks a device that has been up for a month --
+  // the corrupt-1 phase used to leak an entire message of buffers on
+  // every bad CRC, which is exactly the shape of thing this catches.
+  const int pool_now = pbuf_buffer_avail();
+  CHECK(pool_now >= pool_total - 2,
+        "%d of %d buffers are still held after every channel closed and "
+        "the link went idle -- something on an error path is leaking them",
+        pool_total - pool_now, pool_total);
 
   // A pool this small is only worth running to exercise what happens
   // when it runs dry, so require that it actually did. Without this the
