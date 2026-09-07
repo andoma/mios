@@ -74,6 +74,7 @@ typedef struct usb_dev {
   struct usb_device_descriptor ud_desc;
   const char *ud_manufacturer;
   const char *ud_product;
+  uint8_t ud_serial_number[6]; // see stm32g4_usb_create()
   uint8_t *ud_config_desc;
   size_t ud_config_desc_size;
 } usb_dev_t;
@@ -311,7 +312,7 @@ read_bin2hex_as_desc(void *opaque)
     } else {
       const uint8_t byte_idx = chof / 2;
       const uint8_t b = data[byte_idx] >> (chof & 1 ? 0 : 4);
-      r = "0123456789abcdef"[b & 0xf];
+      r = "0123456789ABCDEF"[b & 0xf];
     }
     break;
   }
@@ -367,9 +368,8 @@ handle_get_descriptor(usb_dev_t *ud, const struct usb_setup_packet *usp,
       break;
     case 3:
       getch = read_bin2hex_as_desc;
-      const struct serial_number sn = sys_get_serial_number();
-      desc = sn.data;
-      desclen = sn.len * 2;
+      desc = ud->ud_serial_number;
+      desclen = sizeof(ud->ud_serial_number) * 2;
       break;
     }
     desclen = desclen * 2 + 2;
@@ -1020,6 +1020,23 @@ stm32g4_usb_create(uint16_t vid, uint16_t pid,
 
   uc->uc_ud.ud_manufacturer = manfacturer_string;
   uc->uc_ud.ud_product = product_string;
+
+  // Same 12-digit serial as the chip's own DFU bootloader reports, so a
+  // board keeps its identity across a DFU cycle (udev rules, tooling
+  // that tracks devices by serial): the first 8 digits are UID word 0
+  // plus UID word 2, the last 4 are the top half of UID word 1. This
+  // is what ST's USB device library does, and what stm32h7_usb.c does.
+  const struct serial_number sn = sys_get_serial_number();
+  const uint32_t *sn_u32 = sn.data;
+  const uint32_t sum = sn_u32[0] + sn_u32[2];
+  uint8_t *serial = uc->uc_ud.ud_serial_number;
+  serial[0] = sum >> 24;
+  serial[1] = sum >> 16;
+  serial[2] = sum >> 8;
+  serial[3] = sum;
+  serial[4] = sn_u32[1] >> 24;
+  serial[5] = sn_u32[1] >> 16;
+
   uc->uc_ud.ud_desc.idVendor = vid;
   uc->uc_ud.ud_desc.idProduct = pid;
 
