@@ -21,6 +21,10 @@
 // thread stop" and "should we retry discovery", so keep it short.
 #define IO_TIMEOUT_MS 300
 
+// How long dsig_usb_start() waits for the first connect before handing
+// control back. See the comment there.
+#define CONNECT_WAIT_MS 1000
+
 struct dsig_usb {
   uint16_t vid, pid;
   uint8_t subclass;
@@ -199,6 +203,18 @@ dsig_usb_start(dsig_usb_t *t, dsig_t *bus)
     t->running = 0;
     return -1;
   }
+
+  // Claiming the interface happens on the rx thread, and dsig_usb_tx()
+  // silently drops anything handed to it before that completes. A
+  // one-shot command ("dsig emit") sends immediately and exits, so it
+  // lost every frame with no error anywhere -- the transfer looked
+  // fine and nothing ever arrived. Wait for the first connect here.
+  //
+  // Bounded, because a device that is absent must not hang the tool:
+  // the rx thread keeps retrying regardless, so a long-running command
+  // still recovers on its own once the device appears.
+  for(int i = 0; i < CONNECT_WAIT_MS / 10 && !dsig_usb_connected(t); i++)
+    usleep(10000);
   return 0;
 }
 
