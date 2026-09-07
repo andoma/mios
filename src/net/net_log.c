@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/param.h>
 
 static struct pbuf_queue netlog_queue =
   STAILQ_HEAD_INITIALIZER(netlog_queue);
@@ -40,8 +41,16 @@ netlog(const char *fmt, ...)
     return;
 
   va_start(ap, fmt);
-  pb->pb_pktlen = vsnprintf(pbuf_data(pb, 0), PBUF_DATA_SIZE, fmt, ap);
+  const int len = vsnprintf(pbuf_data(pb, 0), PBUF_DATA_SIZE, fmt, ap);
   va_end(ap);
+
+  // vsnprintf() reports the length the output would have had, not what
+  // it wrote. A line that did not fit was truncated to PBUF_DATA_SIZE-1
+  // characters plus the terminator, and storing the unclamped value
+  // would hand the stack a pbuf claiming more data than its own buffer
+  // holds.
+  const int maxlen = PBUF_DATA_SIZE - 1;
+  pb->pb_pktlen = MIN(len, maxlen);
   pb->pb_flags = PBUF_SOP | PBUF_EOP;
   pb->pb_buflen = pb->pb_pktlen;
   STAILQ_INSERT_TAIL(&netlog_queue, pb, pb_link);

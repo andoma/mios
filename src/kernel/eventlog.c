@@ -556,10 +556,19 @@ SERVICE_DEF_PUSHPULL("log", 2, 2, evlog_svc_open);
 
 static size_t g_logfile_max_size;
 
+// Returns the number of bytes actually written, which is at most
+// buflen - 1. snprintf() reports the length the output would have had,
+// so each result has to be clamped before it can be used as an offset
+// to append at, or by the caller as a length.
 static size_t
 print_timestamp_to_buf(char *buf, size_t buflen, int64_t ts)
 {
-  size_t used = 0;
+  if(buflen == 0)
+    return 0;
+
+  const size_t maxlen = buflen - 1;
+  size_t used;
+
   if(wallclock.source) {
     datetime_t dt;
     ts += wallclock.utc_offset;
@@ -568,7 +577,7 @@ print_timestamp_to_buf(char *buf, size_t buflen, int64_t ts)
     datetime_from_unixtime(secs + wallclock.tz_offset,
                            &dt);
 
-    used += snprintf(buf, buflen, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+    used = snprintf(buf, buflen, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
              dt.year,
              dt.mon,
              dt.mday,
@@ -577,8 +586,8 @@ print_timestamp_to_buf(char *buf, size_t buflen, int64_t ts)
              dt.sec,
              usecs / 1000);
 
-    if(used >= buflen)
-      return used;
+    if(used >= maxlen)
+      return maxlen;
 
     if(wallclock.tz_offset == 0) {
       used += snprintf(buf + used, buflen - used, "Z");
@@ -587,11 +596,11 @@ print_timestamp_to_buf(char *buf, size_t buflen, int64_t ts)
       used += snprintf(buf + used, buflen - used, " +%02d:%02d",
                        tzm / 60, tzm % 60);
     }
-    return used;
   } else {
     const int ms = ts / 1000;
-    return snprintf(buf, buflen, "%d", ms);
+    used = snprintf(buf, buflen, "%d", ms);
   }
+  return MIN(used, maxlen);
 }
 
 
@@ -649,15 +658,20 @@ eventlog_to_fs_thread(void *arg)
 
     ts += evfifo_read_delta_ts(ef, ptr);
 
-    size_t buflen = 0;
-    buflen += print_timestamp_to_buf(linebuf, sizeof(linebuf), ts);
+    // One byte of linebuf is kept back for the newline appended below
+    const size_t maxlen = sizeof(linebuf) - 1;
 
-    if(buflen < sizeof(linebuf)) {
-      buflen += snprintf(linebuf + buflen, sizeof(linebuf) - buflen,
-                         "\t%s\t", level2str[level]);
-    }
+    size_t buflen = print_timestamp_to_buf(linebuf, sizeof(linebuf), ts);
 
-    msglen = MIN(msglen, sizeof(linebuf) - buflen - 1);
+    // Clamped for the same reason as inside print_timestamp_to_buf():
+    // what snprintf() reports is not what it wrote. Left unclamped,
+    // buflen could exceed sizeof(linebuf) and the subtraction below
+    // would wrap, leaving the memcpy() unbounded.
+    buflen += snprintf(linebuf + buflen, sizeof(linebuf) - buflen,
+                       "\t%s\t", level2str[level]);
+    buflen = MIN(buflen, maxlen);
+
+    msglen = MIN(msglen, maxlen - buflen);
 
     const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
 

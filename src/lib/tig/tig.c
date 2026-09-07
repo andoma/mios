@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/param.h>
 
 typedef struct tig_state {
   gfx_position_t ts_pos;
@@ -294,8 +295,12 @@ tig_text(tig_ctx_t *tc, int flags, const char *fmt, ...)
   char tmp[64];
   va_list ap;
   va_start(ap, fmt);
-  size_t len = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+  const int r = vsnprintf(tmp, sizeof(tmp), fmt, ap);
   va_end(ap);
+
+  // vsnprintf() reports the length the output would have had; passing
+  // that on as a length would read past tmp for a long string
+  const size_t len = MIN((size_t)r, sizeof(tmp) - 1);
 
   gfx_size_t size = gdc->get_text_size(gd, ts->ts_font, tmp, len);
 

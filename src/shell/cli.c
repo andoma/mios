@@ -96,7 +96,9 @@ cli_printf(cli_t *cli, const char *fmt, ...)
     int avail = (int)sizeof(test_output) - test_output_pos - 1;
     if(avail < 0) avail = 0;
     r = vsnprintf(test_output + test_output_pos, avail, fmt, ap);
-    if(r > 0 && r <= avail)
+    // r == avail means truncation: only avail - 1 characters landed in
+    // the buffer, the last byte went to the terminator
+    if(r > 0 && r < avail)
       test_output_pos += r;
     else if(r > 0)
       test_output_pos = (int)sizeof(test_output) - 1;
