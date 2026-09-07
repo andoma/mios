@@ -14,6 +14,14 @@ ENABLE_NET_IPV4 := yes
 ENABLE_NET_DSIG_UDP := yes
 ENABLE_NET_CAN := yes
 
+# Virtual consoles. No in-tree target enabled these before, so the host
+# suites are their only coverage.
+ENABLE_VCON := yes
+
+# The VLLP client role, exercised by suite_vllp_client.c and
+# suite_vcon_vllp.c.
+ENABLE_VLLP_CLIENT := yes
+
 P := ${SRC}/platform/host
 
 GLOBALDEPS += ${P}/host.mk
@@ -41,10 +49,15 @@ SRCS += ${P}/host.c \
 	${P}/suite_snprintf.c \
 	${P}/vnet.c \
 	${P}/vcan.c \
+	${P}/vcan_loop.c \
+	${P}/testterm.c \
 	${P}/sim_dhcpd.c \
 	${P}/suite_dhcp.c \
+	${P}/suite_vcon.c \
+	${P}/suite_vcon_vllp.c \
 	${P}/suite_vllp.c \
 	${P}/suite_vllp_frames.c \
+	${P}/suite_vllp_client.c \
 	${P}/suite_ota.c \
 	${P}/vspiflash.c \
 	${P}/host_ota.c \

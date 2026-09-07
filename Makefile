@@ -93,6 +93,13 @@ ENABLE_PROFILE ?= no
 ENABLE_PERFTEST ?= no
 ENABLE_VCON ?= no
 
+# The VLLP client role (vllp_client_create and friends). Only a client can
+# establish a link and open channels, so a device that merely *serves*
+# VLLP does not need it. Costs ~2 KB of flash and 48 bytes per link
+# endpoint, and it cannot be linker-GC'd when compiled in because the
+# client paths hang off the shared rx and timer callbacks.
+ENABLE_VLLP_CLIENT ?= no
+
 CONFIG_H := ${O}/include/config.h
 
 #

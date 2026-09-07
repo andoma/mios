@@ -76,8 +76,12 @@ static void
 vcan_print_info(struct device *dev, struct stream *st)
 {
   vcan_t *v = (vcan_t *)dev;
-  stprintf(st, "vcan mtu %d  ring drops: tx %u rx %u\n",
-           v->v_cni.cni_ni.ni_mtu, v->v_tx.drops, v->v_rx.drops);
+  int q = 0;
+  pbuf_t *pb;
+  STAILQ_FOREACH(pb, &v->v_cni.cni_ni.ni_rx_queue, pb_link)
+    q++;
+  stprintf(st, "vcan mtu %d  ring drops: tx %u rx %u  rx_queue %d pbufs\n",
+           v->v_cni.cni_ni.ni_mtu, v->v_tx.drops, v->v_rx.drops, q);
 }
 
 static const device_class_t vcan_device_class = {
