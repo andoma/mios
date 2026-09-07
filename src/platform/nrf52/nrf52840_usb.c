@@ -510,8 +510,20 @@ nrf_ep_read(device_t *dev, usb_ep_t *ue,
   usb_ctrl_t *uc = (usb_ctrl_t *)dev;
   const uint32_t ea = ue->ue_address & 0x7f;
   const uint8_t *src = uc->uc_rxbuf[ea];
-  for(size_t i = 0; i < bytes; i++)
-    buf[(buf_offset + i) & (buf_size - 1)] = src[i];
+  // The destination may be a ring buffer -- usb_cdc hands us its fifo
+  // together with a free-running write pointer -- so the copy wraps.
+  // buf_size is NOT necessarily a power of two: usb_dsig and usb_mbus
+  // pass PBUF_DATA_SIZE, which is 72 on targets sized for one CAN-FD
+  // frame. This used to be an AND mask, which silently aliased
+  // destination index 8 onto 0 for such a size and corrupted every
+  // transfer longer than 8 bytes -- including the frame header, so the
+  // damage showed up as traffic arriving under the wrong signal id.
+  size_t o = buf_offset % buf_size;
+  for(size_t i = 0; i < bytes; i++) {
+    buf[o] = src[i];
+    if(++o == buf_size)
+      o = 0;
+  }
 }
 
 static int
