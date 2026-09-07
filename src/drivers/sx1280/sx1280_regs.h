@@ -93,7 +93,53 @@
 // (REG_LR_WHITSEEDBASEADDR). BLE seeds it per channel.
 #define SX1280_REG_WHITENING_SEED     0x09c5
 #define SX1280_REG_CRC_INIT           0x09c7 // 3 bytes, MSB first (BLE)
+#define SX1280_REG_CRC_SEED           0x09c8 // 2 bytes, MSB first (GFSK/FLRC)
 #define SX1280_REG_BLE_ACCESS_ADDR    0x09cf // 4 bytes, MSB first
+
+// FLRC modulation parameters (datasheet tables 13-31..13-33)
+#define SX1280_FLRC_BR_1_300_BW_1_2   0x45
+#define SX1280_FLRC_BR_1_000_BW_1_2   0x69
+#define SX1280_FLRC_BR_0_650_BW_0_6   0x86
+#define SX1280_FLRC_BR_0_520_BW_0_6   0xaa
+#define SX1280_FLRC_BR_0_325_BW_0_3   0xc7
+#define SX1280_FLRC_BR_0_260_BW_0_3   0xeb
+
+#define SX1280_FLRC_CR_1_2            0x00
+#define SX1280_FLRC_CR_3_4            0x02
+#define SX1280_FLRC_CR_1_0            0x04
+
+#define SX1280_FLRC_BT_DIS            0x00
+#define SX1280_FLRC_BT_1_0            0x10
+#define SX1280_FLRC_BT_0_5            0x20
+
+// FLRC packet parameters (datasheet tables 13-34..13-42)
+// AGC preamble: value = (bits / 4 - 1) << 4. Minimum is 8 bits at
+// 1.3Mb/s, 16 bits at every other bit rate.
+#define SX1280_FLRC_PREAMBLE_8_BITS   0x10
+#define SX1280_FLRC_PREAMBLE_16_BITS  0x30
+#define SX1280_FLRC_PREAMBLE_24_BITS  0x50
+#define SX1280_FLRC_PREAMBLE_32_BITS  0x70
+
+#define SX1280_FLRC_SYNC_NOSYNC       0x00 // 21-bit preamble only
+#define SX1280_FLRC_SYNC_LEN_P32S     0x04 // + 32-bit sync word
+
+#define SX1280_FLRC_RX_MATCH_SYNC_OFF 0x00
+#define SX1280_FLRC_RX_MATCH_SYNC_1   0x10
+#define SX1280_FLRC_RX_MATCH_SYNC_2   0x20
+#define SX1280_FLRC_RX_MATCH_SYNC_3   0x40
+
+#define SX1280_FLRC_PACKET_FIXED_LENGTH    0x00
+#define SX1280_FLRC_PACKET_VARIABLE_LENGTH 0x20
+
+#define SX1280_FLRC_CRC_OFF           0x00
+#define SX1280_FLRC_CRC_2_BYTE        0x20
+#define SX1280_FLRC_CRC_3_BYTE        0x30
+
+// FLRC has no whitener; packetParam7 must always say disabled
+#define SX1280_FLRC_WHITENING_OFF     0x08
+
+#define SX1280_FLRC_PAYLOAD_MIN       6
+#define SX1280_FLRC_PAYLOAD_MAX       127
 
 // BLE modulation parameters (1Mb/s uncoded PHY)
 #define SX1280_BLE_BR_1_000_BW_1_2    0x45
