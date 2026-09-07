@@ -307,6 +307,8 @@ vllp_channel_net_close(vllp_t *v, vllp_channel_t *vc,
   if(vc->net_closed)
     return 0;
 
+  // Never called for the management channel, which has no app bound.
+  assert(vc->pp.app != NULL);
   vc->pp.app->close(vc->pp.app_opaque, reason);
   vc->net_closed = 1;
   LIST_REMOVE(vc, link);
@@ -347,10 +349,21 @@ vllp_disconnect(vllp_t *v, const char *reason)
     vllp_channel_destroy(v, vc);
   }
 
-  // Anything queued on the CMC belongs to the old session
+  // Anything on the CMC belongs to the old session. The CMC outlives the
+  // session (it is never destroyed), so unlike every other channel it is
+  // not cleaned up by the loop above and has to be reset here --
+  // including a half-reassembled *inbound* message. Leaving that in place
+  // does not just hold the buffers: the next session's first fragments
+  // are appended to the stale ones, so the message fails its CRC, which
+  // resets the link, which strands another partial message.
   {
     int q = irq_forbid(IRQ_LEVEL_NET);
     pbuf_free_queue_irq_blocked(&v->cmc->txq);
+    pbuf_free_queue_irq_blocked(&v->cmc->rxq);
+    if(v->cmc->stalled_tx) {
+      pbuf_free_irq_blocked(v->cmc->stalled_tx);
+      v->cmc->stalled_tx = NULL;
+    }
     irq_permit(q);
   }
   v->ack_pending = 0;
@@ -524,6 +537,9 @@ handle_cmc(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb)
     return handle_cmc_close(v, cmc, pb, target_channel, u8 + 1, len - 1);
 
   default:
+    // Ownership of pb is ours (see vllp_channel_receive), and the
+    // ERR_BAD_STATE below drops the link, not the buffer.
+    pbuf_free(pb);
     return ERR_BAD_STATE;
   }
 }
@@ -565,6 +581,20 @@ vllp_channel_receive(vllp_t *v, int channel_id,
       evlog(LOG_WARNING, "VLLP: channel %d: message larger than %d bytes, "
             "closing channel", vc->id,
             (int)vllp_max_message_size());
+
+      if(vc == v->cmc) {
+        // The management channel has no app bound, so it must not go
+        // through vllp_channel_net_close() -- that dereferences pp.app,
+        // which is NULL here. A peer that sends an oversized management
+        // message would otherwise crash us, and it takes nothing more
+        // than a few fragments with the last-fragment bit clear.
+        //
+        // An oversized management message means the peer is broken or we
+        // have lost sync with it, and neither is recoverable on this
+        // session, so drop the link and let it be rebuilt.
+        return ERR_BAD_STATE;
+      }
+
       vc->close_error = ERR_MTU_EXCEEDED;
       vllp_channel_net_close(v, vc, "message too large");
       return 0; // Fragment consumed (dropped); the rest follow suit
@@ -607,6 +637,16 @@ vllp_channel_receive(vllp_t *v, int channel_id,
   STAILQ_INIT(&vc->rxq);
 
   if(calc_crc32(pb, vc->rx_crc_IV)) {
+    // STAILQ_INIT() above detached the chain from the channel, so pb is
+    // the only reference left to it -- returning without freeing loses
+    // every buffer in the message. The channel teardown that follows
+    // cannot help, because the chain is no longer on any queue.
+    //
+    // Reachable from the wire: a peer (or a noisy bus) that corrupts
+    // frames leaks a whole message worth of buffers per bad CRC,
+    // permanently, until the pool is empty and the device stops talking
+    // to anything at all.
+    pbuf_free(pb);
     return ERR_CHECKSUM_ERROR;
   }
   vc->rx_crc_IV++;

@@ -44,6 +44,7 @@ SRCS += ${P}/host.c \
 	${P}/sim_dhcpd.c \
 	${P}/suite_dhcp.c \
 	${P}/suite_vllp.c \
+	${P}/suite_vllp_frames.c \
 	${P}/suite_ota.c \
 	${P}/vspiflash.c \
 	${P}/host_ota.c \
