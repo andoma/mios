@@ -41,6 +41,12 @@ struct vcon {
   cond_t vc_out_cond;    // Signalled on new output or client stop
   struct vcon_client_list vc_clients;
 
+  // Optional notification for a backend that is not a thread blocked in
+  // read(). Guarded by vc_mutex, and invoked with it held -- see
+  // vcon_set_backend_notify().
+  void (*vc_notify)(void *opaque);
+  void *vc_notify_opaque;
+
   // Input fifo: keystrokes from clients toward the backend
   uint8_t *vc_in;
   size_t vc_in_size;
@@ -331,8 +337,64 @@ vcon_input(vcon_t *vc, const void *buf, size_t len)
   if(n)
     cond_signal(&vc->vc_in_cond);
 
+  // Under the lock, deliberately. A backend clears its callback and then
+  // frees itself; firing outside the lock means we can load the pointer,
+  // lose the race, and call into freed memory. The contract is therefore
+  // "must not block, must not re-enter vcon" rather than "may take its
+  // own locks" -- raising an event is all this is for.
+  if(n && vc->vc_notify != NULL)
+    vc->vc_notify(vc->vc_notify_opaque);
+
   mutex_unlock(&vc->vc_mutex);
   return n;
+}
+
+
+void
+vcon_set_backend_notify(vcon_t *vc, void (*cb)(void *opaque), void *opaque)
+{
+  mutex_lock(&vc->vc_mutex);
+  vc->vc_notify_opaque = opaque;
+  vc->vc_notify = cb;
+  mutex_unlock(&vc->vc_mutex);
+}
+
+
+size_t
+vcon_input_peek(vcon_t *vc, void *buf, size_t size)
+{
+  uint8_t *b = buf;
+
+  mutex_lock(&vc->vc_mutex);
+  size_t n = MIN(size, vc->vc_in_used);
+  size_t tail = vc->vc_in_tail;
+  for(size_t i = 0; i < n; i++) {
+    b[i] = vc->vc_in[tail];
+    tail = (tail + 1) % vc->vc_in_size;
+  }
+  mutex_unlock(&vc->vc_mutex);
+  return n;
+}
+
+
+void
+vcon_input_consume(vcon_t *vc, size_t len)
+{
+  mutex_lock(&vc->vc_mutex);
+  size_t n = MIN(len, vc->vc_in_used);
+  vc->vc_in_tail = (vc->vc_in_tail + n) % vc->vc_in_size;
+  vc->vc_in_used -= n;
+  mutex_unlock(&vc->vc_mutex);
+}
+
+
+void
+vcon_input_flush(vcon_t *vc)
+{
+  mutex_lock(&vc->vc_mutex);
+  vc->vc_in_tail = vc->vc_in_head;
+  vc->vc_in_used = 0;
+  mutex_unlock(&vc->vc_mutex);
 }
 
 

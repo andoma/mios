@@ -176,6 +176,13 @@ void pbuf_fault_inject(unsigned int pct, uint32_t seed);
 
 int pbuf_buffer_total(void);
 
+#ifdef PBUF_ORIGIN_TRACE
+struct stream;
+// List every data buffer currently checked out, with the function that
+// took it. For chasing pool exhaustion.
+void pbuf_origin_dump(struct stream *st);
+#endif
+
 
 // =========================================================
 // Debug helpers

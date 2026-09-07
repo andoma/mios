@@ -30,6 +30,12 @@ SRCS-${ENABLE_NET_DSIG} += \
 	${SRC}/net/dsig.c \
 	${SRC}/net/vllp.c \
 
+# Glue for binding a virtual console to a pushpull channel (a VLLP client
+# channel, typically). Needs pbufs, so it lives here rather than next to
+# vcon.c in util/; boards decide whether to actually use it.
+SRCS-${ENABLE_VCON}-${ENABLE_NET_STACK} += \
+	${SRC}/net/vcon_pushpull.c \
+
 SRCS-${ENABLE_NET_DSIG_UDP} += \
 	${SRC}/net/dsig_udp.c \
 

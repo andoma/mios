@@ -28,6 +28,15 @@ typedef struct pbuf_pool {
 static struct pbuf_pool pbuf_datas = { . pp_wait = WAITABLE_INITIALIZER("pbufdata")};
 static struct pbuf_pool pbufs  = { . pp_wait = WAITABLE_INITIALIZER("pbuf")};
 
+#ifdef PBUF_ORIGIN_TRACE
+// Provenance for every buffer in the data pool, indexed by arena slot.
+// The pool is one contiguous arena of fixed-size slots, so an address
+// maps straight to an index.
+static void *pbuf_origin_arena_start;
+static const char **pbuf_origin_tab;
+static int pbuf_origin_slots;
+#endif
+
 int
 pbuf_buffer_avail(void)
 {
@@ -219,20 +228,64 @@ pbuf_data_add(void *start, void *end)
     end = start + size;
   }
   size_t count = pbuf_pool_add(&pbuf_datas, start, end, PBUF_DATA_SIZE);
+#ifdef PBUF_ORIGIN_TRACE
+  pbuf_origin_arena_start = start;
+  pbuf_origin_slots = count;
+  pbuf_origin_tab = xalloc(count * sizeof(const char *), 0, MEM_CLEAR);
+#endif
   printf("pbuf: size:%d arena:%zd count:%zd\n",
          PBUF_DATA_SIZE, end - start, count);
   pbuf_alloc(count);
 }
 
+#ifdef PBUF_ORIGIN_TRACE
+
+static int
+pbuf_origin_slot(void *buf)
+{
+  if(pbuf_origin_tab == NULL || buf < pbuf_origin_arena_start)
+    return -1;
+  const size_t off = (uint8_t *)buf - (uint8_t *)pbuf_origin_arena_start;
+  const int slot = off / PBUF_DATA_SIZE;
+  return slot < pbuf_origin_slots ? slot : -1;
+}
+
+void
+pbuf_origin_dump(struct stream *st)
+{
+  if(pbuf_origin_tab == NULL) {
+    stprintf(st, "pbuf origin tracking not initialised\n");
+    return;
+  }
+  stprintf(st, "pbuf data buffers currently held:\n");
+  for(int i = 0; i < pbuf_origin_slots; i++) {
+    if(pbuf_origin_tab[i] != NULL)
+      stprintf(st, "  slot %d: %s\n", i, pbuf_origin_tab[i]);
+  }
+}
+
+#endif
+
 void *
 pbuf_data_get0(int wait PBUF_ORIGIN_ARG_DECL)
 {
-  return pbuf_pool_get(&pbuf_datas, wait PBUF_ORIGIN_ARG_CALL);
+  void *buf = pbuf_pool_get(&pbuf_datas, wait PBUF_ORIGIN_ARG_CALL);
+#ifdef PBUF_ORIGIN_TRACE
+  const int slot = pbuf_origin_slot(buf);
+  if(slot >= 0)
+    pbuf_origin_tab[slot] = origin;
+#endif
+  return buf;
 }
 
 void
 pbuf_data_put(void *buf)
 {
+#ifdef PBUF_ORIGIN_TRACE
+  const int slot = pbuf_origin_slot(buf);
+  if(slot >= 0)
+    pbuf_origin_tab[slot] = NULL;
+#endif
   pbuf_pool_put(&pbuf_datas, buf);
 }
 

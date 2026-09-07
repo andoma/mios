@@ -59,6 +59,31 @@ void vcon_bind(vcon_t *vc, struct stream *term);
 // short if the input buffer is full).
 size_t vcon_input(vcon_t *vc, const void *buf, size_t len);
 
+// Called when a client types something. For backends that are not a thread
+// sitting in vcon_backend()'s read(): without this they have no way to
+// learn a keystroke arrived, and the alternative is a thread per vcon
+// whose only job is to poll.
+//
+// Runs on whichever thread called vcon_input(), with the vcon lock held,
+// so it must not block and must not call back into vcon. Raising an event
+// (pushpull_wakeup, net_task_raise) is what it is for. Holding the lock is
+// deliberate: it is what lets a backend clear the callback and then free
+// itself without racing a call already in flight.
+void vcon_set_backend_notify(vcon_t *vc, void (*cb)(void *opaque),
+                             void *opaque);
+
+// Look at up to `size` bytes of pending client input without consuming
+// it, then consume what was actually used. Two steps so a backend that
+// cannot take the bytes right now (no buffer, say) leaves them queued
+// rather than dropping keystrokes.
+size_t vcon_input_peek(vcon_t *vc, void *buf, size_t size);
+void vcon_input_consume(vcon_t *vc, size_t len);
+
+// Discard pending client input. For a backend that has just reconnected:
+// what is queued was typed at a session that no longer exists, and the
+// tail of a half-typed command is worse than nothing in a fresh shell.
+void vcon_input_flush(vcon_t *vc);
+
 // Registry helpers (vcons are created at init and never destroyed).
 vcon_t *vcon_find(const char *name);
 vcon_t *vcon_first(void);

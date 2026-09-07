@@ -27,12 +27,53 @@ TAILQ_HEAD(vllp_channel_queue, vllp_channel);
 
 static struct vllp_list vllps;
 
+// Everything below #ifdef ENABLE_VLLP_CLIENT is the client role. It is a
+// compile-time option rather than dead code the linker drops, because it
+// cannot be dropped: the client paths hang off vllp_rx(), the keepalive
+// timer and vllp_maybe_tx(), all of which a server needs. See the flag's
+// comment in the top-level Makefile.
+#ifdef ENABLE_VLLP_CLIENT
+
+LIST_HEAD(vllp_bind_list, vllp_bind);
+
+// A persistent client-side channel: re-opened on every new session and,
+// after a refused open, on a backoff. See vllp_client_bind().
+typedef struct vllp_bind {
+  LIST_ENTRY(vllp_bind) link;
+  const char *service;
+  error_t (*open)(void *opaque, pushpull_t *pp);
+  void *opaque;
+  struct vllp_channel *channel;  // NULL while not open
+} vllp_bind_t;
+
+#endif
+
 typedef struct vllp {
 
   LIST_ENTRY(vllp) link;
 
   struct vllp_channel_list channels;
   struct vllp_channel_queue established_channels;
+
+#ifdef ENABLE_VLLP_CLIENT
+  // Channels the app has asked for but whose OPEN has not gone out yet,
+  // and the persistent binds that re-create them.
+  struct vllp_channel_queue pending_open;
+  struct vllp_bind_list binds;
+
+  timer_t bind_timer;     // backoff before retrying a refused open
+
+  // Arms the first SYN. vllp_client_create() runs from board init, and
+  // net_timer_arm() touches an unprotected list (see net_core.c), so the
+  // timer has to be armed from net context, not from the caller.
+  net_task_t bootstrap;
+
+  // Channel ids we may hand out. Channels 14 (management) and 15 (not a
+  // channel) are never available, so this starts at 0x3fff. The client
+  // allocates ids; the server takes whatever it is told.
+  uint16_t available_channel_ids;
+  uint8_t is_client;
+#endif
 
   timer_t ack_timer;
   timer_t rtx_timer;
@@ -70,10 +111,27 @@ typedef struct vllp {
 
 
 
+// Client channels walk PENDING -> OPEN_SENT -> ESTABLISHED. Server
+// channels are born ESTABLISHED, so only a client sees the first two.
+// Which tx queue a channel sits on is tracked explicitly in vc->queue,
+// not inferred from the state.
 #define VLLP_CHANNEL_STATE_PENDING     0
 #define VLLP_CHANNEL_STATE_OPEN_SENT   1
 #define VLLP_CHANNEL_STATE_ESTABLISHED 2
 #define VLLP_CHANNEL_STATE_CLOSED_SENT 3
+
+#ifdef ENABLE_VLLP_CLIENT
+// How long to wait before re-opening a bind the server refused. Without a
+// backoff a bind whose service does not exist would re-ask as fast as the
+// link allows, which on a shared CAN bus is a flood.
+#define VLLP_BIND_RETRY_US 5000000
+
+#define VLLP_IS_CLIENT(v) ((v)->is_client)
+#else
+// Folds to a constant so the compiler drops the client branches that do
+// not need their own #ifdef.
+#define VLLP_IS_CLIENT(v) 0
+#endif
 
 
 struct vllp_channel {
@@ -92,6 +150,22 @@ struct vllp_channel {
   // Message pulled from the app that could not be taken on (no pbuf
   // for the CRC). Retried before pulling anything new.
   pbuf_t *stalled_tx;
+
+#ifdef ENABLE_VLLP_CLIENT
+  // The remote service this channel asks for. Referenced, not copied --
+  // callers pass a string literal or other long-lived storage, since it
+  // is needed again on every reconnect.
+  const char *service;
+
+  // The bind that owns this channel, if any.
+  vllp_bind_t *bind;
+#endif
+
+  // The tx queue this channel is currently on, or NULL. Explicit rather
+  // than derived from the state: a channel exists briefly before it is
+  // queued at all, and a TAILQ_REMOVE on an unqueued entry corrupts the
+  // queue silently.
+  struct vllp_channel_queue *queue;
 
   uint32_t tx_crc_IV;
   uint32_t rx_crc_IV;
@@ -145,6 +219,7 @@ struct vllp_channel {
 #define VLLP_CMC_OPCODE_CLOSE             3
 
 static void vllp_channel_task_cb(net_task_t *nt, uint32_t signals);
+static pbuf_t *vllp_maybe_tx(vllp_t *v, pbuf_t *reuse);
 
 static void __attribute__((unused))
 logpkt(const pbuf_t *pb, const char *prefix)
@@ -200,9 +275,58 @@ vllp_channel_destroy(vllp_t *v, vllp_channel_t *vc)
   if(vc->stalled_tx)
     pbuf_free_irq_blocked(vc->stalled_tx);
   irq_permit(q);
+
+#ifdef ENABLE_VLLP_CLIENT
+  if(v->is_client && vc != v->cmc) {
+    // The id is ours again. Only once the peer can no longer refer to it,
+    // which is why this lives here rather than at close time.
+    v->available_channel_ids |= 1 << vc->id;
+
+    if(vc->bind != NULL) {
+      vc->bind->channel = NULL;
+      // Re-open after a backoff if the link is still up. On a dead link
+      // there is nothing to re-open onto; the next session drives every
+      // idle bind from scratch (see vllp_drive_binds).
+      if(v->connected)
+        net_timer_arm(&v->bind_timer, clock_get() + VLLP_BIND_RETRY_US);
+    }
+  }
+#endif
+
   evlog(LOG_DEBUG, "VLLP: channel %d closed", vc->id);
   free(vc);
 }
+
+
+static void
+vllp_channel_enqueue(vllp_channel_t *vc, struct vllp_channel_queue *q)
+{
+  assert(vc->queue == NULL);
+  vc->queue = q;
+  TAILQ_INSERT_TAIL(q, vc, qlink);
+}
+
+// Take the channel off its tx queue, if it is on one.
+static void
+vllp_channel_dequeue(vllp_channel_t *vc)
+{
+  if(vc->queue == NULL)
+    return;
+  TAILQ_REMOVE(vc->queue, vc, qlink);
+  vc->queue = NULL;
+}
+
+
+static void
+vllp_net_event_cb(void *opaque, uint32_t events)
+{
+  vllp_channel_t *vc = opaque;
+  net_task_raise(&vc->task, events);
+}
+
+static const pushpull_net_fn_t vllp_net_fn = {
+  .event = vllp_net_event_cb,
+};
 
 
 static vllp_channel_t *
@@ -334,6 +458,14 @@ vllp_disconnect(vllp_t *v, const char *reason)
   timer_disarm(&v->ack_timer);
   timer_disarm(&v->rtx_timer);
   timer_disarm(&v->timeout_timer);
+#ifdef ENABLE_VLLP_CLIENT
+  timer_disarm(&v->bind_timer);
+#endif
+
+  // Before tearing the channels down, so vllp_channel_destroy() does not
+  // arm the bind backoff: there is no session left to re-open onto, and
+  // the next one drives every idle bind anyway (vllp_drive_binds).
+  v->connected = 0;
 
   evlog(LOG_DEBUG, "VLLP: 0x%x:0x%x Disconnected -- %s", v->txid, v->rxid, reason);
 
@@ -344,18 +476,20 @@ vllp_disconnect(vllp_t *v, const char *reason)
     if(vllp_channel_net_close(v, vc, reason))
       continue;
     // No session to send a CLOSE on; the channel is simply gone
-    TAILQ_REMOVE(&v->established_channels, vc, qlink);
+    vllp_channel_dequeue(vc);
     vc->app_closed = 2;
     vllp_channel_destroy(v, vc);
   }
 
   // Anything on the CMC belongs to the old session. The CMC outlives the
-  // session (it is never destroyed), so unlike every other channel it is
-  // not cleaned up by the loop above and has to be reset here --
+  // session (it is never destroyed), so unlike every other channel it
+  // does not get cleaned up by the loop above and has to be reset here --
   // including a half-reassembled *inbound* message. Leaving that in place
-  // does not just hold the buffers: the next session's first fragments
+  // does not just leak the buffers: the next session's first fragments
   // are appended to the stale ones, so the message fails its CRC, which
-  // resets the link, which strands another partial message.
+  // resets the link, which strands another partial message. A link that
+  // resets under load then bleeds the pbuf pool a buffer at a time until
+  // nothing works.
   {
     int q = irq_forbid(IRQ_LEVEL_NET);
     pbuf_free_queue_irq_blocked(&v->cmc->txq);
@@ -375,8 +509,208 @@ vllp_disconnect(vllp_t *v, const char *reason)
   v->current_tx_len = 0;
   v->current_tx_channel = 0;
 
-  v->connected = 0;
+#ifdef ENABLE_VLLP_CLIENT
+  if(v->is_client) {
+    // Every id is free again -- the peer has forgotten the session, so
+    // reusing them cannot be confused with the old channels.
+    v->available_channel_ids = 0x3fff;
+    // Start knocking again straight away.
+    net_timer_arm(&v->ack_timer, clock_get());
+  }
+#endif
 }
+
+
+#ifdef ENABLE_VLLP_CLIENT
+
+// Client: open a new session. Every attempt uses a fresh cookie, which
+// becomes the CRC IV for the whole session, so a SYN-ACK answering an
+// earlier attempt fails its CRC and is ignored. That costs a retry
+// interval when a SYN-ACK and a SYN retransmit cross, but it matches the
+// reference implementation (host/dsig/vllp.c) exactly, and diverging from
+// it on handshake details is a worse trade than a slower reconnect.
+static void
+vllp_send_syn(vllp_t *v)
+{
+  net_timer_arm(&v->ack_timer, clock_get() + 1000000);
+
+  pbuf_t *pb = pbuf_make(v->tx_headroom, 0);
+  if(pb == NULL)
+    return;  // No buffer; the timer above brings us back
+
+  // rand() is the same source the DHCP xid and the TCP ISN use. The
+  // cookie only has to differ between successive sessions (it exists to
+  // stop a peer that reset from being desynchronised against our old
+  // state), not to be unpredictable. Two calls because RAND_MAX is 31
+  // bits.
+  v->crc_IV = ((uint32_t)rand() << 16) ^ (uint32_t)rand();
+
+  v->channel_iv_cnt = 0;
+  const uint32_t cmc_iv = vllp_gen_channel_crc(v);
+  // Mirrored relative to the server: our tx IV is its rx IV.
+  v->cmc->tx_crc_IV = ~cmc_iv;
+  v->cmc->rx_crc_IV = cmc_iv;
+
+  v->SE = VLLP_HDR_E;
+
+  uint8_t *pkt = pbuf_append(pb, 7);
+  pkt[0] = VLLP_SYN;
+  pkt[1] = VLLP_VERSION;
+  // v->mtu is already the adapted value (see vllp_server_create); the
+  // server compares the SYN byte against its own adapted mtu, so send
+  // that and not what the caller passed in.
+  pkt[2] = v->mtu;
+  memcpy(pkt + 3, &v->crc_IV, sizeof(v->crc_IV));
+
+  dsig_emit_pbuf(v->txid, pb);
+}
+
+
+// Client: allocate a channel and queue it for an OPEN. The caller must
+// bind an app to vc->pp before the OPEN goes out, since a reply can
+// arrive as soon as we return to the net loop.
+static vllp_channel_t *
+vllp_client_channel_new(vllp_t *v, const char *service)
+{
+  if(!v->connected)
+    return NULL;
+
+  if(v->available_channel_ids == 0)
+    return NULL;
+
+  const int id = __builtin_ffs(v->available_channel_ids) - 1;
+
+  vllp_channel_t *vc = vllp_channel_make(v, id);
+  if(vc == NULL)
+    return NULL;
+
+  v->available_channel_ids &= ~(1 << id);
+
+  vc->service = service;
+  vc->state = VLLP_CHANNEL_STATE_PENDING;
+  vc->pp.max_fragment_size = PBUF_DATA_SIZE - 4; // Make place for CRC32
+  vc->pp.preferred_offset = 0;
+  vc->pp.net = &vllp_net_fn;
+  vc->pp.net_opaque = vc;
+
+  vllp_channel_enqueue(vc, &v->pending_open);
+  return vc;
+}
+
+
+// The peer never opened this channel (it refused, or the link died before
+// answering), so no CLOSE is owed on the wire -- as far as the peer is
+// concerned the channel does not exist. Tell the app and drop it.
+static void
+vllp_channel_abandon(vllp_t *v, vllp_channel_t *vc, const char *reason)
+{
+  if(vc->pp.app != NULL)
+    vc->pp.app->close(vc->pp.app_opaque, reason);
+  vllp_channel_dequeue(vc);
+  vc->net_closed = 1;
+  vc->app_closed = 2;
+  LIST_REMOVE(vc, link);
+  vllp_channel_destroy(v, vc);
+}
+
+
+// Give every bind that is not currently open a channel. Called when a
+// session comes up and from the retry backoff.
+static void
+vllp_drive_binds(vllp_t *v)
+{
+  vllp_bind_t *b;
+
+  LIST_FOREACH(b, &v->binds, link) {
+    if(b->channel != NULL)
+      continue;
+
+    vllp_channel_t *vc = vllp_client_channel_new(v, b->service);
+    if(vc == NULL) {
+      // Out of ids or out of memory. Come back later.
+      net_timer_arm(&v->bind_timer, clock_get() + VLLP_BIND_RETRY_US);
+      return;
+    }
+
+    const error_t err = b->open(b->opaque, &vc->pp);
+    if(err) {
+      evlog(LOG_WARNING, "VLLP: 0x%x:0x%x could not bind a local app for "
+            "'%s' -- %s", v->txid, v->rxid, b->service,
+            error_to_string(err));
+      // vc->bind is still NULL, so destroy() will not touch b->channel
+      // and the backoff below is the only thing that retries.
+      vllp_channel_abandon(v, vc, "local open failed");
+      net_timer_arm(&v->bind_timer, clock_get() + VLLP_BIND_RETRY_US);
+      continue;
+    }
+
+    vc->bind = b;
+    b->channel = vc;
+  }
+}
+
+
+static void
+vllp_bind_timer(void *opaque, uint64_t expire)
+{
+  vllp_t *v = opaque;
+  if(!v->connected)
+    return;
+  vllp_drive_binds(v);
+  vllp_maybe_tx(v, NULL);
+}
+
+
+// Client: turn queued channels into OPEN requests on the management
+// channel. Runs from the tx path, so a message that cannot be built for
+// want of a buffer just stays queued.
+static void
+handle_pending_channels(vllp_t *v)
+{
+  vllp_channel_t *vc;
+
+  while((vc = TAILQ_FIRST(&v->pending_open)) != NULL) {
+
+    const size_t namelen = strlen(vc->service);
+
+    // 1 opcode byte + the name, and vllp_channel_tx() appends a 4 byte
+    // CRC. A name that cannot fit is a programming error, not something
+    // to retry forever.
+    if(1 + namelen + 4 > PBUF_DATA_SIZE) {
+      evlog(LOG_ERR, "VLLP: service name '%s' too long", vc->service);
+      vllp_channel_abandon(v, vc, "service name too long");
+      continue;
+    }
+
+    pbuf_t *pb = pbuf_make(0, 0);
+    if(pb == NULL) {
+      // Keep the queue order and try again once buffers are back.
+      net_timer_arm(&v->rtx_timer, clock_get() + 25000);
+      return;
+    }
+
+    vllp_channel_dequeue(vc);
+    vc->state = VLLP_CHANNEL_STATE_OPEN_SENT;
+
+    // One IV per OPEN we send. The server generates one per OPEN it
+    // receives -- including ones it goes on to refuse -- so the two
+    // counters only stay in step if we advance here unconditionally.
+    // Get this wrong and every later channel on the link fails its CRC.
+    const uint32_t iv = vllp_gen_channel_crc(v);
+    vc->tx_crc_IV = ~iv;
+    vc->rx_crc_IV = iv;
+
+    uint8_t *u8 = pbuf_append(pb, 1 + namelen);
+    u8[0] = (VLLP_CMC_OPCODE_OPEN << 4) | vc->id;
+    memcpy(u8 + 1, vc->service, namelen);
+    STAILQ_INSERT_TAIL(&v->cmc->txq, pb, pb_link);
+
+    evlog(LOG_DEBUG, "VLLP: requesting '%s' on channel %d", vc->service,
+          vc->id);
+  }
+}
+
+#endif // ENABLE_VLLP_CLIENT
 
 
 static pbuf_t *
@@ -384,6 +718,14 @@ vllp_accept_syn(vllp_t *v, const uint8_t *data, size_t len,
                 pbuf_t *pb)
 {
   evlog(LOG_DEBUG, "VLLP syn, len=%zd", len);
+
+  if(VLLP_IS_CLIENT(v)) {
+    // Only a client may open a link. Two clients on the same id pair is a
+    // configuration error; say so rather than silently half-working.
+    evlog(LOG_WARNING, "VLLP: 0x%x:0x%x client got a SYN -- is the peer "
+          "also configured as a client?", v->txid, v->rxid);
+    return pb;
+  }
 
   if(len != 7)
     return pb;
@@ -430,18 +772,6 @@ send_cmc_message(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb,
 }
 
 
-static void
-vllp_net_event_cb(void *opaque, uint32_t events)
-{
-  vllp_channel_t *vc = opaque;
-  net_task_raise(&vc->task, events);
-}
-
-static const pushpull_net_fn_t vllp_net_fn = {
-  .event = vllp_net_event_cb,
-};
-
-
 static error_t
 handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
                 int target_channel,
@@ -483,7 +813,7 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
     return err;
   }
 
-  TAILQ_INSERT_TAIL(&v->established_channels, vc, qlink);
+  vllp_channel_enqueue(vc, &v->established_channels);
   evlog(LOG_DEBUG, "VLLP: service open %s on channel %d", s->name,
         vc->id);
   return 0;
@@ -512,6 +842,55 @@ handle_cmc_close(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb,
   return err;
 }
 
+#ifdef ENABLE_VLLP_CLIENT
+
+// Client: the server has answered one of our OPEN requests.
+static error_t
+handle_cmc_open_response(vllp_t *v, int target_channel,
+                         const uint8_t *data, size_t len)
+{
+  vllp_channel_t *vc = vllp_channel_find(v, target_channel);
+
+  // A stray response -- one still in flight from a session that has since
+  // been reset, say -- is not a protocol violation. Ignore it. Tearing
+  // the link down here would cascade into another reset, which is the bug
+  // the host client had until it was made to ignore these too.
+  if(vc == NULL || vc == v->cmc) {
+    evlog(LOG_DEBUG, "VLLP: open response for unknown channel %d, ignoring",
+          target_channel);
+    return 0;
+  }
+
+  if(vc->state != VLLP_CHANNEL_STATE_OPEN_SENT) {
+    evlog(LOG_DEBUG, "VLLP: open response for channel %d in state %d, "
+          "ignoring", target_channel, vc->state);
+    return 0;
+  }
+
+  if(len != 2)
+    return ERR_MALFORMED;
+
+  const int16_t err = data[0] | (data[1] << 8);
+
+  if(err) {
+    evlog(LOG_WARNING, "VLLP: 0x%x:0x%x peer refused '%s' -- %s",
+          v->txid, v->rxid, vc->service, error_to_string(err));
+    vllp_channel_abandon(v, vc, "peer refused the open");
+    return 0;
+  }
+
+  vc->state = VLLP_CHANNEL_STATE_ESTABLISHED;
+  vllp_channel_enqueue(vc, &v->established_channels);
+  evlog(LOG_DEBUG, "VLLP: '%s' open on channel %d", vc->service, vc->id);
+
+  // The app may have queued output while the open was in flight.
+  net_task_raise(&vc->task, PUSHPULL_EVENT_PULL);
+  return 0;
+}
+
+#endif // ENABLE_VLLP_CLIENT
+
+
 static error_t
 handle_cmc(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb)
 {
@@ -527,6 +906,25 @@ handle_cmc(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb)
   uint8_t opcode = u8[0] >> 4;
   uint8_t target_channel = u8[0] & 0xf;
 
+  // OPEN is client-to-server and OPEN_RESPONSE is server-to-client; the
+  // spec is explicit that neither travels the other way. CLOSE is the
+  // only opcode both roles both send and receive.
+#ifdef ENABLE_VLLP_CLIENT
+  if(v->is_client) {
+    switch(opcode) {
+    case VLLP_CMC_OPCODE_OPEN_RESPONSE:
+      err = handle_cmc_open_response(v, target_channel, u8 + 1, len - 1);
+      pbuf_free(pb);
+      return err;
+    case VLLP_CMC_OPCODE_CLOSE:
+      return handle_cmc_close(v, cmc, pb, target_channel, u8 + 1, len - 1);
+    default:
+      pbuf_free(pb);
+      return ERR_BAD_STATE;
+    }
+  }
+#endif
+
   switch(opcode) {
   case VLLP_CMC_OPCODE_OPEN:
     err = handle_cmc_open(v, cmc, target_channel, u8 + 1, len - 1);
@@ -538,7 +936,7 @@ handle_cmc(vllp_t *v, vllp_channel_t *cmc, pbuf_t *pb)
 
   default:
     // Ownership of pb is ours (see vllp_channel_receive), and the
-    // ERR_BAD_STATE below drops the link, not the buffer.
+    // ERR_BAD_STATE below drops the link rather than the buffer.
     pbuf_free(pb);
     return ERR_BAD_STATE;
   }
@@ -784,8 +1182,8 @@ vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb, pbuf_t *reuse)
   reuse = vllp_fragment(v, reuse);
 
   // Move to tail for round-robin scheduling
-  TAILQ_REMOVE(&v->established_channels, vc, qlink);
-  TAILQ_INSERT_TAIL(&v->established_channels, vc, qlink);
+  vllp_channel_dequeue(vc);
+  vllp_channel_enqueue(vc, &v->established_channels);
   return reuse;
 }
 
@@ -793,7 +1191,7 @@ vllp_channel_tx(vllp_t *v, vllp_channel_t *vc, pbuf_t *pb, pbuf_t *reuse)
 static error_t
 vllp_tx_close(vllp_t *v, vllp_channel_t *vc)
 {
-  TAILQ_REMOVE(&v->established_channels, vc, qlink);
+  vllp_channel_dequeue(vc);
   vc->state = VLLP_CHANNEL_STATE_CLOSED_SENT;
 
   if(!v->connected)
@@ -816,6 +1214,11 @@ vllp_maybe_tx(vllp_t *v, pbuf_t *reuse)
 {
   if(!v->connected)
     return reuse;
+
+#ifdef ENABLE_VLLP_CLIENT
+  if(v->is_client)
+    handle_pending_channels(v);
+#endif
 
   if(v->current_tx_buf) {
     // Waiting for the peer to accept our outstanding frame. An ACK we
@@ -942,6 +1345,29 @@ vllp_rx(vllp_t *v, pbuf_t *pb)
     !(u8[0] & VLLP_HDR_S) == !(v->SE & VLLP_HDR_E);
 
   if(!v->connected) {
+
+#ifdef ENABLE_VLLP_CLIENT
+    if(v->is_client) {
+      // The only thing we accept before a session exists is the ACK
+      // answering our SYN. Its CRC was validated above against the cookie
+      // we just generated, so a reply to an earlier attempt (different
+      // cookie) has already been dropped.
+      if(u8[0] != (VLLP_HDR_E | 0x1f)) {
+        evlog(LOG_DEBUG, "VLLP: 0x%x:0x%x expected a SYN response, got 0x%02x",
+              v->txid, v->rxid, u8[0]);
+        return pb;
+      }
+
+      v->connected = 1;
+      evlog(LOG_DEBUG, "VLLP: 0x%x:0x%x Connected", v->txid, v->rxid);
+
+      net_timer_arm(&v->ack_timer, clock_get() + 1000000);
+
+      // Re-open everything that wants to be open on this fresh session.
+      vllp_drive_binds(v);
+      return vllp_maybe_tx(v, pb);
+    }
+#endif
     return pb;
   }
 
@@ -1000,6 +1426,17 @@ static void
 vllp_ack_timer(void *opaque, uint64_t expire)
 {
   vllp_t *v = opaque;
+
+  if(!v->connected) {
+#ifdef ENABLE_VLLP_CLIENT
+    // Client only -- a server arms this timer only once a session exists,
+    // and disarms it on disconnect.
+    if(v->is_client)
+      vllp_send_syn(v);
+#endif
+    return;
+  }
+
   vllp_refresh_local_flow_status(v);
   vllp_tx_ack(v, NULL);
 }
@@ -1073,9 +1510,8 @@ vllp_max_message_size(void)
 }
 
 
-vllp_t *
-vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
-                   uint8_t timeout)
+static vllp_t *
+vllp_create(uint32_t txid, uint32_t rxid, uint8_t mtu, uint8_t timeout)
 {
   // Reserve headroom for the headers prepended below us, but never so
   // much that a full frame no longer fits the buffer. VLLP_TX_HEADROOM
@@ -1112,7 +1548,7 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
   v->cmc->state = VLLP_CHANNEL_STATE_ESTABLISHED;
 
   TAILQ_INIT(&v->established_channels);
-  TAILQ_INSERT_TAIL(&v->established_channels, v->cmc, qlink);
+  vllp_channel_enqueue(v->cmc, &v->established_channels);
 
   v->rxid = rxid;
   v->txid = txid;
@@ -1128,7 +1564,7 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
 
   v->ack_timer.t_cb = vllp_ack_timer;
   v->ack_timer.t_opaque = v;
-  v->ack_timer.t_name = "vllprtx";
+  v->ack_timer.t_name = "vllpack";
 
   v->timeout_timer.t_cb = vllp_timeout_timer;
   v->timeout_timer.t_opaque = v;
@@ -1137,6 +1573,116 @@ vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
   LIST_INSERT_HEAD(&vllps, v, link);
   return v;
 }
+
+
+vllp_t *
+vllp_server_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
+                   uint8_t timeout)
+{
+  return vllp_create(txid, rxid, mtu, timeout);
+}
+
+
+#ifdef ENABLE_VLLP_CLIENT
+
+// Deferred work for a client, so callers can create links and binds from
+// board init without touching net-context-only state. See v->bootstrap.
+static void
+vllp_bootstrap_cb(net_task_t *nt, uint32_t signals)
+{
+  vllp_t *v = ((void *)nt) - offsetof(vllp_t, bootstrap);
+
+  if(!v->connected) {
+    vllp_send_syn(v);
+    return;
+  }
+
+  // A bind added while the link was already up.
+  vllp_drive_binds(v);
+  vllp_maybe_tx(v, NULL);
+}
+
+
+vllp_t *
+vllp_client_create(uint32_t txid, uint32_t rxid, uint8_t mtu,
+                   uint8_t timeout)
+{
+  vllp_t *v = vllp_create(txid, rxid, mtu, timeout);
+  if(v == NULL)
+    return NULL;
+
+  v->is_client = 1;
+  v->available_channel_ids = 0x3fff; // Channels 0-13; 14 and 15 are ours
+  v->SE = VLLP_HDR_E;
+
+  TAILQ_INIT(&v->pending_open);
+  LIST_INIT(&v->binds);
+
+  // Set up here rather than in vllp_create(): the assignment is what
+  // makes vllp_bind_timer (and through it the whole bind machinery)
+  // reachable, so doing it on the shared path linked it into images that
+  // only ever instantiate servers.
+  v->bind_timer.t_cb = vllp_bind_timer;
+  v->bind_timer.t_opaque = v;
+  v->bind_timer.t_name = "vllpbind";
+
+  v->bootstrap.nt_cb = vllp_bootstrap_cb;
+  net_task_raise(&v->bootstrap, 1);
+  return v;
+}
+
+
+error_t
+vllp_client_channel_open(vllp_t *v, const char *service, pushpull_t *pp)
+{
+  if(!v->is_client)
+    return ERR_NOT_IMPLEMENTED;
+
+  if(!v->connected)
+    return ERR_NOT_CONNECTED;
+
+  vllp_channel_t *vc = vllp_client_channel_new(v, service);
+  if(vc == NULL)
+    return v->available_channel_ids ? ERR_NO_MEMORY : ERR_QUEUE_FULL;
+
+  // The caller's app functions, transplanted onto the channel's own
+  // pushpull -- the app talks to vc->pp, not to the pp it passed in.
+  vc->pp.app = pp->app;
+  vc->pp.app_opaque = pp->app_opaque;
+  pp->net = vc->pp.net;
+  pp->net_opaque = vc->pp.net_opaque;
+  pp->max_fragment_size = vc->pp.max_fragment_size;
+  pp->preferred_offset = vc->pp.preferred_offset;
+
+  vllp_maybe_tx(v, NULL);
+  return 0;
+}
+
+
+vllp_bind_t *
+vllp_client_bind(vllp_t *v, const char *service,
+                 error_t (*open)(void *opaque, pushpull_t *pp),
+                 void *opaque)
+{
+  if(!v->is_client)
+    return NULL;
+
+  vllp_bind_t *b = xalloc(sizeof(vllp_bind_t), 0, MEM_MAY_FAIL | MEM_CLEAR);
+  if(b == NULL)
+    return NULL;
+
+  b->service = service;
+  b->open = open;
+  b->opaque = opaque;
+  LIST_INSERT_HEAD(&v->binds, b, link);
+
+  // If the link is already up, open it now; otherwise the next SYN-ACK
+  // picks it up. Either way this runs on the net thread only.
+  net_task_raise(&v->bootstrap, 1);
+  return b;
+}
+
+#endif // ENABLE_VLLP_CLIENT
 
 static const char vllp_channel_state_strtbl[] = {
   "PENDING\0"
@@ -1160,26 +1706,70 @@ static const char vllp_channel_net_closed_strtbl[] = {
 };
 
 static error_t
-cmd_tcp(cli_t *cli, int argc, char **argv)
+cmd_show_vllp(cli_t *cli, int argc, char **argv)
 {
   vllp_t *v;
   vllp_channel_t *vc;
   LIST_FOREACH(v, &vllps, link) {
+#ifdef ENABLE_VLLP_CLIENT
+    // Only worth saying when there is more than one role to be in.
+    cli_printf(cli, "%s ", v->is_client ? "client" : "server");
+#endif
     cli_printf(cli, "TX:0x%x  RX:0x%x %sonnected", v->txid, v->rxid,
                v->connected ? "C" : "Disc");
     cli_printf(cli, "  Flow status Local:0x%04x Remote:0x%04x\n",
                v->local_flow_status, v->remote_flow_status);
+#ifdef ENABLE_VLLP_CLIENT
+    if(v->is_client)
+      cli_printf(cli, "  Free channel ids:0x%04x\n",
+                 v->available_channel_ids);
+    if(v->current_tx_buf != NULL)
+      cli_printf(cli, "  In-flight fragment on channel %d\n",
+                 v->current_tx_channel);
+#endif
     cli_printf(cli, "  Channels:\n");
     LIST_FOREACH(vc, &v->channels, link) {
       cli_printf(cli, "    %2d : state:%s app:%s net:%s\n", vc->id,
                  strtbl(vllp_channel_state_strtbl, vc->state),
                  strtbl(vllp_channel_app_closed_strtbl, vc->app_closed),
                  strtbl(vllp_channel_net_closed_strtbl, vc->net_closed));
+#ifdef ENABLE_VLLP_CLIENT
+      // Which service a channel is for, and what it is sitting on. The
+      // buffer counts are what localise a draining pool to a channel and
+      // a queue, which is otherwise a guessing game -- they are useful on
+      // a server too, but a server-only build should not pay for a
+      // command it never grew, so they live here with the rest.
+      int rx = 0, tx = 0;
+      pbuf_t *pb;
+      STAILQ_FOREACH(pb, &vc->rxq, pb_link)
+        rx++;
+      STAILQ_FOREACH(pb, &vc->txq, pb_link)
+        tx++;
+      if(vc->service != NULL || rx || tx || vc->stalled_tx) {
+        cli_printf(cli, "         ");
+        if(vc->service != NULL)
+          cli_printf(cli, " service:%s", vc->service);
+        if(rx || tx || vc->stalled_tx)
+          cli_printf(cli, " pbufs:rxq=%d,txq=%d%s", rx, tx,
+                     vc->stalled_tx ? ",stalled" : "");
+        cli_printf(cli, "\n");
+      }
+#endif
     }
+
+#ifdef ENABLE_VLLP_CLIENT
+    if(v->is_client) {
+      vllp_bind_t *b;
+      LIST_FOREACH(b, &v->binds, link) {
+        cli_printf(cli, "  bind '%s' : %s\n", b->service,
+                   b->channel ? "open" : "waiting");
+      }
+    }
+#endif
 
     cli_printf(cli, "\n");
   }
   return 0;
 }
 
-CLI_CMD_DEF_EXT("show_vllp", cmd_tcp, NULL, "Show VLLP connections");
+CLI_CMD_DEF_EXT("show_vllp", cmd_show_vllp, NULL, "Show VLLP connections");
