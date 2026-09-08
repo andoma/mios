@@ -40,7 +40,18 @@
 #include "platform/stm32/stm32_fdcan.c"
 
 #define FDCAN_BASE(x) (0x40006000 + ((x) * 0x400))
-#define FDCAN_RAM(x)  (0x4000a000 + ((x) * 0x400))
+
+// Message RAM is one fixed section per instance, and unlike other M_CAN
+// integrations the section addresses are not configurable: SIDFC, RXF0C,
+// TXBC and friends do not select where the sections live here, so this
+// has to match the hardware layout exactly. Sections start at 0x4000a400
+// and are FDCAN_RAM_SIZE apart -- note that is 0x350, not the 0x400 that
+// separates the register blocks. Deriving one stride from the other gives
+// the right answer for instance 1 and silently wrong addresses for 2 and
+// 3, where the driver then stages frames the core never reads and reads
+// FIFO entries the core never wrote.
+#define FDCAN_RAM_SIZE 0x350
+#define FDCAN_RAM(x)  (0x4000a400 + (((x) - 1) * FDCAN_RAM_SIZE))
 
 // Interrupt lines per instance (RM0440 NVIC table): IT0/IT1.
 static const uint8_t fdcan_irq0[3] = { 21, 86, 88 };
@@ -76,27 +87,36 @@ stm32g4_fdcan_init(int instance, gpio_t can_tx, gpio_t can_rx,
   stm32_fdcan_cce(fc, NULL);
 
   // The Bosch M_CAN User's Manual (section 1.3, Dual Clock Sources)
-  // requires the Host clock (fdcan_pclk, APB1, 42.5MHz here) to be >=
-  // the CAN clock (fdcan_ker_ck, 85MHz via PLLQ) for stable operation.
-  // That was violated outright -- Host clock was half the CAN clock.
-  // FDCAN_CKDIV divides fdcan_ker_ck down before it reaches the CAN
-  // core; PDIV=0b0001 (divide by 2) brings it to 42.5MHz, exactly
-  // matching the Host clock. /4 was also considered but discarded: at
-  // 21.25MHz neither target bitrate divides evenly anymore (worst-case
-  // error grows to ~5.6%, vs. an exact match at /2 for the data phase
-  // and ~1.16% for nominal -- see fdcan_calculate_timings()'s
-  // tolerance in stm32_fdcan.c).
+  // requires the Host clock (fdcan_pclk, i.e. APB1) to be >= the time
+  // quantum clock for stable operation. With PLLQ feeding fdcan_ker_ck
+  // at twice APB1, as the PLL setup here arranges, that is violated
+  // unless something divides by two on the way to the CAN core.
   //
-  // FDCAN_CKDIV exists only in FDCAN1's register block and is common
-  // to all instances (RM0440, FDCAN register map). Protected write:
-  // FDCAN1's CCCR must have INIT+CCE set. INIT is FDCAN1's reset state
-  // and, for instance 1, stm32_fdcan_cce() above already set both; for
-  // the other instances set CCE on the (otherwise untouched) FDCAN1.
-  reg_set_bit(FDCAN_BASE(1) + FDCAN_CCCR, 1);
-  reg_wr(FDCAN_BASE(1) + FDCAN_CKDIV, 0b0001);
-  const uint32_t core_clk = clk_get_freq(CLK_FDCAN) / 2;
+  // FDCAN_CKDIV divides fdcan_ker_ck before it reaches the CAN core, but
+  // only FDCAN1 actually has one: it is not shared, and the other
+  // instances have nothing writable at their own offset 0x100 (reads
+  // back 0 after a write). Measured on hardware -- with FDCAN1's CKDIV
+  // holding /2, FDCAN2 still ran the bus at exactly twice the configured
+  // rate, because the bit timing had been computed for a divided clock
+  // it never got.
+  //
+  // So instance 1 runs on the halved clock and the rest on the full
+  // kernel clock, and the solver is told which. The wire rate comes out
+  // identical either way; only the tq count differs. The M_CAN
+  // requirement that the time-quantum clock not exceed the host clock is
+  // handled by the pclk argument below, which forces a prescaler of 2 on
+  // the undivided instances -- landing them on the same tq clock, and on
+  // exact bit rates, without touching the APB prescalers.
+  //
+  // Protected write: FDCAN1's CCCR needs INIT+CCE, which the
+  // stm32_fdcan_cce() above has established for instance 1 itself.
+  uint32_t core_clk = clk_get_freq(CLK_FDCAN);
+  if(instance == 1) {
+    reg_wr(FDCAN_BASE(1) + FDCAN_CKDIV, 0b0001);
+    core_clk /= 2;
+  }
 
-  for(size_t i = 0; i < 0x350; i += 4) {
+  for(size_t i = 0; i < FDCAN_RAM_SIZE; i += 4) {
     reg_wr(fc->ram_base + i, 0);
   }
 
