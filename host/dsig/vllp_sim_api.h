@@ -21,6 +21,32 @@ hvllp_t *hvllp_create_client(int mtu, int timeout, uint32_t flags, void *opaque,
                                         size_t len),
                              void (*log)(void *opaque, int level,
                                          const char *msg));
+
+// The server role, for driving the *guest* client against an independent
+// implementation. Layout-identical to vllp.h's open_channel_result_t; the
+// two headers deliberately describe the same structs under different
+// names so a suite can include both (see the note on hvllp_t above).
+//
+// In sim mode there is no rx-dispatch thread, so an accepted channel must
+// return rx = eof = NULL and be drained with hvllp_channel_read(). Note
+// that a read which times out marks the channel closed for good, so a
+// peer polls by blocking with a generous deadline rather than spinning on
+// short ones.
+typedef struct {
+  int error;
+  void (*rx)(void *opaque, const void *data, size_t length);
+  void (*eof)(void *opaque, int error_code);
+  void *opaque;
+} hvllp_open_channel_result_t;
+
+hvllp_t *hvllp_create_server(int mtu, int timeout, uint32_t flags, void *opaque,
+                             void (*tx)(void *opaque, const void *data,
+                                        size_t len),
+                             void (*log)(void *opaque, int level,
+                                         const char *msg),
+                             hvllp_open_channel_result_t (*open_channel)(
+                                 void *opaque, const char *name,
+                                 hvllp_channel_t *vc));
 void hvllp_start(hvllp_t *v);
 void hvllp_destroy(hvllp_t *v);
 int  hvllp_is_connected(hvllp_t *v);

@@ -58,6 +58,7 @@ SRCS += ${P}/host.c \
 	${P}/suite_vllp.c \
 	${P}/suite_vllp_frames.c \
 	${P}/suite_vllp_client.c \
+	${P}/suite_vllp_xcheck.c \
 	${P}/suite_ota.c \
 	${P}/vspiflash.c \
 	${P}/host_ota.c \
