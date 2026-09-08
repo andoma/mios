@@ -96,7 +96,7 @@ dsig_output(uint32_t id, struct pbuf *pb, struct netif *exclude)
     const struct dsig_filter *dof = ni->ni_dsig_output_filter;
     if(dof != NULL) {
       dof = dsig_filter_match(dof, id);
-      if(dof == NULL)
+      if(dof == NULL || (dof->flags & DSIG_FLAG_DENY))
         continue;
       flags = dof->flags;
     }

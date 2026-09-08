@@ -13,5 +13,7 @@ uint32_t inet_addr(const char *s);
 static inline uint32_t
 mask_from_prefixlen(int prefixlen)
 {
+  if(prefixlen == 0)
+    return 0; // 1 << 32 is undefined
   return ~((1 << (32 - prefixlen)) - 1);
 }
