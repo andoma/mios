@@ -60,12 +60,16 @@ typedef struct bxcan {
   uint32_t reg_base;
 
   size_t qlen;
+  uint32_t rx[2];
+  uint32_t nobufs;
+  uint32_t tx;
   uint32_t tx_drop;
 
   char name[5];
 
 } bxcan_t;
 
+// Every transmitted frame goes through here
 static void
 stm32_bxcan_send(bxcan_t *bx, const void *data, size_t len,
                  uint32_t id, int mailbox)
@@ -91,6 +95,7 @@ stm32_bxcan_send(bxcan_t *bx, const void *data, size_t len,
     reg_wr(reg_base + CAN_TI(mailbox), (id << 3) | 0x5);
   }
   bx->tx_status[mailbox] = 1;
+  bx->tx++;
 }
 
 
@@ -230,6 +235,9 @@ stm32_bxcan_rx(bxcan_t *bx, int mailbox)
       }
       STAILQ_INSERT_TAIL(&bx->cni.cni_ni.ni_rx_queue, pb, pb_link);
       netif_wakeup(&bx->cni.cni_ni);
+      bx->rx[mailbox]++;
+    } else {
+      bx->nobufs++;
     }
     reg_wr(bx->reg_base + CAN_RF(mailbox), 1 << 5);
   }
@@ -265,12 +273,19 @@ stm32_bxcan_print_info(struct device *dev, struct stream *st)
   uint32_t tec = (esr >> 16) & 0xff;
   uint32_t lec = (esr >> 4) & 7;
 
+  stprintf(st, "Received packets, Fifo0:%u  Fifo1:%u  NoPbufs:%u\n",
+           bx->rx[0], bx->rx[1], bx->nobufs);
+  stprintf(st, "Transmitted packets:%u  Drops:%u  Queued:%d/%d\n",
+           bx->tx, bx->tx_drop, (int)bx->qlen, TX_QUEUE_DEPTH);
+
   stprintf(st, "Receive error counter: %d\n", rec);
   stprintf(st, "Transmit error counter: %d\n", tec);
-  stprintf(st, "Last error code: %d\n", lec);
-  stprintf(st, "Bus Off: %s\n", esr & 0x4 ? "Yes" : "No");
-  stprintf(st, "Error Passive: %s\n", esr & 0x2 ? "Yes" : "No");
-  stprintf(st, "Error Warning: %s\n", esr & 0x1 ? "Yes" : "No");
+  stprintf(st, "Bus state: O%s, ", esr & 0x4 ? "ff" : "n");
+  stprintf(st, "Error passive: %s, ", esr & 0x2 ? "Yes" : "No");
+  stprintf(st, "Error warning: %s\n", esr & 0x1 ? "Yes" : "No");
+  stprintf(st, "Last error code: %s\n",
+           strtbl("None\0Stuffing\0Form\0AckErr\0Bit1Err\0Bit0Err\0CRC\0"
+                  "SoftwareSet\0\0", lec));
 }
 
 static const device_class_t stm32_bxcan_device_class = {
