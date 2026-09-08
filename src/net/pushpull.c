@@ -13,6 +13,8 @@
 
 #include "net/pbuf.h"
 
+#include "irq.h"
+
 typedef struct pushpull_stream {
 
   stream_t pps_stream;
@@ -234,10 +236,44 @@ static const pushpull_app_fn_t pps_pushpull_vtable = {
   .close = pushpull_stream_close_pp,
 };
 
+// Without this a pushpull stream cannot be handed to poll() at all --
+// poll() asserts on a stream with no poll method. That is reachable from
+// the shell: `attach` on a console whose terminal is a pushpull stream
+// (any shell reached over VLLP, BLE L2CAP or MBUS) polls its terminal
+// through vcon_client_wait(), and used to bring the device down on the
+// spot.
+//
+// Called from poll() with the scheduler already held off, so the check
+// and the caller's enlisting on the returned waitable cannot be split by
+// the net thread setting pps_rxbuf in between.
+static task_waitable_t *
+pushpull_stream_poll(struct stream *s, poll_type_t type)
+{
+  pushpull_stream_t *pps = (pushpull_stream_t *)s;
+
+  if(type != POLL_STREAM_READ)
+    return NULL;  // The write side blocks internally, not through poll
+
+  irq_forbid(IRQ_LEVEL_SWITCH);
+
+  // A shut-down stream is "readable": read() returns an error straight
+  // away, so a poller must wake and see that rather than sleep forever.
+  if(pps->pps_rxbuf != NULL || pps->pps_shutdown)
+    return NULL;
+
+  // The same nudge read() gives the network side before it sleeps. A peer
+  // that was told to stop sending is only told it may resume when we ask,
+  // so without this we could sleep waiting for data nobody will send.
+  pps->pps_pp->net->event(pps->pps_pp->net_opaque, PUSHPULL_EVENT_PUSH);
+  return &pps->pps_cond;
+}
+
+
 static const stream_vtable_t pps_stream_vtable = {
   .read = pushpull_stream_read,
   .write = pushpull_stream_write,
   .close = pushpull_stream_destroy,
+  .poll = pushpull_stream_poll,
 };
 
 

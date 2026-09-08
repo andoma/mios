@@ -283,8 +283,13 @@ vcon_bind_thread(void *arg)
       progress = 1;
     }
 
-    if(!progress)
+    if(!progress) {
+      // Nothing more to pump; make sure what we wrote is actually on its
+      // way before sleeping. A terminal that buffers until a fragment
+      // fills (a pushpull stream) would otherwise hold it indefinitely.
+      stream_flush(term);
       vcon_client_wait(vcc);
+    }
   }
 }
 

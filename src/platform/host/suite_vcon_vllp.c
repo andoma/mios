@@ -772,6 +772,81 @@ phase_faults(const char *name, int drop, int dup, int corrupt)
 }
 
 
+/* Nested attach: attach to a unit, and from that unit's shell attach to
+   another. Two cmd_attach() loops are then in series on the same byte
+   stream, and both filter the same escape prefix. */
+static void
+phase_nested(void)
+{
+  if(g_starved) {
+    // What this phase checks is where an escape byte gets consumed, which
+    // has nothing to do with buffer pressure. Establishing the nesting
+    // does though: it takes a typed command through two hops, and with
+    // allocations being forced to fail that command can simply be
+    // dropped. The other two registrations cover the routing.
+    hosttest_log("-- nested attach (skipped: allocations are being forced "
+                 "to fail)");
+    return;
+  }
+
+  hosttest_log("-- nested attach");
+
+  attach_ctx_t ac = { .tt = testterm_create(), .console = units[7].name };
+  thread_create(attach_thread, &ac, 4096, "attach", TASK_DETACHED, 4);
+
+  GCHECK(testterm_out_wait(ac.tt, "[attached to unit8", 10 * SEC),
+         "nested: outer attach did not start");
+  GCHECK(testterm_out_wait(ac.tt, ">", 25 * SEC), "nested: no outer prompt");
+
+  /* From the remote shell, attach to a second console. Everything we type
+     now passes through the outer cmd_attach() on its way there. */
+  testterm_out_clear(ac.tt);
+  testterm_types(ac.tt, "attach unit9\n");
+  GCHECK(testterm_out_wait(ac.tt, "[attached to unit9", 25 * SEC),
+         "nested: inner attach did not start");
+
+  /* The nesting has to actually carry traffic, in both directions and
+     through both levels. Checking only that the inner attach *started*
+     misses the case that mattered: the inner cmd_attach's terminal is a
+     pushpull stream, which holds written data until a fragment fills or
+     someone flushes, so console output used to sit in that buffer
+     indefinitely -- keystrokes reached the inner console and its shell
+     answered, but nothing ever came back up to the operator. */
+  testterm_out_clear(ac.tt);
+  testterm_types(ac.tt, "zz-through-both-levels\n");
+  GCHECK(testterm_out_wait(ac.tt, "zz-through-both-levels", 30 * SEC),
+         "nested: nothing came back through the nested session -- the "
+         "inner terminal is buffering output that never gets flushed");
+
+  /* A bare ^A is eaten by the OUTER loop -- it is the first filter the
+     byte meets -- so the inner one never sees it. Doubling it makes the
+     outer loop pass one through, which the inner loop then takes as its
+     own prefix. So the inner detach is ^A ^A d, and the outer is ^A d. */
+  testterm_out_clear(ac.tt);
+  testterm_types(ac.tt, "\x01\x01" "d");
+  GCHECK(testterm_out_wait(ac.tt, "[detached from unit9]", 15 * SEC),
+         "nested: ^A^Ad did not detach the inner session");
+  GCHECK(!ac.done, "nested: ^A^Ad detached the outer session too");
+  GCHECK(vcon_client_count(units[8].vcon) == 0,
+         "nested: %d clients left on unit9",
+         vcon_client_count(units[8].vcon));
+
+  /* Still attached to the outer one, and it still works. */
+  viewer_t probe = { .tt = ac.tt };
+  (void)probe;
+  GCHECK(vcon_client_count(units[7].vcon) == 1,
+         "nested: outer session lost, %d clients on unit8",
+         vcon_client_count(units[7].vcon));
+
+  /* And a single ^A d now detaches the outer one. */
+  testterm_types(ac.tt, "\x01" "d");
+  GCHECK(hosttest_wait(pred_attach_done, &ac, 10 * SEC),
+         "nested: ^Ad did not detach the outer session");
+  GCHECK(testterm_out_has(ac.tt, "[detached from unit8]"),
+         "nested: no outer detach message");
+}
+
+
 /* ---------------- driver ---------------- */
 
 static int
@@ -809,6 +884,7 @@ test_vcon_vllp(void)
   phase_scrollback();
   phase_multi_attach();
   phase_attach_command();
+  phase_nested();
   phase_reconnect(1);
   phase_reconnect(2);
   phase_faults("loss-5", 5, 0, 0);
