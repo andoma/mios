@@ -800,6 +800,9 @@ pbuf_status(stream_t *st)
   stprintf(st, "pbuf: %d avail, %u alloc failures\n", pbufs.pp_avail,
            pbuf_alloc_fails);
   stprintf(st, "pbuf_data: %d avail\n", pbuf_datas.pp_avail);
+#ifdef PBUF_ORIGIN_TRACE
+  pbuf_origin_dump(st);
+#endif
 }
 
 
