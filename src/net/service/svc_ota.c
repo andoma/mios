@@ -352,7 +352,12 @@ ota_open_with_args(pushpull_t *pp,
 
   sa->sa_partition = partition;
   sa->sa_platform_upgrade = platform_upgrade;
-  sa->sa_blocksize = MIN(blocksize ?: pp->max_fragment_size, 128);
+  // Round after the cap, not before: clamping to 128 lands wherever it
+  // lands, so a board with a roomy pbuf pool would otherwise pay an
+  // extra round trip per block to move the few bytes that spill past a
+  // fragment boundary.
+  sa->sa_blocksize =
+    pushpull_whole_fragments(pp, MIN(blocksize ?: pp->max_fragment_size, 128));
   sa->sa_skipped_kbytes = writeout_skip_kb;
 
   pbuf_t *pb = pbuf_make(0, 0);

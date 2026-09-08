@@ -50,10 +50,42 @@ typedef struct pushpull {
   const pushpull_net_fn_t *net;
   void *net_opaque;
 
+  // Largest message the transport will take in one go, already rounded
+  // down so it occupies whole fragments (see fragment_payload).
   uint16_t max_fragment_size;
+
+  // What one fragment of that message carries, or 0 if the transport
+  // does not fragment, plus whatever the transport appends to every
+  // message. Together they let a service pick a size that lands on a
+  // fragment boundary -- see pushpull_whole_fragments().
+  uint16_t fragment_payload;
+  uint16_t message_overhead;
+
   uint16_t preferred_offset;
 
 } pushpull_t;
+
+// The largest message no bigger than len that still occupies whole
+// transport fragments.
+//
+// Worth doing whenever a service picks a size below max_fragment_size.
+// A stop-and-wait transport spends a round trip on every fragment
+// regardless of how full it is, so a message sized to just overflow one
+// pays double to carry barely more: at a 62-byte fragment, 68 bytes go
+// out as 62 and 10 and move 34 bytes per round trip where 58 were
+// available. Transports that do not fragment leave fragment_payload at
+// zero and get their size back unchanged.
+static inline size_t
+pushpull_whole_fragments(const pushpull_t *pp, size_t len)
+{
+  const size_t frag = pp->fragment_payload;
+  if(frag == 0)
+    return len;
+  const size_t total = len + pp->message_overhead;
+  if(total < frag)
+    return len; // already inside a single fragment
+  return (total / frag) * frag - pp->message_overhead;
+}
 
 static inline void
 pushpull_wakeup(pushpull_t *s, uint32_t flags)

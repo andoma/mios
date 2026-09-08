@@ -521,6 +521,28 @@ vllp_disconnect(vllp_t *v, const char *reason)
 }
 
 
+// What a service may hand us in one go, and how that gets split up.
+//
+// max_fragment_size stays the full pbuf capacity: it is a capability,
+// and a service that wants to send the largest message the link can
+// carry must still be able to. Rounding it down to whole fragments was
+// tried and is wrong -- it silently costs up to a fragment of reach, and
+// the xcheck suite catches it by echoing 503 bytes.
+//
+// fragment_payload is how that message is cut up, which is what a
+// service needs to size anything smaller. The link is stop-and-wait, so
+// every fragment costs a whole round trip whether it carries a full load
+// or ten bytes: a message sized to just overflow a fragment pays two
+// round trips to move barely more than one could. Harmless where a round
+// trip is a millisecond of CAN, expensive where it is a radio frame.
+static void
+vllp_set_fragment_limits(vllp_t *v, pushpull_t *pp)
+{
+  pp->max_fragment_size = PBUF_DATA_SIZE - 4; // Make place for CRC32
+  pp->fragment_payload = v->mtu - 1;
+  pp->message_overhead = 4;                   // the CRC32 itself
+}
+
 #ifdef ENABLE_VLLP_CLIENT
 
 // Client: open a new session. Every attempt uses a fresh cookie, which
@@ -588,7 +610,7 @@ vllp_client_channel_new(vllp_t *v, const char *service)
 
   vc->service = service;
   vc->state = VLLP_CHANNEL_STATE_PENDING;
-  vc->pp.max_fragment_size = PBUF_DATA_SIZE - 4; // Make place for CRC32
+  vllp_set_fragment_limits(v, &vc->pp);
   vc->pp.preferred_offset = 0;
   vc->pp.net = &vllp_net_fn;
   vc->pp.net_opaque = vc;
@@ -799,7 +821,7 @@ handle_cmc_open(vllp_t *v, vllp_channel_t *cmc,
 
   vc->state = VLLP_CHANNEL_STATE_ESTABLISHED;
 
-  vc->pp.max_fragment_size = PBUF_DATA_SIZE - 4; // Make place for CRC32
+  vllp_set_fragment_limits(v, &vc->pp);
   vc->pp.preferred_offset = 0;
   vc->pp.net = &vllp_net_fn;
   vc->pp.net_opaque = vc;
@@ -1652,6 +1674,7 @@ vllp_client_channel_open(vllp_t *v, const char *service, pushpull_t *pp)
   pp->net = vc->pp.net;
   pp->net_opaque = vc->pp.net_opaque;
   pp->max_fragment_size = vc->pp.max_fragment_size;
+  pp->fragment_payload = vc->pp.fragment_payload;
   pp->preferred_offset = vc->pp.preferred_offset;
 
   vllp_maybe_tx(v, NULL);

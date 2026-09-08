@@ -26,7 +26,11 @@ chargen_pull(void *opaque)
   if(pb == NULL)
     return NULL;
 
-  const size_t len = s->max_fragment_size;
+  // Whole fragments only. This is a throughput measurement, so a message
+  // that spills a few bytes past a fragment boundary would spend a whole
+  // extra round trip on them and under-report what the transport can
+  // actually do.
+  const size_t len = pushpull_whole_fragments(s, s->max_fragment_size);
   uint8_t *data = pbuf_data(pb, 0);
   for(size_t i = 0; i < len; i++)
     data[i] = (uint8_t)i;
