@@ -78,6 +78,7 @@ typedef struct tx_ptr {
   uint16_t offset;
   uint16_t total;
   uint8_t zlp;
+  uint8_t blength; // full descriptor length when generated on the fly
 } tx_ptr_t;
 
 
@@ -205,7 +206,7 @@ read_string_as_desc(void *opaque)
 
   switch(tp->offset) {
   case 0:
-    r = tp->total;
+    r = tp->blength;
     break;
   case 1:
     r = USB_DESC_TYPE_STRING;
@@ -234,7 +235,7 @@ read_bin2hex_as_desc(void *opaque)
 
   switch(tp->offset) {
   case 0:
-    r = tp->total;
+    r = tp->blength;
     break;
   case 1:
     r = USB_DESC_TYPE_STRING;
@@ -379,12 +380,15 @@ handle_get_descriptor(usb_ctrl_t *uc)
 
   case USB_DESC_TYPE_STRING:
 
+    // String 0 is the raw LANGID list, not a UTF-16 string
+    if(index == 0) {
+      desc = "\x04\x03\x09\x04";
+      desclen = 4;
+      break;
+    }
+
     getch = read_string_as_desc;
     switch(index) {
-    case 0:
-      desc = "\x09\x04";
-      desclen = 2;
-      break;
     case 1:
       desc = uc->uc_manufacturer;
       desclen = strlen(desc);
@@ -419,6 +423,7 @@ handle_get_descriptor(usb_ctrl_t *uc)
   tp->getch = getch;
   tp->offset = 0;
   tp->total = MIN(reqlen, desclen);
+  tp->blength = desclen;
   tp->zlp = 0;
 
   // If the descriptor is shorter then asked for and is a multiple of 8
