@@ -16,6 +16,11 @@ dsig_sub_t *dsig_sub(uint32_t signal, uint32_t mask, uint16_t ttl_ms,
                                 uint32_t signal),
                      void *opaque);
 
+// Filters are matched in order and the first match decides. No match at
+// all means deny, so a filter list is an allow-list by default. An entry
+// with DSIG_FLAG_DENY inverts that for the IDs it covers, which together
+// with a catch-all entry ({0, 0}) at the end turns the list into a
+// deny-list instead.
 struct dsig_filter {
   uint32_t prefix;
   uint8_t prefixlen;
@@ -25,6 +30,9 @@ struct dsig_filter {
 };
 
 #define DSIG_FLAG_EXTENDED 0x1
+
+// Output filters only. Matching IDs are not passed to the interface.
+#define DSIG_FLAG_DENY     0x2
 
 #define DSIG_FILTER_END { .prefixlen = 0xff }
 
