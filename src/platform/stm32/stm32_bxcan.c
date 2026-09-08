@@ -84,6 +84,8 @@ stm32_bxcan_send(bxcan_t *bx, const void *data, size_t len,
 }
 
 
+// Copies out of the pbuf; ownership stays with the caller, which either
+// frees it or hands it back for the network stack to free.
 static void
 stm32_bxcan_send_pb(bxcan_t *bx, pbuf_t *pb, uint32_t id, int mailbox)
 {
@@ -165,7 +167,15 @@ stm32_bxcan_tx_irq(void *arg)
       bx->qlen--;
       uint32_t group = rd32_le(pbuf_data(pb, 0));
       pb = pbuf_drop(pb, 4, 0);
-      stm32_bxcan_send_pb(bx, pb, group, i);
+      if(pb != NULL) {
+        stm32_bxcan_send_pb(bx, pb, group, i);
+        // Nothing downstream owns a queued pbuf: unlike the direct path in
+        // stm32_bxcan_output(), which hands it back to the stack, this one
+        // took it off our own queue and must release it.
+        pbuf_free_irq_blocked(pb);
+      } else {
+        bx->tx_status[i] = 0;
+      }
     }
   }
 }
