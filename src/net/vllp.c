@@ -1717,44 +1717,55 @@ cmd_show_vllp(cli_t *cli, int argc, char **argv)
 #endif
     cli_printf(cli, "TX:0x%x  RX:0x%x %sonnected", v->txid, v->rxid,
                v->connected ? "C" : "Disc");
-    cli_printf(cli, "  Flow status Local:0x%04x Remote:0x%04x\n",
-               v->local_flow_status, v->remote_flow_status);
+
+    // Nothing below means anything without a session: the flow bits are
+    // stale, every channel id is still free, and the only channel that
+    // exists is the CMC -- which is ESTABLISHED from the moment the link
+    // is created, as a sentinel for "needs no setup" rather than a state
+    // it ever reached. Printing it against a disconnected link just
+    // invites the reader to believe something is up when nothing is.
+    if(!v->connected) {
+      cli_printf(cli, "\n");
+    } else {
+      cli_printf(cli, "  Flow status Local:0x%04x Remote:0x%04x\n",
+                 v->local_flow_status, v->remote_flow_status);
 #ifdef ENABLE_VLLP_CLIENT
-    if(v->is_client)
-      cli_printf(cli, "  Free channel ids:0x%04x\n",
-                 v->available_channel_ids);
-    if(v->current_tx_buf != NULL)
-      cli_printf(cli, "  In-flight fragment on channel %d\n",
-                 v->current_tx_channel);
+      if(v->is_client)
+        cli_printf(cli, "  Free channel ids:0x%04x\n",
+                   v->available_channel_ids);
+      if(v->current_tx_buf != NULL)
+        cli_printf(cli, "  In-flight fragment on channel %d\n",
+                   v->current_tx_channel);
 #endif
-    cli_printf(cli, "  Channels:\n");
-    LIST_FOREACH(vc, &v->channels, link) {
-      cli_printf(cli, "    %2d : state:%s app:%s net:%s\n", vc->id,
-                 strtbl(vllp_channel_state_strtbl, vc->state),
-                 strtbl(vllp_channel_app_closed_strtbl, vc->app_closed),
-                 strtbl(vllp_channel_net_closed_strtbl, vc->net_closed));
+      cli_printf(cli, "  Channels:\n");
+      LIST_FOREACH(vc, &v->channels, link) {
+        cli_printf(cli, "    %2d : state:%s app:%s net:%s\n", vc->id,
+                   strtbl(vllp_channel_state_strtbl, vc->state),
+                   strtbl(vllp_channel_app_closed_strtbl, vc->app_closed),
+                   strtbl(vllp_channel_net_closed_strtbl, vc->net_closed));
 #ifdef ENABLE_VLLP_CLIENT
-      // Which service a channel is for, and what it is sitting on. The
-      // buffer counts are what localise a draining pool to a channel and
-      // a queue, which is otherwise a guessing game -- they are useful on
-      // a server too, but a server-only build should not pay for a
-      // command it never grew, so they live here with the rest.
-      int rx = 0, tx = 0;
-      pbuf_t *pb;
-      STAILQ_FOREACH(pb, &vc->rxq, pb_link)
-        rx++;
-      STAILQ_FOREACH(pb, &vc->txq, pb_link)
-        tx++;
-      if(vc->service != NULL || rx || tx || vc->stalled_tx) {
-        cli_printf(cli, "         ");
-        if(vc->service != NULL)
-          cli_printf(cli, " service:%s", vc->service);
-        if(rx || tx || vc->stalled_tx)
-          cli_printf(cli, " pbufs:rxq=%d,txq=%d%s", rx, tx,
-                     vc->stalled_tx ? ",stalled" : "");
-        cli_printf(cli, "\n");
+        // Which service a channel is for, and what it is sitting on. The
+        // buffer counts are what localise a draining pool to a channel
+        // and a queue, which is otherwise a guessing game -- they are
+        // useful on a server too, but a server-only build should not pay
+        // for a command it never grew, so they live here with the rest.
+        int rx = 0, tx = 0;
+        pbuf_t *pb;
+        STAILQ_FOREACH(pb, &vc->rxq, pb_link)
+          rx++;
+        STAILQ_FOREACH(pb, &vc->txq, pb_link)
+          tx++;
+        if(vc->service != NULL || rx || tx || vc->stalled_tx) {
+          cli_printf(cli, "         ");
+          if(vc->service != NULL)
+            cli_printf(cli, " service:%s", vc->service);
+          if(rx || tx || vc->stalled_tx)
+            cli_printf(cli, " pbufs:rxq=%d,txq=%d%s", rx, tx,
+                       vc->stalled_tx ? ",stalled" : "");
+          cli_printf(cli, "\n");
+        }
+#endif
       }
-#endif
     }
 
 #ifdef ENABLE_VLLP_CLIENT
