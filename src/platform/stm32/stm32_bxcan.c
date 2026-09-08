@@ -41,6 +41,15 @@
 
 #define TX_MAILBOXES 3
 
+// Depth of the software queue behind the transmit mailbox. Anything
+// beyond this is dropped rather than queued: a bus with no other node on
+// it never acknowledges a frame, so the mailbox stays busy indefinitely
+// and an unbounded queue drains the pbuf pool -- taking the rest of the
+// stack down with it. Protocols that care retransmit; those that do not
+// are periodic and the next sample supersedes what was dropped. FDCAN
+// does the same when its hardware FIFO fills.
+#define TX_QUEUE_DEPTH 8
+
 typedef struct bxcan {
   can_netif_t cni;
 
@@ -51,6 +60,7 @@ typedef struct bxcan {
   uint32_t reg_base;
 
   size_t qlen;
+  uint32_t tx_drop;
 
   char name[5];
 
@@ -121,6 +131,13 @@ stm32_bxcan_output(can_netif_t *cni, pbuf_t *pb, uint32_t id)
 
   int q = irq_forbid(IRQ_LEVEL_NET);
   if(bx->tx_status[mailbox]) {
+
+    if(bx->qlen >= TX_QUEUE_DEPTH) {
+      bx->tx_drop++;
+      irq_permit(q);
+      return pb; // Caller frees it
+    }
+
     pb = pbuf_prepend(pb, 4, 0, 0);
     if(pb != NULL) {
       wr32_le(pbuf_data(pb, 0), id);
