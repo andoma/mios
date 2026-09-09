@@ -87,6 +87,22 @@ pushpull_whole_fragments(const pushpull_t *pp, size_t len)
   return (total / frag) * frag - pp->message_overhead;
 }
 
+struct stream;
+
+// Bind a stream to the app side of a pushpull, for callers that have a
+// pushpull and want to do blocking reads and writes on it from a thread.
+//
+// The server path gets this for free: a service declared with
+// SERVICE_DEF_STREAM is handed a stream by service_open_pushpull(). A
+// client has no equivalent, because it fills in pp->app itself, so
+// without this the only way to drive a client channel is to implement
+// the four app callbacks by hand.
+//
+// Fills in pp->app and pp->app_opaque. The returned stream is the
+// caller's to close, and closing it tears the channel down. Returns NULL
+// if there is no memory for it.
+struct stream *pushpull_stream_create(pushpull_t *pp);
+
 static inline void
 pushpull_wakeup(pushpull_t *s, uint32_t flags)
 {

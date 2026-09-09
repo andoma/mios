@@ -277,20 +277,13 @@ static const stream_vtable_t pps_stream_vtable = {
 };
 
 
-error_t
-service_open_pushpull(const service_t *svc, pushpull_t *pp)
+stream_t *
+pushpull_stream_create(pushpull_t *pp)
 {
-  if(svc->open_pushpull != NULL) {
-    return svc->open_pushpull(pp);
-  }
-
-  // Service does not support the pushpull interface (it's a stream service)
-  // setup the bridge
-
   pushpull_stream_t *pps = xalloc(sizeof(pushpull_stream_t), 0,
                                   MEM_MAY_FAIL | MEM_CLEAR);
   if(pps == NULL)
-    return ERR_NO_MEMORY;
+    return NULL;
 
   mutex_init(&pps->pps_mutex, "socket");
   cond_init(&pps->pps_cond, "socket");
@@ -301,9 +294,30 @@ service_open_pushpull(const service_t *svc, pushpull_t *pp)
   pp->app = &pps_pushpull_vtable;
   pp->app_opaque = pps;
 
-  error_t err = svc->open_stream(&pps->pps_stream);
+  // The stream is the first member, so this is also the allocation.
+  return &pps->pps_stream;
+}
+
+
+error_t
+service_open_pushpull(const service_t *svc, pushpull_t *pp)
+{
+  if(svc->open_pushpull != NULL) {
+    return svc->open_pushpull(pp);
+  }
+
+  // Service does not support the pushpull interface (it's a stream service)
+  // setup the bridge
+
+  stream_t *s = pushpull_stream_create(pp);
+  if(s == NULL)
+    return ERR_NO_MEMORY;
+
+  error_t err = svc->open_stream(s);
   if(err) {
-    free(pps);
+    // Nothing has been handed out and no close callback has run, so the
+    // allocation can just go back.
+    free(s);
   }
   return err;
 }
