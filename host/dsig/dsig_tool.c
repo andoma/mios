@@ -712,31 +712,63 @@ main(int argc, char **argv)
       dsig_vllp_destroy(dv);
       rc = 1; goto out;
     }
-    uint8_t buf[64];
+    uint8_t buf[128];
     memset(buf, 0xa5, sizeof(buf));
-    size_t chunk = (mtu > 0 && (size_t)mtu < sizeof(buf)) ?
-      (size_t)mtu : sizeof(buf);
 
-    // vllp_channel_send() has no backpressure signal (it just malloc()s
-    // and queues), so pace ourselves rather than risk unbounded growth
-    // if we can enqueue faster than the link can drain.
+    // Size the message so it fills whole link fragments. The link splits
+    // at one byte below the (already FDCAN-adjusted) mtu and appends a
+    // CRC32 to every message, so anything larger than this spills a few
+    // bytes into a second fragment -- and since the link is
+    // stop-and-wait, that second fragment costs a full round trip to
+    // carry them. A flat 64 here measured barely half the rate the link
+    // was actually capable of, purely from straddling that boundary.
+    const size_t frag = (size_t)(mtu > 8 ? mtu - 1 : mtu) - 1;
+    size_t chunk = frag > 4 ? frag - 4 : frag;
+    if(chunk > sizeof(buf))
+      chunk = sizeof(buf);
+
+    // Keep a bounded number of messages in flight, and no more.
+    // vllp_channel_send() has no backpressure -- it mallocs and queues --
+    // so a sender paced by a fixed sleep measures how fast it can fill a
+    // queue, not how fast the link drains one. On a slow link that
+    // overstates throughput by whatever factor it happens to outrun the
+    // medium, and leaves a backlog the close cannot then get past, which
+    // shows up as "no close-response from peer". Bounding the outstanding
+    // count makes the enqueue rate the delivery rate, so the byte count
+    // is a rate rather than a measure of this loop's sleep granularity.
+    const int window = 4;
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     while(!xs.done && !g_stop) {
+      while(vllp_channel_tx_pending(vc) >= window && !xs.done && !g_stop)
+        usleep(200);
+      if(xs.done || g_stop)
+        break;
       vllp_channel_send(vc, buf, chunk);
       xs.total += (int64_t)chunk;
-      usleep(1000);
       clock_gettime(CLOCK_MONOTONIC, &t1);
       if(elapsed_s(&t0, &t1) >= duration_s)
         break;
     }
+    // Everything counted has to have actually landed before it is
+    // divided by the clock.
+    int drained = 1;
+    while(vllp_channel_tx_pending(vc) > 0 && !xs.done && !g_stop) {
+      clock_gettime(CLOCK_MONOTONIC, &t1);
+      if(elapsed_s(&t0, &t1) >= duration_s + 60) {
+        drained = 0;
+        break;
+      }
+      usleep(1000);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     if(!xs.done)
       vllp_channel_close(vc, 0, 1);
-    clock_gettime(CLOCK_MONOTONIC, &t1);
     double s = elapsed_s(&t0, &t1);
-    fprintf(stderr, "dsig: discard: %lld bytes in %.2fs (%.1f KB/s)%s\n",
+    fprintf(stderr, "dsig: discard: %lld bytes in %.2fs (%.1f KB/s)%s%s\n",
            (long long)xs.total, s, xs.total / s / 1024.0,
-           xs.done ? " -- server closed" : "");
+           xs.done ? " -- server closed" : "",
+           drained ? "" : " -- WARNING: did not drain, rate is not valid");
     dsig_vllp_destroy(dv);
 
   } else {
