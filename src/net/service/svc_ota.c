@@ -40,6 +40,7 @@ typedef struct svc_ota {
   pbuf_t *sa_info;
   uint8_t sa_blocksize;
   uint8_t sa_shutdown;
+  uint8_t sa_finished;   // worker is gone; nothing will drain sa_rxbuf
   uint8_t sa_rebooting;
   uint8_t sa_skipped_kbytes;
 
@@ -229,7 +230,37 @@ ota_thread(void *arg)
   svc_ota_t *sa = arg;
   error_t err = ota_perform(sa);
   evlog(LOG_NOTICE, "OTA: Cancelled -- %s", error_to_string(err));
+  // Nothing will consume received data from here on, so release the
+  // buffer and stop holding the channel off -- see ota_may_push().
+  mutex_lock(&sa->sa_mutex);
+  sa->sa_finished = 1;
+  pbuf_t *stale = sa->sa_rxbuf;
+  sa->sa_rxbuf = NULL;
+  mutex_unlock(&sa->sa_mutex);
+  if(stale != NULL)
+    pbuf_free(stale);
+  sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_PUSH);
+
   ota_send_final_status(sa, -err);
+
+  // Let the status byte reach the tx path before closing, for the same
+  // reason the success path does: closing stops the channel pulling app
+  // data, so a status still sitting in sa_info is simply dropped and the
+  // peer is left waiting for a response that no longer exists -- it then
+  // has to time the link out, and the service stays busy until it does,
+  // failing the *next* attempt too. Only the success path had this wait,
+  // so every failed transfer was ending the hard way.
+  //
+  // Bounded, and gives up early if the peer closed first: a teardown
+  // must not hinge on a peer that may already be gone.
+  const uint64_t deadline = clock_get() + 100000;
+  mutex_lock(&sa->sa_mutex);
+  while(sa->sa_info != NULL && !sa->sa_shutdown) {
+    if(cond_wait_timeout(&sa->sa_cond, &sa->sa_mutex, deadline))
+      break;
+  }
+  mutex_unlock(&sa->sa_mutex);
+
   sa->sa_sock->net->event(sa->sa_sock->net_opaque, PUSHPULL_EVENT_CLOSE);
   thread_exit(NULL);
 }
@@ -253,6 +284,14 @@ static uint32_t
 ota_push(void *opaque, struct pbuf *pb)
 {
   svc_ota_t *sa = opaque;
+
+  // Transfer already over: the peer is still finishing whatever it had
+  // in flight when we aborted. Take it and throw it away rather than
+  // refuse it, so the channel can drain and be closed.
+  if(sa->sa_finished) {
+    pbuf_free(pb);
+    return 0;
+  }
 
   if(!sa->sa_thread) {
 
@@ -286,7 +325,13 @@ ota_may_push(void *opaque)
   int r = 1;
   mutex_lock(&sa->sa_mutex);
   pbuf_t *pb = sa->sa_rxbuf;
-  if(pb != NULL &&
+  // Back-pressure is only honest while someone is still consuming. Once
+  // the worker has gone -- which for an aborted transfer is long before
+  // the peer stops sending -- holding the channel off wedges it: the
+  // peer cannot get rid of the data it still owes, and this end cannot
+  // get its own status byte or its close out past it. The transfer is
+  // over, so take whatever arrives and drop it.
+  if(!sa->sa_finished && pb != NULL &&
      pb->pb_offset + pb->pb_buflen + sa->sa_blocksize >= PBUF_DATA_SIZE) {
     r = 0;
   }

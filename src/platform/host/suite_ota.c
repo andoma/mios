@@ -46,7 +46,12 @@
 
 #define DEV_TXID 0x200
 #define DEV_RXID 0x201
-#define MTU 64
+// Set per variant, see the registrations at the bottom. The service
+// derives its OTA block size from the link's fragment size, so the two
+// MTUs take genuinely different arms of that arithmetic -- one block per
+// fragment at 64, eighteen fragments per block at 8 -- and only running
+// both covers it.
+static int g_mtu = 64;
 
 #define NOR_SIZE   (1u << 20)     // 1 MB virtual NOR
 #define IMG_CAP    (256 * 1024)   // payload / reconstruction buffer cap
@@ -224,7 +229,11 @@ ota_scenario_fn(void *arg)
 {
   ota_scenario_t *sc = arg;
 
-  hvllp_t *v = hvllp_create_client(MTU, 3, HVLLP_FDCAN_ADAPTATION, sc,
+  // FDCAN adaptation pads frames onto the DLC ladder, which only applies
+  // above the classic 8-byte frame -- the same condition the mcp host
+  // uses to decide.
+  hvllp_t *v = hvllp_create_client(g_mtu, 3,
+                                   g_mtu > 8 ? HVLLP_FDCAN_ADAPTATION : 0, sc,
                                    client_tx, client_log);
   sc->v = v;
   hvllp_sim_setup(v, 0x07a5eed1, sc, client_recv, DEV_TXID);
@@ -389,9 +398,10 @@ read_self_exe(uint8_t *buf, size_t cap)
 
 
 static int
-test_ota(void)
+test_ota_mtu(void)
 {
-  hosttest_log("---- OTA end to end: host client -> svc_ota -> SPI NOR ----");
+  hosttest_log("---- OTA end to end: host client -> svc_ota -> SPI NOR "
+               "(mtu %d) ----", g_mtu);
 
   // Build the flash stack: virtual NOR chip <- real spiflash driver <-
   // partition, then point the "ota" service at it.
@@ -411,8 +421,8 @@ test_ota(void)
   }
   memset(g_elf + n, 0xff, IMG_CAP - n);
 
-  vcan_t *vcan = vcan_create("vcan0", MTU);
-  vllp_server_create(DEV_TXID, DEV_RXID, MTU, 3);
+  vcan_t *vcan = vcan_create("vcan0", g_mtu);
+  vllp_server_create(DEV_TXID, DEV_RXID, g_mtu, 3);
   vcan_set_link(vcan, 1);
 
   ota_scenario_t *sc = calloc(1, sizeof(*sc));
@@ -437,4 +447,26 @@ test_ota(void)
   return sc->failures;
 }
 
-HOSTTEST_SUITE("ota", test_ota, 0);
+static int
+test_ota(void)
+{
+  g_mtu = 64;
+  return test_ota_mtu();
+}
+
+static int
+test_ota_mtu8(void)
+{
+  g_mtu = 8;
+  return test_ota_mtu();
+}
+
+// Four registrations because the block size falls out of both the link
+// MTU and the pbuf size, and the combinations do not behave alike: 64/512
+// caps at 128 and lands on two fragments, 64/72 is bounded by the pbuf
+// and fits one, and the 8-byte variants fragment the same block eighteen
+// ways. A constrained pool is what the small boards actually ship.
+HOSTTEST_SUITE_EX("ota", test_ota, 0, 0);
+HOSTTEST_SUITE_EX("ota-tight", test_ota, 0, 72);
+HOSTTEST_SUITE_EX("ota-mtu8", test_ota_mtu8, 0, 0);
+HOSTTEST_SUITE_EX("ota-mtu8-tight", test_ota_mtu8, 0, 72);
