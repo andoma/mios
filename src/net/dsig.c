@@ -6,6 +6,7 @@
 #include <mios/bytestream.h>
 #include <mios/cli.h>
 #include <mios/eventlog.h>
+#include <mios/nettrace.h>
 #include <sys/queue.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -84,6 +85,8 @@ dsig_output(uint32_t id, struct pbuf *pb, struct netif *exclude)
   struct netif *ni, *to = NULL;
   uint32_t to_flags = 0;
 
+  nettrace_pkt(NETTRACE_TX, id, pbuf_cdata(pb, 0), pb->pb_pktlen);
+
   // Local dispatch
   dsig_dispatch(id, pb);
 
@@ -138,6 +141,9 @@ dsig_input(uint32_t id, struct pbuf *pb, struct netif *ni)
   }
   if(pbuf_pullup(pb, pb->pb_pktlen))
     return pb;
+
+  // After the pullup, so the payload is contiguous and can be hashed.
+  nettrace_pkt(NETTRACE_RX, id, pbuf_cdata(pb, 0), pb->pb_pktlen);
 
   if((pb = vllp_input(id, pb)) == NULL)
     return pb;

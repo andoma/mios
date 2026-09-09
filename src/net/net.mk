@@ -30,6 +30,11 @@ SRCS-${ENABLE_NET_DSIG} += \
 	${SRC}/net/dsig.c \
 	${SRC}/net/vllp.c \
 
+# Packet-path tracing (include/mios/nettrace.h). Off unless a board asks
+# for it: it is a diagnostic, and it carries a static buffer.
+SRCS-${ENABLE_NETTRACE} += \
+	${SRC}/net/nettrace.c \
+
 # Glue for binding a virtual console to a pushpull channel (a VLLP client
 # channel, typically). Needs pbufs, so it lives here rather than next to
 # vcon.c in util/; boards decide whether to actually use it.
