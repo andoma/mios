@@ -160,6 +160,29 @@ const char *memtypeflags =
   "CHAINLOADER\0"
   "CODE\0\0";
 
+// Totals over every heap, for a status report. Walks the block lists
+// under the heap mutex, so not for a hot path.
+void
+heap_stats(size_t *used, size_t *avail)
+{
+  size_t u = 0, a = 0;
+  mutex_lock(&heap_mutex);
+  heap_header_t *hh;
+  LIST_FOREACH(hh, &heaps, link) {
+    for(heap_block_t *hb = hh->blocks; hb->next; hb = hb->next) {
+      if(hb->free)
+        a += hb_size(hb);
+      else
+        u += hb_size(hb);
+    }
+  }
+  mutex_unlock(&heap_mutex);
+  if(used)
+    *used = u;
+  if(avail)
+    *avail = a;
+}
+
 static error_t
 cmd_show_malloc(cli_t *cli, int argc, char **argv)
 {

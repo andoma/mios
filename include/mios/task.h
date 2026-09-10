@@ -250,6 +250,10 @@ thread_t *thread_create_va(void *entry, size_t stack_size,
                            const char *name, int flags, unsigned int prio,
                            int nargs, va_list ap);
 
+// CPU load in tenths of a percent (0..1000) over the last accounting
+// period, idle excluded. 0 without ENABLE_TASK_ACCOUNTING.
+unsigned task_cpu_load(void);
+
 thread_t *thread_create(void *(*entry)(void *arg), void *arg, size_t stack_size,
                         const char *name, int flags, unsigned int prio);
 

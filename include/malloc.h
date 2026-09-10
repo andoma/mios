@@ -24,3 +24,6 @@ int free_try(void *ptr);
 // Lower numerical prio means it be tried earlier if no specific
 // memory type is requested when allocating
 void heap_add_mem(long start, long end, uint8_t type, uint8_t prio);
+
+// Bytes in use and bytes free, summed over every heap.
+void heap_stats(size_t *used, size_t *avail);

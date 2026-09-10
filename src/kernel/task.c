@@ -907,6 +907,23 @@ accounting_run(task_t *t_)
   }
 }
 
+// CPU load in tenths of a percent over the last accounting period:
+// everything that is not the idle task.
+unsigned
+task_cpu_load(void)
+{
+  unsigned total = 0;
+  thread_t *t;
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  SLIST_FOREACH(t, &allthreads, t_global_link) {
+    if(&t->t_task == curcpu()->sched.idle)
+      continue;
+    total += t->t_load;
+  }
+  irq_permit(q);
+  return total > 1000 ? 1000 : total;
+}
+
 static task_t accounting_task = {
   .t_run = accounting_run,
   .t_prio = 10,
@@ -1103,3 +1120,11 @@ poll(const pollset_t *ps, size_t num, mutex_t *m, int64_t deadline)
   irq_permit(q);
   return wm->wm_which;
 }
+
+#ifndef ENABLE_TASK_ACCOUNTING
+unsigned
+task_cpu_load(void)
+{
+  return 0;
+}
+#endif
