@@ -71,12 +71,16 @@ vllp_do_ota(vllp_t *v, const char *elfpath, vllp_channel_t *vc,
             mi->buildid[2],
             mi->buildid[3]);
 
-  if(strcmp(mi->appname, mi->appname)) {
-    vllp_logf(v, LOG_ERR,
-              "OTA: Mismatching appname (running:\"%s\", loaded:\"%s\")",
-              running_app, mi->appname);
-    free(mi);
-    return "Mismatching appname";
+  if(strcmp(running_app, mi->appname)) {
+    // The same hardware can carry different apps, so this is a guard
+    // against the wrong image, not a rule. force lets it through.
+    vllp_logf(v, force ? LOG_WARNING : LOG_ERR,
+              "OTA: Mismatching appname (running:\"%s\", loaded:\"%s\")%s",
+              running_app, mi->appname, force ? ", forced" : "");
+    if(!force) {
+      free(mi);
+      return "Mismatching appname";
+    }
   }
 
   if(!force && !memcmp(hdr + 4, mi->buildid, sizeof(mi->buildid))) {
