@@ -51,6 +51,13 @@ sx1280_t *sx1280_create(spi_t *bus, gpio_t nss, gpio_t nreset,
 
 error_t sx1280_reset(sx1280_t *s);
 
+// The last commands sent to the chip, oldest first: timestamp relative
+// to now, opcode, first parameter, status byte read back, BUSY wait.
+// To a stream, or the last few into the event log.
+struct stream;
+void sx1280_cmd_trace_dump(sx1280_t *s, struct stream *st, unsigned last);
+void sx1280_cmd_trace_log(sx1280_t *s, unsigned last);
+
 error_t sx1280_read_reg(sx1280_t *s, uint16_t addr, void *ptr, size_t len);
 
 error_t sx1280_write_reg(sx1280_t *s, uint16_t addr, const void *ptr,

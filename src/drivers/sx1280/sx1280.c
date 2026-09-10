@@ -78,10 +78,64 @@ sx1280_wait_ready(sx1280_t *s, int timeout)
 error_t
 sx1280_cmd(sx1280_t *s, const uint8_t *tx, uint8_t *rx, size_t len)
 {
+  const int64_t t0 = clock_get();
   error_t err = sx1280_wait_ready(s, SX1280_BUSY_TIMEOUT);
+  const int64_t waited = clock_get() - t0;
+
+  __typeof__(s->cmd_trace[0]) *e = &s->cmd_trace[s->cmd_trace_wr];
+  s->cmd_trace_wr = (s->cmd_trace_wr + 1) % SX1280_CMD_TRACE;
+  e->t_us = (uint32_t)clock_get();
+  e->opcode = tx[0];
+  e->param0 = len > 1 ? tx[1] : 0;
+  e->status = 0;
+  e->wait_ms = err ? 255 : waited >= 254000 ? 254 : waited / 1000;
+
   if(err)
     return err;
-  return s->bus->rw(s->bus, tx, rx, len, s->nss, s->spicfg);
+  err = s->bus->rw(s->bus, tx, rx, len, s->nss, s->spicfg);
+  if(!err && rx != NULL)
+    e->status = rx[0];
+  return err;
+}
+
+// Oldest first. Times are relative to now, in ms, so the dump reads as
+// "how long before the fault".
+void
+sx1280_cmd_trace_dump(sx1280_t *s, struct stream *st, unsigned last)
+{
+  const uint32_t now = (uint32_t)clock_get();
+  if(last > SX1280_CMD_TRACE)
+    last = SX1280_CMD_TRACE;
+  for(unsigned i = SX1280_CMD_TRACE - last; i < SX1280_CMD_TRACE; i++) {
+    const __typeof__(s->cmd_trace[0]) *e =
+      &s->cmd_trace[(s->cmd_trace_wr + i) % SX1280_CMD_TRACE];
+    if(e->t_us == 0 && e->opcode == 0)
+      continue;
+    stprintf(st, "%7d ms  op %02x p0 %02x st %02x%s\n",
+             -(int)((now - e->t_us) / 1000), e->opcode, e->param0,
+             e->status,
+             e->wait_ms == 255 ? "  BUSY TIMEOUT" :
+             e->wait_ms ? "  waited" : "");
+  }
+}
+
+// Same, into the event log, for a board nobody is watching.
+void
+sx1280_cmd_trace_log(sx1280_t *s, unsigned last)
+{
+  const uint32_t now = (uint32_t)clock_get();
+  if(last > SX1280_CMD_TRACE)
+    last = SX1280_CMD_TRACE;
+  for(unsigned i = SX1280_CMD_TRACE - last; i < SX1280_CMD_TRACE; i++) {
+    const __typeof__(s->cmd_trace[0]) *e =
+      &s->cmd_trace[(s->cmd_trace_wr + i) % SX1280_CMD_TRACE];
+    if(e->t_us == 0 && e->opcode == 0)
+      continue;
+    evlog(LOG_WARNING, "%s: %d ms: op %02x p0 %02x st %02x wait %u%s",
+          s->name, -(int)((now - e->t_us) / 1000), e->opcode, e->param0,
+          e->status, e->wait_ms == 255 ? 0 : e->wait_ms,
+          e->wait_ms == 255 ? " TIMEOUT" : "");
+  }
 }
 
 // After clearing chip IRQ status, drop the software edge flags if
@@ -503,6 +557,11 @@ cmd_sx1280(cli_t *cli, int argc, char **argv)
   if(argc >= 2 && !strcmp(argv[1], "pins"))
     return cmd_sx1280_pins(cli);
 
+  if(argc >= 2 && !strcmp(argv[1], "trace")) {
+    sx1280_cmd_trace_dump(sx1280_cli_instance, cli->cl_stream,
+                          SX1280_CMD_TRACE);
+    return 0;
+  }
   if(argc >= 2 && !strcmp(argv[1], "status"))
     return cmd_sx1280_status(cli);
 
