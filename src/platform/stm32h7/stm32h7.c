@@ -73,6 +73,7 @@ stm32h7_init(void)
          pkgstr ?: "???", flash_size);
 
 
+  crashlog_init((void *)CRASHLOG_ADDR);
   crashlog_recover();
 
   // DTCM

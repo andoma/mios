@@ -5,6 +5,7 @@
 #include <mios/cli.h>
 
 #include "cpu.h"
+#include <mios/mios.h>
 
 // If curcpu() is not a macro defined by the platform we define a
 // inline function in cortexm.h that expects a global cpu0 to exist
@@ -83,7 +84,15 @@ cpu_fpu_ctx_init(int *ctx)
 void
 halt(const char *msg)
 {
-  __asm("bkpt 1");
+  // With a debugger attached, stop where the problem is. Without one a
+  // breakpoint instruction faults, and the part then sits dead until
+  // the watchdog gets it, thirty seconds later, with "watchdog" as the
+  // only record. Reboot instead: whatever the panic path wrote to the
+  // crash log is read back on the way up.
+  static volatile uint32_t *const DHCSR = (volatile uint32_t *)0xe000edf0;
+  if(*DHCSR & 1) // C_DEBUGEN
+    __asm("bkpt 1");
+  reboot();
 }
 
 void

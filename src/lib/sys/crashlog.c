@@ -1,3 +1,4 @@
+#include <string.h>
 #include <mios/stream.h>
 #include <mios/eventlog.h>
 #include <sys/param.h>
@@ -47,12 +48,19 @@ static const stream_vtable_t crashlog_stream_vtable = {
   .write = crashlog_stream_write,
 };
 
-static const crashlog_stream_t crashlog_stream = {
+// The buffer address is set by the platform at init, since on some parts
+// it depends on the RAM size read from the chip at runtime.
+static crashlog_stream_t crashlog_stream = {
   .s = {
     .vtable = &crashlog_stream_vtable
   },
-  .buf = (void *)CRASHLOG_ADDR
 };
+
+static void
+crashlog_init(void *addr)
+{
+  crashlog_stream.buf = addr;
+}
 
 stream_t *
 get_crashlog_stream(void)
@@ -65,6 +73,8 @@ static void
 crashlog_recover(void)
 {
   crashlog_buf_t *cb = crashlog_stream.buf;
+  if(cb == NULL)
+    return;
 
   if(cb->magic == CRASHLOG_PRESENT) {
     char *s = cb->message;

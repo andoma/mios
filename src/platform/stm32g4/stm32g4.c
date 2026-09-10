@@ -35,6 +35,21 @@ static struct {
 };
 
 
+#ifdef ENABLE_CRASHLOG
+// Panic text kept across a reset in the top of SRAM1, which the reset
+// does not touch and which neither the bootloader nor .bss covers, and
+// logged on the next boot. Optional: the smallest parts have 16 kB of
+// SRAM1 and no bytes to spare.
+#define CRASHLOG_SIZE 512
+
+static void
+get_crashlog_stream_prep(void)
+{
+}
+
+#include "lib/sys/crashlog.c"
+#endif
+
 static void  __attribute__((constructor(120)))
 stm32g4_init(void)
 {
@@ -60,7 +75,13 @@ stm32g4_init(void)
          *FLASH_SIZE, category, sram1_size, sram2_size, ccm_size, chipid);
 
   void *SRAM1_end   = (void *)0x20000000 + sram1_size * 1024;
-  heap_add_mem(HEAP_START_EBSS, (long)SRAM1_end,
+  void *heap1_end   = SRAM1_end;
+#ifdef ENABLE_CRASHLOG
+  heap1_end -= CRASHLOG_SIZE;
+  crashlog_init(heap1_end);
+  crashlog_recover();
+#endif
+  heap_add_mem(HEAP_START_EBSS, (long)heap1_end,
                MEM_TYPE_DMA | MEM_TYPE_VECTOR_TABLE | MEM_TYPE_CODE, 20);
 
   void *SRAM2_start = SRAM1_end;
