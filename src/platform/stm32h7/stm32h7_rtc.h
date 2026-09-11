@@ -11,3 +11,8 @@
 // pin is 13, 14 or 15. The pin must not have another RTC function
 // enabled (tamper, timestamp, alarm or calibration output).
 void stm32h7_rtc_force_pin(int pin, int value);
+
+// Hand the pin back to the GPIO configuration. A forced level set by
+// stm32h7_rtc_force_pin() outlives every reset while VBAT is present,
+// so a board that wants the GPIO in charge again must ask for it.
+void stm32h7_rtc_release_pin(int pin);

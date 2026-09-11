@@ -28,3 +28,18 @@ stm32h7_rtc_force_pin(int pin, int value)
     v &= ~(1u << value_bit);
   reg_wr(RTC_TAFCR, v);
 }
+
+void
+stm32h7_rtc_release_pin(int pin)
+{
+  if(pin < 13 || pin > 15)
+    return;
+  reg_set_bit(PWR_CR1, PWR_CR1_DBP);
+  clk_enable(CLK_RTCAPB);
+  const int mode_bit = 19 + 2 * (pin - 13);
+  const int value_bit = 18 + 2 * (pin - 13);
+  uint32_t v = reg_rd(RTC_TAFCR);
+  v &= ~(1u << mode_bit);
+  v &= ~(1u << value_bit);
+  reg_wr(RTC_TAFCR, v);
+}
