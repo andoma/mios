@@ -30,6 +30,11 @@ typedef struct sx1280_slot {
 
 void sx1280_sched_submit(sx1280_t *s, sx1280_slot_t *slot, int64_t time);
 
+// Slot start lateness: the maximum since the previous call (reset by the
+// call) and the running count of starts more than 20 ms late. Lateness
+// on the highest-priority thread is the MCU stalling.
+void sx1280_sched_late(sx1280_t *s, uint32_t *max_us, uint32_t *count);
+
 void sx1280_sched_cancel(sx1280_t *s, sx1280_slot_t *slot);
 
 // Modem-config ownership: returns 1 if the mode changed since the

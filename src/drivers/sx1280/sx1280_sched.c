@@ -85,6 +85,15 @@ sched_thread(void *arg)
     LIST_REMOVE(slot, ss_link);
     slot->ss_queued = 0;
     s->sched_cancelled = NULL;
+    {
+      const int64_t late = clock_get() - slot->ss_time;
+      if(late > 0) {
+        if((uint32_t)late > s->sched_late_max_us)
+          s->sched_late_max_us = late;
+        if(late > 20000)
+          s->sched_late_count++;
+      }
+    }
     mutex_unlock(&s->sched_mutex);
 
     const int64_t next = slot->ss_execute(slot, s, now);
@@ -93,6 +102,16 @@ sched_thread(void *arg)
     if(next > 0 && !slot->ss_queued && s->sched_cancelled != slot)
       sched_insert(s, slot, next);
   }
+}
+
+void
+sx1280_sched_late(sx1280_t *s, uint32_t *max_us, uint32_t *count)
+{
+  mutex_lock(&s->sched_mutex);
+  *max_us = s->sched_late_max_us;
+  *count = s->sched_late_count;
+  s->sched_late_max_us = 0;
+  mutex_unlock(&s->sched_mutex);
 }
 
 void

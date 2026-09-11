@@ -51,6 +51,13 @@ struct sx1280 {
   struct sx1280_slot_list sched_slots;
   const void *sched_mode;
   const struct sx1280_slot *sched_cancelled; // Cancelled while executing
+
+  // How late slots start against their earliest-start time: the radio
+  // thread is the highest priority there is, so lateness here is the
+  // whole MCU stalling (interrupts off, a bus held, a spin). Max since
+  // last read, and a count of starts more than 20 ms late.
+  uint32_t sched_late_max_us;
+  uint32_t sched_late_count;
 };
 
 void sx1280_sched_init(sx1280_t *s);
