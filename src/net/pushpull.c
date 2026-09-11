@@ -29,6 +29,12 @@ typedef struct pushpull_stream {
   pbuf_t *pps_txbuf_head;
   pbuf_t *pps_txbuf_tail;
 
+  // Set once the network side has called our close(), which per
+  // pushpull_app_fn_t means it will make no further calls -- and takes
+  // the pushpull_t with it: for VLLP the pushpull_t is embedded in the
+  // channel, and the channel is freed right after (vllp.c,
+  // vllp_channel_net_close). So pps_shutdown also means pps_pp is
+  // dangling, and every dereference of it below is guarded by it.
   uint8_t pps_shutdown;
   uint8_t pps_flushed;
 
@@ -82,9 +88,9 @@ pushpull_stream_write(struct stream *s, const void *buf, size_t size,
   mutex_lock(&pps->pps_mutex);
 
   if(buf == NULL) {
-    // Flush
+    // Flush. Nothing to flush to once the network side has closed.
 
-    if(pps->pps_txbuf_head != NULL) {
+    if(pps->pps_txbuf_head != NULL && !pps->pps_shutdown) {
       pps->pps_flushed = 1;
       pps->pps_pp->net->event(pps->pps_pp->net_opaque,
                                 PUSHPULL_EVENT_PULL);
@@ -153,17 +159,6 @@ pushpull_stream_write(struct stream *s, const void *buf, size_t size,
   return written;
 }
 
-static void
-pushpull_stream_wait_shutdown(pushpull_stream_t *pps)
-{
-  mutex_lock(&pps->pps_mutex);
-  while(!pps->pps_shutdown)
-    cond_wait(&pps->pps_cond, &pps->pps_mutex);
-  mutex_unlock(&pps->pps_mutex);
-
-  pbuf_free(pps->pps_rxbuf);
-  pbuf_free(pps->pps_txbuf_head);
-}
 
 
 static struct pbuf *
@@ -222,8 +217,23 @@ static void
 pushpull_stream_destroy(stream_t *s)
 {
   pushpull_stream_t *pps = (pushpull_stream_t *)s;
-  pps->pps_pp->net->event(pps->pps_pp->net_opaque, PUSHPULL_EVENT_CLOSE);
-  pushpull_stream_wait_shutdown(pps);
+
+  mutex_lock(&pps->pps_mutex);
+
+  // Ask the network side to close only if it has not already closed us:
+  // after that pps_pp is gone (see pps_shutdown). A shell whose VLLP
+  // link dropped arrives here exactly that way -- the channel tears
+  // down, then cli_on_stream() returns and svc_shell closes the stream.
+  if(!pps->pps_shutdown) {
+    pps->pps_pp->net->event(pps->pps_pp->net_opaque, PUSHPULL_EVENT_CLOSE);
+    while(!pps->pps_shutdown)
+      cond_wait(&pps->pps_cond, &pps->pps_mutex);
+  }
+
+  mutex_unlock(&pps->pps_mutex);
+
+  pbuf_free(pps->pps_rxbuf);
+  pbuf_free(pps->pps_txbuf_head);
   free(pps);
 }
 
