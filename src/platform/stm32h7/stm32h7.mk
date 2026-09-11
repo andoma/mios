@@ -26,6 +26,7 @@ SRCS += ${C}/entry-xip.s \
 	${P}/stm32h7_usb.c \
 	${P}/stm32h7_spi.c \
 	${P}/stm32h7_adc.c \
+	${P}/stm32h7_rtc.c \
 	${P}/stm32h7_can.c \
 	${P}/stm32h7_pwg.c \
 	${P}/stm32h7_systim.c \
