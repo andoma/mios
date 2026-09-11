@@ -338,7 +338,10 @@ phase_crosstalk(void)
      back either way -- what matters is *which* console it comes back on. */
   for(int i = 0; i < UNITS; i++) {
     snprintf(tag[i], sizeof(tag[i]), "zz-tag-%d-%d", i, i * 7 + 3);
-    char line[48];
+    /* Sized off the whole of tag rather than one row: GCC bounds tag[i]
+       by the full 2D array, so a tighter buffer trips
+       -Wformat-truncation (on aarch64 at least). */
+    char line[sizeof(tag) + 1];
     snprintf(line, sizeof(line), "%s\n", tag[i]);
     viewer_type(units[i].vcon, line);
   }

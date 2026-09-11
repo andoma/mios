@@ -386,9 +386,11 @@ phase_partial_across_reset(peer_t *p)
     tx_fragment(p, CMC_CHANNEL, junk, sizeof(junk), 0);
     drain(p, 200000);
 
-    /* ...then go quiet for longer than the link timeout so the server
-       tears the session down with that fragment still in hand. */
-    usleep(5 * SEC);
+    /* ...then stop transmitting for longer than the link timeout, so the
+       server tears the session down with that fragment still in hand.
+       drain() rather than usleep(): this is a simulation thread, and
+       usleep() is a kernel call it must not make (see sim.h). */
+    drain(p, 5 * SEC);
   }
 
   /* A fresh session must work. If the stale fragments are still queued,

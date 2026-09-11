@@ -54,7 +54,10 @@
 static int g_mtu = 64;
 
 #define NOR_SIZE   (1u << 20)     // 1 MB virtual NOR
-#define IMG_CAP    (256 * 1024)   // payload / reconstruction buffer cap
+// Payload / reconstruction buffer cap. The payload is the running ELF,
+// so this has to stay ahead of it -- an aarch64 build is a good 15%
+// bigger than the same code on x86-64.
+#define IMG_CAP    (512 * 1024)
 
 // OTA header written to block 0 of the partition (matches svc_ota / the
 // platform bootloaders).
