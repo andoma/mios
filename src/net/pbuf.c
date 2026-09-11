@@ -515,8 +515,14 @@ pbuf_trim(pbuf_t *pb, size_t bytes)
       prev->pb_flags |= tail->pb_flags & PBUF_EOP;
       prev->pb_next = NULL;
 
+      // Callers run in thread mode without the pool lock (VLLP strips
+      // its CRC here from an input handler), and the pool is shared
+      // with the CAN and USB interrupts. Same lock as pbuf_drop() and
+      // pbuf_pullup() take for their frees.
+      int q = irq_forbid(IRQ_LEVEL_NET);
       pbuf_data_put(tail->pb_data);
       pbuf_put(tail);
+      irq_permit(q);
     }
   }
 }
