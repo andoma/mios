@@ -60,6 +60,10 @@ buffer_alloc(usb_mbus_t *um)
   if(pb == NULL) {
     pbuf_data_put(buf);
   } else {
+    // A bare header: pb_next is the pool's free-list link until set.
+    pb->pb_next = NULL;
+    pb->pb_credits = 0;
+    pb->pb_flags = 0;
     pb->pb_data = buf;
 
     usb_ep_t *ue = &um->iface->ui_endpoints[0]; // OUT

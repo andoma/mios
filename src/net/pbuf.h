@@ -210,6 +210,13 @@ void pbuf_data_put(void *ptr);
 
 void pbuf_alloc(size_t count);
 
+// A bare header from the pool, like malloc(): nothing in it is
+// initialised. In particular pb_next is the pool's own free-list link,
+// so it points at the next free header, not NULL. A caller must set
+// every field before the pbuf can reach pbuf_free(), pb_next included;
+// inserting the header into a queue with STAILQ_INSERT_TAIL does that
+// for pb_next as a side effect, which is what most drivers lean on.
+// pbuf_make() returns an initialised header with a data buffer.
 __attribute__((warn_unused_result,malloc))
 pbuf_t *pbuf_get0(int wait PBUF_ORIGIN_ARG_DECL);
 

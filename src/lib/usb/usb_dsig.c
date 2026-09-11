@@ -62,6 +62,10 @@ buffer_alloc(usb_dsig_t *ud)
   if(pb == NULL) {
     pbuf_data_put(buf);
   } else {
+    // A bare header: pb_next is the pool's free-list link until set.
+    pb->pb_next = NULL;
+    pb->pb_credits = 0;
+    pb->pb_flags = 0;
     pb->pb_data = buf;
 
     usb_ep_t *ue = &ud->iface->ui_endpoints[0]; // OUT
@@ -230,6 +234,8 @@ usb_dsig_output(struct can_netif *cni, pbuf_t *pb, uint32_t id)
       pbuf_put(frag);
       break;
     }
+    frag->pb_next = NULL;
+    frag->pb_credits = 0;
     frag->pb_data = buf;
     frag->pb_offset = 0;
     frag->pb_buflen = len;
