@@ -255,9 +255,10 @@ usb_dsig_output(struct can_netif *cni, pbuf_t *pb, uint32_t id)
   if(!ud->tx_on) {
     do_tx(ud);
   }
-  irq_permit(q);
 
   pbuf_free_irq_blocked(pb);
+  irq_permit(q);
+
   return NULL;
 }
 
