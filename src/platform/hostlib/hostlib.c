@@ -11,5 +11,7 @@
 static void __attribute__((constructor(120)))
 hostlib_heap_init(void)
 {
+#ifndef ENABLE_HEAP_MMAP
   host_map_heap(HOSTLIB_HEAP_SIZE);
+#endif
 }

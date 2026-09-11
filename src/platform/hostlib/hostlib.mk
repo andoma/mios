@@ -10,6 +10,7 @@
 #
 
 ENABLE_TASK_DEBUG := yes
+ENABLE_HEAP_MMAP := yes
 # The virtual CAN interface is a real can_netif (platform/host/vcan.c), so
 # the DSIG stack comes with the platform.
 ENABLE_NET_CORE := yes
@@ -49,6 +50,8 @@ SRCS += ${C}/cpu.c \
 	${C}/timer.c \
 	${C}/rnd.c \
 	${C}/sim.c \
+
+SRCS-${ENABLE_HEAP_MMAP} += ${C}/heap_mmap.c
 
 SRCS += ${P}/hostlib.c \
 	${P}/console_lib.c \

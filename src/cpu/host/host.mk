@@ -48,6 +48,8 @@ SRCS += ${C}/cpu.c \
 	${C}/rnd.c \
 	${C}/sim.c \
 
+SRCS-${ENABLE_HEAP_MMAP} += ${C}/heap_mmap.c
+
 run: ${O}/${ARTIFACT}.elf
 	${O}/${ARTIFACT}.elf
 

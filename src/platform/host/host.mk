@@ -9,6 +9,9 @@
 #
 
 ENABLE_TASK_DEBUG := yes
+# One mmap per allocation, unmapped on free: a use-after-free faults on
+# the spot instead of corrupting whatever got the block next.
+ENABLE_HEAP_MMAP := yes
 ENABLE_PERFTEST := yes
 ENABLE_NET_IPV4 := yes
 ENABLE_NET_DSIG_UDP := yes
