@@ -1,55 +1,40 @@
 #pragma once
 
 /*
- * Raw Linux x86-64 syscall interface.
+ * Raw Linux syscall interface.
  *
  * Mios is built with -nostdinc and its own libc, so nothing from glibc
  * is available (or wanted: the symbol names collide). These are the
  * only syscalls the host port uses. Structures follow the kernel ABI
  * (uapi), not glibc's.
+ *
+ * Everything the two supported machines disagree on -- syscall numbers,
+ * the syscall instruction, the signal frame -- lives in
+ * linux_${arch}.h. The rest of the kernel ABI we touch (signal numbers,
+ * fcntl and termios constants, siginfo, ...) comes from
+ * include/uapi/asm-generic and is the same on both.
  */
 
 #include <stdint.h>
 #include <stddef.h>
 
-#define SYS_read              0
-#define SYS_write             1
-#define SYS_open              2
-#define SYS_close             3
-#define SYS_mmap              9
-#define SYS_mprotect         10
-#define SYS_munmap           11
-#define SYS_rt_sigaction     13
-#define SYS_rt_sigprocmask   14
-#define SYS_rt_sigreturn     15
-#define SYS_ioctl            16
-#define SYS_nanosleep        35
-#define SYS_getpid           39
-#define SYS_execve           59
-#define SYS_fcntl            72
-#define SYS_rt_sigsuspend   130
-#define SYS_sigaltstack     131
-#define SYS_gettid          186
-#define SYS_timer_create    222
-#define SYS_timer_settime   223
-#define SYS_clock_gettime   228
-#define SYS_exit_group      231
-#define SYS_tgkill          234
-#define SYS_ppoll           271
+typedef unsigned long linux_sigset_t;
 
-static inline long
-linux_syscall6(long n, long a, long b, long c, long d, long e, long f)
-{
-  register long r10 asm("r10") = d;
-  register long r8 asm("r8") = e;
-  register long r9 asm("r9") = f;
-  long ret;
-  asm volatile ("syscall"
-                : "=a"(ret)
-                : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9)
-                : "rcx", "r11", "memory");
-  return ret;
-}
+// sigaltstack(2). Defined up here because struct linux_ucontext in the
+// arch header embeds it.
+struct linux_stack {
+  void *ss_sp;
+  int ss_flags;
+  size_t ss_size;
+};
+
+#if defined(__x86_64__)
+#include "linux_x86_64.h"
+#elif defined(__aarch64__)
+#include "linux_aarch64.h"
+#else
+#error Unsupported host architecture
+#endif
 
 #define linux_syscall(n, ...) \
   linux_syscall_(n, ##__VA_ARGS__, 0, 0, 0, 0, 0, 0)
@@ -114,6 +99,7 @@ linux_clock_gettime_ns(int clk)
 #define SIGALRM  14
 #define SIGIO    29
 #define SIGHUP    1
+#define SIGCHLD  17
 #define SIGRTMIN 32
 
 #define SA_SIGINFO   0x00000004
@@ -131,8 +117,6 @@ linux_clock_gettime_ns(int clk)
 
 #define SIGEV_SIGNAL     0
 #define SIGEV_THREAD_ID  4
-
-typedef unsigned long linux_sigset_t;
 
 struct linux_sigaction {
   void *sa_handler;
@@ -175,30 +159,7 @@ struct linux_sigevent {
 
 _Static_assert(sizeof(struct linux_sigevent) == 64, "sigevent size");
 
-struct linux_stack {
-  void *ss_sp;
-  int ss_flags;
-  size_t ss_size;
-};
-
-struct linux_sigcontext {
-  unsigned long r8, r9, r10, r11, r12, r13, r14, r15;
-  unsigned long rdi, rsi, rbp, rbx, rdx, rax, rcx, rsp, rip, eflags;
-  unsigned short cs, gs, fs, ss;
-  unsigned long err, trapno, oldmask, cr2;
-  void *fpstate;
-  unsigned long reserved[8];
-};
-
-struct linux_ucontext {
-  unsigned long uc_flags;
-  struct linux_ucontext *uc_link;
-  struct linux_stack uc_stack;
-  struct linux_sigcontext uc_mcontext;
-  linux_sigset_t uc_sigmask;
-};
-
-void __restore_rt(void); // entry.S
+void __restore_rt(void); // entry_${arch}.S
 
 #define LINUX_SIGMASK(sig) (1ul << ((sig) - 1))
 
@@ -231,6 +192,8 @@ linux_sigsuspend_all(void)
 #define F_SETFL      4
 #define F_SETOWN     8
 #define F_SETSIG    10
+
+#define AT_FDCWD    -100
 
 #define TCGETS 0x5401
 #define TCSETS 0x5402
@@ -276,6 +239,17 @@ linux_poll1(int fd, short events, const struct linux_timespec *timeout)
   return pfd.revents;
 }
 
+// The generic syscall table dropped open(2) in favour of openat(2)
+static inline long
+linux_open(const char *path, int flags, int mode)
+{
+#ifdef SYS_open
+  return linux_syscall(SYS_open, path, flags, mode);
+#else
+  return linux_syscall(SYS_openat, AT_FDCWD, path, flags, mode);
+#endif
+}
+
 static inline void __attribute__((noreturn))
 linux_exit_group(int code)
 {
@@ -284,13 +258,6 @@ linux_exit_group(int code)
 }
 
 // ---- Sockets / processes (network backends) ----
-
-#define SYS_writev       20
-#define SYS_dup2         33
-#define SYS_socket       41
-#define SYS_connect      42
-#define SYS_socketpair   53
-#define SYS_fork         57
 
 #define AF_UNIX       1
 #define SOCK_STREAM   1
@@ -301,11 +268,30 @@ struct linux_sockaddr_un {
   char sun_path[108];
 };
 
-// ---- Threads / futex (virtual time simulation threads, sim.c) ----
+// ... and dup2(2) in favour of dup3(2), which unlike dup2() rejects
+// oldfd == newfd. No caller needs that case.
+static inline long
+linux_dup2(int oldfd, int newfd)
+{
+#ifdef SYS_dup2
+  return linux_syscall(SYS_dup2, oldfd, newfd);
+#else
+  return linux_syscall(SYS_dup3, oldfd, newfd, 0);
+#endif
+}
 
-#define SYS_clone   56
-#define SYS_exit    60
-#define SYS_futex  202
+// ... and fork(2) in favour of plain clone(2)
+static inline long
+linux_fork(void)
+{
+#ifdef SYS_fork
+  return linux_syscall(SYS_fork);
+#else
+  return linux_syscall(SYS_clone, SIGCHLD, 0);
+#endif
+}
+
+// ---- Threads / futex (virtual time simulation threads, sim.c) ----
 
 #define CLONE_VM       0x00000100
 #define CLONE_FS       0x00000200
@@ -317,7 +303,7 @@ struct linux_sockaddr_un {
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
 
-// entry.S: clone a thread on the given stack and run fn(arg) on it
+// entry_${arch}.S: clone a thread on the given stack and run fn(arg) on it
 long linux_clone_thread(unsigned long flags, void *child_sp,
                         void (*fn)(void *arg), void *arg);
 

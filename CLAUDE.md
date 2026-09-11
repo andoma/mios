@@ -28,7 +28,7 @@ make PLATFORM=stm32h7-nucleo144 BTS=1
 make cli_test    # build only
 make cli_run     # build and run interactive
 
-# Run Mios as a native Linux x86-64 process (kernel, timers, shell on stdio,
+# Run Mios as a native Linux process, x86-64 or aarch64 (kernel, timers, shell on stdio,
 # Ethernet via passt if installed; DHCP, TCP etc. go through the host stack)
 make PLATFORM=host run
 echo ps | build.host/mios.elf              # scripted: exits on stdin EOF
@@ -42,7 +42,7 @@ Output goes to `build.${PLATFORM}/` (e.g., `build.stm32h7-nucleo144/build.elf`).
 
 ## Supported Platforms
 
-lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144, nrf54l15-dk. `host` (Linux x86-64, added to `allplatforms` when building on such a machine). Additional platforms (aarch64-virt, spike, t234 variants, nrf52, stm32wb55-nucleo64) exist but are not in the `allplatforms` CI target.
+lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144, nrf54l15-dk. `host` (native Linux, x86-64 or aarch64, added to `allplatforms` when building on such a machine). Additional platforms (aarch64-virt, spike, t234 variants, nrf52, stm32wb55-nucleo64) exist but are not in the `allplatforms` CI target.
 
 ## Compiler Flags
 
@@ -91,7 +91,7 @@ Custom libc, crypto (RSA/ECDSA/AES/SHA), LittleFS filesystem, USB stack (CDC/HID
 - ARM Cortex-M: `arm-none-eabi-`
 - AArch64: `aarch64-none-elf-` (Linux) / `aarch64-elf-` (Darwin)
 - RISC-V: `riscv64-linux-gnu-`
-- host: native `gcc`, static and freestanding (`src/cpu/host/` provides raw Linux syscalls, IRQs are signals, context switch is in `entry.S`). Networking is `src/platform/host/passt.c`, qemu-style length-prefixed frames over a UNIX socket to passt (unprivileged). Read the comment blocks in `irq.c` and `host.mk` before touching signal handling or compiler flags: the choices there (no `SA_NODEFER`, `-malign-data=abi`) fix real crashes.
+- host: native `gcc`, static and freestanding (`src/cpu/host/` provides raw Linux syscalls, IRQs are signals, context switch is in `entry_${arch}.S`). Supports x86-64 and aarch64; everything machine-specific is in `arch.mk`, `entry_${arch}.S`, `arch_${arch}.c` and `linux_${arch}.h`. Networking is `src/platform/host/passt.c`, qemu-style length-prefixed frames over a UNIX socket to passt (unprivileged). Read the comment blocks in `irq.c`, `host.mk` and `arch.mk` before touching signal handling or compiler flags: the choices there (no `SA_NODEFER`, `-malign-data=abi` on x86-64, `-mno-outline-atomics` on aarch64) fix real crashes and link failures.
 
 ## CI
 

@@ -41,8 +41,6 @@
 #include "linux.h"
 #include "hostnet.h"
 
-#define SYS_getrandom 318
-
 // passt's own maximum. We advertise 1500 via -m but must survive more.
 #define MAX_FRAME 65536
 
@@ -256,7 +254,7 @@ passt_find_binary(char *buf, size_t buflen)
       memcpy(buf, path, dirlen);
       strcpy(buf + dirlen, "/passt");
       // access(2) is not in our syscall shim, try opening it
-      int fd = linux_syscall(SYS_open, buf, 0 /* O_RDONLY */, 0);
+      int fd = linux_open(buf, 0 /* O_RDONLY */, 0);
       if(fd >= 0) {
         linux_syscall(SYS_close, fd);
         return buf;
@@ -304,7 +302,7 @@ passt_spawn(void)
     argv[argc++] = tail[i];
   argv[argc] = NULL;
 
-  long pid = linux_syscall(SYS_fork);
+  long pid = linux_fork();
   if(pid < 0) {
     linux_syscall(SYS_close, sv[0]);
     linux_syscall(SYS_close, sv[1]);
@@ -314,7 +312,7 @@ passt_spawn(void)
   if(pid == 0) {
     // Child
     linux_syscall(SYS_close, sv[0]);
-    linux_syscall(SYS_dup2, sv[1], 3);
+    linux_dup2(sv[1], 3);
     linux_syscall(SYS_close, sv[1]);
     linux_syscall(SYS_execve, bin, argv, host_envp());
     const char msg[] = "passt: exec failed\n";

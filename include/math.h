@@ -29,7 +29,7 @@
 // Single precision
 // ================
 
-#if __ARM_FP & 4
+#if defined(__arm__) && (__ARM_FP & 4)
 
 static inline float __attribute__((always_inline))
 fabsf(float f)
@@ -91,7 +91,7 @@ float fmodf(float x, float y) __attribute__ ((const));
 // Double precision
 // ================
 
-#if __ARM_FP & 8
+#if defined(__arm__) && (__ARM_FP & 8)
 
 static inline double __attribute__((always_inline))
 sqrt(double f)

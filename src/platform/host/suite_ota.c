@@ -382,7 +382,7 @@ ota_bootloader_verify(ota_scenario_t *sc, block_iface_t *bi,
 static size_t
 read_self_exe(uint8_t *buf, size_t cap)
 {
-  long fd = linux_syscall(SYS_open, "/proc/self/exe", 0 /*O_RDONLY*/, 0);
+  long fd = linux_open("/proc/self/exe", 0 /*O_RDONLY*/, 0);
   if(fd < 0)
     return 0;
   size_t n = 0;

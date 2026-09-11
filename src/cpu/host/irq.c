@@ -182,9 +182,9 @@ host_fatal(int sig, linux_siginfo_t *si, void *ucontext)
 {
   struct linux_ucontext *uc = ucontext;
   thread_t *t = thread_current();
-  panic_frame(uc, "%s at %p (rip=0x%lx) thread:%s stack:%p-%p "
+  panic_frame(uc, "%s at %p (pc=0x%lx) thread:%s stack:%p-%p "
               "irq_level:%d irq_depth:%d pending:0x%x",
-              signame(sig), si->fault.si_addr, uc->uc_mcontext.rip,
+              signame(sig), si->fault.si_addr, linux_uc_pc(uc),
               t ? t->t_name : "?", t ? t->t_sp_bottom : NULL,
               t ? (void *)t : NULL, irq_level, irq_depth, irq_pending);
 }
@@ -195,26 +195,19 @@ backtrace_print_frame(struct stream *st, void *frame)
 {
   if(frame == NULL)
     return;
-  const struct linux_sigcontext *mc = &((struct linux_ucontext *)frame)->uc_mcontext;
-  stprintf(st, "  rip 0x%016lx  rsp 0x%016lx  rbp 0x%016lx\n",
-           mc->rip, mc->rsp, mc->rbp);
-  stprintf(st, "  rax 0x%016lx  rbx 0x%016lx  rcx 0x%016lx  rdx 0x%016lx\n",
-           mc->rax, mc->rbx, mc->rcx, mc->rdx);
-  stprintf(st, "  rsi 0x%016lx  rdi 0x%016lx  r8  0x%016lx  r9  0x%016lx\n",
-           mc->rsi, mc->rdi, mc->r8, mc->r9);
-  stprintf(st, "  r10 0x%016lx  r11 0x%016lx  r12 0x%016lx  r13 0x%016lx\n",
-           mc->r10, mc->r11, mc->r12, mc->r13);
-  stprintf(st, "  r14 0x%016lx  r15 0x%016lx  eflags 0x%lx\n",
-           mc->r14, mc->r15, mc->eflags);
-  stprintf(st, "  (addr2line -e build.host/mios.full.elf 0x%lx)\n", mc->rip);
+  const struct linux_ucontext *uc = frame;
+  host_regs_print(st, uc);
+  stprintf(st, "  (addr2line -e build.host/mios.full.elf 0x%lx)\n",
+           linux_uc_pc(uc));
 
   // Crude backtrace: every word on the stack that points into .text
   extern char _stext, _text_end;
   thread_t *t = thread_current();
   if(t == NULL)
     return;
-  const uintptr_t *sp = (const uintptr_t *)(mc->rsp & ~7);
+  const uintptr_t *bottom = (const uintptr_t *)(linux_uc_sp(uc) & ~7ul);
   const uintptr_t *top = (const uintptr_t *)t;
+  const uintptr_t *sp = bottom;
   int n = 0;
   stprintf(st, "  text words on stack (%zd bytes):", (size_t)((void *)top - (void *)sp));
   for(; sp < top && n < 64; sp++) {
@@ -225,16 +218,7 @@ backtrace_print_frame(struct stream *st, void *frame)
   }
   stprintf(st, "\n");
 
-  // Signal frames on the stack: pretcode is __restore_rt, ucontext follows
-  for(sp = (const uintptr_t *)(mc->rsp & ~7); sp < top; sp++) {
-    if(*sp != (uintptr_t)__restore_rt)
-      continue;
-    const struct linux_ucontext *uc = (const void *)(sp + 1);
-    const linux_siginfo_t *si = (const void *)(uc + 1);
-    stprintf(st, "  sigframe @%p: rip=%lx rsp=%lx sig=%d code=%d mask=%lx\n", sp,
-             uc->uc_mcontext.rip, uc->uc_mcontext.rsp,
-             si->si_signo, si->si_code, uc->uc_sigmask);
-  }
+  host_sigframes_print(st, bottom, top);
 }
 
 

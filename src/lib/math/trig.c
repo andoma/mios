@@ -29,8 +29,8 @@ cosf(float x)
 
 
 // GCC folds a sinf()/cosf() pair on the same argument into one sincosf()
-// call on targets whose libc has it (x86-64 glibc conventions, so the host
-// and hostlib builds). Provide it so those builds resolve against this
+// call on targets whose libc has it (glibc conventions, so the host and
+// hostlib builds). Provide it so those builds resolve against this
 // libm instead of picking up an undefined symbol.
 void
 sincosf(float x, float *s, float *c)

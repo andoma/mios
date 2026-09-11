@@ -7,12 +7,15 @@
 
 #define CPU_STACK_ALIGNMENT 16
 
-// Signal frames (with AVX-512 state) are ~3.5kB each and land on the
-// interrupted thread's stack, nested up to the number of IRQ levels.
+// Signal frames land on the interrupted thread's stack, nested up to
+// the number of IRQ levels: ~3.5kB each on x86-64 (with AVX-512 state),
+// ~4.8kB on aarch64 (siginfo plus a ucontext with 4kB reserved for
+// FP/SIMD and SVE records).
+#if defined(__aarch64__)
+#define MIN_STACK_SIZE 49152
+#else
 #define MIN_STACK_SIZE 32768
-
-void *cpu_stack_init(uint64_t *stack, void *entry,
-                     void (*thread_exit)(void *), int nargs, va_list ap);
+#endif
 
 typedef struct cpu {
   sched_cpu_t sched;
@@ -31,9 +34,17 @@ cpu_stack_redzone(thread_t *t)
 static inline uint32_t
 cpu_cycle_counter(void)
 {
+#if defined(__x86_64__)
   uint32_t lo, hi;
   asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
   return lo;
+#else
+  // Not a cycle counter, but the same thing we want it for: a cheap
+  // monotonic tick with no syscall. Readable from EL0 on Linux.
+  uint64_t cnt;
+  asm volatile ("mrs %0, cntvct_el0" : "=r"(cnt));
+  return cnt;
+#endif
 }
 
 // Terminate the process: run destructors (restores the terminal) and exit
@@ -48,6 +59,27 @@ void cpu_switch(void);
 void cpu_jump_stack(void *sp, void (*fn)(void)) __attribute__((noreturn));
 
 void cpu_thread_start(void);
+
+// ---- Machine specific (arch_${arch}.c, entry_${arch}.S) ----
+
+struct stream;
+struct linux_ucontext;
+
+// Build a thread's initial context switch frame below stack (which
+// grows down), so that resuming it enters entry(arg0, ...) and passes
+// the result to thread_exit()
+void *cpu_stack_init(uint64_t *stack, void *entry,
+                     void (*thread_exit)(void *), int nargs, va_list ap);
+
+// Same, for cpu_coswitch(): resuming the returned sp calls fn()
+void *cpu_coswitch_frame_init(void *stack_top, void (*fn)(void));
+
+// Panic output: the interrupted register state, and any nested signal
+// frames found between sp and top
+void host_regs_print(struct stream *st, const struct linux_ucontext *uc);
+
+void host_sigframes_print(struct stream *st, const uintptr_t *sp,
+                          const uintptr_t *top);
 
 // ---- Virtual time (see timer.c) ----
 

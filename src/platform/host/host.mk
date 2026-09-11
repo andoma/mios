@@ -1,7 +1,7 @@
 #
-# Mios as a Linux x86-64 process. Console on stdin/stdout, Ethernet via
-# passt (unprivileged user-mode networking, spawned automatically when
-# found in PATH).
+# Mios as a native Linux process (x86-64 or aarch64). Console on
+# stdin/stdout, Ethernet via passt (unprivileged user-mode networking,
+# spawned automatically when found in PATH).
 #
 #   make PLATFORM=host run
 #   build.host/mios.elf --no-net

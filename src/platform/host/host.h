@@ -1,5 +1,11 @@
 #pragma once
 
+#if defined(__x86_64__)
+#define HOST_MACHINE "x86-64"
+#elif defined(__aarch64__)
+#define HOST_MACHINE "aarch64"
+#endif
+
 // Anonymous mmap backing the Mios heap. Pages are only committed on
 // first touch, so this is an upper bound, not a cost.
 #define HOST_HEAP_SIZE (64 * 1024 * 1024)

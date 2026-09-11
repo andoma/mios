@@ -1,5 +1,5 @@
 /*
- * Linker script for the "host" CPU: static, non-PIE x86-64 Linux ELF.
+ * Linker script for the "host" CPU: a native Linux ELF.
  *
  * Mirrors cortexm.ld in what it exports (init/fini arrays, section
  * arrays for CLI commands, drivers, etc. and the version blobs) so
@@ -42,8 +42,11 @@ SECTIONS {
         }
 
         /* Everything below is writable (init arrays and the version blobs
-           are non-const objects) and lives in the RW segment. */
-        . = ALIGN(0x1000);
+           are non-const objects) and lives in the RW segment. The loader
+           needs the two segments congruent modulo the page size, so use
+           the linker's idea of the largest one (4kB on x86-64, 64kB on
+           aarch64) rather than a hardcoded 0x1000. */
+        . = ALIGN(CONSTANT(MAXPAGESIZE));
 
         .inits : {
                 . = ALIGN(8);

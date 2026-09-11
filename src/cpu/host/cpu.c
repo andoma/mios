@@ -81,18 +81,7 @@ host_lib_boot(void)
   const size_t ss = 1 << 20;
   uint8_t *stk = linux_mmap(NULL, ss, PROT_READ | PROT_WRITE,
                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  // Land in mios_lib_entry with the SysV entry contract rsp%16==8 (as if
-  // reached by a call). After cpu_coswitch pops 6 saved regs and rets, rsp
-  // equals this base, so make the base %16==8.
-  uint64_t *sp = (uint64_t *)(((uintptr_t)(stk + ss) & ~(uintptr_t)15) - 8);
-  *--sp = (uint64_t)mios_lib_entry;   // return address for the first coswitch
-  *--sp = 0;                          // rbp
-  *--sp = 0;                          // rbx
-  *--sp = 0;                          // r12
-  *--sp = 0;                          // r13
-  *--sp = 0;                          // r14
-  *--sp = 0;                          // r15
-  g_mios_sp = sp;
+  g_mios_sp = cpu_coswitch_frame_init(stk + ss, mios_lib_entry);
   cpu_coswitch(&g_harness_sp, g_mios_sp);   // run mios to first idle, then return
 }
 
@@ -131,30 +120,7 @@ cpu_init(void)
 }
 
 
-/**
- * See entry.S for the frame layout.
- */
-void *
-cpu_stack_init(uint64_t *stack, void *entry,
-               void (*thread_exit)(void *), int nargs, va_list ap)
-{
-  uint64_t args[4] = {};
-  for(int i = 0; i < nargs && i < 4; i++)
-    args[i] = va_arg(ap, uintptr_t);
-
-  uint64_t *p = (uint64_t *)((uintptr_t)stack & ~15);
-  *--p = (uint64_t)cpu_thread_start;  // return address
-  *--p = (uint64_t)thread_exit;       // rbp
-  *--p = (uint64_t)entry;             // rbx
-  *--p = args[0];                     // r12
-  *--p = args[1];                     // r13
-  *--p = args[2];                     // r14
-  *--p = args[3];                     // r15
-  return p;
-}
-
-
-// Called by cpu_thread_start (entry.S) on a new thread's stack, still
+// Called by cpu_thread_start (entry_${arch}.S) on a new thread's stack, still
 // logically inside the switch "exception". Return to thread mode.
 void
 cpu_thread_start_hook(void)

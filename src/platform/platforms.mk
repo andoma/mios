@@ -11,9 +11,11 @@ ALLPLATFORMS := \
 	nrf54l15-dk \
 	nrf52840-dongle \
 
-# The host platform is a native Linux x86-64 process
-ifeq ($(shell uname -sm),Linux x86_64)
+# The host platform runs Mios as a native Linux process
+ifeq ($(shell uname -s),Linux)
+ifneq ($(filter $(shell uname -m),x86_64 aarch64),)
 ALLPLATFORMS += host
+endif
 endif
 
 ${ALLPLATFORMS}:

@@ -20,7 +20,7 @@ C := ${SRC}/cpu/host
 
 PLATFORM := hostlib
 
-GLOBALDEPS += ${P}/hostlib.mk ${C}/host.mk ${C}/host_shared.ld ${P}/hostlib.syms
+GLOBALDEPS += ${P}/hostlib.mk ${C}/host_shared.ld ${P}/hostlib.syms
 
 CPPFLAGS += -iquote${C} -iquote${P} -iquote${SRC}/platform/host
 CPPFLAGS += -include ${C}/host.h
@@ -28,10 +28,12 @@ CPPFLAGS += -include ${C}/host.h
 TOOLCHAIN :=
 
 # Position-independent, hidden by default. Same freestanding choices as the
-# host exe (no stack protector / CET / stack-clash; psABI data alignment).
+# host exe (no stack protector, no stack-clash probes).
 CFLAGS += -fPIC -fvisibility=hidden
-CFLAGS += -fno-stack-protector -fcf-protection=none -fno-stack-clash-protection
-CFLAGS += -malign-data=abi
+CFLAGS += -fno-stack-protector -fno-stack-clash-protection
+
+# Machine specific flags and sources
+include ${C}/arch.mk
 
 FRAME_LIMIT := 1024
 
@@ -42,8 +44,7 @@ LD_NMAGIC :=
 LDFLAGS += -shared -Wl,-z,noexecstack -Wl,-z,defs
 LDFLAGS += -Wl,--version-script=${P}/hostlib.syms
 
-SRCS += ${C}/entry.s \
-	${C}/cpu.c \
+SRCS += ${C}/cpu.c \
 	${C}/irq.c \
 	${C}/timer.c \
 	${C}/rnd.c \

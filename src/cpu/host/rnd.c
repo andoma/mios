@@ -6,8 +6,6 @@
 #include "cpu.h"
 #include "linux.h"
 
-#define SYS_getrandom 318
-
 static prng_t state;
 static int seeded;
 static uint32_t seq;

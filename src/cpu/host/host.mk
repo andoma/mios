@@ -1,5 +1,5 @@
 #
-# "host" CPU: run Mios as a regular Linux x86-64 process.
+# "host" CPU: run Mios as a regular Linux process (x86-64 or aarch64).
 #
 # The kernel, libc and everything above is compiled unchanged. This layer
 # provides what the cortexm/aarch64/riscv64 layers provide on real silicon:
@@ -23,15 +23,11 @@ CPPFLAGS += -include ${SRC}/cpu/host/host.h
 # Native toolchain
 TOOLCHAIN :=
 
-# Freestanding: no PIE, no stack protector (needs TLS canary we don't have),
-# no CET (our context switch is incompatible with shadow stacks).
-CFLAGS += -fno-pie -fno-stack-protector -fcf-protection=none -fno-stack-clash-protection
+# Freestanding: no PIE, no stack protector (needs TLS canary we don't have).
+CFLAGS += -fno-pie -fno-stack-protector -fno-stack-clash-protection
 
-# x86-64 GCC bumps alignment of >=16 byte objects to 16 by default, which
-# inserts padding between the entries of the linker section arrays
-# (clicmd, udpinput, driver, ...) that the kernel walks by sizeof().
-# Stick to the psABI's natural alignment like every other target.
-CFLAGS += -malign-data=abi
+# Machine specific flags and sources
+include ${C}/arch.mk
 
 # Host stack frames are wider than Cortex-M frames (64-bit spills).
 # The 192 byte limit is tuned for the MCU targets, allow more here.
@@ -46,8 +42,7 @@ LD_NMAGIC :=
 ENTRYPOINT ?= _start
 LDFLAGS += -e ${ENTRYPOINT}
 
-SRCS += ${C}/entry.s \
-	${C}/cpu.c \
+SRCS += ${C}/cpu.c \
 	${C}/irq.c \
 	${C}/timer.c \
 	${C}/rnd.c \
