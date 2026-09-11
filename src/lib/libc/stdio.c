@@ -48,7 +48,19 @@ emit_str(fmtcb_t *cb, void *aux, const char *str,
   if(str == NULL)
     return cb(aux, "(null)", 6);
 
-  size_t sl = fp->decimals != INT16_MIN ? fp->decimals : strlen(str);
+  size_t sl;
+  if(fp->decimals == INT16_MIN) {
+    sl = strlen(str);
+  } else {
+    // POSIX: a precision on %s is the maximum number of bytes to write,
+    // and the argument need not be NUL terminated within them. (A
+    // negative precision means something else entirely here, see
+    // emit_hexdump(); it never reaches this far.)
+    const int max = fp->decimals < 0 ? 0 : fp->decimals;
+    sl = 0;
+    while(sl < (size_t)max && str[sl])
+      sl++;
+  }
   size_t total = 0;
   const int pad = fp->width - sl;
 
@@ -202,7 +214,11 @@ emit_fix16(fmtcb_t *cb, void *aux, const fmtparam_t *fp, int x)
 {
   char buf[13];
   fix16_to_str(x, buf, fp->decimals != INT16_MIN ? fp->decimals : 5);
-  return emit_str(cb, aux, buf, fp);
+  // The precision was the decimal count; it must not now also bound the
+  // string we hand to emit_str().
+  fmtparam_t f = *fp;
+  f.decimals = INT16_MIN;
+  return emit_str(cb, aux, buf, &f);
 }
 #endif
 
@@ -283,7 +299,10 @@ float_to_str(fmtcb_t *cb, void *aux,
     } else {
       str = "+inf";
     }
-    return emit_str(cb, aux, str, fp);
+    // A precision on %f is a digit count, not a bound on this text
+    fmtparam_t f = *fp;
+    f.decimals = INT16_MIN;
+    return emit_str(cb, aux, str, &f);
   }
 
   if(e2 == 0) {
