@@ -33,5 +33,7 @@ struct mutex;
  *
  * if timeout expired -1 will be returned
  *
+ * The wait set is built on the caller's stack: a waitable plus one task
+ * struct per object. Size the stack of a polling thread for it.
  */
 int poll(const pollset_t *ps, size_t num, struct mutex *m, int64_t deadline);
