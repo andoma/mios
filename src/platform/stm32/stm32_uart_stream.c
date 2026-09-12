@@ -8,6 +8,7 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "irq.h"
 
@@ -260,6 +261,51 @@ static const stream_vtable_t stm32_uart_vtable = {
   .poll = stm32_uart_poll
 };
 
+void
+stm32_uart_stream_set_baudrate(stream_t *s, unsigned int baudrate)
+{
+  if(s == NULL || s->vtable != &stm32_uart_vtable)
+    return;
+
+  stm32_uart_stream_t *u = (stm32_uart_stream_t *)s;
+
+  // Everything already queued belongs to the old rate, and the peer is
+  // still listening at it. Usually the last thing sent is the request
+  // that makes the peer change, so losing it would leave the two ends
+  // disagreeing, which is the failure this is here to avoid.
+  while(1) {
+    const int q = irq_forbid(IRQ_LEVEL_CONSOLE);
+    const int pending = u->tx_fifo_wrptr != u->tx_fifo_rdptr || u->tx_busy;
+    irq_permit(q);
+    if(!pending)
+      break;
+    if(can_sleep())
+      usleep(1000);
+  }
+  // And the last byte's stop bit has to be on the wire, not just handed
+  // to the transmitter.
+  while(!(reg_rd(u->reg_base + USART_SR) & UART_SR_TC)) {}
+
+  const unsigned int freq = clk_get_freq(u->clkid);
+  const unsigned int bbr = (freq + baudrate - 1) / baudrate;
+
+  const int q = irq_forbid(IRQ_LEVEL_CONSOLE);
+
+  // The divisor is only guaranteed to take effect from a disabled
+  // USART, and disabling it is also the cleanest way to abandon a
+  // character that is half received.
+  reg_wr(u->reg_base + USART_CR1, 0);
+  reg_wr(u->reg_base + USART_BRR, bbr);
+
+  // Whatever arrived at the old rate is noise at this one.
+  u->rx_fifo_rdptr = 0;
+  u->rx_fifo_wrptr = 0;
+
+  stm32_uart_update_cr1(u);
+  irq_permit(q);
+}
+
+
 stm32_uart_stream_t *
 stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
                        int clkid, int irq, uint8_t flags, const char *name)
@@ -278,6 +324,7 @@ stm32_uart_stream_init(stm32_uart_stream_t *u, int reg_base, int baudrate,
 
   u->reg_base = reg_base;
   u->flags = flags;
+  u->clkid = clkid;
 
   const unsigned int freq = clk_get_freq(clkid);
   const unsigned int bbr = (freq + baudrate - 1) / baudrate;

@@ -16,6 +16,10 @@ typedef struct stm32_uart_stream {
 
   uint32_t reg_base;
 
+  // Kept so the baud rate can be recomputed later: the divisor depends
+  // on the peripheral clock, and only the clock id knows what that is.
+  uint16_t clkid;
+
   task_waitable_t wait_rx;
   task_waitable_t wait_tx;
 
@@ -65,3 +69,14 @@ typedef struct stm32_uart_stream {
 #define UART_CTRLD_IS_PANIC 0x80 /* panic system if CTRL-D is receviced
                                   * useful on system console
                                   */
+
+// Change the baud rate of a stream that is already running.
+//
+// Waits for what is already queued to leave at the old rate, because
+// the peer is still listening at that rate: a caller that has just
+// asked the peer to change with its own protocol needs that request to
+// arrive intact. Anything still arriving is discarded, since bytes
+// sampled at the wrong rate are noise.
+//
+// Does nothing if the stream is not one of these UARTs.
+void stm32_uart_stream_set_baudrate(stream_t *s, unsigned int baudrate);
