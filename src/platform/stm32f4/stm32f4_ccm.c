@@ -37,5 +37,6 @@ stm32f4_ccm_init(void)
   heap_add_mem(0x10000000 + sizeof(cpu_t), CRASHLOG_ADDR,
                MEM_TYPE_LOCAL, 5);
 
+  crashlog_init((void *)CRASHLOG_ADDR);
   crashlog_recover();
 }
