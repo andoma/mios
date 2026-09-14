@@ -341,6 +341,20 @@ float_to_str(fmtcb_t *cb, void *aux,
   size_t total = 0;
   int significands = fp->decimals > 0 ? fp->decimals : 6;
 
+  // Round half up at the last printed digit before the layout is fixed:
+  // a carry out of the leading digit adds one (9.998 -> "10.00", not "9.00")
+  int digits = significands + e10;
+  if(digits >= 0) {
+    uint64_t r = 1ULL << 59;
+    for(int i = 0; i < digits; i++)
+      r /= 10;
+    mantissa += r;
+    if(mantissa >= (1ULL << 60)) {
+      mantissa /= 10;
+      e10++;
+    }
+  }
+
   int chars = flt_count_output_chars(sign, e10, significands, fp);
   int pad = fp->width - chars;
 
@@ -367,11 +381,6 @@ float_to_str(fmtcb_t *cb, void *aux,
         goto done;
     }
   }
-
-  uint64_t r = 1ULL << 59;
-  for(int i = 0; i < significands; i++)
-    r /= 10;
-  mantissa += r;
 
   for(int i = 0; i < significands; i++) {
 
