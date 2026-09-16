@@ -116,11 +116,18 @@ ota_perform(svc_ota_t *sa)
 
   uint32_t total_bytes = num_blocks * sa->sa_blocksize;
   evlog(LOG_DEBUG, "OTA: Transfer started %d bytes", total_bytes);
-  err = bi->erase(bi, 0, 1);
+
+  // Erase everything the image will touch (header sector included) in
+  // one go, before the first data byte.
+  uint32_t end_byte = sa->sa_skipped_kbytes * 1024 + total_bytes;
+  size_t erase_blocks = (end_byte + 4095) >> 12;
+  if(erase_blocks > bi->num_blocks)
+    erase_blocks = bi->num_blocks;
+  err = bi->erase(bi, 0, erase_blocks);
   if(err)
     return err;
 
-  uint32_t erased_sector = 0;
+  uint32_t reported_sector = 0;
   uint32_t crc_acc = 0;
   uint32_t current_byte = 0;
 
@@ -142,13 +149,8 @@ ota_perform(svc_ota_t *sa)
       uint32_t byte_offset = (sa->sa_skipped_kbytes * 1024) + current_byte;
       uint32_t sector = byte_offset >> 12;
       uint32_t sector_offset = byte_offset & 4095;
-      if(sector > erased_sector) {
-        err = bi->erase(bi, sector, 1);
-        if(err) {
-          pbuf_free(pb);
-          return err;
-        }
-        erased_sector = sector;
+      if(sector > reported_sector) {
+        reported_sector = sector;
         ota_progress(current_byte, total_bytes);
       }
 
