@@ -3,9 +3,11 @@
 #include "netif.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <mios/eventlog.h>
+#include <mios/cli.h>
 
 #define MII_BMSR    0x01
 #define MII_ANAR    0x04
@@ -194,3 +196,56 @@ ethphy_create(device_t *parent, const ethphy_device_class_t *dc, size_t size)
 
   return d;
 }
+
+
+// Raw MDIO access for bring-up and field diagnostics. Operates on the
+// first Ethernet interface unless one is named.
+
+static ether_netif_t *
+ethphy_cli_netif(int argc, char **argv, int nameidx)
+{
+  ether_netif_t *eni;
+  SLIST_FOREACH(eni, &ether_netifs, eni_global_link) {
+    if(argc <= nameidx || !strcmp(argv[nameidx], eni->eni_ni.ni_dev.d_name))
+      return eni;
+  }
+  return NULL;
+}
+
+static error_t
+cmd_phy_rd(cli_t *cli, int argc, char **argv)
+{
+  if(argc < 2)
+    return ERR_INVALID_ARGS;
+  ether_netif_t *eni = ethphy_cli_netif(argc, argv, 2);
+  if(eni == NULL)
+    return ERR_NO_DEVICE;
+  const uint16_t reg = atolx(argv[1]);
+  cli_printf(cli, "%s PHY reg 0x%04x = 0x%04x\n", eni->eni_ni.ni_dev.d_name,
+             reg, ethphy_mii_read(eni, reg));
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("phy_rd", cmd_phy_rd, "<reg> [ifname]",
+                "Read PHY register over MDIO");
+
+static error_t
+cmd_phy_wr(cli_t *cli, int argc, char **argv)
+{
+  if(argc < 3)
+    return ERR_INVALID_ARGS;
+  ether_netif_t *eni = ethphy_cli_netif(argc, argv, 3);
+  if(eni == NULL)
+    return ERR_NO_DEVICE;
+  const uint16_t reg = atolx(argv[1]);
+  const uint16_t val = atolx(argv[2]);
+  error_t err = ethphy_mii_write(eni, reg, val);
+  if(err)
+    return err;
+  cli_printf(cli, "%s PHY reg 0x%04x <- 0x%04x, readback 0x%04x\n",
+             eni->eni_ni.ni_dev.d_name, reg, val, ethphy_mii_read(eni, reg));
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("phy_wr", cmd_phy_wr, "<reg> <value> [ifname]",
+                "Write PHY register over MDIO");

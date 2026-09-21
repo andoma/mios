@@ -26,10 +26,15 @@ dp83826_print_info(struct device *dev, struct stream *s)
   uint16_t model = (id2 >> 4) & 0x3f;
 
   uint16_t rcsr = ethphy_mii_read(eni, REG_RCSR);
-  stprintf(s, "DP83826%c rev %d  Interface: %sMII\n",
+  uint16_t physts = ethphy_mii_read(eni, REG_PHYSTS);
+  // PHYSTS[14]: 0 = transmit on TD pair (MDI), 1 = pairs swapped (MDI-X).
+  // Auto-MDIX lands differently after every PHY restart, so a fault on
+  // one pair looks like an intermittent link. Show which one we are on.
+  stprintf(s, "DP83826%c rev %d  Interface: %sMII  Pairs: %s\n",
            model == 0x13 ? 'E' : 'I',
            id2 & 0xf,
-           (rcsr & 0x20) ? "R" : "");
+           (rcsr & 0x20) ? "R" : "",
+           (physts & 0x4000) ? "MDI-X (TX on RD)" : "MDI (TX on TD)");
   ethphy_print_status(eni, s);
 }
 
