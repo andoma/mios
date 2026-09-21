@@ -41,6 +41,10 @@ typedef struct {
 #define ETH_RDES3_BUF1V         0x01000000
 
 #define ETH_RDES3_CTX           0x40000000
+// Status bits in RDES3 write-back format, valid when LD is set
+#define ETH_RDES3_CE            0x01000000  // CRC error
+#define ETH_RDES3_OE            0x00200000  // Rx FIFO overflow (partial pkt)
+#define ETH_RDES3_ES            0x00008000  // Error summary
 
 #define ETH_TDES3_OWN           0x80000000
 #define ETH_TDES3_FD            0x20000000
@@ -89,6 +93,16 @@ typedef struct {
 #define ETH_MMC_TX_INTERRUPT  (ETH_BASE + 0x708)
 #define ETH_MMC_RX_INTR_MASK  (ETH_BASE + 0x70c)
 #define ETH_MMC_TX_INTR_MASK  (ETH_BASE + 0x710)
+
+// MAC management counters. The STM32H7 exposes only this subset.
+#define ETH_TX_SINGLE_COLLISION_GOOD_PACKETS   (ETH_BASE + 0x74c)
+#define ETH_TX_MULTIPLE_COLLISION_GOOD_PACKETS (ETH_BASE + 0x750)
+#define ETH_TX_PACKET_COUNT_GOOD               (ETH_BASE + 0x768)
+#define ETH_RX_CRC_ERROR_PACKETS               (ETH_BASE + 0x794)
+#define ETH_RX_ALIGNMENT_ERROR_PACKETS         (ETH_BASE + 0x798)
+#define ETH_RX_UNICAST_PACKETS_GOOD            (ETH_BASE + 0x7c4)
+#define ETH_TX_LPI_TRAN_CNTR                   (ETH_BASE + 0x7f0)
+#define ETH_RX_LPI_TRAN_CNTR                   (ETH_BASE + 0x7f8)
 
 #define ETH_MACTSCR      (ETH_BASE + 0xb00)
 #define ETH_MACSSIR      (ETH_BASE + 0xb04)
@@ -214,10 +228,30 @@ rx_desc_give(stm32h7_eth_t *se, size_t index, void *buf)
 static void
 stm32h7_eth_print_info(struct device *dev, struct stream *st)
 {
-  ether_print((ether_netif_t *)dev, st);
-#ifdef ENABLE_NET_PTP
   stm32h7_eth_t *se = (stm32h7_eth_t *)dev;
 
+  // Packets missed (no Rx descriptor) or dropped on Rx FIFO overflow.
+  // The MTL counter is cleared on read, so fold it into the stats.
+  const uint32_t mpoc = reg_rd(ETH_MTLRXQMPOCR);
+  se->se_eni.eni_stats.rx_hw_qdrop += ((mpoc >> 16) & 0x7ff) + (mpoc & 0x7ff);
+
+  ether_print(&se->se_eni, st);
+
+  // MAC management counters, the subset the STM32H7 exposes. Free
+  // running 32 bit, cleared at init. Collisions on a full duplex link
+  // and LPI transitions on a PHY without EEE both mean the link partner
+  // disagrees with us about the link.
+  stprintf(st, "MAC TX  good: %u  single-coll: %u  multi-coll: %u  lpi: %u\n",
+           reg_rd(ETH_TX_PACKET_COUNT_GOOD),
+           reg_rd(ETH_TX_SINGLE_COLLISION_GOOD_PACKETS),
+           reg_rd(ETH_TX_MULTIPLE_COLLISION_GOOD_PACKETS),
+           reg_rd(ETH_TX_LPI_TRAN_CNTR));
+  stprintf(st, "MAC RX  ucast-good: %u  crc: %u  align: %u  lpi: %u\n",
+           reg_rd(ETH_RX_UNICAST_PACKETS_GOOD),
+           reg_rd(ETH_RX_CRC_ERROR_PACKETS),
+           reg_rd(ETH_RX_ALIGNMENT_ERROR_PACKETS),
+           reg_rd(ETH_RX_LPI_TRAN_CNTR));
+#ifdef ENABLE_NET_PTP
   if(ptp_print_info(st, &se->se_eni)) {
     stprintf(st, "  Hardware time: %u.%u\n",
              reg_rd(ETH_MACSTSR),
@@ -437,6 +471,15 @@ stm32h7_thread(stm32h7_eth_t *se, gpio_t phyrst,
   }
   usleep(10);
 
+  // MAC management counters: clear, then mask their half-full
+  // interrupts so they never reach MACISR (which the IRQ handler
+  // treats as fatal)
+  reg_wr(ETH_MMC_CONTROL, 1 << 0); // CNTRST
+  reg_wr(ETH_MMC_RX_INTR_MASK,
+         (1 << 27) | (1 << 26) | (1 << 17) | (1 << 6) | (1 << 5));
+  reg_wr(ETH_MMC_TX_INTR_MASK,
+         (1 << 27) | (1 << 26) | (1 << 21) | (1 << 15) | (1 << 14));
+
 #ifdef ENABLE_NET_PTP
   stm32h7_ptp_init(se);
 #endif
@@ -508,6 +551,29 @@ handle_irq_rx(stm32h7_eth_t *se)
       se->se_rx_scatter_length = 0;
     }
 
+    if(unlikely((w3 & (ETH_RDES3_LD | ETH_RDES3_ES | ETH_RDES3_CTX)) ==
+                (ETH_RDES3_LD | ETH_RDES3_ES))) {
+      // Errored packet (CRC, RX_ER, overflow, watchdog, giant, dribble).
+      // The Rx queue runs in threshold mode so the MTL cannot drop these
+      // for us; they arrive truncated or corrupt and must not reach the
+      // stack. Drop any earlier segments and recycle this buffer as is.
+      pbuf_t *pb = STAILQ_FIRST(&se->se_rx_scatter_queue);
+      if(pb != NULL) {
+        pbuf_free_irq_blocked(pb);
+        STAILQ_INIT(&se->se_rx_scatter_queue);
+      }
+      se->se_rx_scatter_length = 0;
+      if(w3 & ETH_RDES3_CE)
+        se->se_eni.eni_stats.rx_crc++;
+      else if(w3 & ETH_RDES3_OE)
+        se->se_eni.eni_stats.rx_hw_qdrop++;
+      else
+        se->se_eni.eni_stats.rx_other_err++;
+      rx_desc_give(se, rx_idx, se->se_rx_pbuf_data[rx_idx]);
+      se->se_next_rx++;
+      continue;
+    }
+
     void *buf = se->se_rx_pbuf_data[rx_idx];
     assert(buf != NULL);
     pbuf_t *pb = pbuf_get(0);
@@ -568,6 +634,8 @@ handle_irq_rx(stm32h7_eth_t *se)
           if((flags == (PBUF_SOP | PBUF_EOP)) && likely(!tsa)) {
             pb->pb_buflen = len;
             pb->pb_pktlen = len;
+            se->se_eni.eni_stats.rx_pkt++;
+            se->se_eni.eni_stats.rx_byte += len;
             STAILQ_INSERT_TAIL(&se->se_eni.eni_ni.ni_rx_queue, pb, pb_link);
             netif_wakeup(&se->se_eni.eni_ni);
           } else {
@@ -582,6 +650,8 @@ handle_irq_rx(stm32h7_eth_t *se)
               first->pb_pktlen = len;
 
               if(likely(!tsa)) {
+                se->se_eni.eni_stats.rx_pkt++;
+                se->se_eni.eni_stats.rx_byte += len;
                 STAILQ_CONCAT(&se->se_eni.eni_ni.ni_rx_queue,
                               &se->se_rx_scatter_queue);
                 netif_wakeup(&se->se_eni.eni_ni);
@@ -615,6 +685,12 @@ handle_irq_tx(stm32h7_eth_t *se)
     const uint32_t w3 = tx->w3;
     if(w3 & ETH_TDES3_OWN)
       break;
+
+    // TDES2 is not touched by the write-back, B1L is still the segment
+    // length. Count the packet on its first segment, bytes on every one.
+    if(w3 & ETH_TDES3_FD)
+      se->se_eni.eni_stats.tx_pkt++;
+    se->se_eni.eni_stats.tx_byte += tx->w2 & 0x3fff;
 
     pbuf_t *pb = se->se_tx_pbuf[rdptr];
     if(pb != NULL) {
