@@ -28,7 +28,10 @@ struct dsig_sub {
   int64_t expire_us;     // EXPIRE_NEVER when disarmed
   dsig_rx_cb cb;
   void *opaque;
-  int dead;
+  int dead;      // unsubscribed; never call cb again
+  int refs;      // snapshots taken for delivery that have not finished
+  int running;   // calls of cb in progress
+  int orphaned;  // dsig_unsub() has returned; the last ref frees
 };
 
 struct dsig_emitter {
@@ -44,6 +47,7 @@ struct dsig_emitter {
 struct dsig {
   pthread_t tid;
   pthread_mutex_t mtx;
+  pthread_cond_t idle_cond;   // a sub's 'running' dropped
   int wakeup_pipe[2];
   int stop;
 
@@ -76,6 +80,112 @@ drain_pipe(int fd)
   uint8_t buf[64];
   while(read(fd, buf, sizeof(buf)) > 0) {
   }
+}
+
+
+/*
+ * Callbacks run without the bus lock, so a slow one does not hold up the
+ * bus or the other threads feeding it. Subscribers are matched under the
+ * lock into a snapshot, each entry holding a reference that keeps the
+ * dsig_sub_t alive, and 'dead' is re-checked under the lock right before
+ * every call. Together with dsig_unsub() waiting for calls in progress,
+ * that means a callback is neither running nor entered once dsig_unsub()
+ * has returned, so the caller may free the opaque.
+ */
+
+// The callbacks this thread is inside, innermost first, so that
+// dsig_unsub() called from one of them does not wait for itself.
+typedef struct call_frame {
+  dsig_sub_t *s;
+  struct call_frame *up;
+} call_frame_t;
+
+static __thread call_frame_t *current_frames;
+
+static int
+calls_on_this_thread(const dsig_sub_t *s)
+{
+  int n = 0;
+  for(const call_frame_t *f = current_frames; f != NULL; f = f->up)
+    n += f->s == s;
+  return n;
+}
+
+typedef struct {
+  dsig_sub_t *stack[16];
+  dsig_sub_t **subs;
+  int n;
+  int cap;
+} snapshot_t;
+
+static void
+snapshot_init(snapshot_t *ss)
+{
+  ss->subs = ss->stack;
+  ss->n = 0;
+  ss->cap = sizeof(ss->stack) / sizeof(ss->stack[0]);
+}
+
+// Called with the lock held
+static void
+snapshot_add(snapshot_t *ss, dsig_sub_t *s)
+{
+  if(ss->n == ss->cap) {
+    int cap = ss->cap * 2;
+    dsig_sub_t **grown;
+    if(ss->subs == ss->stack) {
+      grown = malloc(sizeof(*grown) * cap);
+      if(grown != NULL)
+        memcpy(grown, ss->stack, sizeof(ss->stack));
+    } else {
+      grown = realloc(ss->subs, sizeof(*grown) * cap);
+    }
+    if(grown == NULL) {
+      // Best-effort: drop the rest.
+      return;
+    }
+    ss->subs = grown;
+    ss->cap = cap;
+  }
+  s->refs++;
+  ss->subs[ss->n++] = s;
+}
+
+// Called without the lock. Drops every reference the snapshot holds.
+static void
+snapshot_deliver(dsig_t *d, snapshot_t *ss, uint32_t signal,
+                 const void *data, size_t len)
+{
+  for(int i = 0; i < ss->n; i++) {
+    dsig_sub_t *s = ss->subs[i];
+
+    pthread_mutex_lock(&d->mtx);
+    const int call = !s->dead;
+    if(call)
+      s->running++;
+    pthread_mutex_unlock(&d->mtx);
+
+    if(call) {
+      call_frame_t frame = { s, current_frames };
+      current_frames = &frame;
+      s->cb(s->opaque, signal, data, len);
+      current_frames = frame.up;
+    }
+
+    pthread_mutex_lock(&d->mtx);
+    if(call) {
+      s->running--;
+      pthread_cond_broadcast(&d->idle_cond);
+    }
+    const int last = --s->refs == 0 && s->orphaned;
+    pthread_mutex_unlock(&d->mtx);
+
+    // dsig_unsub() left the free to whoever dropped the last reference
+    if(last)
+      free(s);
+  }
+  if(ss->subs != ss->stack)
+    free(ss->subs);
 }
 
 static void
@@ -117,14 +227,8 @@ bus_thread(void *arg)
     }
 
     // Collect any expired subscribers; fire them after unlock.
-    struct {
-      dsig_rx_cb cb;
-      void *opaque;
-    } fire[16];
-    int nfire = 0;
-    dsig_rx_cb *fire_overflow_cb = NULL;
-    void **fire_overflow_op = NULL;
-    int fire_overflow_n = 0;
+    snapshot_t expired;
+    snapshot_init(&expired);
 
     dsig_sub_t *s;
     TAILQ_FOREACH(s, &d->subs, link) {
@@ -134,21 +238,7 @@ bus_thread(void *arg)
         continue;
       if(s->expire_us <= now) {
         s->expire_us = EXPIRE_NEVER;
-        if(nfire < (int)(sizeof(fire) / sizeof(fire[0]))) {
-          fire[nfire].cb = s->cb;
-          fire[nfire].opaque = s->opaque;
-          nfire++;
-        } else {
-          fire_overflow_cb = realloc(fire_overflow_cb,
-                                     sizeof(*fire_overflow_cb) *
-                                     (fire_overflow_n + 1));
-          fire_overflow_op = realloc(fire_overflow_op,
-                                     sizeof(*fire_overflow_op) *
-                                     (fire_overflow_n + 1));
-          fire_overflow_cb[fire_overflow_n] = s->cb;
-          fire_overflow_op[fire_overflow_n] = s->opaque;
-          fire_overflow_n++;
-        }
+        snapshot_add(&expired, s);
       } else if(s->expire_us < next) {
         next = s->expire_us;
       }
@@ -156,12 +246,7 @@ bus_thread(void *arg)
 
     pthread_mutex_unlock(&d->mtx);
 
-    for(int i = 0; i < nfire; i++)
-      fire[i].cb(fire[i].opaque, 0, NULL, 0);
-    for(int i = 0; i < fire_overflow_n; i++)
-      fire_overflow_cb[i](fire_overflow_op[i], 0, NULL, 0);
-    free(fire_overflow_cb);
-    free(fire_overflow_op);
+    snapshot_deliver(d, &expired, 0, NULL, 0);
 
     int timeout_ms;
     if(next == EXPIRE_NEVER) {
@@ -207,12 +292,14 @@ dsig_create(dsig_tx_fn tx, void *tx_opaque)
 #endif
 
   pthread_mutex_init(&d->mtx, NULL);
+  pthread_cond_init(&d->idle_cond, NULL);
   TAILQ_INIT(&d->subs);
   TAILQ_INIT(&d->emitters);
   d->tx = tx;
   d->tx_opaque = tx_opaque;
 
   if(pthread_create(&d->tid, NULL, bus_thread, d)) {
+    pthread_cond_destroy(&d->idle_cond);
     pthread_mutex_destroy(&d->mtx);
     close(d->wakeup_pipe[0]);
     close(d->wakeup_pipe[1]);
@@ -243,6 +330,7 @@ dsig_destroy(dsig_t *d)
     free(e);
   }
 
+  pthread_cond_destroy(&d->idle_cond);
   pthread_mutex_destroy(&d->mtx);
   close(d->wakeup_pipe[0]);
   close(d->wakeup_pipe[1]);
@@ -264,16 +352,9 @@ dsig_input(dsig_t *d, uint32_t signal, const void *data, size_t len)
   pthread_mutex_lock(&d->mtx);
   int64_t now = monotonic_us();
 
-  // Snapshot matching callbacks under the lock; rearm their TTL.
-  struct fire_entry {
-    dsig_rx_cb cb;
-    void *opaque;
-  };
-  struct fire_entry stack_fire[16];
-  struct fire_entry *fire = stack_fire;
-  int cap = sizeof(stack_fire) / sizeof(stack_fire[0]);
-  int n = 0;
-  int heap_alloc = 0;
+  // Snapshot matching subscribers under the lock; rearm their TTL.
+  snapshot_t matched;
+  snapshot_init(&matched);
 
   dsig_sub_t *s;
   TAILQ_FOREACH(s, &d->subs, link) {
@@ -283,26 +364,7 @@ dsig_input(dsig_t *d, uint32_t signal, const void *data, size_t len)
       continue;
     if(s->ttl_us)
       s->expire_us = now + s->ttl_us;
-    if(n == cap) {
-      cap *= 2;
-      struct fire_entry *grown;
-      if(heap_alloc) {
-        grown = realloc(fire, sizeof(*grown) * cap);
-      } else {
-        grown = malloc(sizeof(*grown) * cap);
-        if(grown != NULL)
-          memcpy(grown, stack_fire, sizeof(stack_fire));
-        heap_alloc = 1;
-      }
-      if(grown == NULL) {
-        // Best-effort: drop the rest.
-        break;
-      }
-      fire = grown;
-    }
-    fire[n].cb = s->cb;
-    fire[n].opaque = s->opaque;
-    n++;
+    snapshot_add(&matched, s);
   }
   pthread_mutex_unlock(&d->mtx);
 
@@ -310,11 +372,7 @@ dsig_input(dsig_t *d, uint32_t signal, const void *data, size_t len)
   // sleep budget. Cheap to nudge; bus_thread re-reads under the lock.
   wakeup(d);
 
-  for(int i = 0; i < n; i++)
-    fire[i].cb(fire[i].opaque, signal, data, len);
-
-  if(heap_alloc)
-    free(fire);
+  snapshot_deliver(d, &matched, signal, data, len);
 }
 
 dsig_sub_t *
@@ -346,9 +404,23 @@ dsig_unsub(dsig_sub_t *s)
     return;
   dsig_t *d = s->bus;
   pthread_mutex_lock(&d->mtx);
+  s->dead = 1;
   TAILQ_REMOVE(&d->subs, s, link);
+
+  // Wait out calls in progress on other threads. Calls this thread is
+  // inside (dsig_unsub() from the callback itself) cannot be waited for;
+  // they finish after we return, which the caller has asked for.
+  const int mine = calls_on_this_thread(s);
+  while(s->running > mine)
+    pthread_cond_wait(&d->idle_cond, &d->mtx);
+
+  // Snapshots still referencing s skip it now that it is dead, and the
+  // last of them frees it.
+  const int free_now = s->refs == 0;
+  s->orphaned = 1;
   pthread_mutex_unlock(&d->mtx);
-  free(s);
+  if(free_now)
+    free(s);
 }
 
 dsig_emitter_t *

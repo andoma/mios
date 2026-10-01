@@ -45,6 +45,12 @@ int dsig_send(dsig_t *d, uint32_t signal, const void *data, size_t len);
 dsig_sub_t *dsig_sub(dsig_t *d, uint32_t signal, uint32_t mask, int ttl_ms,
                      dsig_rx_cb cb, void *opaque);
 
+/* Unsubscribe. Once this returns, cb is not running and will not be
+ * called again, so the caller may free opaque. If cb is running on
+ * another thread this waits for it to return, so don't call it while
+ * holding a lock that cb takes. A callback may unsubscribe itself; only
+ * the call in progress remains, and it ends normally.
+ */
 void dsig_unsub(dsig_sub_t *s);
 
 /* Periodic emitter. refresh_ms == 0 disables the auto-repeat; the emitter
