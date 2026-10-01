@@ -1,0 +1,102 @@
+# AGENTS.md
+
+This file provides guidance to coding agents working with code in this repository.
+
+## Project Overview
+
+Mios is a lightweight embedded operating system written in C for microcontrollers and SoCs. It supports ARM Cortex-M, ARMv7-A (AArch32), ARMv8 (AArch64), and RISC-V 64 architectures, plus a native Linux host port. The codebase is ~145K lines of C (excluding vendored code and submodules) with no external RTOS dependencies.
+
+## Build Commands
+
+```bash
+# Build for a specific platform (default: host)
+make PLATFORM=stm32h7-nucleo144
+
+# Build all supported platforms (this is what CI runs)
+make -j$(nproc) allplatforms
+
+# Generate stripped binary for flashing
+make PLATFORM=stm32h7-nucleo144 bin
+
+# Clean build artifacts
+make PLATFORM=stm32h7-nucleo144 clean
+
+# Build with timestamp
+make PLATFORM=stm32h7-nucleo144 BTS=1
+
+# Host-side CLI test (compiles shell for host)
+make cli_test    # build only
+make cli_run     # build and run interactive
+
+# Run Mios as a native Linux process, x86-64 or aarch64 (kernel, timers, shell on stdio,
+# Ethernet via passt if installed; DHCP, TCP etc. go through the host stack)
+make PLATFORM=host run
+echo ps | build.host/mios.elf              # scripted: exits on stdin EOF
+build.host/mios.elf -- -t 2323:23          # passt args after "--": forward telnet
+build.host/mios.elf --no-net               # or --passt=/path/to/socket
+build.host/mios.elf --list                 # test suites
+build.host/mios.elf dhcp-client            # run a suite (virtual time), exit 0/1
+```
+
+Output goes to `build.${PLATFORM}/` (e.g., `build.stm32h7-nucleo144/mios.elf`; apps that set `APPNAME` get `${APPNAME}.elf` instead).
+
+## Supported Platforms
+
+lm3s811evb, stm32f405-feather, stm32g0-nucleo64, stm32f407g-disc1, bluefruit-nrf52, stm32f439-nucleo144, stm32g4-usb, vexpress-a9, stm32h7-nucleo144, nrf54l15-dk, nrf52840-dongle (list lives in `src/platform/platforms.mk`). `host` (native Linux, x86-64 or aarch64, added to `allplatforms` when building on such a machine). Additional platforms (aarch64-virt, spike, t234ccplex/t234spe, stm32n6-dk, stm32wb55-nucleo64, hostlib) exist but are not in the `allplatforms` CI target.
+
+## Compiler Flags
+
+- `-Wall -Werror` – all warnings are errors
+- `-nostdinc` – no standard includes; Mios provides its own libc
+- `-Wframe-larger-than=192` – stack frame size limit (`FRAME_LIMIT`, raised to 1024 on host)
+- `.clang-format` disables auto-formatting (`DisableFormat: true`)
+
+## Architecture
+
+### Build System
+
+Makefile-based with per-component `.mk` files. Each platform has a `.mk` that includes its CPU architecture `.mk` and enables features. Feature flags (`ENABLE_NET_IPV4`, `ENABLE_NET_CAN`, `ENABLE_METRIC`, etc.) default to `no` and are set by platform `.mk` files. A `config.h` is auto-generated from these flags.
+
+Platform `.mk` path: `src/platform/${PLATFORM}/${PLATFORM}.mk`
+
+### Kernel (`src/kernel/`)
+
+- **Task scheduler**: 32 priority levels (0=idle, higher=higher priority). Supports lightweight tasks (run function) and full threads (dedicated stack). Mutexes and condition variables for synchronization.
+- **Device framework**: Reference-counted device objects with parent-child hierarchy and power management callbacks.
+- **Driver framework**: Drivers registered via `DRIVER(probefn, prio)` macro using linker sections for automatic discovery.
+- Application entry point: weak `main()` function.
+
+### Hardware Abstraction (`include/mios/`)
+
+Consistent APIs across all platforms for GPIO, I2C, SPI, and UART. Platform-specific implementations live in `src/platform/`.
+
+### Networking (`src/net/`)
+
+IPv4 (TCP/UDP/DHCP/mDNS/NTP), CAN/FDCAN, BLE (L2CAP), and custom protocols: MBUS (multidrop bus, spec in `docs/mbus-v2.txt`) and VLLP (virtual link layer, spec in `docs/vllp.txt`). Services layer provides echo, shell, OTA updates, telnet, RPC over network.
+
+### Key Patterns
+
+- **Constructor-based init**: `__attribute__((constructor(PRIORITY)))` for boot ordering (101-102 = clock/core, 110 = console, 800+ = late init).
+- **Linker section arrays**: CLI commands (`clicmd.*`), RPC definitions (`rpcdef`), services (`servicedef`), drivers (`driver.*`) are collected via linker sections.
+- **Error handling**: Negative integers for errors (`ERR_TIMEOUT = -2`, etc.), zero for success. Defined in `include/mios/error.h`.
+- **Packet buffers**: `pbuf` for network packet management.
+- **Stream interface**: Generic I/O stream abstraction used for printf, logging, etc.
+
+### Host-side tools (`host/`)
+
+Linux/macOS utilities that talk to devices: DFU and FDCAN flashers, `dsig` tooling, and an MCP server for driving devices from AI assistants (see `docs/mcp.md`).
+
+### Libraries (`src/lib/`)
+
+Custom libc, crypto (AES/AES-CMAC/SHA-1/SHA-512, ECC via micro-ecc), LittleFS filesystem, USB stack (CDC/DFU runtime/MCP), RPC with CBOR serialization, fixed-point math (libfixmath submodule).
+
+### Toolchains
+
+- ARM Cortex-M and AArch32: `arm-none-eabi-`
+- AArch64: `aarch64-none-elf-` (Linux) / `aarch64-elf-` (Darwin)
+- RISC-V: `riscv64-linux-gnu-`
+- host: native `gcc`, static and freestanding (`src/cpu/host/` provides raw Linux syscalls, IRQs are signals, context switch is in `entry_${arch}.S`). Supports x86-64 and aarch64; everything machine-specific is in `arch.mk`, `entry_${arch}.S`, `arch_${arch}.c` and `linux_${arch}.h`. Networking is `src/platform/host/passt.c`, qemu-style length-prefixed frames over a UNIX socket to passt (unprivileged). Read the comment blocks in `irq.c`, `host.mk` and `arch.mk` before touching signal handling or compiler flags: the choices there (no `SA_NODEFER`, `-malign-data=abi` on x86-64, `-mno-outline-atomics` on aarch64) fix real crashes and link failures.
+
+## CI
+
+GitHub Actions runs `make -j$(nproc) allplatforms` on Ubuntu with `gcc-arm-none-eabi`. Behavioural tests exist only for the host platform (`build.host/mios.elf <suite>`, see `src/platform/host/hosttest.h`). CI runs the virtual-time suites via `make PLATFORM=host test`; realtime suites are skipped there. Suites run in virtual time by default: the clock jumps to the next deadline when everything is idle, so a minute of protocol timeouts takes milliseconds and runs are deterministic. Peers (for example the DHCP server in `sim_dhcpd.c`) are simulation threads written as blocking receive loops (`src/cpu/host/sim.h`); they run in lockstep with Mios and talk to it only through rings and an IRQ line (`vnet.h`).
