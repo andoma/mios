@@ -18,7 +18,6 @@
 
 #define CRASHLOG_SIZE  512
 #define CRASHLOG_ADDR  (0x38004000 - CRASHLOG_SIZE)
-
 // Save even unfinished panic output. Do not let a polled UART stall hide
 // the panic reason: replay the retained (bounded) text only at final flush.
 #define CRASHLOG_DEFER_CONSOLE
@@ -41,6 +40,8 @@ static volatile uint16_t *const FLASH_SIZE   = (volatile uint16_t *)0x1FF1E880;
 static volatile uint32_t *const LINE_ID      = (volatile uint32_t *)0x1FF1E8c0;
 static volatile uint32_t *const SYSCFG_PKGR  = (volatile uint32_t *)0x58000524;
 static volatile uint32_t *const DWT_CONTROL  = (volatile uint32_t *)0xE0001000;
+static volatile uint32_t *const DWT_LAR      = (volatile uint32_t *)0xE0001FB0;
+static volatile uint32_t *const SCB_DEMCR    = (volatile uint32_t *)0xE000EDFC;
 
 
 
@@ -145,7 +146,10 @@ stm32h7_init(void)
   code_itcm = mpu_add_region(NULL, 16, MPU_AP_RO);
 
   mpu_add_region(NULL, 12, 0); // Map 0 - 4095 as no-access at all times
-  *DWT_CONTROL = 1;
+  // CYCCNTENA alone is insufficient when no debugger enabled tracing.
+  *SCB_DEMCR |= 1u << 24; // TRCENA
+  *DWT_LAR = 0xC5ACCE55;
+  *DWT_CONTROL |= 1;
 
 }
 
