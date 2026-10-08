@@ -125,7 +125,17 @@ exc_usage_fault(void *frame)
 #endif
   if(ufsr & 0x2) {
     // Most likely an attempt to return to non-thumb code, etc
-    panic_frame(frame, "Invalid use of EPSR");
+#ifdef HAVE_FPU
+    const uint32_t cpacr = *(volatile uint32_t *)0xe000ed88;
+    // Capture before panic teardown. Pointer identities avoid dereferencing
+    // a potentially corrupt owner and distinguish disabled-FPU resume from
+    // an INVSTATE after the lazy restore has already completed.
+    panic_frame(frame, "Invalid use of EPSR (UFSR:%04x CPACR:%08x "
+                "thread:%p FP-owner:%p)", ufsr, (unsigned)cpacr,
+                thread_current(), curcpu()->sched.current_fpu);
+#else
+    panic_frame(frame, "Invalid use of EPSR (UFSR:0x%04x)", ufsr);
+#endif
   }
   if(ufsr & 0x100) {
     panic_frame(frame, "Unaligned access");

@@ -290,8 +290,10 @@ print_ipsr(struct stream *st, uint32_t ipsr)
 void
 backtrace_regs(struct stream *st, armv7_regs_t *r, uint32_t ipsr)
 {
-  while(1) {
+  unsigned depth;
+  for(depth = 0; depth < 32; depth++) {
     uint32_t pc = r->pc;
+    const uint32_t old_sp = r->sp;
     if(pc == 0xffffffff) {
       break;
     }
@@ -301,6 +303,9 @@ backtrace_regs(struct stream *st, armv7_regs_t *r, uint32_t ipsr)
         // Switch to PSP
         asm volatile ("mrs %0, psp\n" : "=r" (sp));
       }
+      // Keep the hardware evidence ahead of a possibly corrupt unwind.
+      stprintf(st, "Frame SP:%08x PC:%08x LR:%08x xPSR:%08x EXC_RETURN:%08x\n",
+               (unsigned)(uintptr_t)sp, sp[6], sp[5], sp[7], pc);
       r->r0 = sp[0];
       r->r1 = sp[1];
       r->r2 = sp[2];
@@ -377,7 +382,13 @@ backtrace_regs(struct stream *st, armv7_regs_t *r, uint32_t ipsr)
       }
     }
     stprintf(st, "\n");
+    if(r->pc == pc && r->sp == old_sp) {
+      stprintf(st, "<unwind made no progress>\n");
+      break;
+    }
   }
+  if(depth == 32)
+    stprintf(st, "<unwind frame limit>\n");
   if(ipsr != -1) {
     stprintf(st, "* Top of stack: ");
     print_ipsr(st, ipsr);

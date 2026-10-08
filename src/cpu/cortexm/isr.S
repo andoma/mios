@@ -7,7 +7,9 @@ pendsv:
         .fnstart
         .cantunwind
 #endif
-        push {lr}
+        // Keep MSP 8-byte aligned across the C scheduler call. r3 is
+        // restored from the incoming hardware frame on exception return.
+        push {r3, lr}
 
         mrs r0, psp
         isb
@@ -37,7 +39,7 @@ pendsv:
 #endif
         msr psp, r0
         isb
-        pop {pc}
+        pop {r3, pc}
 #ifdef __thumb2__
         .fnend
 #endif
@@ -131,14 +133,21 @@ exc_bus_fault0:
 
         .thumb_func
 exc_usage_fault0:
-        push {lr}
+        // Preserve EXC_RETURN and keep SP 8-byte aligned for the C call.
+        push {r4, lr}
         bl  exc_handle_usage_fault
         cmp     r0, #0
         beq     1f
 
+        // BL replaced LR with a code address. The common fault entry
+        // needs the original EXC_RETURN and original MSP to locate the
+        // hardware frame, including faults taken from Handler mode.
+        pop {r4}
+        pop {r1}
+        mov lr, r1
         ldr r0,=exc_usage_fault
         b exc_common_fault
-1:      pop  {pc}
+1:      pop  {r4, pc}
 
 
 // ----------- Vectors ------------------------------------------
