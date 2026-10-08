@@ -42,6 +42,15 @@ cpu_stack_redzone(thread_t *t)
 
 void cpu_fpu_ctx_init(int *ctx);
 
+#ifdef HAVE_FPU
+void cpu_fpu_switch(thread_t *t);
+#endif
+
+#ifdef CPU_FPU_ICI_RESUME
+void cpu_fpu_resume(thread_t *t);
+extern uint32_t cpu_fpu_ici_restores;
+#endif
+
 
 
 static inline uint32_t

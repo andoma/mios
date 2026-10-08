@@ -1,0 +1,63 @@
+fc1 lazy FPU / INVSTATE regression
+=================================
+
+Run from the repository root:
+  python3 firmware/mios/test/fpu-lazy/run.py
+
+Requires arm-none-eabi-gcc and qemu-system-arm. The runner extracts the
+current FPU helpers, UsageFault handler and PendSV assembly from the source;
+only thread metadata and task selection are stubbed. No hardware is accessed.
+
+Evidence
+--------
+Hardware build 56b6681b46f6be220658f8818fa8b831cc8f9042 faulted in telemetry:
+  UFSR=0002 CPACR=0 PC=08021782 xPSR=6100b000 EXC_RETURN=fffffffd
+  current thread differed from the FP owner.
+The matching image decodes PC as VPUSH {d8-d11}; ICI=11 means that this
+instruction had been interrupted with a transfer still pending.
+
+The standalone test constructs a valid continuation frame for the analogous
+VPOP {d8-d11}, ICI=11 and passes it through the actual PendSV return path.
+The old scheduler policy disables the FPU because another thread owns it.
+QEMU then raises INVSTATE (UFSR=2), bypassing NOCP acquisition entirely.
+With cpu_fpu_resume(), the same return completes; all FP registers, FPSCR,
+the outgoing owner's saved state and the resulting SP are checked.
+
+The additional test performs 1000 ordinary switching cycles, including idle,
+same-owner resumption and IT states which must not be confused with ICI.
+It requires 2001 NOCP acquisitions and zero ICI restores.
+
+Fix and limits
+--------------
+On Cortex-M7, restore the incoming FP owner before exception return when
+its saved xPSR contains ICI continuation state. Ordinary instruction
+boundaries still acquire the FPU lazily. The check conservatively includes
+integer continuations in FP-capable threads and does not decode instructions
+or change PC/SP/xPSR. INVSTATE remains fatal. fpustats reports ICI restores.
+PendSV also now keeps MSP eight-byte aligned across its C call.
+
+This reproduces the observed fault mechanism, not the original interrupt
+timing. QEMU restarts multiple transfers instead of implementing the M7's
+partial memory access sequence. Hardware validation is recorded below.
+The result does not establish that every reported watchdog reset has this
+cause, or that INVSTATE-versus-NOCP precedence is an architectural guarantee.
+
+Hardware validation (2026-10-08)
+-------------------------------
+Flashed build 7fc7d2903c88fed60e2a47c36bfe7ec20b32da48 onto fc1, USB serial
+364139543033. cpustress 1200 99 completed without reboot; sustained reported
+CPU load was 99.6-99.7% after the first sample. Post-test log had no panic,
+current RTC breadcrumb was 0x57444700, and BuildID still matched the image.
+NOCP counter: 6496 -> 253758. ICI counter: 37 -> 2587. These readings include
+brief pre/post-test intervals; ICI counts precautionary restores, not faults.
+The full serial log, image, symbols, source patches and checksum manifest
+are in firmware/archives/fc1/7fc7d2903c88fed60e2a47c36bfe7ec20b32da48
+in the parent drone repository. The build.fc1 image and symbols also match.
+
+References
+----------
+Arm DDI0403E.e, B1.5.10 (B1-543 through B1-545): ICI encoding and SP rules.
+  https://www.pjrc.com/teensy/DDI0403Ee_arm_v7m_ref_manual.pdf
+QEMU translator: early disabled-coprocessor decoding plus the final
+unhandled-ICI check explains the emulator's INVSTATE result.
+  https://github.com/qemu/qemu/blob/master/target/arm/tcg/translate.c

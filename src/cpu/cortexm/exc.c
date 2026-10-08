@@ -3,6 +3,7 @@
 
 #include <mios/task.h>
 #include <mios/mios.h>
+#include <mios/cli.h>
 
 #include "cpu.h"
 #include "mpu.h"
@@ -67,6 +68,24 @@ exc_bus_fault(void *frame)
 
 
 
+#ifdef __ARM_FP
+static uint32_t fpu_nocp_restores;
+
+static error_t
+cmd_fpustats(cli_t *cli, int argc, char **argv)
+{
+  cli_printf(cli, "Lazy FPU restores: NOCP=%u", (unsigned)fpu_nocp_restores);
+#ifdef CPU_FPU_ICI_RESUME
+  cli_printf(cli, " ICI=%u", (unsigned)cpu_fpu_ici_restores);
+#endif
+  cli_printf(cli, "\n");
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("fpustats", cmd_fpustats, "", "Lazy FPU acquisition counters");
+#endif
+
+
 int
 exc_handle_usage_fault(void)
 {
@@ -78,31 +97,15 @@ exc_handle_usage_fault(void)
 #endif
 #ifdef __ARM_FP
   uint16_t ufsr = *UFSR;
+  thread_t *const t = thread_current();
+  if(t == NULL || t->t_fpuctx == NULL)
+    return -1;
+
   if(ufsr == 0x8) {
-    // NOCP (ie, tried to use FPU)
-
-    thread_t *const t = thread_current();
-    if(t == NULL || t->t_fpuctx == NULL) {
-      return -1;
-    }
-
-    cpu_t *cpu = curcpu();
-
-    cpu_fpu_enable(1);
-    if(cpu->sched.current_fpu) {
-      int32_t *ctx = cpu->sched.current_fpu->t_fpuctx;
-      asm volatile("vstm %0, {s0-s15}" :: "r"(ctx));
-      asm volatile("vstm %0, {s16-s31}" :: "r"(ctx + 16));
-      uint32_t fpscr;
-      asm volatile("vmrs %0, fpscr" :"=r"(fpscr));
-      ctx[32] = fpscr;
-    }
-
-    cpu->sched.current_fpu = t;
-    const int32_t *ctx = t->t_fpuctx;
-    asm volatile("vldm %0, {s0-s15}" :: "r"(ctx));
-    asm volatile("vldm %0, {s16-s31}" :: "r"(ctx + 16));
-    asm volatile("vmsr fpscr, %0" :: "r"(ctx[32]));
+    cpu_fpu_switch(t);
+    // NOCP is sticky and write-one-to-clear. Leave all other faults fatal.
+    *UFSR = 0x8;
+    fpu_nocp_restores++;
     return 0;
   }
 #endif

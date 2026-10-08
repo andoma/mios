@@ -30,6 +30,9 @@ cpu_init(void)
   strlcpy(t->t_name, "idle", sizeof(t->t_name));
   t->t_sp_bottom = sp_bottom;
   t->t_stream = NULL;
+#ifdef HAVE_FPU
+  t->t_fpuctx = NULL;
+#endif
   t->t_task.t_state = TASK_STATE_ZOMBIE;
   t->t_task.t_prio = 0;
   sched_cpu_init(&curcpu()->sched, t);
@@ -79,6 +82,69 @@ cpu_fpu_ctx_init(int *ctx)
   memset(ctx, 0, sizeof(int) * 32);
   ctx[32] = 1 << 24; // Enable flush-to-zero
 }
+
+#ifdef HAVE_FPU
+void
+cpu_fpu_switch(thread_t *t)
+{
+  if(t->t_fpuctx == NULL) {
+    // Keep the previous owner's state in the registers while integer-only
+    // threads run, but continue to trap accidental FP use by those threads.
+    cpu_fpu_enable(0);
+    return;
+  }
+  cpu_t *cpu = curcpu();
+  cpu_fpu_enable(1);
+  if(cpu->sched.current_fpu == t)
+    return;
+
+  if(cpu->sched.current_fpu) {
+    int32_t *ctx = cpu->sched.current_fpu->t_fpuctx;
+    asm volatile("vstm %0, {s0-s15}" :: "r"(ctx) : "memory");
+    asm volatile("vstm %0, {s16-s31}" :: "r"(ctx + 16) : "memory");
+    uint32_t fpscr;
+    asm volatile("vmrs %0, fpscr" : "=r"(fpscr));
+    ctx[32] = fpscr;
+  }
+  const int32_t *ctx = t->t_fpuctx;
+  asm volatile("vldm %0, {s0-s15}" :: "r"(ctx) : "memory");
+  asm volatile("vldm %0, {s16-s31}" :: "r"(ctx + 16) : "memory");
+  asm volatile("vmsr fpscr, %0" :: "r"(ctx[32]));
+  cpu->sched.current_fpu = t;
+}
+
+#ifdef CPU_FPU_ICI_RESUME
+uint32_t cpu_fpu_ici_restores;
+
+void
+cpu_fpu_resume(thread_t *t)
+{
+  cpu_t *cpu = curcpu();
+  if(cpu->sched.current_fpu == t) {
+    cpu_fpu_enable(1);
+    return;
+  }
+
+  if(t->t_fpuctx != NULL) {
+    // PendSV saves r4-r11 before the basic hardware frame; xPSR is word 15.
+    // IT and ICI share bits. ICI is nonzero only when IT[3:0] is zero.
+    const uint32_t xpsr = ((const uint32_t *)t->t_sp)[15];
+    if((xpsr & 0x0000f000) && !(xpsr & 0x06000c00)) {
+      // An FP multiple transfer may already be partway through execution.
+      // Returning to it with CP10/11 disabled can raise INVSTATE, not the
+      // NOCP used for lazy acquisition. Restore before exception return;
+      // preserve the PC, SP and ICI exactly. Conservatively cover integer
+      // continuations too, avoiding an instruction fetch in the scheduler.
+      cpu_fpu_switch(t);
+      cpu_fpu_ici_restores++;
+      return;
+    }
+  }
+  // Normal instruction boundaries still acquire the FPU lazily via NOCP.
+  cpu_fpu_enable(0);
+}
+#endif
+#endif
 
 
 void

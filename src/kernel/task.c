@@ -214,7 +214,9 @@ task_switch(void *cur_sp)
 
   cpu_stack_redzone(t);
 
-#ifdef HAVE_FPU
+#ifdef CPU_FPU_ICI_RESUME
+  cpu_fpu_resume(t);
+#elif defined(HAVE_FPU)
   cpu_fpu_enable(cpu->sched.current_fpu == t);
 #endif
 
