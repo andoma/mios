@@ -67,6 +67,7 @@ linux_mmap(void *addr, size_t len, int prot, int flags, int fd, long off)
 // ---- Time ----
 
 #define CLOCK_MONOTONIC 1
+#define CLOCK_PROCESS_CPUTIME_ID 2
 #define TIMER_ABSTIME   1
 
 struct linux_timespec {
@@ -100,6 +101,7 @@ linux_clock_gettime_ns(int clk)
 #define SIGIO    29
 #define SIGHUP    1
 #define SIGCHLD  17
+#define SIGPROF  27
 #define SIGRTMIN 32
 
 #define SA_SIGINFO   0x00000004

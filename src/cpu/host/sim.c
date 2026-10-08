@@ -142,6 +142,66 @@ sim_thread_create(const char *name, void (*fn)(void *arg), void *arg,
 }
 
 
+// ---- Watchdog ----
+
+/* A livelock (something runnable forever) stops the virtual clock, so
+   the "nothing runnable" deadlock check below never trips and neither
+   does anything sleeping on the clock: the run would spin until CI
+   gives up. Real Mios goes idle within milliseconds (and the idle loop
+   feeds the hardware watchdog), so if the coordinator has not found
+   everybody waiting for a second, something is stuck.
+
+   The second is process CPU time, not wall clock, so a loaded machine
+   does not trip it. The timer signals the Mios CPU thread by tid: a
+   process-directed signal could land on a peer, and the panic should
+   show the Mios thread that is spinning. */
+
+#define SIM_WATCHDOG_SEC 1
+
+static int sim_watchdog_id = -1;
+
+static void
+sim_watchdog_fire(int sig, linux_siginfo_t *si, void *ucontext)
+{
+  thread_t *t = thread_current();
+  const uint64_t now = clock_get();
+  panic_frame(ucontext, "virtual time stuck at %d.%06d s: no idle for %d s "
+              "of CPU (livelock?) thread:%s", (int)(now / 1000000),
+              (int)(now % 1000000), SIM_WATCHDOG_SEC, t ? t->t_name : "?");
+}
+
+static void
+sim_watchdog_kick(void)
+{
+  if(sim_watchdog_id < 0)
+    return;
+  const struct linux_itimerspec its = {
+    .it_value.tv_sec = SIM_WATCHDOG_SEC,
+  };
+  linux_syscall(SYS_timer_settime, sim_watchdog_id, 0, &its, NULL);
+}
+
+static void __attribute__((constructor(102)))
+sim_watchdog_init(void)
+{
+  extern int host_lib_mode;  // idles in cpu.c's lib_idle(), never here
+  if(!host_vtime || host_lib_mode)
+    return;
+
+  linux_sigaction(SIGPROF, sim_watchdog_fire, SA_SIGINFO | SA_ONSTACK, 0);
+  struct linux_sigevent sev = {
+    .sigev_signo = SIGPROF,
+    .sigev_notify = SIGEV_THREAD_ID,
+    .sigev_tid = linux_syscall(SYS_gettid),
+  };
+  int id;
+  if(linux_syscall(SYS_timer_create, CLOCK_PROCESS_CPUTIME_ID, &sev, &id))
+    panic("sim watchdog: timer_create failed");
+  sim_watchdog_id = id;
+  sim_watchdog_kick();
+}
+
+
 // ---- Coordinator ----
 
 static int
@@ -175,6 +235,7 @@ sim_idle(void)
       continue;   // a peer may have posted another peer
 
     // Everybody is waiting. Advance the clock to the earliest deadline.
+    sim_watchdog_kick();
     uint64_t next = host_timer_next();
     for(sim_thread_t *t = sim_threads; t != NULL; t = t->next) {
       if(!t->dead && t->deadline < next)
