@@ -21,19 +21,41 @@ static ssize_t
 crashlog_stream_write(struct stream *s, const void *buf, size_t size, int flags)
 {
   crashlog_stream_t *cs = (crashlog_stream_t *)s;
+#ifndef CRASHLOG_DEFER_CONSOLE
   stream_write(stdio, buf, size, flags);
+#endif
 
   crashlog_buf_t *cb = cs->buf;
-
-  if(buf == NULL) {
-    cb->magic = CRASHLOG_PRESENT;
+  if(cb == NULL) {
+#ifdef CRASHLOG_DEFER_CONSOLE
+    stream_write(stdio, buf, size, flags);
+#endif
     return size;
   }
 
-  if(cb->magic != CRASHLOG_READY)
+  if(buf == NULL) {
+    cb->magic = CRASHLOG_PRESENT;
+#ifdef CRASHLOG_DEFER_CONSOLE
+    CRASHLOG_COMMIT_BARRIER();
+    // Retention is committed BEFORE touching the console. Only the
+    // retained prefix is replayed if the backtrace exceeded the buffer.
+    cb->message[sizeof(cb->message) - 1] = 0;
+    stream_write(stdio, cb->message, strlen(cb->message), flags);
+    stream_write(stdio, NULL, 0, flags);
+#endif
+    return size;
+  }
+
+  if(cb->magic != CRASHLOG_READY
+#ifdef CRASHLOG_DEFER_CONSOLE
+     && cb->magic != CRASHLOG_PRESENT
+#endif
+     )
     return size;
 
-  size_t len = strlen(cb->message);
+  size_t len = 0;
+  while(len < sizeof(cb->message) - 1 && cb->message[len])
+    len++;
   size_t to_copy = sizeof(cb->message) - len - 1;
   to_copy = MIN(size, to_copy);
 
@@ -41,6 +63,13 @@ crashlog_stream_write(struct stream *s, const void *buf, size_t size, int flags)
   const char *src = buf;
   memcpy(dst, src, to_copy);
   dst[to_copy] = 0;
+#ifdef CRASHLOG_DEFER_CONSOLE
+  // Each chunk is independently recoverable, including a panic whose
+  // stack unwind faults or stalls before reaching the final flush.
+  CRASHLOG_COMMIT_BARRIER();
+  cb->magic = CRASHLOG_PRESENT;
+  CRASHLOG_COMMIT_BARRIER();
+#endif
   return size;
 }
 
@@ -77,6 +106,7 @@ crashlog_recover(void)
     return;
 
   if(cb->magic == CRASHLOG_PRESENT) {
+    cb->message[sizeof(cb->message) - 1] = 0;
     char *s = cb->message;
 
     evlog(LOG_ALERT, "Crashlog from last boot");

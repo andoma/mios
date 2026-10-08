@@ -19,6 +19,11 @@
 #define CRASHLOG_SIZE  512
 #define CRASHLOG_ADDR  (0x38004000 - CRASHLOG_SIZE)
 
+// Save even unfinished panic output. Do not let a polled UART stall hide
+// the panic reason: replay the retained (bounded) text only at final flush.
+#define CRASHLOG_DEFER_CONSOLE
+#define CRASHLOG_COMMIT_BARRIER() asm volatile("dsb" ::: "memory")
+
 #define CMDLINE_SIZE   192
 #define CMDLINE_ADDR   0x1000
 
