@@ -50,6 +50,7 @@ SRCS += ${P}/host.c \
 	${P}/hostnet.c \
 	${P}/hosttest.c \
 	${P}/suite_snprintf.c \
+	${P}/suite_kernel.c \
 	${P}/vnet.c \
 	${P}/vcan.c \
 	${P}/vcan_loop.c \
