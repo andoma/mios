@@ -15,6 +15,8 @@ icm42688_t *icm42688_create(spi_t *bus, gpio_t nss);
 // the sensor start-up completes.
 error_t icm42688_reset(icm42688_t *dev);
 
+// ERR_NOT_READY means no new data-ready event, or an update raced the
+// burst read. On any error, values is unchanged. Single-reader API.
 error_t icm42688_read(icm42688_t *dev, imu_values_t *values);
 
 void icm42688_dump(icm42688_t *dev, struct stream *st);

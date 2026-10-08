@@ -5,6 +5,12 @@
 
 #define ICM42688_REG_DEVICE_CONFIG  0x11
 #define ICM42688_REG_TEMP_DATA1     0x1d // First of 14 contiguous data regs
+#define ICM42688_REG_INT_STATUS     0x2d
+#define ICM42688_REG_INT_CONFIG     0x14
+#define ICM42688_REG_INT_CONFIG0    0x63
+#define ICM42688_REG_INT_CONFIG1    0x64
+#define ICM42688_REG_INT_SOURCE0    0x65
+#define ICM42688_REG_GYRO_ACCEL_CONFIG0 0x52
 #define ICM42688_REG_PWR_MGMT0      0x4e
 #define ICM42688_REG_GYRO_CONFIG0   0x4f
 #define ICM42688_REG_ACCEL_CONFIG0  0x50
@@ -14,7 +20,8 @@
 
 // +-2000dps / +-16g, 1kHz ODR (== reset default, written explicitly).
 // No DRDY line is wired on fc1 (INT1/INT2 unconnected), so this is read
-// by polling at the ODR rate rather than off an interrupt.
+// by polling at the ODR rate rather than off an interrupt. Each read
+// checks latched data-ready; a poll is not automatically a fresh sample.
 #define ICM42688_GYRO_CONFIG0_VAL   0x06
 #define ICM42688_ACCEL_CONFIG0_VAL  0x06
 
@@ -31,18 +38,19 @@ struct icm42688 {
   gpio_t nss;
   int spicfg;
   uint8_t buf[1 + 14];
+  uint8_t regbuf[2] __attribute__((aligned(4)));
 };
 
 
 static error_t
 read_u8(icm42688_t *dev, uint8_t reg, uint8_t *value)
 {
-  dev->buf[0] = 0x80 | reg;
-  dev->buf[1] = 0;
-  error_t err = dev->spi->rw(dev->spi, dev->buf, dev->buf, 2, dev->nss,
+  dev->regbuf[0] = 0x80 | reg;
+  dev->regbuf[1] = 0;
+  error_t err = dev->spi->rw(dev->spi, dev->regbuf, dev->regbuf, 2, dev->nss,
                              dev->spicfg);
   if(!err)
-    *value = dev->buf[1];
+    *value = dev->regbuf[1];
   return err;
 }
 
@@ -96,6 +104,21 @@ icm42688_reset(icm42688_t *dev)
   if(err)
     return err;
 
+  // DS-000347: retain the default UI bandwidth explicitly (ODR/4,
+  // 250 Hz at 1 kHz). Sensor-internal AAF/order settings remain defaults.
+  err = write_u8(dev, ICM42688_REG_GYRO_ACCEL_CONFIG0, 0x11);
+  if(err) return err;
+  // Data-ready latched until STATUS read. INT1 is not wired, but the
+  // status register lets polling distinguish new data from old data.
+  err = write_u8(dev, ICM42688_REG_INT_CONFIG, 0x04);
+  if(err) return err;
+  err = write_u8(dev, ICM42688_REG_INT_CONFIG0, 0x00);
+  if(err) return err;
+  err = write_u8(dev, ICM42688_REG_INT_CONFIG1, 0x00); // INT_ASYNC_RESET=0
+  if(err) return err;
+  err = write_u8(dev, ICM42688_REG_INT_SOURCE0, 0x08); // UI_DRDY_INT1_EN
+  if(err) return err;
+
   // Enable accel + gyro in Low Noise mode
   err = write_u8(dev, ICM42688_REG_PWR_MGMT0, 0x0f);
   if(err)
@@ -111,11 +134,22 @@ icm42688_reset(icm42688_t *dev)
 error_t
 icm42688_read(icm42688_t *dev, imu_values_t *v)
 {
+  uint8_t status;
+  error_t err = read_u8(dev, ICM42688_REG_INT_STATUS, &status);
+  if(err) return err;
+  if(!(status & 0x08)) return ERR_NOT_READY;
   dev->buf[0] = 0x80 | ICM42688_REG_TEMP_DATA1;
-  error_t err = dev->spi->rw(dev->spi, dev->buf, dev->buf, sizeof(dev->buf),
+  err = dev->spi->rw(dev->spi, dev->buf, dev->buf, sizeof(dev->buf),
                              dev->nss, dev->spicfg);
   if(err)
     return err;
+  // If another sample arrived during the transaction, discard this
+  // ambiguous read. The next accepted read must have a new ready event;
+  // it cannot count this same register image a second time. FIFO-based
+  // acquisition would preserve such samples instead of discarding them.
+  err = read_u8(dev, ICM42688_REG_INT_STATUS, &status);
+  if(err) return err;
+  if(status & 0x08) return ERR_NOT_READY;
 
   const int16_t iax = dev->buf[3]  << 8 | dev->buf[4];
   const int16_t iay = dev->buf[5]  << 8 | dev->buf[6];

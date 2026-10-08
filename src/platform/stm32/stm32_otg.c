@@ -23,6 +23,7 @@
 #define OTG_GAHBCFG  (OTG_BASE + 0x008)
 #define OTG_GUSBCFG  (OTG_BASE + 0x00c)
 #define OTG_GRSTCTL  (OTG_BASE + 0x010)
+#include "stm32_otg_fifo.h"
 #define OTG_GINTSTS  (OTG_BASE + 0x014)
 #define OTG_GINTMSK  (OTG_BASE + 0x018)
 #define OTG_GRXSTSP  (OTG_BASE + 0x020)
@@ -131,6 +132,8 @@ struct usb_ctrl {
   uint32_t uc_resets;
   uint32_t uc_enumerations;
   uint32_t uc_erratic_errors;
+  uint32_t uc_tx_flush_failures;
+  uint32_t uc_tx_disable_failures;
 
   struct usb_interface_queue uc_ifaces;
 
@@ -279,9 +282,13 @@ static error_t
 uc_ep_write(device_t *dev, usb_ep_t *ue, const uint8_t *buf, size_t len)
 {
   const uint32_t ep = ue->ue_address & 0x7f;
+  // Do not let USB reset/reconfiguration interrupt a partially queued
+  // packet and leave payload in a FIFO belonging to the old transfer.
+  const int irq_state = irq_forbid(IRQ_LEVEL_NET);
 
-  if(reg_rd(OTG_DIEPCTL(ep)) & (1 << 31)) {
+  if(!ue->ue_running || (reg_rd(OTG_DIEPCTL(ep)) & (1 << 31))) {
     ue->ue_num_drops++;
+    irq_permit(irq_state);
     return ERR_NOT_READY;
   }
 
@@ -290,6 +297,7 @@ uc_ep_write(device_t *dev, usb_ep_t *ue, const uint8_t *buf, size_t len)
 
   if(len + 4 > avail_bytes) {
     ue->ue_num_drops++;
+    irq_permit(irq_state);
     return ERR_NOT_READY;
   }
 
@@ -318,6 +326,7 @@ uc_ep_write(device_t *dev, usb_ep_t *ue, const uint8_t *buf, size_t len)
   if(len & 3) {
     reg_wr(OTG_FIFO(ep), u32);
   }
+  irq_permit(irq_state);
   return 0;
 }
 
@@ -636,10 +645,25 @@ handle_oepint(usb_ctrl_t *uc)
 static void
 handle_reset(usb_ctrl_t *uc)
 {
+  reg_wr(OTG_DAINTMSK, 0);
   set_address(0);
 
   for(int ep = 0; ep < uc->uc_num_endpoints; ep++) {
     usb_ep_t *ue;
+
+    // Cancelling only USBAEP does not clear EPENA. Flushing a still
+    // enabled IN transfer leaves it waiting forever for its discarded
+    // payload. EP0 is handled by the control setup/reset machinery.
+    if(ep && (reg_rd(OTG_DIEPCTL(ep)) & (1u << 31))) {
+      reg_or(OTG_DIEPCTL(ep), (1u << 30) | (1u << 27)); // EPDIS, SNAK
+      unsigned n;
+      for(n = 0; n < OTG_FIFO_POLL_LIMIT; n++) {
+        if(!(reg_rd(OTG_DIEPCTL(ep)) & (1u << 31)))
+          break;
+      }
+      if(n == OTG_FIFO_POLL_LIMIT)
+        uc->uc_tx_disable_failures++;
+    }
 
     // Turn off active endpoint bits
     reg_clr_bit(OTG_DIEPCTL(ep), 15);
@@ -665,6 +689,15 @@ handle_reset(usb_ctrl_t *uc)
       if(ue->ue_reset != NULL)
         ue->ue_reset(&uc->uc_dev, ue);
     }
+  }
+
+  // USB reset cancels the hardware transfer but does not empty its TX
+  // FIFO. In particular a pending 64-byte tlm packet leaves only 16 free
+  // words in its 32-word FIFO; subsequent writes then fail forever.
+  // Flush before enabling EP0/enumeration, while every interface is stopped.
+  if(otg_flush_all_tx_fifos()) {
+    uc->uc_tx_flush_failures++;
+    return; // fail closed; a subsequent bus reset can retry
   }
 
   reg_wr(OTG_DOEPMSK, 0);
@@ -1043,10 +1076,11 @@ usb_print_info(struct device *d, struct stream *st)
            ((dsts >> 23) & 1),
            dsts & 1);
 
-  stprintf(st, "Resets: %d  Enumerations: %d  Core errors: %d\n",
+  stprintf(st, "Resets: %d  Enumerations: %d  Core errors: %d  TX flush/disable failures: %d/%d\n",
            uc->uc_resets,
            uc->uc_enumerations,
-           uc->uc_erratic_errors);
+           uc->uc_erratic_errors,
+           uc->uc_tx_flush_failures, uc->uc_tx_disable_failures);
 
   if(!(dsts & 1)) {
     stprintf(st, "Assigned address: %d   Last SOF Frame: %d\n",

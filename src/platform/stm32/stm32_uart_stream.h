@@ -14,24 +14,28 @@ typedef struct stm32_uart_stream {
 
   device_t device;
 
+  task_waitable_t wait_rx;
+  task_waitable_t wait_tx;
+
   uint32_t reg_base;
+  uint32_t rx_overrun;
+  uint32_t rx_noise;
+  uint32_t rx_framing_error;
+
+  gpio_t tx_enable;
+  gpio_t rx_enable;
 
   // Kept so the baud rate can be recomputed later: the divisor depends
   // on the peripheral clock, and only the clock id knows what that is.
   uint16_t clkid;
 
-  task_waitable_t wait_rx;
-  task_waitable_t wait_tx;
-
   stm32_dma_instance_t tx_dma;
 
   uint8_t flags;
 
-  gpio_t tx_enable;
   uint8_t tx_pol_invert;
   uint8_t tx_enabled;
 
-  gpio_t rx_enable;
   uint8_t rx_pol_invert;
 
   uint8_t rx_fifo_rdptr;
@@ -42,10 +46,6 @@ typedef struct stm32_uart_stream {
 
   uint8_t tx_fifo[TX_FIFO_SIZE];
   uint8_t rx_fifo[RX_FIFO_SIZE];
-
-  uint32_t rx_overrun;
-  uint32_t rx_noise;
-  uint32_t rx_framing_error;
 
 } stm32_uart_stream_t;
 
