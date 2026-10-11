@@ -376,6 +376,29 @@ level_for(int mbs_per_sec, int mbs)
 }
 
 
+// AXISRAM1-6, what the VENC's AXI master can reach. The TCMs (where a
+// general heap allocation may also end up) are CPU only.
+#define AXISRAM_START 0x24000000
+#define AXISRAM_END   0x243c0000
+
+// Allocate a buffer for the encoder. `type` is the preferred memory
+// type; if that doesn't fit, or lands outside the AXI SRAM, fall back to
+// the DMA heap.
+static void *
+venc_alloc(size_t size, unsigned int type)
+{
+  void *p = xalloc(size, 64, type | MEM_MAY_FAIL);
+  if(p != NULL &&
+     ((intptr_t)p < AXISRAM_START || (intptr_t)p + size > AXISRAM_END)) {
+    free(p);
+    p = NULL;
+  }
+  if(p == NULL && type != MEM_TYPE_DMA)
+    p = xalloc(size, 64, MEM_TYPE_DMA | MEM_MAY_FAIL);
+  return p;
+}
+
+
 static int
 exp_golomb_signed_len(int val)
 {
@@ -420,14 +443,14 @@ stm32n6_venc_h264_create(const stm32n6_venc_h264_config_t *cfg)
 
   // Reference and reconstruction, swapped after every frame
   for(int i = 0; i < 2; i++) {
-    v->luma[i] = xalloc(mbs * 256, 64, cfg->ref_mem_type);
-    v->chroma[i] = xalloc(mbs * 128, 64, cfg->ref_mem_type);
+    v->luma[i] = venc_alloc(mbs * 256, cfg->ref_mem_type);
+    v->chroma[i] = venc_alloc(mbs * 128, cfg->ref_mem_type);
   }
 
   // Worst case for a sane QP is well below this. A frame that doesn't fit
   // is reported as an error and the next one is forced to IDR.
   v->out_size = ALIGN(v->width * v->height / 2 + 4096, 64);
-  v->out = xalloc(v->out_size, 64, MEM_TYPE_DMA);
+  v->out = venc_alloc(v->out_size, MEM_TYPE_DMA);
 
   // NAL size table, CABAC context tables, MV/MB info output (56 bytes per
   // MB on this revision) and the segmentation map (4 bits per MB)
@@ -436,7 +459,7 @@ stm32n6_venc_h264_create(const stm32n6_venc_h264_config_t *cfg)
   v->mv_offset = v->cabac_offset + ALIGN(52 * 2 * 464, 64);
   v->segmap_offset = v->mv_offset + ALIGN(mbs * 64, 64);
   v->aux_size = v->segmap_offset + ALIGN((mbs * 4 + 63) / 64 * 8, 64);
-  v->aux = xalloc(v->aux_size, 64, cfg->ref_mem_type);
+  v->aux = venc_alloc(v->aux_size, cfg->ref_mem_type);
 
   if(v->luma[0] == NULL || v->luma[1] == NULL ||
      v->chroma[0] == NULL || v->chroma[1] == NULL || v->out == NULL ||
@@ -792,6 +815,12 @@ stm32n6_venc_h264_print_status(stm32n6_venc_h264_t *v, stream_t *st)
              v->intra_refresh, v->ir_pos);
   else
     stprintf(st, "  IDR every %d frames\n", v->gop);
+  const int mbs = v->mb_width * v->mb_height;
+  stprintf(st, "  Memory: luma %p %p (%d), chroma %p %p (%d), "
+           "out %p (%d), aux %p (%d)\n",
+           v->luma[0], v->luma[1], mbs * 256,
+           v->chroma[0], v->chroma[1], mbs * 128,
+           v->out, (int)v->out_size, v->aux, (int)v->aux_size);
   stprintf(st, "  Frames:%u Errors:%u  Last frame: %u bytes, %u us\n",
            v->frames, v->errors, v->last_size, v->encode_time);
 }

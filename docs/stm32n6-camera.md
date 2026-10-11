@@ -110,7 +110,7 @@ the whole pipeline: sensor, CSI-2 receiver, ISP, encoder and output.
 | Command                     | Purpose                                       |
 |-----------------------------|-----------------------------------------------|
 | `camera`                    | Pipeline status                               |
-| `camera start <ip> <port> [qp] [frame] [gop]` | Stream H.264 over RTP. `frame` selects whole frame mode, `gop` periodic IDRs instead of intra refresh |
+| `camera start <ip> <port> [WxH] [qp] [frame] [gop]` | Stream H.264 over RTP, default 640x480 (width a multiple of 16; 4:3 keeps the full sensor view, other aspect ratios crop). `frame` selects whole frame mode, `gop` periodic IDRs instead of intra refresh |
 | `camera stop`               | Stop streaming                                |
 | `camera qp <n>`             | Change the encoder QP                         |
 | `camera slices <rows>`      | Macroblock rows per slice, 0 = one slice per frame. Each slice starts a new RTP packet, so a lost packet only damages its slice |

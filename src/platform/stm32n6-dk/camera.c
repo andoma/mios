@@ -84,7 +84,11 @@ cmd_camera(cli_t *cli, int argc, char **argv)
       .intra_refresh = is->fps,
     };
     for(int i = 4; i < argc; i++) {
-      if(!strcmp(argv[i], "frame"))
+      const char *x = strchr(argv[i], 'x');
+      if(x != NULL) {
+        cfg.width = atoi(argv[i]);
+        cfg.height = atoi(x + 1);
+      } else if(!strcmp(argv[i], "frame"))
         cfg.streaming = 0;
       else if(!strcmp(argv[i], "gop"))
         cfg.intra_refresh = 0;
@@ -155,7 +159,7 @@ cmd_camera(cli_t *cli, int argc, char **argv)
 }
 
 CLI_CMD_DEF_EXT("camera", cmd_camera,
-                "[start <ip> <port> [qp] [frame] [gop] | stop | qp <n> | "
+                "[start <ip> <port> [WxH] [qp] [frame] [gop] | stop | qp <n> | "
                 "slices <rows> | ae on|off | awb on|off | "
                 "exposure <lines> [gain] | wb <r> <b> | tpg <n|-1> | "
                 "raw [x y [w h]] | clear | regs]",

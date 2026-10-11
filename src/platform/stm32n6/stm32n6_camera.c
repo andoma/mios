@@ -285,6 +285,12 @@ stm32n6_camera_start(const stm32n6_camera_config_t *cfg, video_sink_t *sink)
     return is == NULL ? ERR_NO_DEVICE : ERR_BAD_STATE;
   }
 
+  if((cfg->width & 15) || (cfg->height & 1) || cfg->width > is->width ||
+     cfg->height > is->height) {
+    sink->close(sink);
+    return ERR_INVALID_ARGS;
+  }
+
   cam.cfg = *cfg;
   if(cam.cfg.gop == 0)
     cam.cfg.gop = is->fps;
@@ -330,8 +336,9 @@ stm32n6_camera_start(const stm32n6_camera_config_t *cfg, video_sink_t *sink)
 
   // Two frame buffers, or one ring in streaming mode
   const size_t size = stm32n6_dcmipp_buffer_size(&cam.isp);
-  cam.frames[0] = xalloc(size, 64, MEM_TYPE_DMA);
-  cam.frames[1] = cfg->streaming ? NULL : xalloc(size, 64, MEM_TYPE_DMA);
+  cam.frames[0] = xalloc(size, 64, MEM_TYPE_DMA | MEM_MAY_FAIL);
+  cam.frames[1] = cfg->streaming ? NULL :
+    xalloc(size, 64, MEM_TYPE_DMA | MEM_MAY_FAIL);
   cam.enc = stm32n6_venc_h264_create(&venc_cfg);
 
   error_t err = 0;
@@ -510,7 +517,7 @@ stm32n6_camera_raw_stats(stream_t *st, int x, int y, int w, int h)
 
   x &= ~1;
   w &= ~1;
-  uint16_t *buf = xalloc(w * h * 2, 64, MEM_TYPE_DMA);
+  uint16_t *buf = xalloc(w * h * 2, 64, MEM_TYPE_DMA | MEM_MAY_FAIL);
   if(buf == NULL)
     return ERR_NO_MEMORY;
 
