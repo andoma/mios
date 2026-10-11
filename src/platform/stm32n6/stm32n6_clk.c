@@ -57,11 +57,35 @@ clk_get_freq(uint16_t id)
  */
 
 
+// PLL1 output, see stm32n6_init_pll()
+static uint32_t pll1_freq;
+
 static void
 enable_ic(int unit, int divider, int source)
 {
   reg_wr(RCC_ICxCFGR(unit), ((divider - 1) << 16) | (source << 28));
   reg_set_bit(RCC_DIVENR, unit - 1); // Use set-register instead
+}
+
+unsigned int
+stm32n6_ic_enable_pll1(int unit, unsigned int hz)
+{
+  unsigned int divider = (pll1_freq + hz - 1) / hz;
+  if(divider < 1)
+    divider = 1;
+  if(divider > 256)
+    divider = 256;
+  enable_ic(unit, divider, 0);
+  return pll1_freq / divider;
+}
+
+unsigned int
+stm32n6_ic_get_freq(int unit)
+{
+  const uint32_t cfgr = reg_rd(RCC_ICxCFGR(unit));
+  if((cfgr >> 28) != 0)
+    return 0; // Only PLL1 is tracked
+  return pll1_freq / (((cfgr >> 16) & 0xff) + 1);
 }
 
 
@@ -77,6 +101,7 @@ stm32n6_init_pll(unsigned int hse_freq)
   // Configure PLL1 HSE@48MHZ * 50 == 2400MHz
   int divm = 1;
   int divn = 50;
+  pll1_freq = hse_freq / divm * divn;
   //  int divp = 1;
 
   reg_wr(RCC_PLLxCFGR2(1), 0);  // Clear fractional divider (FSBL leaves 0x800000)

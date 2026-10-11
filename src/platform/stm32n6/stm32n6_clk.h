@@ -33,6 +33,8 @@
 #define RCC_APB2ENR       (RCC_BASE + 0x26c)
 #define RCC_APB4ENR1      (RCC_BASE + 0x274)
 #define RCC_APB4ENR2      (RCC_BASE + 0x278)
+#define RCC_APB5ENR       (RCC_BASE + 0x27c)
+#define RCC_APB5LPENR     (RCC_BASE + 0x2bc)
 
 
 #define CLK_BSEC      CLK_ID(RCC_APB4ENR2, 1)
@@ -98,6 +100,10 @@
 #define CLK_ETH1RXEN   CLK_ID(RCC_AHB5ENR, 24)
 #define CLK_ETH1EN     CLK_ID(RCC_AHB5ENR, 25)
 
+#define CLK_DCMIPP     CLK_ID(RCC_APB5ENR, 2)
+#define CLK_VENC       CLK_ID(RCC_APB5ENR, 5)
+#define CLK_CSI        CLK_ID(RCC_APB5ENR, 6)
+
 #define CLK_OTG1PHYCTL CLK_ID(RCC_AHB5ENR, 22)
 #define CLK_OTG2PHYCTL CLK_ID(RCC_AHB5ENR, 24)
 #define CLK_OTG1       CLK_ID(RCC_AHB5ENR, 26)
@@ -155,3 +161,10 @@ unsigned int clk_get_freq(uint16_t id);
 extern uint32_t stm32n6_hse_freq;
 
 const char *stm32n6_init_pll(unsigned int hse_freq);
+
+// Configure and enable ICx (RCC_ICxCFGR) as PLL1 divided down to at
+// most `hz`. Returns the resulting frequency.
+unsigned int stm32n6_ic_enable_pll1(int unit, unsigned int hz);
+
+// Frequency of an ICx output, 0 if it's not fed from PLL1
+unsigned int stm32n6_ic_get_freq(int unit);

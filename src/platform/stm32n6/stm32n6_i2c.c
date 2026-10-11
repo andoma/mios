@@ -27,6 +27,17 @@ static const struct i2c_config {
   { 0x56001c00, CLK_I2C4, 106, 107 },
 };
 
+static stm32_i2c_t *g_i2c[ARRAYSIZE(i2c_configs)];
+
+i2c_t *
+i2c_get_bus(unsigned int bus_id)
+{
+  bus_id--;
+  if(bus_id >= ARRAYSIZE(g_i2c))
+    return NULL;
+  return (i2c_t *)g_i2c[bus_id];
+}
+
 
 i2c_t *
 stm32n6_i2c_create_unit(unsigned int instance, int scl_freq)
@@ -50,6 +61,7 @@ stm32n6_i2c_create_unit(unsigned int instance, int scl_freq)
   irq_enable_fn_arg(c->irq2, IRQ_LEVEL_IO, i2c_irq, d);
 
   reg_wr(d->base_addr + I2C_TIMINGR, timingr);
+  g_i2c[instance] = d;
   return &d->i2c;
 }
 
