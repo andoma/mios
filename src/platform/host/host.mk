@@ -15,6 +15,7 @@ ENABLE_HEAP_MMAP := yes
 ENABLE_PERFTEST := yes
 ENABLE_NET_IPV4 := yes
 ENABLE_NET_DSIG_UDP := yes
+ENABLE_NET_RTP := yes
 ENABLE_NET_CAN := yes
 
 # Virtual consoles. No in-tree target enabled these before, so the host
@@ -64,6 +65,7 @@ SRCS += ${P}/host.c \
 	${P}/suite_vllp_client.c \
 	${P}/suite_vllp_xcheck.c \
 	${P}/suite_ota.c \
+	${P}/suite_rtp_h264.c \
 	${P}/vspiflash.c \
 	${P}/host_ota.c \
 	${T}host/dsig/vllp.c \

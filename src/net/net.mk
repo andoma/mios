@@ -129,6 +129,9 @@ SRCS-${ENABLE_NET_IPV4} += \
 SRCS-${ENABLE_NET_PTP} += \
 	${SRC}/net/ptp.c \
 
+SRCS-${ENABLE_NET_RTP} += \
+	${SRC}/net/rtp_h264.c \
+
 ${MOS}/net/%.o : CFLAGS += ${NOFPU}
 ${MOS}/net/mbus/%.o : CFLAGS += ${NOFPU}
 ${MOS}/net/ipv4/%.o : CFLAGS += ${NOFPU}
