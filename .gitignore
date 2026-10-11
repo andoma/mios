@@ -2,3 +2,4 @@ build.*/
 *~
 local.mk
 support/msmp/msmp
+host/camview/camview
