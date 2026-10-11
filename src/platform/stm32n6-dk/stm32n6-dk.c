@@ -13,6 +13,8 @@
 #include "stm32n6_eth.h"
 #include "stm32n6_uart.h"
 
+#include "camera.h"
+
 #include <usb/usb.h>
 
 #define BLINK_GPIO GPIO_PG(10) // Red LED (LD2)
@@ -23,6 +25,9 @@ board_init_clk(void)
   stm32n6_init_pll(48000000);
 
   stm32n6_pwr_vddio3_enable(STM32N6_VDDIO_1V8);
+  // PC1, PC[12:6], PH9 (camera I2C and reset) are supplied from VDDIO4,
+  // which is tied to the 3.3V VDDIO rail on this board
+  stm32n6_pwr_vddio4_enable(STM32N6_VDDIO_3V3);
   stm32n6_pwr_usb33_enable();
 }
 
@@ -51,6 +56,8 @@ blinker(void *arg)
 static void __attribute__((constructor(800)))
 board_init_late(void)
 {
+  camera_init();
+
   thread_create(blinker, NULL, 512, "blinker", 0, 0);
 
   struct usb_interface_queue q;
