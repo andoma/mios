@@ -81,3 +81,6 @@ SRCS-${ENABLE_SX1280} += \
 	${SRC}/drivers/sx1280/sx1280.c \
 	${SRC}/drivers/sx1280/sx1280_sched.c \
 	${SRC}/drivers/sx1280/sx1280_ble.c
+
+SRCS-${ENABLE_IMX335} += \
+	${SRC}/drivers/camera/imx335.c
