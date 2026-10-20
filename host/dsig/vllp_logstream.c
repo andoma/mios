@@ -1,11 +1,71 @@
 #include "vllp_logstream.h"
 
+#include <string.h>
+
+#ifndef VLLP_SIM
 #include "vllp.h"
 
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <string.h>
+#endif
+
+
+/**
+ * Framing (see evlog_svc_pull() in mios src/kernel/eventlog.c)
+ *
+ *   rDTT_TLLL
+ *                r = reserved
+ *                D = Discontinuity
+ *                T = Size of timestamp delta
+ *                L = Log level (0 - 7)
+ *
+ *    [4 byte sequence, if D is set]
+ *    [Timestamp Delta, up to 7 bytes]
+ *    [Message]
+ */
+int
+vllp_logstream_decode(const void *data, size_t len, uint32_t *seq,
+                      int *level, int64_t *ms_ago,
+                      const char **msg, size_t *msglen)
+{
+  const uint8_t *u8 = data;
+  if(len < 1)
+    return -1;
+
+  *level = u8[0] & 7;
+  int discontinuity = u8[0] & 0x40;
+  int tsdeltasize = (u8[0] >> 3) & 7;
+
+  u8++;
+  len--;
+
+  if(discontinuity) {
+    if(len < 4)
+      return -1;
+
+    memcpy(seq, u8, sizeof(uint32_t));
+    u8 += 4;
+    len -= 4;
+  }
+  (*seq)++;
+
+  int64_t tsdelta = 0;
+  for(int i = 0; i < tsdeltasize; i++) {
+    if(len < 1)
+      return -1;
+    tsdelta |= (int64_t)*u8 << (i * 8);
+    u8++;
+    len--;
+  }
+
+  *ms_ago = tsdelta;
+  *msg = (const char *)u8;
+  *msglen = len;
+  return 0;
+}
+
+#ifndef VLLP_SIM
 
 typedef struct vllp_logstream {
   vllp_channel_t *vc;
@@ -22,41 +82,18 @@ vllp_log_rx(void *opaque, const void *data, size_t len)
 {
   vllp_logstream_t *vl = opaque;
 
-  const uint8_t *u8 = data;
-  if(len < 1)
+  int level;
+  int64_t ms_ago;
+  const char *msg;
+  size_t msglen;
+  if(vllp_logstream_decode(data, len, &vl->seq, &level, &ms_ago,
+                           &msg, &msglen))
     return;
 
-  int level = u8[0] & 7;
-  int discontinuity = u8[0] & 0x40;
-  int tsdeltasize = (u8[0] >> 3) & 7;
-
-  u8++;
-  len--;
-
-  if(discontinuity) {
-    if(len < 4)
-      return;
-
-
-    memcpy(&vl->seq, u8, sizeof(uint32_t));
-    u8 += 4;
-    len -= 4;
-  }
-  vl->seq++;
-
-  int64_t tsdelta = 0;
-  for(int i = 0; i < tsdeltasize; i++) {
-    if(len < 1)
-      return;
-    tsdelta |= (int64_t)*u8 << (i * 8);
-    u8++;
-    len--;
-  }
-
-  char *buf = alloca(len + 1);
-  memcpy(buf, u8, len);
-  buf[len] = 0;
-  vl->cb(vl->opaque, level, vl->seq, tsdelta, buf);
+  char *buf = alloca(msglen + 1);
+  memcpy(buf, msg, msglen);
+  buf[msglen] = 0;
+  vl->cb(vl->opaque, level, vl->seq, ms_ago, buf);
 }
 
 static void
@@ -87,3 +124,5 @@ vllp_logstream_destroy(vllp_logstream_t *vl)
   vllp_channel_close(vl->vc, 0, 0);
   free(vl);
 }
+
+#endif
