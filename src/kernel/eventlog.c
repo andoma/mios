@@ -130,8 +130,13 @@ evlog_msg_done(evlog_fifo_t *ef, event_level_t level, int64_t now)
   int msg_len = ef->data[(head + 0) & EVENTLOG_MASK];
 
   int64_t delta_ts = now - ef->ts_head;
-  if(delta_ts < 0)
+  if(delta_ts < 0) {
+    // evlog() samples the clock before taking the mutex, so a racing
+    // writer may have committed a later timestamp. Never move ts_head
+    // backwards, or the reconstructed timestamps drift ahead of clock_get()
     delta_ts = 0;
+    now = ef->ts_head;
+  }
   int64_t dts = delta_ts;
   int ts_len = 0;
   while(dts) {
@@ -462,7 +467,8 @@ evlog_svc_pull(void *opaque)
     const uint16_t msgend = (msgstart + msglen) & EVENTLOG_MASK;
 
     ts += evfifo_read_delta_ts(ef, ptr);
-    uint64_t ms_ago = (clock_get() - ts) / 1000;
+    const int64_t age = clock_get() - (int64_t)ts;
+    uint64_t ms_ago = age > 0 ? age / 1000 : 0;
 
     uint8_t tsbuf[8];
     int tslen = 0;
