@@ -48,7 +48,7 @@ vllp_log_rx(void *opaque, const void *data, size_t len)
   for(int i = 0; i < tsdeltasize; i++) {
     if(len < 1)
       return;
-    tsdelta |= *u8 << (i * 8);
+    tsdelta |= (int64_t)*u8 << (i * 8);
     u8++;
     len--;
   }
