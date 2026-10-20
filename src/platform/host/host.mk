@@ -66,12 +66,18 @@ SRCS += ${P}/host.c \
 	${P}/suite_vllp_xcheck.c \
 	${P}/suite_ota.c \
 	${P}/suite_rtp_h264.c \
+	${P}/suite_evlog.c \
 	${P}/vspiflash.c \
 	${P}/host_ota.c \
 	${T}host/dsig/vllp.c \
+	${T}host/dsig/vllp_logstream.c \
 
 
 # The real host VLLP client, compiled into the test binary in single-
 # threaded virtual-time mode (VLLP_SIM). Lets suites exercise the actual
 # production host stack against the guest server.
 ${O}/${T}host/dsig/vllp.o : CFLAGS += -DVLLP_SIM -iquote${T}host/dsig
+
+# Only the frame decoder, for suite_evlog.c; the channel glue needs the
+# threaded host stack and is compiled out.
+${O}/${T}host/dsig/vllp_logstream.o : CFLAGS += -DVLLP_SIM
