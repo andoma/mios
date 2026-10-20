@@ -9,7 +9,8 @@
  * Then the conversions: POSIX semantics, plus the two deliberate
  * extensions (a negative precision on %s hexdumps, %I formats an IPv4
  * address). A precision on %s used to emit exactly that many bytes
- * rather than at most, which reads off the end of the argument.
+ * rather than at most, which reads off the end of the argument. On a
+ * 64 bit target %lld was not recognised at all.
  */
 
 #include <stdio.h>
@@ -34,6 +35,11 @@ static const uint8_t bin3[3] = { 0x01, 0x02, 0x03 };
 static const char *volatile bin3p = (const char *)bin3;
 
 static volatile double inf, nan;
+
+static volatile long long big_neg = -1234567890123LL;
+static volatile unsigned long long all_ones = -1ULL;
+static volatile unsigned long long forty_bits = 0xffffffffffULL;
+static volatile long long fortytwo = 42;
 
 
 /* Every case is "this format with these arguments produces this string",
@@ -95,6 +101,24 @@ run_precision(void)
 }
 
 static int
+run_length_modifiers(void)
+{
+  int fails = 0;
+  char buf[32];
+
+  // On 64 bit targets 'l' alone means 64 bits, and the second 'l' of
+  // "ll" used to be left in place as the conversion character
+  PCHECK("-1234567890123", "%lld", big_neg);
+  PCHECK("[18446744073709551615]", "[%llu]", all_ones);
+  PCHECK("ffffffffff", "%llx", forty_bits);
+  PCHECK("-1234567890123", "%ld", (long)big_neg);
+  // ...which also left the argument unread, shifting all that follow
+  PCHECK("42 7", "%lld %d", fortytwo, 7);
+
+  return fails;
+}
+
+static int
 run_snprintf(void)
 {
   int fails = 0;
@@ -128,6 +152,7 @@ run_snprintf(void)
   fails += !CHECK(buf[1] == 'X', "wrote past the buffer (0x%02x)", buf[1]);
 
   fails += run_precision();
+  fails += run_length_modifiers();
 
   return fails;
 }
