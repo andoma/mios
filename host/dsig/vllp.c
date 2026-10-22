@@ -939,8 +939,9 @@ vllp_tx(vllp_t *v, int64_t now)
       pkt[1] = error_code;
       pkt[2] = error_code >> 8;
       channel_send_message(v, v->cmc, pkt, sizeof(pkt));
-      vllp_logf(v, LOG_DEBUG, "tx CLOSE for channel %d (err %d)",
-                vc->id, error_code);
+      if(error_code)
+        vllp_logf(v, LOG_DEBUG, "tx CLOSE for channel %d (err %d)",
+                  vc->id, error_code);
       vllp_channel_set_state(vc, VLLP_CHANNEL_STATE_CLOSE_SENT);
       free(vp);
 
@@ -1291,6 +1292,9 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
   }
 
   int16_t error_code = data[0] | (data[1] << 8);
+  if(error_code)
+    vllp_logf(v, LOG_DEBUG, "rx CLOSE for channel %d (err %d)",
+              target_channel, error_code);
 
   vllp_channel_t *vc = channel_find(v, target_channel);
   if(vc == 0)
@@ -1362,7 +1366,6 @@ cmc_rx(void *opaque, const void *data, size_t len)
     case VLLP_CMC_OPCODE_OPEN_RESPONSE:
       return cmc_handle_open_response(v, channel, data + 1, len - 1);
     case VLLP_CMC_OPCODE_CLOSE:
-      vllp_logf(v, LOG_DEBUG, "rx CLOSE for channel %d", channel);
       return cmc_handle_close(v, channel, data + 1, len - 1);
     default:
       vllp_log(v, LOG_ERR, "channel_control client unexpected opcode");
