@@ -118,6 +118,7 @@ usbc_init_thread(void *arg)
 
   const typec_port_config_t cfg = {
     .type = TYPEC_PORT_DRP,
+    .prefer_sink = 1,
     .rp = TYPEC_PULL_RP_DEF,
     .role_changed = usbc_role_changed,
     .vbus_mv = usbc_vbus_mv,
