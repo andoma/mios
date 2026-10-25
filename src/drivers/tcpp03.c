@@ -13,6 +13,9 @@
 
 #include <mios/device.h>
 #include <mios/stream.h>
+#include <mios/task.h>
+
+#include "irq.h"
 
 #include "tcpp03.h"
 
@@ -46,6 +49,16 @@ struct tcpp03 {
   error_t t_err;    // Last I2C error
   int (*t_vbus_mv)(void *opaque);
   void *t_vbus_opaque;
+
+  task_waitable_t t_flag_wait;
+  uint8_t t_flag_event;     // Protected by IRQ_LEVEL_IO
+  uint8_t t_last_faults;
+  uint32_t t_faults[5];     // Per fault flag bit
+};
+
+static const char *fault_names[5] = {
+  "VCONN-overcurrent", "VBUS-overcurrent", "VBUS-overvoltage",
+  "CC-overvoltage", "Overtemperature"
 };
 
 
@@ -128,6 +141,63 @@ tcpp03_detach(tcpp03_t *t)
 
 
 static void
+tcpp03_flag_irq(void *arg)
+{
+  tcpp03_t *t = arg;
+  t->t_flag_event = 1;
+  task_wakeup(&t->t_flag_wait, 0);
+}
+
+
+// FLGn goes low on a fault and stays low while it persists (an
+// overvoltage condition recovers by itself once VBUS drops)
+__attribute__((noreturn))
+static void *
+tcpp03_flag_thread(void *arg)
+{
+  tcpp03_t *t = arg;
+
+  while(1) {
+    int q = irq_forbid(IRQ_LEVEL_IO);
+    while(!t->t_flag_event)
+      task_sleep(&t->t_flag_wait);
+    t->t_flag_event = 0;
+    irq_permit(q);
+
+    // In hibernate and low power modes FLGn only signals VBUS presence
+    if((t->t_ctrl & CTRL_MODE_MASK) != CTRL_MODE_NORMAL)
+      continue;
+
+    uint8_t flags;
+    if(i2c_read_u8(t->t_i2c, t->t_address, REG_FLAGS, &flags))
+      continue;
+    const uint8_t faults = flags & 0x1f;
+    if(faults == 0 || faults == t->t_last_faults)
+      continue;
+    t->t_last_faults = faults;
+
+    printf("%s: Fault:", t->t_dev.d_name);
+    for(int i = 0; i < 5; i++) {
+      if(faults & (1 << i)) {
+        t->t_faults[i]++;
+        printf(" %s", fault_names[i]);
+      }
+    }
+    printf("\n");
+  }
+}
+
+
+void
+tcpp03_set_flag_gpio(tcpp03_t *t, gpio_t flg)
+{
+  thread_create(tcpp03_flag_thread, t, 1024, t->t_dev.d_name, 0, 4);
+  gpio_conf_irq(flg, GPIO_PULL_UP, tcpp03_flag_irq, t,
+                GPIO_FALLING_EDGE, IRQ_LEVEL_IO);
+}
+
+
+static void
 tcpp03_print_info(struct device *d, struct stream *st)
 {
   tcpp03_t *t = (tcpp03_t *)d;
@@ -159,6 +229,10 @@ tcpp03_print_info(struct device *d, struct stream *st)
            flags & FLAG_OVP_CC ? " CC-overvoltage" : "",
            flags & FLAG_OCP_VCONN ? " VCONN-overcurrent" : "",
            flags & FLAG_OTP ? " Overtemperature" : "");
+  for(int i = 0; i < 5; i++) {
+    if(t->t_faults[i])
+      stprintf(st, "%s faults: %d\n", fault_names[i], t->t_faults[i]);
+  }
   if(t->t_err)
     stprintf(st, "Last I2C error: %s\n", error_to_string(t->t_err));
 }
