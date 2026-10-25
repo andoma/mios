@@ -8,6 +8,24 @@
 //
 // Channel 0 is used for control transfers, which are synchronous. Bulk
 // pipes get a channel each for as long as they are open.
+//
+// Only used on STM32N6 so far. Cores without internal DMA (OTG_FS on
+// STM32F4 etc) are not supported, they would need a slave mode path
+// where the CPU retries every NAK. Using this on STM32H7 OTG_HS would
+// need:
+//
+//  - The GCCFG/GOTGCTL setup in otgh_core_init() moved to a platform
+//    hook. Bits 23 and 25 of GCCFG are N6 specific, on H7 bit 16
+//    (PWRDWN) powers up the FS transceiver instead.
+//  - FIFO RAM size (4 KB here) and channel count (16 here) passed in
+//    by the platform.
+//  - FSLSPCS in HCFG set after port reset. H7 has no internal HS PHY,
+//    with the embedded FS PHY it must select the 48 MHz (FS) or 6 MHz
+//    (LS) clock, followed by another port reset. The N6 HS PHY works
+//    with the default.
+//  - DMA buffers in memory the OTG_HS master can reach (not DTCM).
+//  - A stm32h7_usbh.c with base, IRQ, clocks and VBUS, like
+//    stm32n6_usbh.c.
 
 #include <stdlib.h>
 #include <stdio.h>
