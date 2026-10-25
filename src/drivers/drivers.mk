@@ -55,6 +55,8 @@ SRCS-${ENABLE_UART_16550} += \
 ${MOS}/drivers/uart_16550.o : CFLAGS += ${NOFPU}
 
 SRCS += ${SRC}/drivers/spiflash.c
+
+SRCS += ${SRC}/drivers/tcpp03.c
 ${MOS}/drivers/spiflash.o : CFLAGS += ${NOFPU}
 
 SRCS += ${SRC}/drivers/tps92682.c
