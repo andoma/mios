@@ -5,6 +5,7 @@ SRCS +=	${SRC}/lib/usb/usb_common.c \
 	${SRC}/lib/usb/usb_dfu_runtime.c \
 	${SRC}/lib/usb/usb_mcp.c \
 	${SRC}/lib/usb/usb_host.c \
+	${SRC}/lib/usb/usb_host_acm.c \
 
 SRCS-${ENABLE_NET_MBUS} += \
 	${SRC}/lib/usb/usb_mbus.c \

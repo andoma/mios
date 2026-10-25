@@ -12,6 +12,15 @@
 // Only the root port for now, so the address can be fixed
 #define USB_HOST_ROOT_ADDR 1
 
+static usb_host_driver_t *usb_host_drivers;
+
+void
+usb_host_driver_register(usb_host_driver_t *uhd)
+{
+  uhd->uhd_next = usb_host_drivers;
+  usb_host_drivers = uhd;
+}
+
 int
 usb_host_control(usb_host_device_t *ud, uint8_t request_type,
                  uint8_t request, uint16_t value, uint16_t index,
@@ -27,6 +36,120 @@ usb_host_control(usb_host_device_t *ud, uint8_t request_type,
   usb_host_ctrl_t *uhc = ud->ud_uhc;
   return uhc->uhc_vtable->control(uhc, ud->ud_addr, ud->ud_speed,
                                   ud->ud_mps0, &setup, data);
+}
+
+
+usb_host_pipe_t *
+usb_host_pipe_open(usb_host_device_t *ud,
+                   const struct usb_endpoint_descriptor *ed)
+{
+  usb_host_ctrl_t *uhc = ud->ud_uhc;
+  return uhc->uhc_vtable->pipe_open(uhc, ud->ud_addr, ud->ud_speed, ed);
+}
+
+
+void
+usb_host_pipe_close(usb_host_device_t *ud, usb_host_pipe_t *up)
+{
+  usb_host_ctrl_t *uhc = ud->ud_uhc;
+  uhc->uhc_vtable->pipe_close(uhc, up);
+}
+
+
+error_t
+usb_host_submit(usb_host_device_t *ud, usb_host_pipe_t *up,
+                usb_host_xfer_t *ux)
+{
+  usb_host_ctrl_t *uhc = ud->ud_uhc;
+  return uhc->uhc_vtable->submit(uhc, up, ux);
+}
+
+
+// Step to the next descriptor, NULL at the end or if malformed
+static const uint8_t *
+desc_next(usb_host_device_t *ud, const uint8_t *p)
+{
+  const uint8_t *end = ud->ud_config + ud->ud_config_len;
+  p += p[0];
+  if(p + 2 > end || p[0] < 2 || p + p[0] > end)
+    return NULL;
+  return p;
+}
+
+
+const struct usb_interface_descriptor *
+usb_host_find_interface(usb_host_device_t *ud, int ifnum)
+{
+  for(const uint8_t *p = ud->ud_config; p != NULL; p = desc_next(ud, p)) {
+    if(p[1] != USB_DESC_TYPE_INTERFACE ||
+       p[0] < sizeof(struct usb_interface_descriptor))
+      continue;
+    const struct usb_interface_descriptor *id = (const void *)p;
+    if(id->bInterfaceNumber == ifnum && id->bAlternateSetting == 0)
+      return id;
+  }
+  return NULL;
+}
+
+
+const void *
+usb_host_find_desc(usb_host_device_t *ud, const void *from, int type)
+{
+  const uint8_t *p = from;
+  while((p = desc_next(ud, p)) != NULL) {
+    if(p[1] == USB_DESC_TYPE_INTERFACE)
+      return NULL;
+    if(p[1] == type)
+      return p;
+  }
+  return NULL;
+}
+
+
+const struct usb_endpoint_descriptor *
+usb_host_find_endpoint(usb_host_device_t *ud,
+                       const struct usb_interface_descriptor *id,
+                       int type, int dir)
+{
+  const struct usb_endpoint_descriptor *ed = (const void *)id;
+  while((ed = usb_host_find_desc(ud, ed, USB_DESC_TYPE_ENDPOINT)) != NULL) {
+    if(ed->bLength >= sizeof(struct usb_endpoint_descriptor) &&
+       (ed->bmAttributes & 3) == type &&
+       (ed->bEndpointAddress & 0x80) == dir)
+      return ed;
+  }
+  return NULL;
+}
+
+
+static void
+bind_drivers(usb_host_device_t *ud)
+{
+  int num_bindings = 0;
+
+  for(const uint8_t *p = ud->ud_config; p != NULL; p = desc_next(ud, p)) {
+    if(p[1] != USB_DESC_TYPE_INTERFACE ||
+       p[0] < sizeof(struct usb_interface_descriptor))
+      continue;
+    const struct usb_interface_descriptor *id = (const void *)p;
+    if(id->bAlternateSetting != 0 || id->bInterfaceNumber >= 32 ||
+       ud->ud_claimed & (1 << id->bInterfaceNumber))
+      continue;
+
+    for(usb_host_driver_t *uhd = usb_host_drivers; uhd != NULL;
+        uhd = uhd->uhd_next) {
+      if(num_bindings == USB_HOST_MAX_BINDINGS)
+        return;
+      void *instance = uhd->uhd_probe(ud, id);
+      if(instance == NULL)
+        continue;
+      ud->ud_claimed |= 1 << id->bInterfaceNumber;
+      ud->ud_bindings[num_bindings].driver = uhd;
+      ud->ud_bindings[num_bindings].instance = instance;
+      num_bindings++;
+      break;
+    }
+  }
 }
 
 
@@ -285,6 +408,8 @@ usb_host_attach(usb_host_ctrl_t *uhc, int speed)
          ud->ud_desc.idVendor, ud->ud_desc.idProduct,
          ud->ud_manufacturer ?: "", ud->ud_product ?: "",
          speed_str(speed));
+
+  bind_drivers(ud);
 }
 
 
@@ -297,5 +422,10 @@ usb_host_detach(usb_host_ctrl_t *uhc)
   uhc->uhc_root = NULL;
   printf("%s: %04x:%04x disconnected\n", uhc->uhc_dev.d_name,
          ud->ud_desc.idVendor, ud->ud_desc.idProduct);
+
+  for(int i = 0; i < USB_HOST_MAX_BINDINGS; i++) {
+    if(ud->ud_bindings[i].driver != NULL)
+      ud->ud_bindings[i].driver->uhd_detach(ud, ud->ud_bindings[i].instance);
+  }
   device_unregister(&ud->ud_dev);
 }

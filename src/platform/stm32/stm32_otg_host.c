@@ -5,7 +5,9 @@
 // transfer costs a single interrupt.
 //
 // Included from platform code, which also sets up clocks and the PHY.
-// Only control transfers on channel 0 so far.
+//
+// Channel 0 is used for control transfers, which are synchronous. Bulk
+// pipes get a channel each for as long as they are open.
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,11 +21,11 @@
 #include <mios/device.h>
 #include <mios/error.h>
 #include <mios/stream.h>
-#include <mios/type_macros.h>
 
 #include <usb/usb_host.h>
 
 #include "irq.h"
+#include "cache.h"
 
 #define OTGH_GOTGCTL     0x000
 #define OTGH_GAHBCFG     0x008
@@ -97,6 +99,16 @@ typedef struct otgh_chan {
 } otgh_chan_t;
 
 
+struct usb_host_pipe {
+  uint32_t up_hcchar;        // Address, endpoint, direction, type, MPS
+  uint32_t up_xfrsiz;        // Transfer size as programmed
+  usb_host_xfer_t *up_xfer;  // Transfer in flight
+  uint8_t up_ch;
+  uint8_t up_pid;            // Data toggle for the next transfer
+  uint8_t up_closing;
+};
+
+
 typedef struct otgh {
   usb_host_ctrl_t oh_uhc;
 
@@ -111,7 +123,8 @@ typedef struct otgh {
   uint8_t oh_port_events;
   uint32_t oh_disconnects;
 
-  otgh_chan_t oh_chan[1];
+  otgh_chan_t oh_chan[OTGH_NUM_CHANNELS];
+  usb_host_pipe_t *oh_pipes[OTGH_NUM_CHANNELS];
 
   uint32_t oh_port_resets;
   uint32_t oh_overcurrents;
@@ -144,6 +157,83 @@ hprt_modify(otgh_t *oh, uint32_t clr, uint32_t set)
 }
 
 
+static int
+otgh_hcint_error(otgh_t *oh, uint32_t hcint)
+{
+  if(hcint & HCINT_STALL) {
+    oh->oh_stalls++;
+    return ERR_OPERATION_FAILED;
+  }
+  if(hcint & HCINT_TXERR) {
+    oh->oh_xact_errors++;
+    return ERR_IO;
+  }
+  if(hcint & HCINT_BBERR)
+    return ERR_BAD_PKT_SIZE;
+  if(hcint & HCINT_DTERR)
+    return ERR_CHECKSUM_ERROR;
+  if(hcint & HCINT_AHBERR)
+    return ERR_DMA_XFER;
+  // Halted for no other reason means we did it, due to disconnect
+  return ERR_NOT_CONNECTED;
+}
+
+
+// Program and enable a channel. Called with IRQ_LEVEL_IO blocked.
+// Returns the programmed transfer size
+static uint32_t
+otgh_chan_start(otgh_t *oh, int ch, uint32_t hcchar, int pid,
+                void *buf, size_t len, int is_in)
+{
+  otgh_chan_t *oc = &oh->oh_chan[ch];
+  const uint32_t mps = hcchar & 0x7ff;
+  const uint32_t pktcnt = len ? (len + mps - 1) / mps : 1;
+  // IN transfers must be programmed as a multiple of the packet size,
+  // a short packet ends the transfer early
+  const uint32_t xfrsiz = is_in ? pktcnt * mps : len;
+
+  if(is_in)
+    hcchar |= HCCHAR_EPDIR;
+
+  oc->oc_hcint = 0;
+  oc->oc_done = 0;
+
+  oh_wr(oh, OTGH_HCINT(ch), 0x7ff);
+  oh_wr(oh, OTGH_HCTSIZ(ch), (pid << 29) | (pktcnt << 19) | xfrsiz);
+  oh_wr(oh, OTGH_HCDMA(ch), (uint32_t)buf);
+  asm volatile ("dsb"); // Make sure the core sees what we wrote to buf
+  oh_wr(oh, OTGH_HCCHAR(ch), hcchar | HCCHAR_CHENA);
+  return xfrsiz;
+}
+
+
+static void
+otgh_pipe_halted(otgh_t *oh, usb_host_pipe_t *up, uint32_t hcint)
+{
+  usb_host_xfer_t *ux = up->up_xfer;
+  if(ux == NULL)
+    return;
+  up->up_xfer = NULL;
+
+  const uint32_t hctsiz = oh_rd(oh, OTGH_HCTSIZ(up->up_ch));
+  up->up_pid = (hctsiz >> 29) & 3;
+
+  if(hcint & HCINT_XFRC) {
+    if(up->up_hcchar & HCCHAR_EPDIR) {
+      ux->ux_result = up->up_xfrsiz - (hctsiz & 0x7ffff);
+      dcache_op(ux->ux_buf, ux->ux_len, DCACHE_INVALIDATE);
+    } else {
+      ux->ux_result = ux->ux_len;
+    }
+  } else if(up->up_closing) {
+    ux->ux_result = ERR_INTERRUPTED;
+  } else {
+    ux->ux_result = otgh_hcint_error(oh, hcint);
+  }
+  ux->ux_done(ux);
+}
+
+
 static void
 otgh_irq(void *arg)
 {
@@ -172,8 +262,8 @@ otgh_irq(void *arg)
     oh->oh_port_events |= PORT_EV_CHANGE;
     task_wakeup(&oh->oh_port_wait, 1);
 
-    // Halt any transfer in flight, the waiter sees CHH without XFRC
-    for(int i = 0; i < ARRAYSIZE(oh->oh_chan); i++) {
+    // Halt any transfer in flight, it completes with CHH but no XFRC
+    for(int i = 0; i < OTGH_NUM_CHANNELS; i++) {
       const uint32_t hcchar = oh_rd(oh, OTGH_HCCHAR(i));
       if(hcchar & HCCHAR_CHENA)
         oh_wr(oh, OTGH_HCCHAR(i), hcchar | HCCHAR_CHDIS);
@@ -182,55 +272,44 @@ otgh_irq(void *arg)
 
   if(gint & GINT_HCINT) {
     const uint32_t haint = oh_rd(oh, OTGH_HAINT);
-    for(int i = 0; i < ARRAYSIZE(oh->oh_chan); i++) {
+    for(int i = 0; i < OTGH_NUM_CHANNELS; i++) {
       if(!(haint & (1 << i)))
         continue;
       otgh_chan_t *oc = &oh->oh_chan[i];
       const uint32_t hcint = oh_rd(oh, OTGH_HCINT(i));
       oh_wr(oh, OTGH_HCINT(i), hcint);
       oc->oc_hcint |= hcint;
-      if(hcint & HCINT_CHH) {
+      if(!(hcint & HCINT_CHH))
+        continue;
+      if(oh->oh_pipes[i] != NULL)
+        otgh_pipe_halted(oh, oh->oh_pipes[i], oc->oc_hcint);
+      else
         oc->oc_done = 1;
-        task_wakeup(&oc->oc_wait, 0);
-      }
+      task_wakeup(&oc->oc_wait, 0);
     }
   }
 }
 
 
-// Run one transaction stage on a channel and wait for it to halt.
+// Run one control transfer stage on channel 0 and wait for it to halt.
 // Returns number of bytes transferred or an error
 static int
-otgh_xfer(otgh_t *oh, int ch, uint32_t hcchar, int pid,
+otgh_xfer(otgh_t *oh, uint32_t hcchar, int pid,
           void *buf, size_t len, int is_in, int64_t deadline)
 {
-  otgh_chan_t *oc = &oh->oh_chan[ch];
-  const uint32_t mps = hcchar & 0x7ff;
-  const uint32_t pktcnt = len ? (len + mps - 1) / mps : 1;
-  // IN transfers must be programmed as a multiple of the packet size,
-  // a short packet ends the transfer early
-  const uint32_t xfrsiz = is_in ? pktcnt * mps : len;
-
-  if(is_in)
-    hcchar |= HCCHAR_EPDIR;
+  otgh_chan_t *oc = &oh->oh_chan[0];
 
   int q = irq_forbid(IRQ_LEVEL_IO);
 
-  oc->oc_hcint = 0;
-  oc->oc_done = 0;
-
-  oh_wr(oh, OTGH_HCINT(ch), 0x7ff);
-  oh_wr(oh, OTGH_HCTSIZ(ch), (pid << 29) | (pktcnt << 19) | xfrsiz);
-  oh_wr(oh, OTGH_HCDMA(ch), (uint32_t)buf);
-  asm volatile ("dsb"); // Make sure the core sees what we wrote to buf
-  oh_wr(oh, OTGH_HCCHAR(ch), hcchar | HCCHAR_CHENA);
+  const uint32_t xfrsiz = otgh_chan_start(oh, 0, hcchar, pid, buf, len,
+                                          is_in);
 
   while(!oc->oc_done) {
     if(task_sleep_deadline(&oc->oc_wait, deadline)) {
       // Halt the channel. The core finishes the current transaction
       // first, so give it a while
-      oh_wr(oh, OTGH_HCCHAR(ch),
-            oh_rd(oh, OTGH_HCCHAR(ch)) | HCCHAR_CHENA | HCCHAR_CHDIS);
+      oh_wr(oh, OTGH_HCCHAR(0),
+            oh_rd(oh, OTGH_HCCHAR(0)) | HCCHAR_CHENA | HCCHAR_CHDIS);
       const int64_t halt_deadline = clock_get() + 10000;
       while(!oc->oc_done) {
         if(task_sleep_deadline(&oc->oc_wait, halt_deadline))
@@ -247,26 +326,10 @@ otgh_xfer(otgh_t *oh, int ch, uint32_t hcchar, int pid,
   if(hcint & HCINT_XFRC) {
     if(!is_in)
       return len;
-    const uint32_t remain = oh_rd(oh, OTGH_HCTSIZ(ch)) & 0x7ffff;
+    const uint32_t remain = oh_rd(oh, OTGH_HCTSIZ(0)) & 0x7ffff;
     return xfrsiz - remain;
   }
-
-  if(hcint & HCINT_STALL) {
-    oh->oh_stalls++;
-    return ERR_OPERATION_FAILED;
-  }
-  if(hcint & HCINT_TXERR) {
-    oh->oh_xact_errors++;
-    return ERR_IO;
-  }
-  if(hcint & HCINT_BBERR)
-    return ERR_BAD_PKT_SIZE;
-  if(hcint & HCINT_DTERR)
-    return ERR_CHECKSUM_ERROR;
-  if(hcint & HCINT_AHBERR)
-    return ERR_DMA_XFER;
-  // Halted for no other reason means we did it, due to disconnect
-  return ERR_NOT_CONNECTED;
+  return otgh_hcint_error(oh, hcint);
 }
 
 
@@ -282,14 +345,14 @@ otgh_control_once(otgh_t *oh, uint32_t hcchar,
   int actual = 0;
 
   memcpy(setup_buf, setup, sizeof(struct usb_setup_packet));
-  int r = otgh_xfer(oh, 0, hcchar, PID_SETUP, setup_buf, 8, 0, deadline);
+  int r = otgh_xfer(oh, hcchar, PID_SETUP, setup_buf, 8, 0, deadline);
   if(r < 0)
     return r;
 
   if(len) {
     if(!data_in)
       memcpy(data_buf, data, len);
-    r = otgh_xfer(oh, 0, hcchar, PID_DATA1, data_buf, len, data_in,
+    r = otgh_xfer(oh, hcchar, PID_DATA1, data_buf, len, data_in,
                   deadline);
     if(r < 0)
       return r;
@@ -300,7 +363,7 @@ otgh_control_once(otgh_t *oh, uint32_t hcchar,
 
   // Status stage goes in the opposite direction of the data stage,
   // IN if there was no data stage
-  r = otgh_xfer(oh, 0, hcchar, PID_DATA1, data_buf, 0, !(len && data_in),
+  r = otgh_xfer(oh, hcchar, PID_DATA1, data_buf, 0, !(len && data_in),
                 deadline);
   if(r < 0)
     return r;
@@ -340,8 +403,109 @@ otgh_control(usb_host_ctrl_t *uhc, uint8_t addr, uint8_t speed,
 }
 
 
+static usb_host_pipe_t *
+otgh_pipe_open(usb_host_ctrl_t *uhc, uint8_t addr, uint8_t speed,
+               const struct usb_endpoint_descriptor *ed)
+{
+  otgh_t *oh = (otgh_t *)uhc;
+  const int type = ed->bmAttributes & 3;
+
+  if(type != USB_ENDPOINT_BULK)
+    return NULL; // Periodic transfers are not supported yet
+
+  usb_host_pipe_t *up = calloc(1, sizeof(usb_host_pipe_t));
+  up->up_hcchar =
+    (addr << 22) |
+    (type << 18) |
+    (speed == USB_SPEED_LOW ? HCCHAR_LSDEV : 0) |
+    (ed->bEndpointAddress & 0x80 ? HCCHAR_EPDIR : 0) |
+    ((ed->bEndpointAddress & 0xf) << 11) |
+    (ed->wMaxPacketSize & 0x7ff);
+  up->up_pid = PID_DATA0;
+
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  for(int i = 1; i < OTGH_NUM_CHANNELS; i++) {
+    if(oh->oh_pipes[i] == NULL) {
+      up->up_ch = i;
+      oh->oh_pipes[i] = up;
+      break;
+    }
+  }
+  irq_permit(q);
+
+  if(up->up_ch == 0) {
+    free(up);
+    return NULL;
+  }
+  return up;
+}
+
+
+static void
+otgh_pipe_close(usb_host_ctrl_t *uhc, usb_host_pipe_t *up)
+{
+  otgh_t *oh = (otgh_t *)uhc;
+  otgh_chan_t *oc = &oh->oh_chan[up->up_ch];
+
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  up->up_closing = 1;
+
+  if(up->up_xfer != NULL) {
+    const uint32_t hcchar = oh_rd(oh, OTGH_HCCHAR(up->up_ch));
+    if(hcchar & HCCHAR_CHENA)
+      oh_wr(oh, OTGH_HCCHAR(up->up_ch), hcchar | HCCHAR_CHDIS);
+
+    const int64_t deadline = clock_get() + 100000;
+    while(up->up_xfer != NULL) {
+      if(task_sleep_deadline(&oc->oc_wait, deadline))
+        break;
+    }
+
+    if(up->up_xfer != NULL) {
+      // Channel never halted, complete the transfer ourselves
+      usb_host_xfer_t *ux = up->up_xfer;
+      up->up_xfer = NULL;
+      ux->ux_result = ERR_INTERRUPTED;
+      ux->ux_done(ux);
+    }
+  }
+  oh->oh_pipes[up->up_ch] = NULL;
+  irq_permit(q);
+  free(up);
+}
+
+
+static error_t
+otgh_submit(usb_host_ctrl_t *uhc, usb_host_pipe_t *up, usb_host_xfer_t *ux)
+{
+  otgh_t *oh = (otgh_t *)uhc;
+  const int is_in = !!(up->up_hcchar & HCCHAR_EPDIR);
+  error_t err = 0;
+
+  int q = irq_forbid(IRQ_LEVEL_IO);
+
+  if(up->up_closing || !(oh_rd(oh, OTGH_HPRT) & HPRT_PENA)) {
+    err = ERR_NOT_CONNECTED;
+  } else if(up->up_xfer != NULL) {
+    err = ERR_NOT_IDLE;
+  } else {
+    dcache_op(ux->ux_buf, ux->ux_len,
+              is_in ? DCACHE_INVALIDATE : DCACHE_CLEAN);
+    up->up_xfer = ux;
+    up->up_xfrsiz = otgh_chan_start(oh, up->up_ch, up->up_hcchar,
+                                    up->up_pid, ux->ux_buf, ux->ux_len,
+                                    is_in);
+  }
+  irq_permit(q);
+  return err;
+}
+
+
 static const usb_host_ctrl_vtable_t otgh_vtable = {
   .control = otgh_control,
+  .pipe_open = otgh_pipe_open,
+  .pipe_close = otgh_pipe_close,
+  .submit = otgh_submit,
 };
 
 
@@ -391,15 +555,13 @@ otgh_core_init(otgh_t *oh)
   oh_wr(oh, OTGH_GRSTCTL, 1 << 4);                 // Flush RX FIFO
   otgh_wait_grstctl(oh, 1 << 4, 0);
 
-  for(int i = 0; i < OTGH_NUM_CHANNELS; i++) {
-    oh_wr(oh, OTGH_HCINTMSK(i), 0);
+  for(int i = 0; i < OTGH_NUM_CHANNELS; i++)
     oh_wr(oh, OTGH_HCINT(i), 0x7ff);
-  }
 
   // In DMA mode channel halted is the only interrupt we need
-  for(int i = 0; i < ARRAYSIZE(oh->oh_chan); i++)
+  for(int i = 0; i < OTGH_NUM_CHANNELS; i++)
     oh_wr(oh, OTGH_HCINTMSK(i), HCINT_CHH);
-  oh_wr(oh, OTGH_HAINTMSK, (1 << ARRAYSIZE(oh->oh_chan)) - 1);
+  oh_wr(oh, OTGH_HAINTMSK, (1 << OTGH_NUM_CHANNELS) - 1);
 
   oh_wr(oh, OTGH_GINTSTS, 0xffffffff);
   oh_wr(oh, OTGH_GINTMSK, GINT_HPRTINT | GINT_HCINT | GINT_DISCINT);
@@ -524,6 +686,17 @@ otgh_print_info(struct device *d, struct stream *st)
            oh->oh_port_resets, oh->oh_disconnects, oh->oh_overcurrents);
   stprintf(st, "Stalls: %d  Transaction errors: %d  Timeouts: %d\n",
            oh->oh_stalls, oh->oh_xact_errors, oh->oh_timeouts);
+
+  for(int i = 1; i < OTGH_NUM_CHANNELS; i++) {
+    const usb_host_pipe_t *up = oh->oh_pipes[i];
+    if(up == NULL)
+      continue;
+    stprintf(st, "Channel %2d: addr %d EP 0x%02x%s\n", i,
+             (up->up_hcchar >> 22) & 0x7f,
+             ((up->up_hcchar >> 11) & 0xf) |
+             (up->up_hcchar & HCCHAR_EPDIR ? 0x80 : 0),
+             up->up_xfer ? " busy" : "");
+  }
 }
 
 
