@@ -84,3 +84,7 @@ SRCS-${ENABLE_SX1280} += \
 
 SRCS-${ENABLE_IMX335} += \
 	${SRC}/drivers/camera/imx335.c
+
+SRCS-${ENABLE_VL53L5CX} += \
+	${SRC}/drivers/vl53l5cx.c \
+	${SRC}/drivers/vl53l5cx_fw.c
