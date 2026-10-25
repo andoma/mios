@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <mios/io.h>
 #include <mios/task.h>
 #include <mios/block.h>
@@ -21,6 +22,7 @@
 #include <usb/usb.h>
 #include <usb/usb_host.h>
 #include <usb/typec.h>
+#include <usb/usb_pd.h>
 
 #include "drivers/tcpp03.h"
 
@@ -63,6 +65,7 @@ blinker(void *arg)
 // USB-C port (CN18): dual role. OTG1 is a device when attached as sink and
 // a host when attached as source. The TCPP03 on I2C2 switches VBUS
 static tcpp03_t *usbc_tcpp;
+static usb_pd_t *usbc_pd;
 
 static void
 usbc_role_changed(void *opaque, typec_role_t role)
@@ -102,14 +105,25 @@ usbc_init_thread(void *arg)
   i2c_t *i2c = arg;
   usbc_tcpp = tcpp03_create(i2c, 0x34, GPIO_PA(4), "tcpp03");
   tcpp03_set_vbus_monitor(usbc_tcpp, usbc_vbus_mv, NULL);
+  tcpp03_set_flag_gpio(usbc_tcpp, GPIO_PD(10));
 
-  static const typec_port_config_t cfg = {
+  typec_phy_t *phy = stm32n6_ucpd_create();
+
+  // The TCPP03 overvoltage protection trips at about 6V (R193 / R192).
+  // It then also disconnects CC, so a higher voltage contract never
+  // completes: VBUS gets there, but the source's PS_RDY can't get
+  // through and the source resets the port. Stay at 5V
+  usbc_pd = usb_pd_create(phy, "usb-pd");
+  usb_pd_set_sink_policy(usbc_pd, 5000, 1500);
+
+  const typec_port_config_t cfg = {
     .type = TYPEC_PORT_DRP,
     .rp = TYPEC_PULL_RP_DEF,
     .role_changed = usbc_role_changed,
     .vbus_mv = usbc_vbus_mv,
+    .pd = usbc_pd,
   };
-  typec_port_create(stm32n6_ucpd_create(), &cfg, "usb-c");
+  typec_port_create(phy, &cfg, "usb-c");
   return NULL;
 }
 
@@ -121,7 +135,6 @@ usbc_init(void)
   stm32n6_otghs_device_enable(0);
   stm32n6_otghs1_host_create();
 
-  gpio_conf_input(GPIO_PD(10), GPIO_PULL_UP); // TCPP03 FLGn, unused so far
 
   // The channel preselect must be set before the ADC is enabled. The pin
   // must be non-secure, or the GPIO keeps the (non-secure) ADC's analog
@@ -158,6 +171,21 @@ board_init_late(void)
   stm32n6_eth_init(GPIO_UNUSED, GPIO_PD(12), GPIO_PD(1),
                    1, ETHPHY_MODE_RGMII);
 }
+
+// Set the USB PD sink policy: highest fixed voltage and current to request
+static error_t
+cmd_pd(cli_t *cli, int argc, char **argv)
+{
+  if(argc < 2 || usbc_pd == NULL)
+    return ERR_INVALID_ARGS;
+  const int mv = atoi(argv[1]);
+  const int ma = argc > 2 ? atoi(argv[2]) : 1500;
+  usb_pd_set_sink_policy(usbc_pd, mv, ma);
+  return 0;
+}
+
+CLI_CMD_DEF("pd", cmd_pd);
+
 
 // Run a command line on the shell of an attached CDC-ACM device and print
 // what comes back. With CN17 cabled to CN18 that is this board's own USB
