@@ -2,8 +2,8 @@
 // Try.SRC / Try.SNK and accessory states.
 //
 // A dual role port toggles between Unattached.SNK and Unattached.SRC
-// until the CC lines show a partner. VBUS is not monitored, a sink
-// detaches when Rp goes away.
+// until the CC lines show a partner. VBUS is polled if the board can
+// measure it.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +21,10 @@
 #define T_PD_DEBOUNCE   15000  // tPDDebounce, 10-20 ms
 #define T_DRP_SNK       40000  // tDRP is 50-100 ms with the source part
 #define T_DRP_SRC       35000  // (dcSRC.DRP) between 30 and 70 %
+#define T_VBUS_POLL     50000  // There is no VBUS interrupt
+
+#define VSAFE0V_MV        800
+#define VBUS_PRESENT_MV  3670  // vSinkDisconnect
 
 typedef enum {
   ST_UNATTACHED_SNK,
@@ -60,7 +64,9 @@ struct typec_port {
   typec_state_t p_state;
   int64_t p_deadline;     // State timer, 0 if not running
   typec_cc_t p_cc[2];     // Previous sample
+  int p_vbus_mv;          // Last measurement, -1 if not measured
   uint8_t p_polarity;
+  uint8_t p_debouncing;   // Detach debounce running in an attached state
   uint32_t p_attaches;
 };
 
@@ -93,6 +99,14 @@ enter_state(typec_port_t *p, typec_state_t state, int timeout)
 
   p->p_state = state;
   p->p_deadline = timeout ? clock_get() + timeout : 0;
+  p->p_debouncing = 0;
+}
+
+
+static int64_t
+vbus_poll_deadline(typec_port_t *p)
+{
+  return p->p_cfg.vbus_mv ? clock_get() + T_VBUS_POLL : 0;
 }
 
 
@@ -135,6 +149,9 @@ typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
 {
   const int changed = cc[0] != p->p_cc[0] || cc[1] != p->p_cc[1];
   const int rds = (cc[0] == TYPEC_CC_RD) + (cc[1] == TYPEC_CC_RD);
+  const int vbus = p->p_vbus_mv;
+  const int vbus_present = vbus < 0 || vbus >= VBUS_PRESENT_MV;
+  const int vbus_safe0v = vbus < VSAFE0V_MV; // Also when not measured
 
   switch(p->p_state) {
   case ST_UNATTACHED_SNK:
@@ -149,20 +166,34 @@ typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
       enter_unattached(p);
     } else if(changed) {
       p->p_deadline = clock_get() + T_CC_DEBOUNCE;
+    } else if(expired && !vbus_present) {
+      // The source turns VBUS on after its own debounce
+      p->p_deadline = vbus_poll_deadline(p);
     } else if(expired) {
       p->p_polarity = is_rp(cc[1]);
       enter_state(p, ST_ATTACHED_SNK, 0);
       set_role(p, TYPEC_ROLE_SINK);
+      p->p_deadline = vbus_poll_deadline(p);
     }
     break;
 
   case ST_ATTACHED_SNK:
-    if(is_rp(cc[p->p_polarity])) {
+    if(p->p_cfg.vbus_mv) {
+      // With VBUS measurement the spec says to detach when VBUS goes
+      if(!vbus_present) {
+        set_role(p, TYPEC_ROLE_NONE);
+        enter_unattached(p);
+      } else {
+        p->p_deadline = vbus_poll_deadline(p);
+      }
+    } else if(is_rp(cc[p->p_polarity])) {
+      p->p_debouncing = 0;
       p->p_deadline = 0;
-    } else if(expired) {
+    } else if(p->p_debouncing && expired) {
       set_role(p, TYPEC_ROLE_NONE);
       enter_unattached(p);
-    } else if(!p->p_deadline) {
+    } else if(!p->p_debouncing) {
+      p->p_debouncing = 1;
       p->p_deadline = clock_get() + T_PD_DEBOUNCE;
     }
     break;
@@ -179,6 +210,9 @@ typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
       enter_unattached(p);
     } else if(changed) {
       p->p_deadline = clock_get() + T_CC_DEBOUNCE;
+    } else if(expired && !vbus_safe0v) {
+      // Don't drive VBUS while something else does (or it's discharging)
+      p->p_deadline = vbus_poll_deadline(p);
     } else if(expired) {
       p->p_polarity = cc[1] == TYPEC_CC_RD;
       enter_state(p, ST_ATTACHED_SRC, 0);
@@ -188,11 +222,13 @@ typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
 
   case ST_ATTACHED_SRC:
     if(cc[p->p_polarity] == TYPEC_CC_RD) {
+      p->p_debouncing = 0;
       p->p_deadline = 0;
-    } else if(expired) {
+    } else if(p->p_debouncing && expired) {
       set_role(p, TYPEC_ROLE_NONE);
       enter_unattached(p);
-    } else if(!p->p_deadline) {
+    } else if(!p->p_debouncing) {
+      p->p_debouncing = 1;
       p->p_deadline = clock_get() + T_PD_DEBOUNCE;
     }
     break;
@@ -215,6 +251,7 @@ typec_thread(void *arg)
   while(1) {
     typec_cc_t cc[2];
     tp->tp_vtable->get_cc(tp, cc);
+    p->p_vbus_mv = p->p_cfg.vbus_mv ? p->p_cfg.vbus_mv(p->p_cfg.opaque) : -1;
     const int expired = p->p_deadline && clock_get() >= p->p_deadline;
     typec_step(p, cc, expired);
 
@@ -242,6 +279,10 @@ typec_print_info(struct device *d, struct stream *st)
 
   stprintf(st, "State: %s\n", state_names[p->p_state]);
   stprintf(st, "CC1: %s  CC2: %s\n", cc_names[cc[0]], cc_names[cc[1]]);
+  if(p->p_cfg.vbus_mv) {
+    const int mv = p->p_cfg.vbus_mv(p->p_cfg.opaque);
+    stprintf(st, "VBUS: %d.%02d V\n", mv / 1000, (mv % 1000) / 10);
+  }
   if(p->p_state == ST_ATTACHED_SNK || p->p_state == ST_ATTACHED_SRC)
     stprintf(st, "Active CC: CC%d\n", p->p_polarity + 1);
   stprintf(st, "Attaches: %d\n", p->p_attaches);

@@ -12,6 +12,10 @@ typedef struct tcpp03 tcpp03_t;
 tcpp03_t *tcpp03_create(i2c_t *i2c, uint8_t address, gpio_t enable,
                         const char *name);
 
+// Optional VBUS measurement (in mV), used to wait for VBUS to discharge
+void tcpp03_set_vbus_monitor(tcpp03_t *t, int (*vbus_mv)(void *opaque),
+                             void *opaque);
+
 // Attached as source: open the sink path and turn on VBUS
 error_t tcpp03_source_on(tcpp03_t *t);
 

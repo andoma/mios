@@ -44,7 +44,35 @@ struct tcpp03 {
   uint8_t t_address;
   uint8_t t_ctrl;   // Last value written to REG0
   error_t t_err;    // Last I2C error
+  int (*t_vbus_mv)(void *opaque);
+  void *t_vbus_opaque;
 };
+
+
+void
+tcpp03_set_vbus_monitor(tcpp03_t *t, int (*vbus_mv)(void *opaque),
+                        void *opaque)
+{
+  t->t_vbus_mv = vbus_mv;
+  t->t_vbus_opaque = opaque;
+}
+
+
+// Wait for VBUS to fall below vSafe0V (0.8V), like ST's BSP
+static void
+tcpp03_wait_discharged(tcpp03_t *t)
+{
+  if(t->t_vbus_mv == NULL) {
+    usleep(100000);
+    return;
+  }
+  for(int i = 0; i < 50; i++) {
+    if(t->t_vbus_mv(t->t_vbus_opaque) < 800)
+      return;
+    usleep(10000);
+  }
+  printf("%s: VBUS did not discharge\n", t->t_dev.d_name);
+}
 
 
 static error_t
@@ -84,13 +112,12 @@ error_t
 tcpp03_detach(tcpp03_t *t)
 {
   if(t->t_ctrl & CTRL_GDP_CLOSED) {
-    // We were the source. There's no VBUS measurement here, ST's BSP
-    // waits for VBUS to fall below 0.8V, up to 400ms
+    // We were the source
     error_t err = tcpp03_write_ctrl(t, CTRL_MODE_NORMAL | CTRL_GDC_OPEN |
                                     CTRL_VBUS_DISCHARGE);
     if(err)
       return err;
-    usleep(100000);
+    tcpp03_wait_discharged(t);
     err = tcpp03_write_ctrl(t, CTRL_MODE_NORMAL | CTRL_GDC_OPEN);
     if(err)
       return err;

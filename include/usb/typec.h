@@ -69,6 +69,13 @@ typedef struct typec_port_config {
   // starts USB host mode, on SINK it starts USB device mode, on NONE it
   // turns VBUS off (if it was on) and stops USB. May block
   void (*role_changed)(void *opaque, typec_role_t role);
+
+  // Optional, returns VBUS in mV. With it a sink attaches only once VBUS
+  // is present and detaches when it goes away, and a source waits for
+  // VBUS to be below vSafe0V before turning it on. Without it a sink
+  // detaches when Rp goes away
+  int (*vbus_mv)(void *opaque);
+
   void *opaque;
 } typec_port_config_t;
 
