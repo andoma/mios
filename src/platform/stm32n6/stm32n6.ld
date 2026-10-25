@@ -1,7 +1,7 @@
 MEMORY {
          BOOT  (rx)  : ORIGIN = 0x34180400, LENGTH = 510K
          VTBL  (rx)  : ORIGIN = 0x24000000, LENGTH = 1K
-         RAM   (xrw) : ORIGIN = 0x24000400, LENGTH = 256K
+         RAM   (xrw) : ORIGIN = 0x24000400, LENGTH = 512K
          ITCM  (rx)  : ORIGIN = 0x00001000, LENGTH = 60K
 }
 
