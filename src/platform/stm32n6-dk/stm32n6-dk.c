@@ -14,6 +14,7 @@
 #include "stm32n6_uart.h"
 #include "stm32n6_ucpd.h"
 #include "stm32n6_i2c.h"
+#include "stm32n6_adc.h"
 
 #include "camera.h"
 
@@ -85,17 +86,28 @@ usbc_role_changed(void *opaque, typec_role_t role)
 }
 
 
+// VBUS on PA11 (ADC1 channel 12) through a 140k / 10k divider
+static int
+usbc_vbus_mv(void *opaque)
+{
+  const int raw = stm32n6_adc_read_channel(ADC1_BASE, 12);
+  return raw * ADC_VREF_MV * 15 / 4095;
+}
+
+
 // The TCPP03 needs I2C and delays, which can't be done from constructors
 static void *
 usbc_init_thread(void *arg)
 {
   i2c_t *i2c = arg;
   usbc_tcpp = tcpp03_create(i2c, 0x34, GPIO_PA(4), "tcpp03");
+  tcpp03_set_vbus_monitor(usbc_tcpp, usbc_vbus_mv, NULL);
 
   static const typec_port_config_t cfg = {
     .type = TYPEC_PORT_DRP,
     .rp = TYPEC_PULL_RP_DEF,
     .role_changed = usbc_role_changed,
+    .vbus_mv = usbc_vbus_mv,
   };
   typec_port_create(stm32n6_ucpd_create(), &cfg, "usb-c");
   return NULL;
@@ -110,6 +122,14 @@ usbc_init(void)
   stm32n6_otghs1_host_create();
 
   gpio_conf_input(GPIO_PD(10), GPIO_PULL_UP); // TCPP03 FLGn, unused so far
+
+  // The channel preselect must be set before the ADC is enabled. The pin
+  // must be non-secure, or the GPIO keeps the (non-secure) ADC's analog
+  // switch open
+  gpio_conf_analog(GPIO_PA(11), GPIO_PULL_NONE);
+  stm32n6_gpio_set_secure(GPIO_PA(11), 0);
+  stm32n6_adc_init(ADC1_BASE, 1 << 12, 0);
+  stm32n6_adc_config_input(ADC1_BASE, 12);
   i2c_t *i2c = stm32n6_i2c_create(2, GPIO_PD(14), GPIO_PD(4),
                                   GPIO_PULL_UP, 100000);
   thread_create(usbc_init_thread, i2c, 1024, "usbcinit", TASK_DETACHED, 4);
