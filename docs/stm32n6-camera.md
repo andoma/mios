@@ -122,3 +122,17 @@ the whole pipeline: sensor, CSI-2 receiver, ISP, encoder and output.
 | `camera raw [x y [w h]]`    | Raw capture of a crop, prints Bayer statistics |
 | `camera clear`              | Clear the CSI-2 error counters                |
 | `camera regs`               | Dump the encoder registers                    |
+
+## Time-of-flight sensor
+
+The camera module also carries a VL53L5CX multizone ToF sensor
+(`src/drivers/vl53l5cx.c`) on the same I2C bus. It has no flash: at boot
+the camera init thread uploads its 84 KB firmware, which takes a few
+seconds. The firmware and default calibration blobs come from ST's ULD
+driver (BSD-3-Clause).
+
+| Command                     | Purpose                                       |
+|-----------------------------|-----------------------------------------------|
+| `tof start [4\|8] [hz]`      | Start ranging, default 8x8 zones at 15 Hz (4x4 goes up to 60 Hz) |
+| `tof stop`                  | Stop ranging                                  |
+| `tof [frames]`              | Print the distance grid for one or more frames |

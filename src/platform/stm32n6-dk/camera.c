@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <malloc.h>
 
 #include <mios/io.h>
 #include <mios/cli.h>
@@ -12,6 +13,7 @@
 #include <net/rtp_h264.h>
 
 #include "drivers/camera/imx335.h"
+#include "drivers/vl53l5cx.h"
 
 #include "stm32n6_i2c.h"
 #include "stm32n6_camera.h"
@@ -21,10 +23,13 @@
 #define CAM_NRST    GPIO_PC(8) // NRST_CAM: sensor XCLR (active low)
 #define CAM_I2C_SCL GPIO_PH(9)
 #define CAM_I2C_SDA GPIO_PC(1)
+// The VL53L5CX LPn (PQ5) is pulled up on the module and left alone,
+// TOF_INT (PQ0) is not used, the driver polls
 
 #define SENSOR_FPS 30
 
 static image_sensor_t *g_sensor;
+static vl53l5cx_t *g_tof;
 
 
 static void *
@@ -39,6 +44,9 @@ camera_thread(void *arg)
   image_sensor_t *sensor = imx335_create(i2c_get_bus(1), SENSOR_FPS);
   if(sensor != NULL && !stm32n6_camera_init(sensor))
     g_sensor = sensor;
+
+  // The ToF firmware upload takes a few seconds, so it goes last
+  g_tof = vl53l5cx_create(i2c_get_bus(1));
   return NULL;
 }
 
@@ -164,3 +172,49 @@ CLI_CMD_DEF_EXT("camera", cmd_camera,
                 "exposure <lines> [gain] | wb <r> <b> | tpg <n|-1> | "
                 "raw [x y [w h]] | clear | regs]",
                 "Camera pipeline status and control");
+
+
+static error_t
+cmd_tof(cli_t *cli, int argc, char **argv)
+{
+  vl53l5cx_t *v = g_tof;
+  if(v == NULL) {
+    cli_printf(cli, "No ToF sensor\n");
+    return ERR_NO_DEVICE;
+  }
+
+  if(argc >= 2 && !strcmp(argv[1], "start")) {
+    const int side = argc >= 3 ? atoi(argv[2]) : 8;
+    const int hz = argc >= 4 ? atoi(argv[3]) : (side == 8 ? 15 : 30);
+    return vl53l5cx_start(v, side, hz);
+  }
+
+  if(argc == 2 && !strcmp(argv[1], "stop"))
+    return vl53l5cx_stop(v);
+
+  if(argc > 2)
+    return ERR_INVALID_ARGS;
+
+  if(!vl53l5cx_is_ranging(v)) {
+    cli_printf(cli, "VL53L5CX idle\n");
+    return 0;
+  }
+
+  const int count = argc == 2 ? atoi(argv[1]) : 1;
+  vl53l5cx_frame_t *f = xalloc(sizeof(vl53l5cx_frame_t), 0, MEM_MAY_FAIL);
+  if(f == NULL)
+    return ERR_NO_MEMORY;
+
+  error_t err = 0;
+  for(int i = 0; i < count; i++) {
+    if((err = vl53l5cx_read(v, f, clock_get() + 1000000)))
+      break;
+    vl53l5cx_print_frame(f, cli->cl_stream);
+  }
+  free(f);
+  return err;
+}
+
+CLI_CMD_DEF_EXT("tof", cmd_tof,
+                "[start [4|8] [hz] | stop | <frames>]",
+                "VL53L5CX time-of-flight sensor");
