@@ -14,6 +14,7 @@
 #include <mios/task.h>
 
 #include <usb/typec.h>
+#include <usb/usb_pd.h>
 
 #include "irq.h"
 
@@ -137,9 +138,17 @@ set_role(typec_port_t *p, typec_role_t role)
     printf("%s: Attached as %s (CC%d)\n", p->p_dev.d_name,
            role == TYPEC_ROLE_SOURCE ? "source" : "sink", p->p_polarity + 1);
   } else {
-    printf("%s: Detached\n", p->p_dev.d_name);
+    if(p->p_vbus_mv >= 0)
+      printf("%s: Detached (VBUS %d mV)\n", p->p_dev.d_name, p->p_vbus_mv);
+    else
+      printf("%s: Detached\n", p->p_dev.d_name);
+    if(p->p_cfg.pd != NULL)
+      usb_pd_detach(p->p_cfg.pd);
   }
   p->p_cfg.role_changed(p->p_cfg.opaque, role);
+
+  if(role == TYPEC_ROLE_SINK && p->p_cfg.pd != NULL)
+    usb_pd_attach(p->p_cfg.pd);
 }
 
 
@@ -179,8 +188,10 @@ typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
 
   case ST_ATTACHED_SNK:
     if(p->p_cfg.vbus_mv) {
-      // With VBUS measurement the spec says to detach when VBUS goes
-      if(!vbus_present) {
+      // With VBUS measurement the spec says to detach when VBUS goes,
+      // but not while it's cycled by a PD Hard Reset
+      if(!vbus_present &&
+         !(p->p_cfg.pd != NULL && usb_pd_hard_reset_active(p->p_cfg.pd))) {
         set_role(p, TYPEC_ROLE_NONE);
         enter_unattached(p);
       } else {
@@ -286,6 +297,8 @@ typec_print_info(struct device *d, struct stream *st)
   if(p->p_state == ST_ATTACHED_SNK || p->p_state == ST_ATTACHED_SRC)
     stprintf(st, "Active CC: CC%d\n", p->p_polarity + 1);
   stprintf(st, "Attaches: %d\n", p->p_attaches);
+  if(p->p_phy->tp_vtable->print_info)
+    p->p_phy->tp_vtable->print_info(p->p_phy, st);
 }
 
 
