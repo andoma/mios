@@ -1165,6 +1165,43 @@ reconnect(void *opaque, uint64_t expire)
 }
 
 
+// Stop device mode so the core can be used in host mode. Interfaces see
+// a USB reset. Thread context
+__attribute__((unused))
+static void
+stm32_otg_stop(usb_ctrl_t *uc, int irq)
+{
+  irq_disable(irq);
+
+  int q = irq_forbid(IRQ_LEVEL_CLOCK);
+  timer_disarm(&uc->uc_reconnect);
+  irq_permit(q);
+
+  reg_set_bits(OTG_DCTL, 1, 1, 1); // Soft disconnect
+
+  q = irq_forbid(IRQ_LEVEL_NET);
+  handle_reset(uc);
+  irq_permit(q);
+
+  reg_wr(OTG_GINTMSK, 0);
+  reg_wr(OTG_GAHBCFG, 0);
+}
+
+
+// Restart device mode after stm32_otg_stop(). Thread context
+__attribute__((unused))
+static void
+stm32_otg_start(usb_ctrl_t *uc, int irq)
+{
+  // The core may have been in host mode, mode changes take 25ms
+  reg_wr(OTG_GUSBCFG, (reg_rd(OTG_GUSBCFG) & ~(1 << 29)) | (1 << 30));
+  usleep(25000);
+
+  otg_init_regs(uc);
+  irq_enable_fn_arg(irq, IRQ_LEVEL_NET, stm32_otg_irq, uc);
+}
+
+
 __attribute__((warn_unused_result, always_inline))
 static inline usb_ctrl_t *
 stm32_otg_create(uint16_t vid, uint16_t pid,

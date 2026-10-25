@@ -5,11 +5,18 @@
 
 #include "platform/stm32/stm32_otg_host.c"
 
+#define OTG1_BASE 0x58040000
+#define OTG1_IRQ  177
+
 #define OTG2_BASE 0x58080000
 #define OTG2_IRQ  178
 
 #define OTGPHYC2_BASE 0x580c0000
 #define OTGPHYC2_CR   (OTGPHYC2_BASE + 0x00)
+
+#define RIF_MASTER_OTG1      4
+#define RIF_PERIPH_OTG1_REG  1
+#define RIF_PERIPH_OTG1_BIT  24
 
 #define RIF_MASTER_OTG2      5
 #define RIF_PERIPH_OTG2_REG  1
@@ -37,5 +44,27 @@ stm32n6_otghs2_host_create(gpio_t vbus_enable)
   stm32n6_rif_set_master_attr(RIF_MASTER_OTG2, 1, 1, 1);
   stm32n6_rif_set_periph_sec(RIF_PERIPH_OTG2_REG, RIF_PERIPH_OTG2_BIT, 1, 1);
 
-  stm32_otg_host_create(OTG2_BASE, OTG2_IRQ, vbus_enable, "usbh");
+  stm32_otg_host_create(OTG2_BASE, OTG2_IRQ, vbus_enable, "usbh", 1);
+}
+
+
+static otgh_t *otg1_host;
+
+void
+stm32n6_otghs1_host_create(void)
+{
+  stm32n6_otghs1_clk_init();
+
+  stm32n6_rif_set_master_attr(RIF_MASTER_OTG1, 1, 1, 1);
+  stm32n6_rif_set_periph_sec(RIF_PERIPH_OTG1_REG, RIF_PERIPH_OTG1_BIT, 1, 1);
+
+  otg1_host = stm32_otg_host_create(OTG1_BASE, OTG1_IRQ, GPIO_UNUSED,
+                                    "usbh-c", 0);
+}
+
+
+void
+stm32n6_otghs1_host_enable(int on)
+{
+  stm32_otg_host_enable(otg1_host, on);
 }

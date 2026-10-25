@@ -265,8 +265,9 @@ acm_probe(usb_host_device_t *ud, const struct usb_interface_descriptor *id)
   a->ud = ud;
   a->refcount = 1;
   mutex_init(&a->tx_mutex, "acmtx");
-  a->rx_dma = xalloc(ACM_BUF_SIZE, 64, MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
-  a->tx_dma = xalloc(ACM_BUF_SIZE, 64, MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
+  // The host controller driver does cache maintenance
+  a->rx_dma = xalloc(ACM_BUF_SIZE, 64, MEM_TYPE_DMA);
+  a->tx_dma = xalloc(ACM_BUF_SIZE, 64, MEM_TYPE_DMA);
   a->rx_xfer.ux_done = acm_rx_done;
   a->rx_xfer.ux_opaque = a;
   a->tx_xfer.ux_done = acm_tx_done;

@@ -20,11 +20,13 @@ otg_platform_init_regs(usb_ctrl_t *uc)
 }
 
 void
-stm32n6_otghs_create(uint16_t vid, uint16_t pid,
-                     const char *manfacturer_string,
-                     const char *product_string,
-                     struct usb_interface_queue *q)
+stm32n6_otghs1_clk_init(void)
 {
+  static uint8_t done;
+  if(done)
+    return;
+  done = 1;
+
   rst_assert(CLK_OTG1);
   rst_assert(CLK_OTG1PHY);
   rst_assert(CLK_OTG1PHYCTL);
@@ -39,7 +41,20 @@ stm32n6_otghs_create(uint16_t vid, uint16_t pid,
   rst_deassert(CLK_OTG1PHY);
   udelay(50);                         // Wait for internal PLL to lock
   rst_deassert(CLK_OTG1);
+}
 
+
+static uint8_t device_enabled;
+
+void
+stm32n6_otghs_create(uint16_t vid, uint16_t pid,
+                     const char *manfacturer_string,
+                     const char *product_string,
+                     struct usb_interface_queue *q)
+{
+  stm32n6_otghs1_clk_init();
+
+  device_enabled = 1;
   usb_ctrl_t *uc =
     stm32_otg_create(vid, pid, manfacturer_string, product_string, q, 177);
 
@@ -51,4 +66,17 @@ stm32n6_otghs_create(uint16_t vid, uint16_t pid,
     uc->uc_serial_number[i] = src[(i & ~3) + (3 - (i & 3))];
   }
   uc->uc_serial_number_bytes = sizeof(uc->uc_serial_number);
+}
+
+
+void
+stm32n6_otghs_device_enable(int on)
+{
+  if(on == device_enabled)
+    return;
+  device_enabled = on;
+  if(on)
+    stm32_otg_start(&g_usb_ctrl, 177);
+  else
+    stm32_otg_stop(&g_usb_ctrl, 177);
 }

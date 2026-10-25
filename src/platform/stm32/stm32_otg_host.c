@@ -102,8 +102,8 @@
 
 #define OTGH_NUM_CHANNELS 16
 
-// Control transfers go through this uncached buffer: SETUP packet first,
-// data stage at OTGH_BOUNCE_DATA
+// Control transfers go through this buffer: SETUP packet first, data
+// stage at OTGH_BOUNCE_DATA
 #define OTGH_BOUNCE_SIZE  1024
 #define OTGH_BOUNCE_DATA  64
 
@@ -138,6 +138,9 @@ typedef struct otgh {
   uint8_t *oh_bounce;
 
   task_waitable_t oh_port_wait;
+  task_waitable_t oh_state_wait;
+  uint8_t oh_enabled;     // Requested state
+  uint8_t oh_running;     // The thread owns the core
   uint8_t oh_port_events;
   uint32_t oh_disconnects;
 
@@ -317,6 +320,9 @@ otgh_xfer(otgh_t *oh, uint32_t hcchar, int pid,
 {
   otgh_chan_t *oc = &oh->oh_chan[0];
 
+  // buf is within the bounce buffer, which is cache line aligned
+  dcache_op(oh->oh_bounce, OTGH_BOUNCE_SIZE, DCACHE_CLEAN | DCACHE_INVALIDATE);
+
   int q = irq_forbid(IRQ_LEVEL_IO);
 
   const uint32_t xfrsiz = otgh_chan_start(oh, 0, hcchar, pid, buf, len,
@@ -344,6 +350,7 @@ otgh_xfer(otgh_t *oh, uint32_t hcchar, int pid,
   if(hcint & HCINT_XFRC) {
     if(!is_in)
       return len;
+    dcache_op(oh->oh_bounce, OTGH_BOUNCE_SIZE, DCACHE_INVALIDATE);
     const uint32_t remain = oh_rd(oh, OTGH_HCTSIZ(0)) & 0x7ffff;
     return xfrsiz - remain;
   }
@@ -636,13 +643,9 @@ otgh_port_reset(otgh_t *oh)
 }
 
 
-__attribute__((noreturn))
-static void *
-otgh_thread(void *arg)
+static void
+otgh_start(otgh_t *oh)
 {
-  otgh_t *oh = arg;
-  const char *name = oh->oh_uhc.uhc_dev.d_name;
-
   otgh_core_init(oh);
   irq_enable_fn_arg(oh->oh_irq, IRQ_LEVEL_IO, otgh_irq, oh);
 
@@ -652,8 +655,41 @@ otgh_thread(void *arg)
                      GPIO_PULL_NONE);
     gpio_set_output(oh->oh_vbus, 1);
   }
+}
 
-  while(1) {
+
+// Hand the core back in the state we found it, so device mode can use it
+static void
+otgh_stop(otgh_t *oh)
+{
+  // Detach while interrupts still work, closing pipes halts channels
+  usb_host_detach(&oh->oh_uhc);
+
+  if(oh->oh_vbus != GPIO_UNUSED)
+    gpio_set_output(oh->oh_vbus, 0);
+  hprt_modify(oh, HPRT_PPWR, 0);
+
+  irq_disable(oh->oh_irq);
+  oh_wr(oh, OTGH_GINTMSK, 0);
+  oh_wr(oh, OTGH_GAHBCFG, 0);
+
+  otgh_wait_grstctl(oh, 1 << 31, 1 << 31);
+  oh_wr(oh, OTGH_GRSTCTL, 1);
+  otgh_wait_grstctl(oh, 1, 0);
+
+  oh_wr(oh, OTGH_GUSBCFG, oh_rd(oh, OTGH_GUSBCFG) & ~(1 << 29));
+  oh_wr(oh, OTGH_GOTGCTL, oh_rd(oh, OTGH_GOTGCTL) & ~0x3c);
+  oh_wr(oh, OTGH_GCCFG, oh_rd(oh, OTGH_GCCFG) & ~(1 << 25));
+}
+
+
+// Handle devices on the port until disabled
+static void
+otgh_run(otgh_t *oh)
+{
+  const char *name = oh->oh_uhc.uhc_dev.d_name;
+
+  while(oh->oh_enabled) {
     if(!(oh_rd(oh, OTGH_HPRT) & HPRT_PCSTS)) {
       otgh_port_wait(oh, 0);
       continue;
@@ -661,7 +697,7 @@ otgh_thread(void *arg)
 
     // Let the connection settle (USB 2.0 spec 7.1.7.3)
     usleep(100000);
-    if(!(oh_rd(oh, OTGH_HPRT) & HPRT_PCSTS))
+    if(!(oh_rd(oh, OTGH_HPRT) & HPRT_PCSTS) || !oh->oh_enabled)
       continue;
 
     const uint32_t disconnects = oh->oh_disconnects;
@@ -676,7 +712,7 @@ otgh_thread(void *arg)
     usb_host_attach(&oh->oh_uhc, speed);
 
     while((oh_rd(oh, OTGH_HPRT) & HPRT_PCSTS) &&
-          oh->oh_disconnects == disconnects) {
+          oh->oh_disconnects == disconnects && oh->oh_enabled) {
       otgh_port_wait(oh, 0);
     }
 
@@ -685,11 +721,59 @@ otgh_thread(void *arg)
 }
 
 
+__attribute__((noreturn))
+static void *
+otgh_thread(void *arg)
+{
+  otgh_t *oh = arg;
+
+  while(1) {
+    int q = irq_forbid(IRQ_LEVEL_IO);
+    while(!oh->oh_enabled)
+      task_sleep(&oh->oh_port_wait);
+    oh->oh_running = 1;
+    irq_permit(q);
+
+    otgh_start(oh);
+    otgh_run(oh);
+    otgh_stop(oh);
+
+    q = irq_forbid(IRQ_LEVEL_IO);
+    oh->oh_running = 0;
+    task_wakeup(&oh->oh_state_wait, 1);
+    irq_permit(q);
+  }
+}
+
+
+// Turn host mode on or off. Turning it off waits until the core has been
+// released. Thread context
+__attribute__((unused))
+static void
+stm32_otg_host_enable(otgh_t *oh, int on)
+{
+  int q = irq_forbid(IRQ_LEVEL_IO);
+  oh->oh_enabled = on;
+  oh->oh_port_events |= PORT_EV_CHANGE;
+  task_wakeup(&oh->oh_port_wait, 1);
+  if(!on) {
+    while(oh->oh_running)
+      task_sleep(&oh->oh_state_wait);
+  }
+  irq_permit(q);
+}
+
+
 static void
 otgh_print_info(struct device *d, struct stream *st)
 {
   otgh_t *oh = (otgh_t *)d;
   static const char *speeds[4] = {"high", "full", "low", "?"};
+
+  if(!oh->oh_running) {
+    stprintf(st, "Disabled\n");
+    return;
+  }
 
   const uint32_t hprt = oh_rd(oh, OTGH_HPRT);
   stprintf(st, "Port: %s%s%s%s%s  Line D+:%d D-:%d\n",
@@ -724,15 +808,15 @@ static const device_class_t otgh_class = {
 };
 
 
-static void
-stm32_otg_host_create(uint32_t base, int irq, gpio_t vbus, const char *name)
+static otgh_t *
+stm32_otg_host_create(uint32_t base, int irq, gpio_t vbus, const char *name,
+                      int enabled)
 {
   otgh_t *oh = calloc(1, sizeof(otgh_t));
   oh->oh_base = base;
   oh->oh_vbus = vbus;
   oh->oh_uhc.uhc_vtable = &otgh_vtable;
-  oh->oh_bounce = xalloc(OTGH_BOUNCE_SIZE, 64,
-                         MEM_TYPE_DMA | MEM_TYPE_NO_CACHE);
+  oh->oh_bounce = xalloc(OTGH_BOUNCE_SIZE, 64, MEM_TYPE_DMA);
   oh->oh_irq = irq;
   mutex_init(&oh->oh_ctrl_mutex, "usbhctrl");
 
@@ -741,5 +825,7 @@ stm32_otg_host_create(uint32_t base, int irq, gpio_t vbus, const char *name)
   device_register(&oh->oh_uhc.uhc_dev);
 
   // Core init sleeps (forcing host mode takes 25ms), so do it in the thread
+  oh->oh_enabled = enabled;
   thread_create(otgh_thread, oh, 2048, name, 0, 4);
+  return oh;
 }
