@@ -21,6 +21,7 @@ stm32n6_i2c_pin_af(unsigned int instance, gpio_t pin)
     break;
   case 2:
     switch(pin) {
+    case GPIO_PD(4):              // SDA
     case GPIO_PB(10):             // SCL
     case GPIO_PB(11):             // SDA
     case GPIO_PB(12):             // SMBA
