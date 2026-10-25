@@ -21,6 +21,7 @@ SRCS += ${C}/systick.c \
 	${P}/stm32n6_flash.c \
 	${P}/stm32n6_usb.c \
 	${P}/stm32n6_usbh.c \
+	${P}/stm32n6_ucpd.c \
 	${P}/stm32n6_spi.c \
 	${P}/stm32n6_adc.c \
 	${P}/stm32n6_i2c.c \
