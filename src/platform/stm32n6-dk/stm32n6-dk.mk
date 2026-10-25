@@ -7,6 +7,7 @@ ENABLE_RTL8211F := yes
 ENABLE_LITTLEFS := yes
 ENABLE_IMX335   := yes
 ENABLE_NET_RTP  := yes
+ENABLE_VL53L5CX := yes
 
 B := ${SRC}/platform/${BOARDNAME}
 
