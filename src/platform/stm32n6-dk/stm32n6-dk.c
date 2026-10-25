@@ -67,6 +67,9 @@ board_init_late(void)
 
   stm32n6_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32n6-dk", &q);
 
+  // USB-A host port (CN17), VBUS switch enabled by PB9
+  stm32n6_otghs2_host_create(GPIO_PB(9));
+
   stm32n6_eth_init(GPIO_UNUSED, GPIO_PD(12), GPIO_PD(1),
                    1, ETHPHY_MODE_RGMII);
 }
