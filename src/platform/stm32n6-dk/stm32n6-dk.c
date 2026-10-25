@@ -12,11 +12,16 @@
 #include "stm32n6_usb.h"
 #include "stm32n6_eth.h"
 #include "stm32n6_uart.h"
+#include "stm32n6_ucpd.h"
+#include "stm32n6_i2c.h"
 
 #include "camera.h"
 
 #include <usb/usb.h>
 #include <usb/usb_host.h>
+#include <usb/typec.h>
+
+#include "drivers/tcpp03.h"
 
 #define BLINK_GPIO GPIO_PG(10) // Red LED (LD2)
 
@@ -54,6 +59,63 @@ blinker(void *arg)
   }
 }
 
+// USB-C port (CN18): dual role. OTG1 is a device when attached as sink and
+// a host when attached as source. The TCPP03 on I2C2 switches VBUS
+static tcpp03_t *usbc_tcpp;
+
+static void
+usbc_role_changed(void *opaque, typec_role_t role)
+{
+  switch(role) {
+  case TYPEC_ROLE_SOURCE:
+    tcpp03_source_on(usbc_tcpp);
+    stm32n6_otghs1_host_enable(1);
+    break;
+  case TYPEC_ROLE_SINK:
+    tcpp03_sink_on(usbc_tcpp);
+    stm32n6_otghs_device_enable(1);
+    break;
+  case TYPEC_ROLE_NONE:
+    // VBUS off first, then release the core
+    tcpp03_detach(usbc_tcpp);
+    stm32n6_otghs1_host_enable(0);
+    stm32n6_otghs_device_enable(0);
+    break;
+  }
+}
+
+
+// The TCPP03 needs I2C and delays, which can't be done from constructors
+static void *
+usbc_init_thread(void *arg)
+{
+  i2c_t *i2c = arg;
+  usbc_tcpp = tcpp03_create(i2c, 0x34, GPIO_PA(4), "tcpp03");
+
+  static const typec_port_config_t cfg = {
+    .type = TYPEC_PORT_DRP,
+    .rp = TYPEC_PULL_RP_DEF,
+    .role_changed = usbc_role_changed,
+  };
+  typec_port_create(stm32n6_ucpd_create(), &cfg, "usb-c");
+  return NULL;
+}
+
+
+static void
+usbc_init(void)
+{
+  // Device mode waits for Type-C to attach us as a sink
+  stm32n6_otghs_device_enable(0);
+  stm32n6_otghs1_host_create();
+
+  gpio_conf_input(GPIO_PD(10), GPIO_PULL_UP); // TCPP03 FLGn, unused so far
+  i2c_t *i2c = stm32n6_i2c_create(2, GPIO_PD(14), GPIO_PD(4),
+                                  GPIO_PULL_UP, 100000);
+  thread_create(usbc_init_thread, i2c, 1024, "usbcinit", TASK_DETACHED, 4);
+}
+
+
 static void __attribute__((constructor(800)))
 board_init_late(void)
 {
@@ -67,6 +129,7 @@ board_init_late(void)
   usb_cdc_create_shell(&q);
 
   stm32n6_otghs_create(0x6666, 0x0500, "Lonelycoder", "stm32n6-dk", &q);
+  usbc_init();
 
   // USB-A host port (CN17), VBUS switch enabled by PB9
   usb_host_acm_register();
