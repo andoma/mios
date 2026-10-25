@@ -475,11 +475,13 @@ pe_handle_msg(usb_pd_t *pd, const pd_msg_t *m)
   case PD_CTRL_PS_RDY:
     if(pd->pd_state != PE_TRANSITION)
       break;
+    if(pd->pd_contract_mv != pd->pd_req_mv ||
+       pd->pd_contract_ma != pd->pd_req_ma)
+      printf("%s: Contract %d mV %d mA\n", pd->pd_dev.d_name,
+             pd->pd_req_mv, pd->pd_req_ma);
     pd->pd_contract_mv = pd->pd_req_mv;
     pd->pd_contract_ma = pd->pd_req_ma;
     pe_set_state(pd, PE_READY, 0);
-    printf("%s: Contract %d mV %d mA\n", pd->pd_dev.d_name,
-           pd->pd_contract_mv, pd->pd_contract_ma);
     break;
 
   case PD_CTRL_GET_SINK_CAP:

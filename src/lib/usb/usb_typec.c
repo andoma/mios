@@ -1,5 +1,5 @@
 // USB Type-C connection state machine (Type-C spec 4.5.2), without the
-// Try.SRC / Try.SNK and accessory states.
+// Try.SRC and accessory states.
 //
 // A dual role port toggles between Unattached.SNK and Unattached.SRC
 // until the CC lines show a partner. VBUS is polled if the board can
@@ -23,6 +23,10 @@
 #define T_DRP_SNK       40000  // tDRP is 50-100 ms with the source part
 #define T_DRP_SRC       35000  // (dcSRC.DRP) between 30 and 70 %
 #define T_VBUS_POLL     50000  // There is no VBUS interrupt
+#define T_DRP_TRY      100000  // tDRPTry, 75-150 ms
+#define T_TRY_DEBOUNCE  15000  // tTryCCDebounce, 10-20 ms
+#define T_TRY_POLL       5000
+#define T_TRY_VBUS     500000  // Partner's tCCDebounce and tVBUSON
 
 #define VSAFE0V_MV        800
 #define VBUS_PRESENT_MV  3670  // vSinkDisconnect
@@ -34,6 +38,8 @@ typedef enum {
   ST_UNATTACHED_SRC,
   ST_ATTACHWAIT_SRC,
   ST_ATTACHED_SRC,
+  ST_TRY_SNK,
+  ST_TRYWAIT_SRC,
 } typec_state_t;
 
 static const char *state_names[] = {
@@ -43,6 +49,8 @@ static const char *state_names[] = {
   [ST_UNATTACHED_SRC] = "Unattached.SRC",
   [ST_ATTACHWAIT_SRC] = "AttachWait.SRC",
   [ST_ATTACHED_SRC]   = "Attached.SRC",
+  [ST_TRY_SNK]        = "Try.SNK",
+  [ST_TRYWAIT_SRC]    = "TryWait.SRC",
 };
 
 static const char *cc_names[] = {
@@ -64,6 +72,8 @@ struct typec_port {
 
   typec_state_t p_state;
   int64_t p_deadline;     // State timer, 0 if not running
+  int64_t p_try_end;      // End of tDRPTry in Try.SNK and TryWait.SRC
+  int64_t p_cc_since;     // When the CC state last changed
   typec_cc_t p_cc[2];     // Previous sample
   int p_vbus_mv;          // Last measurement, -1 if not measured
   uint8_t p_polarity;
@@ -93,13 +103,15 @@ enter_state(typec_port_t *p, typec_state_t state, int timeout)
 {
   typec_phy_t *tp = p->p_phy;
 
-  if(state == ST_UNATTACHED_SNK)
+  if(state == ST_UNATTACHED_SNK || state == ST_TRY_SNK)
     tp->tp_vtable->set_pull(tp, TYPEC_PULL_RD);
-  else if(state == ST_UNATTACHED_SRC)
+  else if(state == ST_UNATTACHED_SRC || state == ST_TRYWAIT_SRC)
     tp->tp_vtable->set_pull(tp, p->p_cfg.rp);
 
+  const int64_t now = clock_get();
   p->p_state = state;
-  p->p_deadline = timeout ? clock_get() + timeout : 0;
+  p->p_deadline = timeout ? now + timeout : 0;
+  p->p_try_end = now + T_DRP_TRY;
   p->p_debouncing = 0;
 }
 
@@ -156,8 +168,13 @@ set_role(typec_port_t *p, typec_role_t role)
 static void
 typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
 {
+  const int64_t now = clock_get();
   const int changed = cc[0] != p->p_cc[0] || cc[1] != p->p_cc[1];
+  if(changed)
+    p->p_cc_since = now;
+  const int stable = now - p->p_cc_since >= T_TRY_DEBOUNCE;
   const int rds = (cc[0] == TYPEC_CC_RD) + (cc[1] == TYPEC_CC_RD);
+  const int rps = is_rp(cc[0]) + is_rp(cc[1]);
   const int vbus = p->p_vbus_mv;
   const int vbus_present = vbus < 0 || vbus >= VBUS_PRESENT_MV;
   const int vbus_safe0v = vbus < VSAFE0V_MV; // Also when not measured
@@ -224,10 +241,38 @@ typec_step(typec_port_t *p, const typec_cc_t cc[2], int expired)
     } else if(expired && !vbus_safe0v) {
       // Don't drive VBUS while something else does (or it's discharging)
       p->p_deadline = vbus_poll_deadline(p);
+    } else if(expired && p->p_cfg.prefer_sink) {
+      // See if the partner can be the source instead
+      enter_state(p, ST_TRY_SNK, T_TRY_POLL);
     } else if(expired) {
       p->p_polarity = cc[1] == TYPEC_CC_RD;
       enter_state(p, ST_ATTACHED_SRC, 0);
       set_role(p, TYPEC_ROLE_SOURCE);
+    }
+    break;
+
+  case ST_TRY_SNK:
+    p->p_deadline = now + T_TRY_POLL;
+    if(now < p->p_try_end)
+      break; // Give the partner tDRPTry to notice our Rd
+    if(rps != 1 || now >= p->p_try_end + T_TRY_VBUS) {
+      enter_state(p, ST_TRYWAIT_SRC, T_TRY_POLL);
+    } else if(stable && vbus_present) {
+      p->p_polarity = is_rp(cc[1]);
+      enter_state(p, ST_ATTACHED_SNK, 0);
+      set_role(p, TYPEC_ROLE_SINK);
+      p->p_deadline = vbus_poll_deadline(p);
+    }
+    break;
+
+  case ST_TRYWAIT_SRC:
+    p->p_deadline = now + T_TRY_POLL;
+    if(rds == 1 && stable && vbus_safe0v) {
+      p->p_polarity = cc[1] == TYPEC_CC_RD;
+      enter_state(p, ST_ATTACHED_SRC, 0);
+      set_role(p, TYPEC_ROLE_SOURCE);
+    } else if(rds != 1 && now >= p->p_try_end) {
+      enter_unattached(p);
     }
     break;
 

@@ -101,6 +101,10 @@ typedef struct typec_port_config {
   typec_port_type_t type;
   typec_pull_t rp;  // Current to advertise as source
 
+  // Dual role only: prefer to be the sink (Try.SNK). Without it, which
+  // side becomes the source when two dual role ports meet is random
+  int prefer_sink;
+
   // Called from the Type-C thread. On SOURCE the board turns on VBUS and
   // starts USB host mode, on SINK it starts USB device mode, on NONE it
   // turns VBUS off (if it was on) and stops USB. May block
