@@ -104,6 +104,7 @@ struct usb_host_device {
   char *ud_manufacturer;
   char *ud_product;
   char *ud_serial;
+  uint16_t ud_langid;  // Language of the string descriptors
 
   uint32_t ud_claimed; // Bitmask of interface numbers bound to drivers
 
@@ -120,6 +121,12 @@ int usb_host_control(usb_host_device_t *ud, uint8_t request_type,
                      uint8_t request, uint16_t value, uint16_t index,
                      void *data, uint16_t length);
 
+error_t usb_host_set_interface(usb_host_device_t *ud, int ifnum, int alt);
+
+// Fetch a string descriptor as ASCII, NULL if index is 0 or on error.
+// Free the result
+char *usb_host_get_string(usb_host_device_t *ud, uint8_t index);
+
 usb_host_pipe_t *usb_host_pipe_open(usb_host_device_t *ud,
                                     const struct usb_endpoint_descriptor *ed);
 
@@ -130,8 +137,12 @@ error_t usb_host_submit(usb_host_device_t *ud, usb_host_pipe_t *up,
 
 // Descriptor helpers, all searching within ud_config
 
+// Alternate setting 0 of an interface
 const struct usb_interface_descriptor *
 usb_host_find_interface(usb_host_device_t *ud, int ifnum);
+
+const struct usb_interface_descriptor *
+usb_host_find_interface_alt(usb_host_device_t *ud, int ifnum, int alt);
 
 // Next descriptor of the given type following 'from' but before the
 // next interface descriptor. NULL if there is none

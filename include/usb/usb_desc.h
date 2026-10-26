@@ -21,6 +21,7 @@
 #define USB_REQ_SET_ADDRESS             5
 #define USB_REQ_GET_DESCRIPTOR          6
 #define USB_REQ_SET_CONFIG              9
+#define USB_REQ_SET_INTERFACE           11
 
 struct usb_setup_packet {
   uint8_t request_type;

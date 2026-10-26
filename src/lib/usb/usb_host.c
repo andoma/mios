@@ -39,6 +39,15 @@ usb_host_control(usb_host_device_t *ud, uint8_t request_type,
 }
 
 
+error_t
+usb_host_set_interface(usb_host_device_t *ud, int ifnum, int alt)
+{
+  int r = usb_host_control(ud, 0x01, USB_REQ_SET_INTERFACE, alt, ifnum,
+                           NULL, 0);
+  return r < 0 ? r : 0;
+}
+
+
 usb_host_pipe_t *
 usb_host_pipe_open(usb_host_device_t *ud,
                    const struct usb_endpoint_descriptor *ed)
@@ -80,12 +89,19 @@ desc_next(usb_host_device_t *ud, const uint8_t *p)
 const struct usb_interface_descriptor *
 usb_host_find_interface(usb_host_device_t *ud, int ifnum)
 {
+  return usb_host_find_interface_alt(ud, ifnum, 0);
+}
+
+
+const struct usb_interface_descriptor *
+usb_host_find_interface_alt(usb_host_device_t *ud, int ifnum, int alt)
+{
   for(const uint8_t *p = ud->ud_config; p != NULL; p = desc_next(ud, p)) {
     if(p[1] != USB_DESC_TYPE_INTERFACE ||
        p[0] < sizeof(struct usb_interface_descriptor))
       continue;
     const struct usb_interface_descriptor *id = (const void *)p;
-    if(id->bInterfaceNumber == ifnum && id->bAlternateSetting == 0)
+    if(id->bInterfaceNumber == ifnum && id->bAlternateSetting == alt)
       return id;
   }
   return NULL;
@@ -162,10 +178,10 @@ get_descriptor(usb_host_device_t *ud, uint8_t type, uint8_t index,
 }
 
 
-// Fetch a string descriptor and convert it to ASCII
-static char *
-get_string(usb_host_device_t *ud, uint8_t index, uint16_t langid)
+char *
+usb_host_get_string(usb_host_device_t *ud, uint8_t index)
 {
+  const uint16_t langid = ud->ud_langid;
   if(index == 0)
     return NULL;
 
@@ -231,15 +247,15 @@ enumerate(usb_host_device_t *ud)
     return ERR_MALFORMED;
 
   // String descriptor 0 holds the supported language ids
-  uint16_t langid = 0x409;
+  ud->ud_langid = 0x409;
   uint8_t langs[4];
   r = get_descriptor(ud, USB_DESC_TYPE_STRING, 0, 0, langs, sizeof(langs));
   if(r == sizeof(langs))
-    langid = langs[2] | (langs[3] << 8);
+    ud->ud_langid = langs[2] | (langs[3] << 8);
 
-  ud->ud_manufacturer = get_string(ud, dd->iManufacturer, langid);
-  ud->ud_product = get_string(ud, dd->iProduct, langid);
-  ud->ud_serial = get_string(ud, dd->iSerialNumber, langid);
+  ud->ud_manufacturer = usb_host_get_string(ud, dd->iManufacturer);
+  ud->ud_product = usb_host_get_string(ud, dd->iProduct);
+  ud->ud_serial = usb_host_get_string(ud, dd->iSerialNumber);
 
   r = usb_host_control(ud, 0, USB_REQ_SET_CONFIG, cd.bConfigurationValue, 0,
                        NULL, 0);
