@@ -75,3 +75,6 @@ uint32_t ipv4_cksum_pseudo(uint32_t src_addr, uint32_t dst_addr,
 uint16_t ipv4_cksum_pbuf(uint32_t sum, struct pbuf *pb, int offset, int length);
 
 struct nexthop *ipv4_nexthop_resolve(uint32_t addr);
+
+// The interface the default route goes through, NULL if there is none
+struct netif *ipv4_default_route(void);

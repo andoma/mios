@@ -281,6 +281,7 @@ dhcpv4_discover(ether_netif_t *eni)
     eni->eni_dhcp_xid = rand();
   }
   eni->eni_ni.ni_ipv4_local_addr = 0;
+  eni->eni_ni.ni_ipv4_gateway = 0;
   eni->eni_dhcp_server_ip = 0;
   eni->eni_dhcp_requested_ip = 0;
 
@@ -492,6 +493,7 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
       eni->eni_ni.ni_ipv4_local_addr = yiaddr;
       eni->eni_ni.ni_ipv4_local_prefixlen =
         33 - __builtin_ffs(ntohl(po.netmask));
+      eni->eni_ni.ni_ipv4_gateway = po.gateway;
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
       dhcpv4_update(&eni->eni_ni, &po.vsi, &po.bootfile);
       net_timer_arm(&eni->eni_dhcp_timer,
@@ -575,6 +577,7 @@ dhcpv4_print(ether_netif_t *eni, struct stream *st)
            strtbl(dhcp_state_str, eni->eni_dhcp_state));
   stprintf(st, "  Our address: %Id\n", eni->eni_dhcp_requested_ip);
   stprintf(st, "  Server: %Id\n", eni->eni_dhcp_server_ip);
+  stprintf(st, "  Gateway: %Id\n", eni->eni_ni.ni_ipv4_gateway);
   if(eni->eni_dhcp_state) {
     int delta = (eni->eni_dhcp_timer.t_expire - clock_get()) / 1000000;
     if(eni->eni_dhcp_state == DHCP_STATE_BOUND) {

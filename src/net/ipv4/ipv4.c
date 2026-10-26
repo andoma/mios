@@ -98,6 +98,22 @@ ipv4_prefix_match(uint32_t addr,
 
 static struct nexthop_list ipv4_nexthops; // Make a hash
 
+netif_t *
+ipv4_default_route(void)
+{
+  netif_t *best = NULL;
+  netif_t *ni;
+  SLIST_FOREACH(ni, &netifs, ni_global_link) {
+    if(!(ni->ni_flags & NETIF_F_UP) || ni->ni_ipv4_local_addr == 0 ||
+       ni->ni_ipv4_gateway == 0)
+      continue;
+    if(best == NULL || ni->ni_ipv4_route_metric < best->ni_ipv4_route_metric)
+      best = ni;
+  }
+  return best;
+}
+
+
 nexthop_t *
 ipv4_nexthop_resolve(uint32_t addr)
 {
@@ -116,8 +132,15 @@ ipv4_nexthop_resolve(uint32_t addr)
       break;
   }
 
-  if(ni == NULL)
-    return NULL;
+  if(ni == NULL) {
+    // Not on any of our subnets: send it to the default router. Off-link
+    // destinations share the router's nexthop (and its ARP entry). The
+    // router is looked up each time, so the route follows link changes
+    ni = ipv4_default_route();
+    if(ni == NULL || addr == ni->ni_ipv4_gateway)
+      return NULL;
+    return ipv4_nexthop_resolve(ni->ni_ipv4_gateway);
+  }
 
   nh = xalloc(sizeof(nexthop_t), 0, MEM_MAY_FAIL);
   if(nh == NULL)

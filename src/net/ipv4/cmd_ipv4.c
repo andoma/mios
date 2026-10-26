@@ -2,6 +2,8 @@
 #include <string.h>
 
 #include "net/netif.h"
+#include "net/net.h"
+#include "ipv4.h"
 
 static error_t
 cmd_arp(cli_t *cli, int argc, char **argv)
@@ -36,3 +38,33 @@ cmd_arp(cli_t *cli, int argc, char **argv)
 
 
 CLI_CMD_DEF_EXT("show_arp", cmd_arp, NULL, "Show ARP table");
+
+
+static error_t
+cmd_route(cli_t *cli, int argc, char **argv)
+{
+  const netif_t *def = ipv4_default_route();
+  netif_t *ni = NULL;
+
+  while((ni = netif_get_net(ni)) != NULL) {
+    if(ni->ni_ipv4_local_addr == 0)
+      continue;
+    const uint32_t mask =
+      htonl(mask_from_prefixlen(ni->ni_ipv4_local_prefixlen));
+    cli_printf(cli, "%Id/%d dev %s\n", ni->ni_ipv4_local_addr & mask,
+               ni->ni_ipv4_local_prefixlen, ni->ni_dev.d_name);
+  }
+
+  while((ni = netif_get_net(ni)) != NULL) {
+    if(ni->ni_ipv4_gateway == 0)
+      continue;
+    cli_printf(cli, "default via %Id dev %s metric %d%s%s\n",
+               ni->ni_ipv4_gateway, ni->ni_dev.d_name,
+               ni->ni_ipv4_route_metric,
+               ni->ni_flags & NETIF_F_UP ? "" : " (link down)",
+               ni == def ? " (active)" : "");
+  }
+  return 0;
+}
+
+CLI_CMD_DEF_EXT("show_route", cmd_route, NULL, "Show IPv4 routes");

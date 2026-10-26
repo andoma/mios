@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <net/ether.h>
+#include <net/ipv4/ipv4.h>
 
 #include "hosttest.h"
 #include "sim_dhcpd.h"
@@ -112,6 +113,11 @@ test_basic(void)
   CHECK(sc->eni->eni_ni.ni_ipv4_local_prefixlen == 24, "prefixlen=%d",
         sc->eni->eni_ni.ni_ipv4_local_prefixlen);
   CHECK(took < 100000, "binding took %d us", (int)took);
+  CHECK(sc->eni->eni_ni.ni_ipv4_gateway == sc->srv.gateway,
+        "gateway %Id, expected %Id", sc->eni->eni_ni.ni_ipv4_gateway,
+        sc->srv.gateway);
+  CHECK(ipv4_default_route() == &sc->eni->eni_ni,
+        "default route should go via the only bound interface");
 
   // Renewal timer at half the lease
   const int64_t renew_in = sc->eni->eni_dhcp_timer.t_expire - clock_get();
