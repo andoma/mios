@@ -157,11 +157,24 @@ void usb_host_attach(usb_host_ctrl_t *uhc, int speed);
 void usb_host_detach(usb_host_ctrl_t *uhc);
 
 
-// CDC-ACM class driver
+// Serial ports
 
+// CDC-ACM class driver
 void usb_host_acm_register(void);
 
-// Returns a stream for the nth attached CDC-ACM device, or NULL.
-// Reads and writes fail with ERR_NOT_CONNECTED once the device is gone.
-// Close the stream when done
-struct stream *usb_host_acm_open(int unit);
+// Vendor specific interfaces with a bulk IN and a bulk OUT endpoint, such
+// as the AT command ports of cellular modems
+typedef struct usb_host_serial_id {
+  uint16_t vid;
+  uint16_t pid;
+  uint32_t interfaces;  // Bitmask of interface numbers
+} usb_host_serial_id_t;
+
+// The table is not copied
+void usb_host_serial_register(const usb_host_serial_id_t *ids,
+                              size_t num_ids);
+
+// Returns a stream for the nth attached serial port (CDC-ACM or vendor),
+// or NULL. Units are assigned in attach order. Reads and writes fail with
+// ERR_NOT_CONNECTED once the device is gone. Close the stream when done
+struct stream *usb_host_serial_open(int unit);

@@ -5,7 +5,7 @@ SRCS +=	${SRC}/lib/usb/usb_common.c \
 	${SRC}/lib/usb/usb_dfu_runtime.c \
 	${SRC}/lib/usb/usb_mcp.c \
 	${SRC}/lib/usb/usb_host.c \
-	${SRC}/lib/usb/usb_host_acm.c \
+	${SRC}/lib/usb/usb_host_serial.c \
 	${SRC}/lib/usb/usb_typec.c \
 	${SRC}/lib/usb/usb_pd.c \
 
