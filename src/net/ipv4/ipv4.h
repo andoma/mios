@@ -78,3 +78,6 @@ struct nexthop *ipv4_nexthop_resolve(uint32_t addr);
 
 // The interface the default route goes through, NULL if there is none
 struct netif *ipv4_default_route(void);
+
+struct pbuf *icmp_input_echo_reply(struct netif *ni, struct pbuf *pb,
+                                   int icmp_offset);

@@ -62,6 +62,7 @@ SRCS-${ENABLE_NET_IPV4} += \
 	${SRC}/net/ipv4/dhcpv4.c \
 	${SRC}/net/ipv4/ntp.c \
 	${SRC}/net/ipv4/cmd_ipv4.c \
+	${SRC}/net/ipv4/ping.c \
 	${SRC}/net/ipv4/mdns.c \
 
 SRCS-${ENABLE_NET_ETHER} += \

@@ -216,6 +216,9 @@ ipv4_input_icmp(netif_t *ni, pbuf_t *pb, int icmp_offset)
     icmp_input_icmp_echo(ni, pb, icmp_offset);
     return NULL;
 
+  case 0: // ICMP_ECHOREPLY
+    return icmp_input_echo_reply(ni, pb, icmp_offset);
+
   default:
     break;
   }
