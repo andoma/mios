@@ -13,6 +13,9 @@
 #include "net/pbuf.h"
 
 #include "ipv4.h"
+#ifdef ENABLE_DNS_CLIENT
+#include "dns.h"
+#endif
 
 #define PING_PAYLOAD 56
 
@@ -129,14 +132,26 @@ cmd_ping(cli_t *cli, int argc, char **argv)
   if(argc < 2 || argc > 3)
     return ERR_INVALID_ARGS;
 
-  const uint32_t dst = inet_addr(argv[1]);
   const int count = argc > 2 ? atoi(argv[2]) : 4;
-  if(dst == 0 || count < 1)
+  if(count < 1)
+    return ERR_INVALID_ARGS;
+
+#ifdef ENABLE_DNS_CLIENT
+  uint32_t dst;
+  error_t err = dns_resolve(argv[1], &dst);
+  if(err) {
+    cli_printf(cli, "Unable to resolve %s\n", argv[1]);
+    return err;
+  }
+#else
+  const uint32_t dst = inet_addr(argv[1]);
+  error_t err = 0;
+#endif
+  if(dst == 0)
     return ERR_INVALID_ARGS;
 
   int received = 0;
   int64_t rtt_min = INT64_MAX, rtt_max = 0, rtt_sum = 0;
-  error_t err = 0;
 
   mutex_lock(&ping_cmd_mutex);
   mutex_lock(&ping_mutex);
@@ -209,5 +224,5 @@ cmd_ping(cli_t *cli, int argc, char **argv)
   return received ? 0 : ERR_TIMEOUT;
 }
 
-CLI_CMD_DEF_EXT("ping", cmd_ping, "<address> [count]",
+CLI_CMD_DEF_EXT("ping", cmd_ping, "<host> [count]",
                 "Send ICMP echo requests");

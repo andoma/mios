@@ -18,6 +18,12 @@ ENABLE_NET_STACK := $(findstring yes,\
 	${ENABLE_NET_IPV4})
 
 ENABLE_NET_ETHER := $(call OR, ${ENABLE_NET_IPV4})
+
+ifeq (${ENABLE_DNS_CLIENT},yes)
+ifneq (${ENABLE_NET_IPV4},yes)
+$(error ENABLE_DNS_CLIENT requires ENABLE_NET_IPV4)
+endif
+endif
 ENABLE_NET_DSIG := $(call OR, ${ENABLE_NET_DSIG} ${ENABLE_NET_MBUS} ${ENABLE_NET_CAN} ${ENABLE_NET_DSIG_UDP})
 
 ifeq (${ENABLE_NET_DSIG_UDP},yes)
@@ -63,6 +69,9 @@ SRCS-${ENABLE_NET_IPV4} += \
 	${SRC}/net/ipv4/ntp.c \
 	${SRC}/net/ipv4/cmd_ipv4.c \
 	${SRC}/net/ipv4/ping.c \
+
+SRCS-${ENABLE_DNS_CLIENT} += \
+	${SRC}/net/ipv4/dns.c \
 	${SRC}/net/ipv4/mdns.c \
 
 SRCS-${ENABLE_NET_ETHER} += \

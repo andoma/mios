@@ -4,16 +4,24 @@
  * DHCP server for a vnet, running as a simulation thread (see
  * cpu/host/sim.h): a blocking receive loop with a deadline, like a real
  * server program. Also answers ARP for its own address so unicast
- * renewals can be delivered. Behaviour knobs let a suite drive the
- * client's state machine through its corners; the suite sets them from
- * the Mios main thread, which is safe because only one participant runs
- * at a time.
+ * renewals can be delivered, and optionally DNS queries for a small
+ * table of names. Behaviour knobs let a suite drive the client's state
+ * machine through its corners; the suite sets them from the Mios main
+ * thread, which is safe because only one participant runs at a time.
  */
 
 #include <stdint.h>
 #include <stddef.h>
 
 #include "vnet.h"
+
+typedef struct sim_dns_record {
+  const char *name;
+  uint32_t addr;               // Network byte order
+  uint32_t ttl;
+  const char *cname;           // Answer with a CNAME to this name first
+  int padding;                 // Unrelated records to put before the A
+} sim_dns_record_t;
 
 typedef struct sim_dhcpd {
   vnet_t *vnet;                // Set by sim_dhcpd_attach()
@@ -26,6 +34,12 @@ typedef struct sim_dhcpd {
   uint32_t pool_ip;            // The one address we hand out
   uint32_t lease_time;         // seconds
   uint32_t ntp_server;         // 0: don't include
+  uint32_t dns_server;         // 0: don't include
+
+  // DNS server on server_ip, names not in the table get NXDOMAIN
+  const sim_dns_record_t *dns_records;
+  int dns_num_records;
+  int dns_drop;                // Ignore this many queries, then answer
 
   // Behaviour
   int silent;                  // Ignore all DHCP
@@ -41,6 +55,7 @@ typedef struct sim_dhcpd {
   int tx_offer;
   int tx_ack;
   int tx_nak;
+  int rx_dns_query;
   uint32_t last_xid;
   uint32_t last_discover_xid;
   uint32_t last_request_xid;
@@ -54,12 +69,13 @@ typedef struct sim_dhcpd {
   struct {                     // Delayed replies, in order of arrival
     uint64_t at;
     uint16_t len;
-    uint8_t frame[600];
+    uint8_t frame[1100];
   } pending[8];
   int pending_rd;
   int pending_wr;
   uint16_t ip_id;
   uint8_t rxframe[2048];
+  uint8_t dnsframe[1100];      // DNS reply being built
 } sim_dhcpd_t;
 
 // Configure for 10.<net>.0.0/24: server .1, gateway .1, pool .50

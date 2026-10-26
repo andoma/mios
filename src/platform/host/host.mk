@@ -14,6 +14,7 @@ ENABLE_TASK_DEBUG := yes
 ENABLE_HEAP_MMAP := yes
 ENABLE_PERFTEST := yes
 ENABLE_NET_IPV4 := yes
+ENABLE_DNS_CLIENT := yes
 ENABLE_NET_DSIG_UDP := yes
 ENABLE_NET_RTP := yes
 ENABLE_NET_CAN := yes
@@ -74,6 +75,7 @@ SRCS += ${P}/host.c \
 	${T}host/dsig/vllp.c \
 	${T}host/dsig/vllp_logstream.c \
 
+SRCS-${ENABLE_DNS_CLIENT} += ${P}/suite_dns.c
 
 # The real host VLLP client, compiled into the test binary in single-
 # threaded virtual-time mode (VLLP_SIM). Lets suites exercise the actual

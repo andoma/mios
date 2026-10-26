@@ -47,6 +47,9 @@ typedef struct netif {
   // Default route via this interface, see ipv4_nexthop_resolve()
   uint8_t ni_ipv4_route_metric; // Lowest metric wins
   uint32_t ni_ipv4_gateway;     // 0 if none
+#ifdef ENABLE_DNS_CLIENT
+  uint32_t ni_ipv4_dns[2];      // DNS servers learned over DHCP, 0 if unused
+#endif
 
   error_t (*ni_output_ipv4)(struct netif *ni, struct nexthop *nh, pbuf_t *pb);
 

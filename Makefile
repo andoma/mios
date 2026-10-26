@@ -102,6 +102,10 @@ ENABLE_HEAP_MMAP ?= no
 # client paths hang off the shared rx and timer callbacks.
 ENABLE_VLLP_CLIENT ?= no
 
+# Unicast DNS client (dns_resolve(), the host command, names for ping).
+# Servers are learned over DHCP. Requires ENABLE_NET_IPV4
+ENABLE_DNS_CLIENT ?= no
+
 CONFIG_H := ${O}/include/config.h
 
 #

@@ -10,6 +10,7 @@
 #include <mios/ghook.h>
 
 #include <unistd.h>
+#include <sys/param.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,7 @@ typedef struct dhcp_hdr {
 
 #define DHCP_SUBNET_MASK               1
 #define DHCP_GATEWAY                   3
+#define DHCP_DNS_SERVER                6
 #define DHCP_NTP_SERVER                42
 #define DHCP_VENDOR_SPECIFIC_INFO      43
 #define DHCP_REQUESTED_IP_ADDRESS      50
@@ -119,11 +121,18 @@ append_client_identifier(pbuf_t *pb, const ether_netif_t *eni)
 static void
 append_parameter_request_list(pbuf_t *pb)
 {
+#ifdef ENABLE_DNS_CLIENT
+  uint8_t *ci = make_option(pb, DHCP_PARAMETER_REQUEST_LIST, 4);
+#else
   uint8_t *ci = make_option(pb, DHCP_PARAMETER_REQUEST_LIST, 3);
+#endif
   if(ci != NULL) {
     ci[0] = DHCP_SUBNET_MASK;
     ci[1] = DHCP_GATEWAY;
     ci[2] = DHCP_LEASE_TIME;
+#ifdef ENABLE_DNS_CLIENT
+    ci[3] = DHCP_DNS_SERVER;
+#endif
   }
 }
 
@@ -282,6 +291,9 @@ dhcpv4_discover(ether_netif_t *eni)
   }
   eni->eni_ni.ni_ipv4_local_addr = 0;
   eni->eni_ni.ni_ipv4_gateway = 0;
+#ifdef ENABLE_DNS_CLIENT
+  memset(eni->eni_ni.ni_ipv4_dns, 0, sizeof(eni->eni_ni.ni_ipv4_dns));
+#endif
   eni->eni_dhcp_server_ip = 0;
   eni->eni_dhcp_requested_ip = 0;
 
@@ -324,6 +336,9 @@ typedef struct parsed_opts {
   uint32_t lease_time;
   uint32_t server_identifer;
   uint32_t ntp_server;
+#ifdef ENABLE_DNS_CLIENT
+  uint32_t dns[2];
+#endif
   pbuf_t *vsi; // Vendor specific info
   char *bootfile;
 } parsed_opts_t;
@@ -353,6 +368,9 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
   po->valid = 0;
   po->vsi = NULL;
   po->bootfile = NULL;
+#ifdef ENABLE_DNS_CLIENT
+  memset(po->dns, 0, sizeof(po->dns));
+#endif
 
   while(pb) {
     if(pbuf_pullup(pb, 1))
@@ -387,6 +405,14 @@ parse_opts(pbuf_t *pb, struct parsed_opts *po)
         memcpy(pbuf_append(po->vsi, length), pbuf_data(pb, 0), length);
       }
     }
+
+#ifdef ENABLE_DNS_CLIENT
+    // A list of servers, keep the first two
+    if(type == DHCP_DNS_SERVER && length >= 4 && length % 4 == 0) {
+      memset(po->dns, 0, sizeof(po->dns));
+      memcpy(po->dns, pbuf_data(pb, 0), MIN(length, sizeof(po->dns)));
+    }
+#endif
 
     if(type == DHCP_BOOT_FILE_NAME && po->bootfile == NULL) {
       po->bootfile = xalloc(length + 1, 0, MEM_MAY_FAIL);
@@ -494,6 +520,9 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
       eni->eni_ni.ni_ipv4_local_prefixlen =
         33 - __builtin_ffs(ntohl(po.netmask));
       eni->eni_ni.ni_ipv4_gateway = po.gateway;
+#ifdef ENABLE_DNS_CLIENT
+      memcpy(eni->eni_ni.ni_ipv4_dns, po.dns, sizeof(po.dns));
+#endif
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
       dhcpv4_update(&eni->eni_ni, &po.vsi, &po.bootfile);
       net_timer_arm(&eni->eni_dhcp_timer,
@@ -578,6 +607,10 @@ dhcpv4_print(ether_netif_t *eni, struct stream *st)
   stprintf(st, "  Our address: %Id\n", eni->eni_dhcp_requested_ip);
   stprintf(st, "  Server: %Id\n", eni->eni_dhcp_server_ip);
   stprintf(st, "  Gateway: %Id\n", eni->eni_ni.ni_ipv4_gateway);
+#ifdef ENABLE_DNS_CLIENT
+  stprintf(st, "  DNS: %Id %Id\n", eni->eni_ni.ni_ipv4_dns[0],
+           eni->eni_ni.ni_ipv4_dns[1]);
+#endif
   if(eni->eni_dhcp_state) {
     int delta = (eni->eni_dhcp_timer.t_expire - clock_get()) / 1000000;
     if(eni->eni_dhcp_state == DHCP_STATE_BOUND) {
