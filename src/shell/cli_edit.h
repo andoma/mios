@@ -26,6 +26,7 @@ enum {
   CLI_ESC_SEMI,
   CLI_ESC_PARAM2,
   CLI_ESC_TILDE,
+  CLI_ESC_LITERAL, // After Ctrl-V, insert the next character as is
 };
 
 typedef struct cli_ed {

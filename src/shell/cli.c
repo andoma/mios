@@ -965,6 +965,20 @@ test_editor_ctrl_u(void)
 }
 
 static void
+test_editor_ctrl_v(void)
+{
+  cli_ed_t ed;
+  cli_ed_init(&ed);
+
+  for(const char *p = "at AT+CPIN"; *p; p++)
+    cli_ed_input(&ed, *p);
+  CHECK(cli_ed_input(&ed, 22) == CLI_ED_NONE); // Ctrl-V
+  CHECK(cli_ed_input(&ed, '?') == CLI_ED_NONE);
+  CHECK(!strcmp(ed.buf, "at AT+CPIN?"));
+  CHECK(cli_ed_input(&ed, '?') == CLI_ED_HELP);
+}
+
+static void
 test_editor_ctrl_w(void)
 {
   cli_ed_t ed;
@@ -1739,6 +1753,7 @@ static const struct {
   {"editor: ctrl-a/ctrl-e",         test_editor_ctrl_a_e},
   {"editor: ctrl-k kill to end",    test_editor_ctrl_k},
   {"editor: ctrl-u kill line",      test_editor_ctrl_u},
+  {"editor: ctrl-v quoted insert",  test_editor_ctrl_v},
   {"editor: ctrl-w kill word",      test_editor_ctrl_w},
   {"editor: ctrl-w mid-word",       test_editor_ctrl_w_mid_word},
   {"editor: insert in middle",      test_editor_insert_middle},

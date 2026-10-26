@@ -148,6 +148,20 @@ handle_csi_final(cli_ed_t *ed, int final)
   }
 }
 
+static void
+insert_char(cli_ed_t *ed, int c)
+{
+  if(c >= 32 && c < 127) {
+    if(ed->len < CLI_LINE_BUF_SIZE - 1) {
+      memmove(ed->buf + ed->pos + 1, ed->buf + ed->pos, ed->len - ed->pos);
+      ed->buf[ed->pos] = c;
+      ed->pos++;
+      ed->len++;
+      ed->buf[ed->len] = '\0';
+    }
+  }
+}
+
 cli_ed_event_t
 cli_ed_input(cli_ed_t *ed, int c)
 {
@@ -209,6 +223,11 @@ cli_ed_input(cli_ed_t *ed, int c)
     }
     ed->esc_state = CLI_ESC_NONE;
     return handle_csi_final(ed, c);
+
+  case CLI_ESC_LITERAL:
+    ed->esc_state = CLI_ESC_NONE;
+    insert_char(ed, c);
+    return CLI_ED_NONE;
 
   default:
     break;
@@ -287,16 +306,12 @@ cli_ed_input(cli_ed_t *ed, int c)
   case '?':
     return CLI_ED_HELP;
 
+  case 22: // Ctrl-V: quoted insert, for '?'
+    ed->esc_state = CLI_ESC_LITERAL;
+    return CLI_ED_NONE;
+
   default:
-    if(c >= 32 && c < 127) {
-      if(ed->len < CLI_LINE_BUF_SIZE - 1) {
-        memmove(ed->buf + ed->pos + 1, ed->buf + ed->pos, ed->len - ed->pos);
-        ed->buf[ed->pos] = c;
-        ed->pos++;
-        ed->len++;
-        ed->buf[ed->len] = '\0';
-      }
-    }
+    insert_char(ed, c);
     return CLI_ED_NONE;
   }
 }
