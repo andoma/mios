@@ -206,6 +206,10 @@ ethphy_cli_netif(int argc, char **argv, int nameidx)
 {
   ether_netif_t *eni;
   SLIST_FOREACH(eni, &ether_netifs, eni_global_link) {
+    const ethmac_device_class_t *edc =
+      (const void *)eni->eni_ni.ni_dev.d_class;
+    if(edc->edc_mii_read == NULL)
+      continue; // No MDIO, such as USB Ethernet
     if(argc <= nameidx || !strcmp(argv[nameidx], eni->eni_ni.ni_dev.d_name))
       return eni;
   }

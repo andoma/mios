@@ -349,6 +349,7 @@ ether_netif_fini(ether_netif_t *eni)
   timer_disarm(&eni->eni_periodic);
   timer_disarm(&eni->eni_dhcp_timer);
   timer_disarm(&eni->eni_lldp_timer);
+  SLIST_REMOVE(&ether_netifs, eni, ether_netif, eni_global_link);
 }
 
 
