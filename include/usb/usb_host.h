@@ -189,3 +189,8 @@ void usb_host_serial_register(const usb_host_serial_id_t *ids,
 // or NULL. Units are assigned in attach order. Reads and writes fail with
 // ERR_NOT_CONNECTED once the device is gone. Close the stream when done
 struct stream *usb_host_serial_open(int unit);
+
+
+// CDC-ECM class driver. Each attached device becomes an Ethernet
+// interface named ecm0, ecm1, ...
+void usb_host_ecm_register(void);

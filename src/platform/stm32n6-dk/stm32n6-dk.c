@@ -175,6 +175,7 @@ board_init_late(void)
 
   // USB-A host port (CN17), VBUS switch enabled by PB9
   usb_host_acm_register();
+  usb_host_ecm_register();
   usb_host_serial_register(serial_ids,
                            sizeof(serial_ids) / sizeof(serial_ids[0]));
   stm32n6_otghs2_host_create(GPIO_PB(9));
