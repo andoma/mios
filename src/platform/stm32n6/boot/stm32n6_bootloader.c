@@ -499,44 +499,152 @@ bl_nor_read32(uint32_t addr)
 }
 
 // Spin until the write-in-progress bit clears, kicking the watchdog.
-static void BL
+// Returns the last status register value.
+static uint8_t BL
 bl_nor_wait_wip(void)
 {
-  while(bl_nor_status() & 1)
+  uint8_t st;
+  while((st = bl_nor_status()) & 1)
     bl_wdog_kick();
+  return st;
+}
+
+// Infineon S25/S28 (JEDEC manufacturer 0x34, first byte on the wire).
+// Program and erase use the 4-byte-address opcodes the datasheet defines,
+// and the sectors must be uniform 256 KB: in the default hybrid layout the
+// 4 KB erase is silently ignored outside the first 128 KB.
+#define NOR_MFR_INFINEON 0x34
+#define NOR_CMD_PP4      0x12
+#define NOR_CMD_SE256    0xDC
+#define NOR_CMD_RDARG    0x65
+#define NOR_CMD_WRARG    0x71
+#define NOR_CMD_CLPEF    0x82
+#define NOR_CMD_SRSTE    0x66
+#define NOR_CMD_SFRST    0x99
+#define NOR_STR1_ERR     0x60     // PRGERR | ERSERR
+#define NOR_CFR3V_ADDR   0x800004
+#define NOR_CFR3N_ADDR   0x000004
+#define NOR_CFR3_UNHYSA  0x08
+#define NOR_CFR2_MEMLAT  8        // default read latency, non-volatile regs
+#define NOR_SECTOR_UNI   0x40000
+
+static int BL
+bl_nor_is_infineon(void)
+{
+  return (bl_nor_rdid() & 0xff) == NOR_MFR_INFINEON;
+}
+
+// Read Any Register, 3-byte address (CFR2V[7] = 0). Non-volatile registers
+// use CFR2V latency, volatile ones CFR3V[7:6] (both at their defaults).
+static uint8_t BL
+bl_nor_rdarg(uint32_t addr, uint32_t dummy)
+{
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b01 << 28) | 1); // FMODE=READ, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, 0);
+  reg_wr(XSPI1_BASE + XSPI_TCR, dummy);
+  reg_wr(XSPI1_BASE + XSPI_CCR,
+         (0b001 << 24) | (0b10 << 12) | (0b001 << 8) | (0b001 << 0));
+  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_RDARG);
+  reg_wr(XSPI1_BASE + XSPI_AR, addr);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  uint8_t v = reg_rd8(XSPI1_BASE + XSPI_DR);
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+  reg_wr(XSPI1_BASE + XSPI_TCR, 0);
+  return v;
 }
 
 static void BL
-bl_nor_erase_sector(uint32_t addr)
+bl_nor_wrarg(uint32_t addr, uint8_t val)
 {
+  bl_nor_cmd(NOR_CMD_WREN);
+  reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1); // FMODE=WRITE, EN
+  reg_wr(XSPI1_BASE + XSPI_DLR, 0);
+  reg_wr(XSPI1_BASE + XSPI_CCR,
+         (0b001 << 24) | (0b10 << 12) | (0b001 << 8) | (0b001 << 0));
+  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_WRARG);
+  reg_wr(XSPI1_BASE + XSPI_AR, addr);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_FTF)) {}
+  reg_wr8(XSPI1_BASE + XSPI_DR, val);
+  while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
+  reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
+}
+
+// Check the PRGERR/ERSERR flags after an operation, clearing them.
+static int BL
+bl_nor_check(uint8_t st)
+{
+  if(!(st & NOR_STR1_ERR) || !bl_nor_is_infineon())
+    return 0;
+  bl_nor_cmd(NOR_CMD_CLPEF);
+  return -1;
+}
+
+// Make sure an Infineon part uses uniform 256 KB sectors. UNHYSA lives in
+// CFR3N and the volatile copy is read-only, so a change only takes effect
+// after a reset. Returns 0 if the layout is uniform (or not Infineon).
+static int BL
+bl_nor_ensure_uniform(void)
+{
+  BL_STR(m_sw, "  Hybrid sectors, switching to uniform 256 KB\n");
+
+  if(!bl_nor_is_infineon())
+    return 0;
+  if(bl_nor_rdarg(NOR_CFR3V_ADDR, 0) & NOR_CFR3_UNHYSA)
+    return 0;
+
+  bl_puts(m_sw);
+
+  uint8_t n = bl_nor_rdarg(NOR_CFR3N_ADDR, NOR_CFR2_MEMLAT);
+  if(!(n & NOR_CFR3_UNHYSA)) {
+    bl_nor_wrarg(NOR_CFR3N_ADDR, n | NOR_CFR3_UNHYSA);
+    if(bl_nor_check(bl_nor_wait_wip()))
+      return -1;
+  }
+
+  bl_nor_cmd(NOR_CMD_SRSTE);
+  bl_nor_cmd(NOR_CMD_SFRST);
+  for(volatile int i = 0; i < 100000; i++) {} // tSR 90 us
+
+  return (bl_nor_rdarg(NOR_CFR3V_ADDR, 0) & NOR_CFR3_UNHYSA) ? 0 : -1;
+}
+
+static int BL
+bl_nor_erase_sector(uint32_t addr, uint32_t *next)
+{
+  int infineon = bl_nor_is_infineon();
+  uint32_t size = infineon ? NOR_SECTOR_UNI : NOR_SECTOR;
+  addr &= ~(size - 1);
+  *next = addr + size;
+
   bl_nor_cmd(NOR_CMD_WREN);
   reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1);
   reg_wr(XSPI1_BASE + XSPI_DLR, 0);
   reg_wr(XSPI1_BASE + XSPI_CCR,
-         (0b000 << 24) |   // no data
-         (0b10 << 12) |    // 24-bit address
-         (0b001 << 8) |    // address, 1 line
-         (0b001 << 0));    // instruction, 1 line
-  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_SE);
+         (0b000 << 24) |                       // no data
+         ((infineon ? 0b11 : 0b10) << 12) |    // 32/24-bit address
+         (0b001 << 8) |                        // address, 1 line
+         (0b001 << 0));                        // instruction, 1 line
+  reg_wr(XSPI1_BASE + XSPI_IR, infineon ? NOR_CMD_SE256 : NOR_CMD_SE);
   reg_wr(XSPI1_BASE + XSPI_AR, addr);
   while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
   reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
-  bl_nor_wait_wip();
+  return bl_nor_check(bl_nor_wait_wip());
 }
 
 // Program up to one page (<= 256 bytes, not crossing a page boundary).
-static void BL
+static int BL
 bl_nor_program_page(uint32_t addr, const uint8_t *src, uint32_t len)
 {
+  int infineon = bl_nor_is_infineon();
   bl_nor_cmd(NOR_CMD_WREN);
   reg_wr(XSPI1_BASE + XSPI_CR, (0b00 << 28) | 1); // FMODE=WRITE, EN
   reg_wr(XSPI1_BASE + XSPI_DLR, len - 1);
   reg_wr(XSPI1_BASE + XSPI_CCR,
-         (0b001 << 24) |   // data, 1 line
-         (0b10 << 12) |    // 24-bit address
-         (0b001 << 8) |    // address, 1 line
-         (0b001 << 0));    // instruction, 1 line
-  reg_wr(XSPI1_BASE + XSPI_IR, NOR_CMD_PP);
+         (0b001 << 24) |                       // data, 1 line
+         ((infineon ? 0b11 : 0b10) << 12) |    // 32/24-bit address
+         (0b001 << 8) |                        // address, 1 line
+         (0b001 << 0));                        // instruction, 1 line
+  reg_wr(XSPI1_BASE + XSPI_IR, infineon ? NOR_CMD_PP4 : NOR_CMD_PP);
   reg_wr(XSPI1_BASE + XSPI_AR, addr);
   for(uint32_t i = 0; i < len; i++) {
     while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_FTF)) {}
@@ -544,25 +652,44 @@ bl_nor_program_page(uint32_t addr, const uint8_t *src, uint32_t len)
   }
   while(!(reg_rd(XSPI1_BASE + XSPI_SR) & XSPI_SR_TCF)) {}
   reg_wr(XSPI1_BASE + XSPI_FCR, XSPI_SR_TCF);
-  bl_nor_wait_wip();
+  return bl_nor_check(bl_nor_wait_wip());
 }
 
-// Erase the sectors spanning [addr, addr+len) and program src over them.
-static void BL
+// Erase the sectors spanning [addr, addr+len), program src over them and
+// read everything back. Returns 0 on success.
+static int BL
 bl_nor_write(uint32_t addr, const uint8_t *src, uint32_t len)
 {
-  for(uint32_t a = addr & ~(NOR_SECTOR - 1); a < addr + len; a += NOR_SECTOR)
-    bl_nor_erase_sector(a);
+  const uint32_t start = addr;
+  const uint8_t *const orig = src;
+  const uint32_t total = len;
+
+  for(uint32_t a = addr; a < addr + len;) {
+    if(bl_nor_erase_sector(a, &a))
+      return -1;
+  }
 
   while(len) {
     uint32_t chunk = NOR_PAGE_SIZE - (addr & (NOR_PAGE_SIZE - 1));
     if(chunk > len)
       chunk = len;
-    bl_nor_program_page(addr, src, chunk);
+    if(bl_nor_program_page(addr, src, chunk))
+      return -1;
     addr += chunk;
     src += chunk;
     len -= chunk;
   }
+
+  for(uint32_t i = 0; i < total; i += 4) {
+    uint32_t got = bl_nor_read32(start + i);
+    uint32_t n = total - i < 4 ? total - i : 4;
+    for(uint32_t j = 0; j < n; j++) {
+      if(((got >> (8 * j)) & 0xff) != orig[i + j])
+        return -1;
+    }
+    bl_wdog_kick();
+  }
+  return 0;
 }
 
 // =====================================================================
@@ -783,7 +910,11 @@ bl_nor_region(const char *name, uint32_t off, const uint8_t *src,
   bl_puts(s_len); bl_puthex(len);
   bl_puts(s_wr);
 
-  bl_nor_write(off, src, len);
+  BL_STR(s_werr, " WRITE FAILED\n");
+  if(bl_nor_write(off, src, len)) {
+    bl_puts(s_werr);
+    return -1;
+  }
 
   uint32_t got = bl_nor_read32(off);
   if(got == magic) {
@@ -826,6 +957,12 @@ bl_provision_nor(void)
   bl_puthex(bl_nor_rdid());
   bl_puts(m_nl);
 
+  BL_STR(m_uni, "NOR sector layout not usable, not provisioning\n");
+  if(bl_nor_ensure_uniform()) {
+    bl_puts(m_uni);
+    return;
+  }
+
   // Re-scope the in-RAM STM2 header for the FSBL slot (.boot only).
   uint32_t boot_padded = (((uint32_t)_boot_end - BOOT_BASE) + 31) & ~31u;
   uint8_t *hdr = (uint8_t *)DL_BUFFER_BASE;
@@ -854,9 +991,9 @@ bl_provision_nor(void)
 
   // Boot selector: 'A'.
   uint8_t sel = 'A';
-  bl_nor_write(BOOTSELECTOR_OFFSET, &sel, 1);
   BL_STR(m_sel, "  Selector 'A' @0x080000\n");
   bl_puts(m_sel);
+  bad |= bl_nor_write(BOOTSELECTOR_OFFSET, &sel, 1);
 
   // Clean boot status so the cold boot starts fresh.
   reg_wr(BSEC_SCRATCH0, 0);

@@ -43,6 +43,8 @@ typedef struct xspi {
   uint8_t tcf;
   uint8_t devsize;   // log2 of device size, for DCR1
   uint8_t prescaler; // clock prescaler for DCR2
+  uint8_t bshift;    // log2 of block (erase unit) size
+  uint8_t infineon;  // Infineon S25/S28: 4-byte opcodes, uniform 256 KB sectors
 
   struct {
     uint8_t size;   // log2 of erase size
@@ -145,6 +147,19 @@ xspi_get_status(xspi_t *xs)
   return reg_rd8(xs->base + XSPI_DR);
 }
 
+// Infineon S25/S28 (JEDEC manufacturer 0x34). Program/erase use the 4-byte
+// address opcodes, errors are flagged in STR1, and the sectors must be
+// uniform 256 KB: in the default hybrid layout the 4 KB erase is silently
+// ignored outside the first 128 KB.
+#define NOR_MFR_INFINEON 0x34
+#define NOR_STR1_ERR     0x60  // PRGERR | ERSERR
+#define NOR_CFR3V_ADDR   0x800004
+#define NOR_CFR3N_ADDR   0x000004
+#define NOR_CFR3_UNHYSA  0x08
+#define NOR_CFR2_MEMLAT  8     // default read latency, non-volatile regs
+
+static error_t xspi_cmd(xspi_t *xs, uint8_t cmd);
+
 static error_t
 xspi_wait_ready(xspi_t *xs)
 {
@@ -156,10 +171,14 @@ xspi_wait_ready(xspi_t *xs)
     xs->busy_until = 0;
   }
 
-  for(int i = 0; i < 500; i++) {
+  for(int i = 0; i < 5000; i++) {
     int status = xspi_get_status(xs);
     if((status & 1) == 0) {
       xs->state = XSPI_STATE_IDLE;
+      if(xs->infineon && (status & NOR_STR1_ERR)) {
+        xspi_cmd(xs, 0x82); // CLPEF: clear program/erase failure flags
+        return ERR_FLASH_HW_ERROR;
+      }
       return 0;
     }
     usleep(1000);
@@ -185,6 +204,95 @@ xspi_cmd(xspi_t *xs, uint8_t cmd)
 }
 
 
+static uint32_t
+xspi_read_id(xspi_t *xs)
+{
+  reg_wr(xs->base + XSPI_CR, (0b01 << 28) | 1); // FMODE = READ, Enable
+  reg_wr(xs->base + XSPI_DCR1, (31 << 16) | (0b010 << 24));
+  reg_wr(xs->base + XSPI_DCR2, 32);
+  reg_wr(xs->base + XSPI_TCR, 0);
+  reg_wr(xs->base + XSPI_DLR, 2); // 3 bytes
+  reg_wr(xs->base + XSPI_CCR,
+         (0b001 << 24) | // Data on single line
+         (0b001 << 0));  // Instruction on single line
+  reg_wr(xs->base + XSPI_IR, 0x9f);
+  xspi_wait_tc(xs);
+  return reg_rd(xs->base + XSPI_DR);
+}
+
+// Read Any Register, 3-byte address (CFR2V[7] = 0)
+static uint8_t
+xspi_rdarg(xspi_t *xs, uint32_t addr, uint32_t dummy)
+{
+  reg_wr(xs->base + XSPI_CR, (0b01 << 28) | 1); // FMODE = READ, Enable
+  reg_wr(xs->base + XSPI_DLR, 0);
+  reg_wr(xs->base + XSPI_TCR, dummy);
+  reg_wr(xs->base + XSPI_CCR,
+         (0b001 << 24) | // Data on single line
+         (0b10 << 12) |  // 24-bit address
+         (0b001 << 8) |  // Address on single line
+         (0b001 << 0));  // Instruction on single line
+  reg_wr(xs->base + XSPI_IR, 0x65);
+  reg_wr(xs->base + XSPI_AR, addr);
+  xspi_wait_tc(xs);
+  uint8_t v = reg_rd8(xs->base + XSPI_DR);
+  reg_wr(xs->base + XSPI_TCR, 0);
+  return v;
+}
+
+static void
+xspi_wrarg(xspi_t *xs, uint32_t addr, uint8_t val)
+{
+  xspi_cmd(xs, 6); // Write enable
+  reg_wr(xs->base + XSPI_CR, (0b00 << 28) | 1); // FMODE = WRITE, Enable
+  reg_wr(xs->base + XSPI_DLR, 0);
+  reg_wr(xs->base + XSPI_CCR,
+         (0b001 << 24) | (0b10 << 12) | (0b001 << 8) | (0b001 << 0));
+  reg_wr(xs->base + XSPI_IR, 0x71);
+  reg_wr(xs->base + XSPI_AR, addr);
+  while(!(reg_rd(xs->base + XSPI_SR) & (1 << 2))) {} // FTF
+  reg_wr8(xs->base + XSPI_DR, val);
+  xspi_wait_tc(xs);
+}
+
+// Make sure an Infineon part uses uniform 256 KB sectors. UNHYSA is in
+// CFR3N, and the volatile copy is read-only so a change needs a reset.
+static error_t
+xspi_infineon_uniform(xspi_t *xs)
+{
+  if(xspi_rdarg(xs, NOR_CFR3V_ADDR, 0) & NOR_CFR3_UNHYSA)
+    return 0;
+
+  printf("hybrid sectors, switching to uniform  ");
+
+  uint8_t n = xspi_rdarg(xs, NOR_CFR3N_ADDR, NOR_CFR2_MEMLAT);
+  if(!(n & NOR_CFR3_UNHYSA)) {
+    xspi_wrarg(xs, NOR_CFR3N_ADDR, n | NOR_CFR3_UNHYSA);
+
+    int status = 1;
+    for(int i = 0; i < 1000 && (status & 1); i++) {
+      status = xspi_get_status(xs);
+      if(status & 1)
+        usleep(1000);
+    }
+    if(status & 1)
+      return ERR_FLASH_TIMEOUT;
+    if(status & NOR_STR1_ERR) {
+      xspi_cmd(xs, 0x82);
+      return ERR_FLASH_HW_ERROR;
+    }
+  }
+
+  xspi_cmd(xs, 0x66); // Software reset reloads CFR3V from CFR3N
+  xspi_cmd(xs, 0x99);
+  usleep(1000);
+
+  if(!(xspi_rdarg(xs, NOR_CFR3V_ADDR, 0) & NOR_CFR3_UNHYSA))
+    return ERR_FLASH_HW_ERROR;
+  return 0;
+}
+
+
 static error_t
 xspi_erase(struct block_iface *bi, size_t block, size_t count)
 {
@@ -197,22 +305,26 @@ xspi_erase(struct block_iface *bi, size_t block, size_t count)
 
     xspi_cmd(xs, 6); // Write enable
 
-    const uint32_t addr = block << 12; // block_size is always 4096
+    const uint32_t addr = block << xs->bshift;
 
     err = ERR_INVALID_ADDRESS;
     for(int i = 3; i >= 0; i--) {
       if(xs->erase_commands[i].size == 0)
         continue;
 
-      size_t chunk = 1 << (xs->erase_commands[i].size - 12);
+      if(xs->erase_commands[i].size < xs->bshift)
+        continue;
+
+      size_t chunk = 1 << (xs->erase_commands[i].size - xs->bshift);
       if(chunk > count)
         continue;
       if(addr & ((1 << xs->erase_commands[i].size) - 1))
         continue;
 
-      int use4byte = addr > 0xffffff;
-      uint8_t cmd = use4byte ? xs->erase_commands[i].cmd4
-                             : xs->erase_commands[i].cmd3;
+      // On Infineon the SFDP erase opcodes are the 4-byte address ones
+      int use4byte = xs->infineon || addr > 0xffffff;
+      uint8_t cmd = (use4byte && !xs->infineon) ? xs->erase_commands[i].cmd4
+                                                : xs->erase_commands[i].cmd3;
       if(cmd == 0xff)
         continue;
 
@@ -272,7 +384,7 @@ xspi_write(struct block_iface *bi, size_t block,
     xspi_cmd(xs, 6); // Write enable
 
     uint32_t addr = xs->iface.block_size * block + offset;
-    int use4byte = addr > 0xffffff;
+    int use4byte = xs->infineon || addr > 0xffffff;
 
     reg_wr(xs->base + XSPI_CR,
            (0b00 << 28) |        // FMODE = WRITE
@@ -471,6 +583,17 @@ xspi_norflash_create(void)
 
   printf("xspi%d: ", xs->base == XSPI1_BASE ? 1 : 2);
 
+  // Probe the vendor: Infineon parts default to a hybrid sector layout
+  // that the block layer cannot use. Everything else is driven from SFDP.
+  if((xspi_read_id(xs) & 0xff) == NOR_MFR_INFINEON) {
+    xs->infineon = 1;
+    error_t err = xspi_infineon_uniform(xs);
+    if(err) {
+      printf("Unable to select uniform sectors: %s\n", error_to_string(err));
+      goto bad;
+    }
+  }
+
   uint32_t sfdp_sig = xspi_read_sfdp(xs, 0);
   if(sfdp_sig != 0x50444653) {
     printf("Invalid SFDP signature [0x%x]\n", sfdp_sig);
@@ -508,8 +631,10 @@ xspi_norflash_create(void)
     devsize++;
   xs->devsize = devsize;
 
-  xs->iface.num_blocks = size >> 12;
-  xs->iface.block_size = 4096;
+  // Block size is the erase unit: 4 KB, or 256 KB on uniform Infineon parts
+  xs->bshift = xs->infineon ? 18 : 12;
+  xs->iface.num_blocks = size >> xs->bshift;
+  xs->iface.block_size = 1 << xs->bshift;
 
   printf("%d kB (%zd sectors", (int)(size >> 10), xs->iface.num_blocks);
   if(devsize > 24)

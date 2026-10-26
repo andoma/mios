@@ -15,19 +15,21 @@
 block_iface_t *xspi_norflash_create(void);
 
 /*
- * Flash partition layout (4KB blocks):
+ * Flash partition layout. The block size is the erase unit of the flash:
+ * 4KB, or 256KB on parts with only large sectors (Infineon S25/S28). Every
+ * partition boundary is 256KB aligned, so the same offsets work for both.
  *
- * Offset      Size    Blocks      Contents
- * 0x000000    256KB   0-63        FSBL1 (bootloader A)
- * 0x040000    256KB   64-127      FSBL2 (bootloader B)
- * 0x080000    4KB     128         Boot selector
- * 0x081000    508KB   129-255     Reserved
- * 0x100000    2MB     256-767     Application A
- * 0x300000    2MB     768-1279    Application B
- * 0x500000    rest    1280-end    Filesystem (LittleFS)
+ * Offset      Size    Contents
+ * 0x000000    256KB   FSBL1 (bootloader A)
+ * 0x040000    256KB   FSBL2 (bootloader B)
+ * 0x080000    1 block Boot selector (the rest up to 0x100000 is reserved)
+ * 0x100000    2MB     Application A
+ * 0x300000    2MB     Application B
+ * 0x500000    rest    Filesystem (LittleFS)
  */
 
-#define FLASH_BLOCK_SIZE     0x1000  // 4KB
+static size_t flash_block_size = 0x1000;
+#define FLASH_BLOCK_SIZE     flash_block_size
 
 #define FSBL1_OFFSET         0x000000
 #define FSBL2_OFFSET         0x040000
@@ -58,6 +60,7 @@ stm32n6_flash_init(void)
     return;
   }
 
+  flash_block_size = flash->block_size;
   const size_t total_blocks = flash->num_blocks;
   const size_t fs_start = OFFSET_TO_BLOCK(FILESYSTEM_OFFSET);
 
@@ -124,22 +127,30 @@ stm32n6_flash_init(void)
 #define MIOS_IMG_TRAILER  12          // 4 (crc) + 8 (magic)
 #define APP_HEADER_SIZE   8           // 4 (magic) + 4 (length)
 
+// Bytes at the start of block 0 held back in RAM until flush. This covers
+// the header and the data sharing its flash page: the NOR has ECC units
+// that must not be programmed twice, so the header cannot be added to a
+// page that already has data in it.
+#define APP_DEFER_SIZE    256
+
 typedef struct {
   stream_t stream;
   block_iface_t *bi;
   uint32_t crc;          // CRC of committed data (excludes tail)
   uint32_t image_pos;    // Bytes committed to flash/block0 so far
-  uint8_t *block0;       // First block buffer (block_size bytes)
+  uint8_t block0_erased; // Block 0 has been erased for this write
   uint8_t target_slot;   // 'A' or 'B'
   uint8_t switch_boot;   // Also switch boot selector on success
   uint8_t tail_len;
   uint8_t tail[MIOS_IMG_TRAILER];
+  uint8_t head[APP_DEFER_SIZE]; // Deferred start of block 0
 } app_write_stream_t;
 
 
 // Write committed image data to flash (or block0 buffer).
 // Data goes to flash at offset (image_pos + APP_HEADER_SIZE).
-// Block 0 is deferred in RAM; blocks 1+ are erased-on-first-touch.
+// The first APP_DEFER_SIZE bytes of block 0 are deferred in RAM, the rest
+// is written directly. Blocks are erased on first touch.
 static error_t
 aws_commit(app_write_stream_t *aws, const void *data, size_t len)
 {
@@ -155,7 +166,23 @@ aws_commit(app_write_stream_t *aws, const void *data, size_t len)
       chunk = len;
 
     if(block == 0) {
-      memcpy(aws->block0 + flash_off, src, chunk);
+      if(!aws->block0_erased) {
+        error_t err = block_erase(aws->bi, 0, 1);
+        if(err) return err;
+        aws->block0_erased = 1;
+      }
+      size_t deferred = 0;
+      if(flash_off < APP_DEFER_SIZE) {
+        deferred = APP_DEFER_SIZE - flash_off;
+        if(deferred > chunk)
+          deferred = chunk;
+        memcpy(aws->head + flash_off, src, deferred);
+      }
+      if(chunk > deferred) {
+        error_t err = block_write(aws->bi, 0, flash_off + deferred,
+                                  src + deferred, chunk - deferred);
+        if(err) return err;
+      }
     } else {
       if(off_in_block == 0) {
         error_t err = block_erase(aws->bi, block, 1);
@@ -187,7 +214,7 @@ aws_write(stream_t *s, const void *data, size_t size, int flags)
   app_write_stream_t *aws = (app_write_stream_t *)s;
 
   if(data == NULL) {
-    // Flush — handle trailer, write header, finalize block 0
+    // Flush — handle trailer, write header and the deferred start of block 0
 
     // Check for existing trailer in buffered tail
     if(aws->tail_len == MIOS_IMG_TRAILER &&
@@ -216,17 +243,15 @@ aws_write(stream_t *s, const void *data, size_t size, int flags)
       if(err) return err;
     }
 
-    // Fill in the partition header in block 0
+    // Fill in the partition header
     uint32_t magic = MIOS_APP_MAGIC;
     uint32_t length = aws->image_pos;
-    memcpy(aws->block0 + 0, &magic, 4);
-    memcpy(aws->block0 + 4, &length, 4);
+    memcpy(aws->head + 0, &magic, 4);
+    memcpy(aws->head + 4, &length, 4);
 
-    // Erase and write block 0
-    error_t err = block_erase(aws->bi, 0, 1);
-    if(err) return err;
-    err = block_write(aws->bi, 0, 0, aws->block0,
-                      aws->bi->block_size);
+    // Block 0 was erased by the first commit, so the slot has no valid
+    // header until this write
+    error_t err = block_write(aws->bi, 0, 0, aws->head, APP_DEFER_SIZE);
     if(err) return err;
 
     // Clear dirty bit for target slot
@@ -293,7 +318,6 @@ static void
 aws_close(stream_t *s)
 {
   app_write_stream_t *aws = (app_write_stream_t *)s;
-  free(aws->block0);
   free(aws);
 }
 
@@ -313,12 +337,7 @@ app_write_stream_open(block_iface_t *bi, uint8_t target_slot, int switch_boot)
   if(aws == NULL)
     return NULL;
 
-  aws->block0 = xalloc(bi->block_size, 0, MEM_MAY_FAIL);
-  if(aws->block0 == NULL) {
-    free(aws);
-    return NULL;
-  }
-  memset(aws->block0, 0xff, bi->block_size);
+  memset(aws->head, 0xff, sizeof(aws->head));
 
   aws->stream.vtable = &app_write_stream_vtable;
   aws->bi = bi;
