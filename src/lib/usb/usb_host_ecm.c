@@ -436,6 +436,9 @@ ecm_probe(usb_host_device_t *ud, const struct usb_interface_descriptor *id)
   irq_permit(q);
   snprintf(e->name, sizeof(e->name), "ecm%d", e->unit);
   e->eni.eni_output = ecm_output;
+  // USB Ethernet is usually a cellular modem, prefer other interfaces
+  // for the default route
+  e->eni.eni_ni.ni_ipv4_route_metric = 100;
   ether_netif_init(&e->eni, e->name, &ecm_device_class);
   ether_netif_attach(&e->eni);
 
