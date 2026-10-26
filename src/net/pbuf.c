@@ -636,7 +636,7 @@ pbuf_read_at(pbuf_t *pb, void *out, size_t offset, size_t len)
   while(len) {
     if(pb == NULL)
       return -1;
-    size_t to_copy = MIN(len, pb->pb_buflen);
+    size_t to_copy = MIN(len, pb->pb_buflen - offset);
     memcpy(out, pb->pb_data + pb->pb_offset + offset, to_copy);
 
     out += to_copy;
@@ -669,7 +669,7 @@ pbuf_memcmp_at(pbuf_t *pb, const void *data, size_t offset, size_t len)
   while(len) {
     if(pb == NULL)
       return -1;
-    size_t to_cmp = MIN(len, pb->pb_buflen);
+    size_t to_cmp = MIN(len, pb->pb_buflen - offset);
     int n = memcmp(data, pb->pb_data + pb->pb_offset + offset, to_cmp);
     if(n)
       return n;

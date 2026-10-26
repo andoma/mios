@@ -60,7 +60,7 @@ gdb: ${O}/${ARTIFACT}.full.elf
 # Realtime suites depend on wall-clock scheduling and are skipped; run
 # them by hand with ${O}/${ARTIFACT}.elf <suite>.
 test: ${O}/${ARTIFACT}.elf
-	@set -e; for s in $$($< --list | grep -vE '^(Platform|pbuf|$$)' | grep -v '(realtime)'); do \
+	@set -e; for s in $$($< --list | grep -vE '^(Platform|pbuf:|$$)' | grep -v '(realtime)'); do \
 	  echo "==== $$s"; $< $$s; \
 	done
 
