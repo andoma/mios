@@ -68,11 +68,12 @@ typedef struct usb_host_ecm {
   uint32_t rx_errors;
   uint32_t tx_errors;
 
+  int unit;
   char name[8];
 } usb_host_ecm_t;
 
 
-static int ecm_unit;
+static uint32_t ecm_units; // Bitmask of unit numbers in use
 
 
 // Called with IRQ_LEVEL_IO blocked
@@ -296,6 +297,9 @@ static void
 ecm_dtor(struct device *dev)
 {
   usb_host_ecm_t *e = (usb_host_ecm_t *)dev;
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  ecm_units &= ~(1 << e->unit);
+  irq_permit(q);
   for(int i = 0; i < ECM_RX_BUFS; i++)
     free(e->rx_dma[i]);
   free(e->tx_dma);
@@ -425,7 +429,12 @@ ecm_probe(usb_host_device_t *ud, const struct usb_interface_descriptor *id)
 
   e->task.nt_cb = ecm_task_cb;
 
-  snprintf(e->name, sizeof(e->name), "ecm%d", ecm_unit++);
+  // A replugged device gets its old name back once that netif is freed
+  int q = irq_forbid(IRQ_LEVEL_SWITCH);
+  e->unit = __builtin_ctz(~ecm_units);
+  ecm_units |= 1 << e->unit;
+  irq_permit(q);
+  snprintf(e->name, sizeof(e->name), "ecm%d", e->unit);
   e->eni.eni_output = ecm_output;
   ether_netif_init(&e->eni, e->name, &ecm_device_class);
   ether_netif_attach(&e->eni);
@@ -436,7 +445,7 @@ ecm_probe(usb_host_device_t *ud, const struct usb_interface_descriptor *id)
          ud->ud_dev.d_name, e->name, id->bInterfaceNumber, data_ifnum,
          m[0], m[1], m[2], m[3], m[4], m[5]);
 
-  int q = irq_forbid(IRQ_LEVEL_IO);
+  q = irq_forbid(IRQ_LEVEL_IO);
   ecm_rx_start(e);
   irq_permit(q);
 
