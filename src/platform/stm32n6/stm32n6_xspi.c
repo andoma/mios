@@ -379,7 +379,9 @@ xspi_write(struct block_iface *bi, size_t block,
       to_copy = page_size - (offset & (page_size - 1));
     }
 
-    xspi_wait_ready(xs);
+    error_t err = xspi_wait_ready(xs);
+    if(err)
+      return err;
 
     xspi_cmd(xs, 6); // Write enable
 

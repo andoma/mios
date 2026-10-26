@@ -133,6 +133,11 @@ stm32n6_flash_init(void)
 // page that already has data in it.
 #define APP_DEFER_SIZE    256
 
+// The rest of the image is programmed a whole flash page at a time, each
+// page once: the stream's writes land at arbitrary offsets, and
+// programming them as they come would hit pages (and ECC units) twice.
+#define APP_PAGE_SIZE     256
+
 typedef struct {
   stream_t stream;
   block_iface_t *bi;
@@ -144,52 +149,69 @@ typedef struct {
   uint8_t tail_len;
   uint8_t tail[MIOS_IMG_TRAILER];
   uint8_t head[APP_DEFER_SIZE]; // Deferred start of block 0
+  uint8_t page[APP_PAGE_SIZE];  // The page being filled
 } app_write_stream_t;
 
+_Static_assert(APP_DEFER_SIZE % APP_PAGE_SIZE == 0,
+               "the deferred head must end on a page boundary");
 
-// Write committed image data to flash (or block0 buffer).
+
+// Program the page that starts at flash offset `page_off` (0xff padded
+// past the image's end). Blocks are erased on first touch: pages arrive
+// in order, so that is the one at offset 0 of the block. Block 0 was
+// erased by the first commit.
+static error_t
+aws_program_page(app_write_stream_t *aws, size_t page_off)
+{
+  const size_t bs = aws->bi->block_size;
+  size_t block = page_off / bs;
+  size_t off_in_block = page_off % bs;
+
+  if(block != 0 && off_in_block == 0) {
+    error_t err = block_erase(aws->bi, block, 1);
+    if(err) return err;
+  }
+  error_t err = block_write(aws->bi, block, off_in_block,
+                            aws->page, APP_PAGE_SIZE);
+  memset(aws->page, 0xff, APP_PAGE_SIZE);
+  return err;
+}
+
+
+// Write committed image data to flash (or the head buffer).
 // Data goes to flash at offset (image_pos + APP_HEADER_SIZE).
-// The first APP_DEFER_SIZE bytes of block 0 are deferred in RAM, the rest
-// is written directly. Blocks are erased on first touch.
+// The first APP_DEFER_SIZE bytes of block 0 are deferred in RAM until
+// flush, the rest is staged a page at a time.
 static error_t
 aws_commit(app_write_stream_t *aws, const void *data, size_t len)
 {
   const uint8_t *src = data;
-  const size_t bs = aws->bi->block_size;
+
+  if(!aws->block0_erased) {
+    error_t err = block_erase(aws->bi, 0, 1);
+    if(err) return err;
+    aws->block0_erased = 1;
+  }
 
   while(len > 0) {
     size_t flash_off = aws->image_pos + APP_HEADER_SIZE;
-    size_t block = flash_off / bs;
-    size_t off_in_block = flash_off % bs;
-    size_t chunk = bs - off_in_block;
-    if(chunk > len)
-      chunk = len;
+    size_t chunk;
 
-    if(block == 0) {
-      if(!aws->block0_erased) {
-        error_t err = block_erase(aws->bi, 0, 1);
-        if(err) return err;
-        aws->block0_erased = 1;
-      }
-      size_t deferred = 0;
-      if(flash_off < APP_DEFER_SIZE) {
-        deferred = APP_DEFER_SIZE - flash_off;
-        if(deferred > chunk)
-          deferred = chunk;
-        memcpy(aws->head + flash_off, src, deferred);
-      }
-      if(chunk > deferred) {
-        error_t err = block_write(aws->bi, 0, flash_off + deferred,
-                                  src + deferred, chunk - deferred);
-        if(err) return err;
-      }
+    if(flash_off < APP_DEFER_SIZE) {
+      chunk = APP_DEFER_SIZE - flash_off;
+      if(chunk > len)
+        chunk = len;
+      memcpy(aws->head + flash_off, src, chunk);
     } else {
-      if(off_in_block == 0) {
-        error_t err = block_erase(aws->bi, block, 1);
+      size_t off_in_page = flash_off % APP_PAGE_SIZE;
+      chunk = APP_PAGE_SIZE - off_in_page;
+      if(chunk > len)
+        chunk = len;
+      memcpy(aws->page + off_in_page, src, chunk);
+      if(off_in_page + chunk == APP_PAGE_SIZE) {
+        error_t err = aws_program_page(aws, flash_off - off_in_page);
         if(err) return err;
       }
-      error_t err = block_write(aws->bi, block, off_in_block, src, chunk);
-      if(err) return err;
     }
 
     src += chunk;
@@ -240,6 +262,13 @@ aws_write(stream_t *s, const void *data, size_t size, int flags)
       error_t err = aws_commit(aws, &stored_crc, 4);
       if(err) return err;
       err = aws_commit(aws, MIOS_IMG_MAGIC, 8);
+      if(err) return err;
+    }
+
+    // The last, partial page
+    size_t end = aws->image_pos + APP_HEADER_SIZE;
+    if(end > APP_DEFER_SIZE && end % APP_PAGE_SIZE) {
+      error_t err = aws_program_page(aws, end - end % APP_PAGE_SIZE);
       if(err) return err;
     }
 
@@ -338,6 +367,7 @@ app_write_stream_open(block_iface_t *bi, uint8_t target_slot, int switch_boot)
     return NULL;
 
   memset(aws->head, 0xff, sizeof(aws->head));
+  memset(aws->page, 0xff, sizeof(aws->page));
 
   aws->stream.vtable = &app_write_stream_vtable;
   aws->bi = bi;
