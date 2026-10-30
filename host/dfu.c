@@ -222,16 +222,23 @@ static int
 dfu_wait_while_busy(libusb_device_handle *h)
 {
   struct dfu_status st;
+  int busy_polls = 0;
 
   while(1) {
     int r = dfu_getstatus(h, &st);
     if(r < 0)
       return r;
-    uint32_t wait = get_poll_timeout(&st);
-    usleep(wait * 1000);
 
-    if(st.bState == DFU_STATE_dfuDNBUSY)
+    if(st.bState == DFU_STATE_dfuDNBUSY) {
+      // The STM32 ROM bootloaders do the erase/program inside the GETSTATUS
+      // that follows the DNLOAD, and answer once done. The first DNBUSY is
+      // thus just the ROM's estimate (100+ ms on an F4, per 2 KB chunk,
+      // for a write that takes ~30 ms), so poll again at once and only
+      // honour bwPollTimeout if the device really stays busy.
+      if(++busy_polls > 1)
+        usleep(get_poll_timeout(&st) * 1000);
       continue;
+    }
     if(st.bStatus != DFU_STATUS_OK) {
       dfu_logf(LOG_ERR, "DFU error: %s (state=%s)", dfu_status_str(st.bStatus), dfu_state_str(st.bState));
       return -1;
