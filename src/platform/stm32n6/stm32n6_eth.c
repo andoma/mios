@@ -143,8 +143,6 @@ typedef struct stm32n6_eth {
 
 #ifdef ENABLE_NET_PTP
   uint32_t se_addend;
-  int32_t se_ppb_scale_mult;
-  int32_t se_ppb_scale_div;
 #endif
 
 } stm32n6_eth_t;
@@ -182,7 +180,8 @@ stm32n6_eth_print_info(struct device *dev, struct stream *st)
 #ifdef ENABLE_NET_PTP
   stm32n6_eth_t *se = (stm32n6_eth_t *)dev;
   if(ptp_print_info(st, &se->se_eni)) {
-    stprintf(st, "  PTP addend:0x%x seconds:%d nano:%d\n",
+    stprintf(st, "  PTP addend:0x%x (nominal 0x%x) seconds:%d nano:%d\n",
+             reg_rd(ETH_MACTSAR),
              se->se_addend,
              reg_rd(ETH_MACSTSR),
              reg_rd(ETH_MACSTNR));
@@ -301,11 +300,7 @@ stm32n6_clock_adj_time(clock_realtime_t *clk, int32_t ppb)
 {
   stm32n6_eth_t *se = &stm32n6_eth;
 
-  int32_t addend_adjustment =
-    ((int64_t)ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
-
-  uint32_t final_addend = se->se_addend + addend_adjustment;
-  reg_wr(ETH_MACTSAR, final_addend);
+  reg_wr(ETH_MACTSAR, clock_realtime_addend(se->se_addend, ppb));
   reg_set_bit(ETH_MACTSCR, 5);
 }
 
@@ -328,9 +323,6 @@ stm32n6_ptp_init(stm32n6_eth_t *se)
 
   uint64_t denominator = (uint64_t)ptp_freq * ssinc;
   se->se_addend = (1000000000ULL << 32) / denominator;
-
-  se->se_ppb_scale_mult = se->se_addend / 1000;
-  se->se_ppb_scale_div = 1000000;
 
   reg_wr(ETH_MACTSCR,
          (1 << 11) | // PTPv2 ethernet

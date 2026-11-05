@@ -196,8 +196,6 @@ typedef struct stm32h7_eth {
 
 #ifdef ENABLE_NET_PTP
   uint32_t se_addend;
-  int32_t se_ppb_scale_mult;
-  int32_t se_ppb_scale_div;
 #endif
 } stm32h7_eth_t;
 
@@ -370,11 +368,7 @@ stm32h7_clock_adj_time(clock_realtime_t *clk, int32_t ppb)
   stm32h7_eth_t *se =
     container_of(clk, stm32h7_eth_t, se_eni.eni_ptp.pes_clock);
 
-  int32_t addend_adjustment =
-    ((int64_t)ppb * se->se_ppb_scale_mult) / se->se_ppb_scale_div;
-
-  uint32_t final_addend = se->se_addend + addend_adjustment;
-  reg_wr(ETH_MACTSAR, final_addend);
+  reg_wr(ETH_MACTSAR, clock_realtime_addend(se->se_addend, ppb));
   reg_set_bit(ETH_MACTSCR, 5);
 }
 
@@ -395,9 +389,6 @@ stm32h7_ptp_init(stm32h7_eth_t *se)
   uint64_t numerator = 1000000000ULL;
   uint64_t denominator = ahb_freq * ssinc;
   se->se_addend = (numerator << 32) / denominator;
-
-  se->se_ppb_scale_mult = se->se_addend / 1000;
-  se->se_ppb_scale_div = 1000000;
 
   reg_wr(ETH_MACTSCR,
          (1 << 11) | // PTPv2 ethernet

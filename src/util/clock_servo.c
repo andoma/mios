@@ -61,9 +61,13 @@ clock_servo_step(clock_servo_t *cs, int64_t offset_ns)
   int64_t cur_ns = clk->clk_class->get_time(clk);
   clk->clk_class->set_time(clk, cur_ns + offset_ns);
 
+  // The drift estimate starts over, and so must the frequency: whatever
+  // the last slew left in the hardware would otherwise stay until the
+  // offset is small enough to slew again, and might never be.
   cs->cs_accumulated_drift_ppb = 0;
   cs->cs_sample_count = 0;
   cs->cs_sample_write = 0;
+  clk->clk_class->adj_time(clk, 0);
 
   evlog(LOG_DEBUG, "%s: Step adjust %" PRId64 " ns", clk->clk_class->name, offset_ns);
 }
