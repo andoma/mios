@@ -5,7 +5,12 @@
 #include <string.h>
 #include <inttypes.h>
 
-#define STEP_THRESHOLD_NS  100000000LL  // 100 ms
+// Offsets beyond this are stepped out rather than slewed. A master whose
+// time jumps by tens of milliseconds (a main computer booting with its
+// clock off until NTP steps it) would otherwise take the slew tens of
+// seconds, ringing on the way, and slewing more than ~30 ms asks for more
+// frequency correction than an STM32N6's timestamp addend has room for.
+#define STEP_THRESHOLD_NS  10000000LL  // 10 ms
 #define MAX_ADJ_PPB        100000
 #define SERVO_KP_SHIFT     2
 #define SERVO_KI_SHIFT     7
@@ -18,6 +23,7 @@ clock_servo_init(clock_servo_t *cs, clock_realtime_t *clk)
   cs->cs_accumulated_drift_ppb = 0;
   cs->cs_sample_count = 0;
   cs->cs_sample_write = 0;
+  cs->cs_step_pending = 0;
 }
 
 
@@ -101,10 +107,19 @@ clock_servo_adjust(clock_servo_t *cs, int64_t offset_ns, int update_interval)
   int64_t abs_offset = (offset_ns < 0) ? -offset_ns : offset_ns;
 
   if(abs_offset > STEP_THRESHOLD_NS) {
+    // A synchronized clock steps on the second offset in a row beyond the
+    // threshold, so one bad exchange (a late software timestamp on the
+    // master, say) cannot move its time; that offset is not filtered
+    // either. A clock that has never been set steps at once.
+    if(cs->cs_clock->synchronized && !cs->cs_step_pending) {
+      cs->cs_step_pending = 1;
+      return;
+    }
     clock_servo_step(cs, offset_ns);
   } else {
     clock_servo_slew(cs, offset_ns, update_interval);
   }
+  cs->cs_step_pending = 0;
   cs->cs_clock->synchronized = 1;
 }
 
