@@ -57,6 +57,22 @@
  * which is retransmitted at once: n losses in one window cost about n
  * round trips rather than n timeouts.
  *
+ * Out-of-order data
+ *
+ * The RX FIFO is indexed by sequence number, so a segment that arrives
+ * behind a hole is copied to where it belongs in the free part of the
+ * FIFO, and all that is kept about it is where it begins and ends
+ * (tcb_ooo, a few blocks). When the hole is filled rcv.nxt moves past
+ * everything that was waiting. This takes no memory beyond the FIFO
+ * the connection has anyway.
+ *
+ * It matters for more than saving retransmissions. A peer without
+ * SACK takes every duplicate ACK to mean that a segment got through.
+ * If we acked segments behind a hole and then threw them away, such a
+ * peer (Linux for one) would decide the path reorders packets, wait
+ * for more duplicate ACKs than we ever send, and end up recovering by
+ * timeout.
+ *
  * There is no congestion window. The sender is limited by the peer's
  * window, Nagle and the size of the TX FIFO only, and a loss does not
  * slow it down. That fits what this stack is for, a few connections
@@ -68,6 +84,8 @@
 #define TCP_KEEPALIVE_INTERVAL 10000 // ms
 #define TCP_TIMEOUT_INTERVAL   21000 // ms
 #define TCP_TIMEOUT_HANDSHAKE   5000 // ms
+
+#define TCP_OOO_BLOCKS 4
 
 #define TCP_STATE_CLOSED       0
 #define TCP_STATE_LISTEN       1
@@ -103,7 +121,19 @@ typedef struct tcb {
   uint8_t tcb_fin_received;
   uint8_t rcv_window_closed;
 
-  uint8_t fast_reject_limiter;
+  // Data received behind a hole, see the comment at the top. Sorted,
+  // apart and all ahead of rcv.nxt. A FIN can wait there too
+  uint8_t tcb_ooo_count;
+  uint8_t tcb_ooo_fin;
+  uint32_t tcb_ooo_fin_seq;
+  struct {
+    uint32_t start;
+    uint32_t end;
+  } tcb_ooo[TCP_OOO_BLOCKS];
+
+  // ACKs sent for segments we could not take, see tcp_reject_limit()
+  uint8_t tcb_reject_count;
+  uint32_t tcb_reject_time;
 
   // Loss recovery, see the comment at the top
   uint8_t tcb_dupacks;
@@ -136,6 +166,7 @@ typedef struct tcb {
     uint32_t nxt;
     uint16_t up;
     uint16_t mss;
+    uint16_t adv_wnd; // Window in the last segment we sent
   } tcb_rcv;
 
   uint32_t tcb_local_addr;
@@ -348,7 +379,8 @@ tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
   th->ack = htonl(tcb->tcb_rcv.nxt);
 
   uint32_t rcv_wnd = tcb_rxfifo_avail(tcb);
-  th->wnd = htons(MIN(rcv_wnd, 65535));
+  tcb->tcb_rcv.adv_wnd = MIN(rcv_wnd, 65535);
+  th->wnd = htons(tcb->tcb_rcv.adv_wnd);
 
   if(th->flg & TCP_F_SYN) {
     uint8_t *opts = pbuf_append(pb, 4);
@@ -815,6 +847,130 @@ tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
 }
 
 
+// Note that [start, end) has been received behind a hole. Returns 0 if
+// there are too many separate blocks already
+static int
+tcp_ooo_insert(tcb_t *tcb, uint32_t start, uint32_t end)
+{
+  // Compare as distances from rcv.nxt, sequence numbers wrap
+  const uint32_t base = tcb->tcb_rcv.nxt;
+  int n = 0;
+
+  // Blocks that touch the new one are merged into it
+  for(int i = 0; i < tcb->tcb_ooo_count; i++) {
+    const uint32_t bs = tcb->tcb_ooo[i].start;
+    const uint32_t be = tcb->tcb_ooo[i].end;
+    if(be - base < start - base || bs - base > end - base) {
+      tcb->tcb_ooo[n++] = tcb->tcb_ooo[i];
+      continue;
+    }
+    if(bs - base < start - base)
+      start = bs;
+    if(be - base > end - base)
+      end = be;
+  }
+  tcb->tcb_ooo_count = n;
+  if(n == TCP_OOO_BLOCKS)
+    return 0; // Nothing was merged either, so nothing has changed
+
+  int pos = n;
+  while(pos > 0 && tcb->tcb_ooo[pos - 1].start - base > start - base) {
+    tcb->tcb_ooo[pos] = tcb->tcb_ooo[pos - 1];
+    pos--;
+  }
+  tcb->tcb_ooo[pos].start = start;
+  tcb->tcb_ooo[pos].end = end;
+  tcb->tcb_ooo_count = n + 1;
+  return 1;
+}
+
+
+// rcv.nxt has moved: take along what was waiting behind the hole
+static void
+tcp_ooo_advance(tcb_t *tcb)
+{
+  while(tcb->tcb_ooo_count) {
+    if((int32_t)(tcb->tcb_ooo[0].start - tcb->tcb_rcv.nxt) > 0)
+      break;
+    if((int32_t)(tcb->tcb_ooo[0].end - tcb->tcb_rcv.nxt) > 0) {
+      tcb->tcb_rx_bytes += tcb->tcb_ooo[0].end - tcb->tcb_rcv.nxt;
+      tcb->tcb_rcv.nxt = tcb->tcb_ooo[0].end;
+    }
+    tcb->tcb_ooo_count--;
+    memmove(&tcb->tcb_ooo[0], &tcb->tcb_ooo[1],
+            tcb->tcb_ooo_count * sizeof(tcb->tcb_ooo[0]));
+  }
+}
+
+
+// Copy 'len' bytes of payload, found 'skip' bytes into the packet, to
+// the RX FIFO at sequence number 'seq'
+static void
+tcp_rxfifo_store(tcb_t *tcb, const pbuf_t *pb, size_t skip, uint32_t seq,
+                 uint32_t len)
+{
+  for(; pb != NULL && len; pb = pb->pb_next) {
+    if(skip >= pb->pb_buflen) {
+      skip -= pb->pb_buflen;
+      continue;
+    }
+    const uint32_t chunk = MIN(pb->pb_buflen - skip, len);
+    ltow_memcpy(tcb_rxfifo(tcb), pb->pb_data + pb->pb_offset + skip,
+                chunk, seq, tcb->tcb_rxfifo_size);
+    seq += chunk;
+    len -= chunk;
+    skip = 0;
+  }
+}
+
+
+// Keep a segment that lies behind a hole, as much of it as is inside
+// the window. Returns 0 if nothing was kept
+static int
+tcp_ooo_store(tcb_t *tcb, const pbuf_t *pb, size_t hdr_len, uint32_t seq,
+              int fin, uint32_t rcv_wnd)
+{
+  const uint32_t off = seq - tcb->tcb_rcv.nxt;
+  uint32_t len = pb->pb_pktlen - hdr_len;
+
+  if(off + len + !!fin > rcv_wnd) {
+    len = rcv_wnd - off;
+    fin = 0;
+  }
+
+  if(len) {
+    if(!tcp_ooo_insert(tcb, seq, seq + len))
+      return 0;
+    tcp_rxfifo_store(tcb, pb, hdr_len, seq, len);
+  }
+
+  if(fin) {
+    tcb->tcb_ooo_fin = 1;
+    tcb->tcb_ooo_fin_seq = seq + len;
+  }
+  return len || fin;
+}
+
+
+// Segments we cannot take are answered with an ACK, which is what
+// makes the peer retransmit, so we must never go quiet for good. But a
+// burst of them needs only a few answers: at most five per 10 ms.
+// Returns nonzero if an ACK may be sent
+static int
+tcp_reject_limit(tcb_t *tcb)
+{
+  const uint32_t now = clock_get() >> 10; // About ms
+  if(now - tcb->tcb_reject_time >= 10) {
+    tcb->tcb_reject_time = now;
+    tcb->tcb_reject_count = 0;
+  }
+  if(tcb->tcb_reject_count == 5)
+    return 0;
+  tcb->tcb_reject_count++;
+  return 1;
+}
+
+
 static void
 tcp_disarm_all_timers(tcb_t *tcb)
 {
@@ -937,9 +1093,11 @@ tcp_rxfifo_consume(tcb_t *tcb, int bytes)
   if(!tcb->rcv_window_closed)
     return;
 
-  // If our RX buffer have opened up enough, send ACK immediatly
+  // If our RX buffer have opened up enough, send ACK immediatly.
+  // Enough is half the FIFO or a full segment, whichever is less
+  // (RFC 9293 3.8.6.2.2), so that it can be reached on a small FIFO
 
-  int thres = MAX(tcb->tcb_rxfifo_size / 2, tcb->tcb_rcv.mss * 2);
+  int thres = MIN(tcb->tcb_rxfifo_size / 2, tcb->tcb_rcv.mss);
 
   if(tcb_rxfifo_avail(tcb) < thres)
     return;
@@ -1405,58 +1563,72 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   //
   // Step 1: Sequence acceptance check
   //
+  // A segment falls in one of three classes:
+  //
+  //  - Taken: it continues at rcv.nxt. It may begin in data we already
+  //    have (a retransmission that also carries new data), the old
+  //    part is cut off. It may also be more than fits the window, see
+  //    step 8.
+  //
+  //  - Acceptable but not taken: it lies behind a hole, or the window
+  //    is closed (a zero window probe). RST and ACK are processed.
+  //    Data behind a hole is put aside (see the comment at the top)
+  //    and we answer with an ACK for rcv.nxt, the duplicate ACK the
+  //    peer's fast retransmit runs on.
+  //
+  //  - Not acceptable: old duplicates and anything outside the window.
+  //    Answered with an ACK and otherwise ignored (RFC 9293 3.10.7.4).
+  //    Keepalive probes end up here on purpose.
+  //
 
-  int acceptance = 0;
-  int nxt_seq = seq - tcb->tcb_rcv.nxt;
-  uint32_t rcv_wnd = tcb_rxfifo_avail(tcb);
+  const int nxt_seq = seq - tcb->tcb_rcv.nxt;
+  const uint32_t rcv_wnd = tcb_rxfifo_avail(tcb);
+  uint32_t trim_front = 0;
+  int acceptance;
+  int take;
+
   if(seg_len == 0) {
-
-
-    if(rcv_wnd == 0) {
-      acceptance = nxt_seq == 0;
-    } else {
-      acceptance = (uint32_t)nxt_seq < tcb->tcb_rcv.nxt + rcv_wnd;
-    }
+    acceptance = nxt_seq == 0 || (uint32_t)nxt_seq < rcv_wnd;
+    take = 1;
+  } else if(flag & TCP_F_SYN) {
+    acceptance = nxt_seq == 0 && rcv_wnd;
+    take = 1;
+  } else if(nxt_seq <= 0) {
+    trim_front = -nxt_seq;
+    acceptance = trim_front < seg_len;
+    take = rcv_wnd != 0;
   } else {
-
-    if(rcv_wnd == 0) {
-
-    } else {
-
-#if 0
-      acceptance = (uint32_t)nxt_seq < tcb->tcb_rcv.nxt + tcb->tcb_rcv.wnd;
-
-      int seq_delta_end = nxt_seq + seg_len - 1;
-      acceptance |=
-        (uint32_t)seq_delta_end < tcb->tcb_rcv.nxt + tcb->tcb_rcv.wnd;
-#endif
-
-      acceptance = nxt_seq == 0;
-    }
+    acceptance = (uint32_t)nxt_seq < rcv_wnd;
+    take = 0;
   }
 
   if(!acceptance) {
     if(flag & TCP_F_RST)
       return pb;
 
-    // We don't want to send too many rejects back-to-back. Sender
-    // only needs to see a few to enter fast-retransmit
-    if(tcb->fast_reject_limiter == 5)
+    if(!tcp_reject_limit(tcb))
       return pb;
 
-    tcb->fast_reject_limiter++;
     return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
                      tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
   }
-  tcb->fast_reject_limiter = 0;
 
   //
   // Step 2: RST
   //
+  // Only one that hits rcv.nxt exactly resets the connection. Others
+  // in the window get an ACK (RFC 5961 section 3)
+  //
 
   if(flag & TCP_F_RST) {
-    tcp_close(tcb, "Got RST");
-    return pb;
+    if(nxt_seq == 0) {
+      tcp_close(tcb, "Got RST");
+      return pb;
+    }
+    if(!tcp_reject_limit(tcb))
+      return pb;
+    return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
+                     tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
   }
 
   //
@@ -1566,7 +1738,43 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   // Step 8: Process payload
   //
 
-  pb = pbuf_drop(pb, hdr_len, 0);
+  if(!take && nxt_seq > 0) {
+    // Behind a hole
+    switch(tcb->tcb_state) {
+    case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_FIN_WAIT1:
+    case TCP_STATE_FIN_WAIT2:
+      break;
+    default:
+      return pb;
+    }
+
+    // One duplicate ACK for each segment we keep, and none for one we
+    // don't: a peer without SACK counts them to tell how much got
+    // through
+    if(!tcp_ooo_store(tcb, pb, hdr_len, seq, flag & TCP_F_FIN, rcv_wnd))
+      return pb;
+
+    // Repeat the window of our last segment even if the application
+    // has read since: an ACK with a changed window is a window update
+    // to the peer, not a duplicate ACK (RFC 5681 section 2), and would
+    // not count towards its fast retransmit
+    return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
+                     tcb->tcb_rcv.nxt, TCP_F_ACK,
+                     MIN(rcv_wnd, tcb->tcb_rcv.adv_wnd));
+  }
+
+  if(!take) {
+    // Window closed
+    if(!tcp_reject_limit(tcb))
+      return pb;
+    return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
+                     tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
+  }
+
+  int fin = flag & TCP_F_FIN;
+
+  pb = pbuf_drop(pb, hdr_len + trim_front, 0);
 
   switch(tcb->tcb_state) {
   case TCP_STATE_ESTABLISHED:
@@ -1576,18 +1784,32 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     if(!pb->pb_pktlen)
       break;
 
-    uint32_t avail = tcb_rxfifo_avail(tcb);
-
-    if(avail >= pb->pb_pktlen) {
-
-      pbuf_t *p;
-      for(p = pb; p != NULL; p = p->pb_next) {
-        ltow_memcpy(tcb_rxfifo(tcb), p->pb_data + p->pb_offset,
-                    p->pb_buflen, tcb->tcb_rcv.nxt,
-                    tcb->tcb_rxfifo_size);
-        tcb->tcb_rcv.nxt += p->pb_buflen;
+    {
+      // Take what fits the window (rcv_wnd is not zero here). A FIN
+      // occupies a byte of the FIFO as well; one that does not fit is
+      // left for the peer to send again together with the rest.
+      uint32_t len = pb->pb_pktlen;
+      if(len + !!fin > rcv_wnd) {
+        len = MIN(len, rcv_wnd);
+        fin = 0;
       }
-      tcb->tcb_rx_bytes += pb->pb_pktlen;
+
+      tcp_rxfifo_store(tcb, pb, 0, tcb->tcb_rcv.nxt, len);
+      tcb->tcb_rcv.nxt += len;
+      tcb->tcb_rx_bytes += len;
+
+      // If this filled a hole, what was waiting behind it comes along,
+      // possibly with a FIN, and the peer is told right away
+      const int filled_hole = tcb->tcb_ooo_count || tcb->tcb_ooo_fin;
+      tcp_ooo_advance(tcb);
+      if(tcb->tcb_ooo_fin) {
+        const int32_t d = tcb->tcb_ooo_fin_seq - tcb->tcb_rcv.nxt;
+        if(d <= 0) {
+          tcb->tcb_ooo_fin = 0;
+          if(d == 0 && tcb_rxfifo_avail(tcb))
+            fin = 1;
+        }
+      }
 
       task_wakeup(&tcb->tcb_rx_waitq, 1);
 
@@ -1600,9 +1822,10 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       int rx_avail = tcb_rxfifo_avail(tcb);
       tcb->rcv_window_closed = rx_avail < tcb->tcb_rcv.mss;
 
-      if(tcb->tcb_snd.wrptr == tcb->tcb_snd.nxt &&
-         (!timer_disarm(&tcb->tcb_delayed_ack_timer) ||
-          tcb->rcv_window_closed)) {
+      if(filled_hole ||
+         (tcb->tcb_snd.wrptr == tcb->tcb_snd.nxt &&
+          (!timer_disarm(&tcb->tcb_delayed_ack_timer) ||
+           tcb->rcv_window_closed))) {
         tcp_emit(tcb, pb, tcb->tcb_snd.nxt, 1, "Instant ack");
         pb = NULL;
       } else {
@@ -1616,7 +1839,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     break;
   }
 
-  if(flag & TCP_F_FIN) {
+  if(fin) {
 
     switch(tcb->tcb_state) {
     case TCP_STATE_CLOSED:

@@ -32,6 +32,7 @@
 
 #define PORT_SOURCE 7000
 #define PORT_SINK   7001
+#define PORT_SINK8K 7002
 
 // Byte at stream offset 'off' of everything the test sends, either way
 static uint8_t
@@ -87,17 +88,21 @@ SERVICE_DEF_STREAM_EX("tcptest-source", PORT_SOURCE, 15, 11, source_open);
 
 
 /* Sink: stores what the peer sends, for the script to look at. One
-   connection at a time. */
+   connection at a time. While sink_pause is set it does not read, so
+   the RX FIFO (2 kB) fills up. */
 
 static uint8_t sink_buf[65536];
 static volatile uint32_t sink_len;
 static volatile int sink_eof;
+static volatile int sink_pause;
 
 static void *
 sink_thread(void *arg)
 {
   stream_t *s = arg;
   while(1) {
+    while(sink_pause)
+      usleep(1000);
     const ssize_t n = stream_read(s, sink_buf + sink_len,
                                   sizeof(sink_buf) - sink_len, 1);
     if(n <= 0)
@@ -119,6 +124,9 @@ sink_open(stream_t *s)
 }
 
 SERVICE_DEF_STREAM("tcptest-sink", PORT_SINK, sink_open);
+
+// The same with an 8 kB RX FIFO
+SERVICE_DEF_STREAM_EX("tcptest-sink8k", PORT_SINK8K, 12, 13, sink_open);
 
 
 /* Client: a connection opened from Mios. The script asks for what it
@@ -582,6 +590,300 @@ scn_write_before_established(void)
 }
 
 
+// Send pattern bytes [from, to) to the sink
+static void
+sink_send(sim_tcp_t *t, uint32_t from, uint32_t to)
+{
+  static uint8_t data[MSS];
+  for(uint32_t i = from; i < to; i++)
+    data[i - from] = pattern(i);
+  sim_tcp_send(t, SIM_TCP_ACK | SIM_TCP_PSH, from, 0, 65535, data, to - from);
+}
+
+// Expect an ACK for exactly 'ackno' no later than 'within' us from
+// now. Returns its window, -1 if it did not come
+static int
+expect_ack(sim_tcp_t *t, uint32_t ackno, uint64_t within, const char *what)
+{
+  sim_tcp_seg_t seg;
+  do {
+    if(!CHECK(sim_tcp_recv(t, &seg, within), "%s: no ACK", what))
+      return -1;
+  } while(seg.seq == (uint32_t)-1); // Mios's own keepalive probe
+  CHECK(seg.flags == SIM_TCP_ACK && seg.len == 0 && seg.ack == ackno,
+        "%s: flags=%x len=%d ack=%u, expected ack=%u", what, seg.flags,
+        seg.len, seg.ack, ackno);
+  return seg.wnd;
+}
+
+static int
+sink_ok(uint32_t len)
+{
+  // Give the sink thread a moment to read
+  sim_wait(clock_get() + 5 * MSEC);
+  if(sink_len != len)
+    return 0;
+  for(uint32_t i = 0; i < len; i++) {
+    if(sink_buf[i] != pattern(i))
+      return 0;
+  }
+  return 1;
+}
+
+
+static void
+scn_rx_overlap(void)
+{
+  hosttest_log("---- receive: retransmissions, overlap, out of order ----");
+  sim_tcp_t *t = peer_new(PORT_SINK);
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  sink_send(t, 0, 500);
+  expect_ack(t, 500, 50 * MSEC, "first segment");
+
+  // A retransmission that starts in data we have and goes on into new
+  // data: the new part must be taken
+  sink_send(t, 200, 900);
+  expect_ack(t, 900, 50 * MSEC, "overlapping segment");
+  CHECK(sink_ok(900), "sink has %u bytes after overlap", sink_len);
+
+  // Old data only: nothing to take, but every copy gets an ACK (the
+  // peer retransmits because it has not seen one)
+  for(int i = 0; i < 20; i++) {
+    sink_send(t, 0, 500);
+    expect_ack(t, 900, 1 * MSEC, "old duplicate");
+    sim_wait(clock_get() + 50 * MSEC);
+  }
+
+  // A segment behind a hole is answered at once with a duplicate ACK
+  // so the peer can fast retransmit, and kept: when the hole is
+  // filled the ACK covers both, again at once
+  sink_send(t, 1400, 1500);
+  expect_ack(t, 900, 1 * MSEC, "segment behind a hole");
+  CHECK(sink_ok(900), "data behind a hole was delivered");
+  sink_send(t, 900, 1400);
+  expect_ack(t, 1500, 1 * MSEC, "the hole");
+  CHECK(sink_ok(1500), "sink has %u bytes at the end", sink_len);
+
+  // Keepalive probes, Linux style (no data, one before what we expect)
+  // and BSD style (one old byte): each one is answered
+  for(int i = 0; i < 10; i++) {
+    sim_tcp_send(t, SIM_TCP_ACK, 1499, 0, 65535, NULL, 0);
+    expect_ack(t, 1500, 1 * MSEC, "keepalive probe");
+    sim_wait(clock_get() + SEC);
+  }
+  sink_send(t, 1499, 1500);
+  expect_ack(t, 1500, 1 * MSEC, "keepalive probe with a byte");
+
+  // A burst of old duplicates gets some ACKs, not one each
+  int acks = 0;
+  sim_tcp_seg_t seg;
+  for(int i = 0; i < 30; i++)
+    sink_send(t, 0, 500);
+  while(sim_tcp_recv(t, &seg, 1 * MSEC))
+    acks++;
+  CHECK(acks >= 3 && acks <= 10, "%d ACKs for a burst of 30 duplicates", acks);
+
+  // A RST that is not exactly at rcv.nxt does not reset
+  sim_tcp_send(t, SIM_TCP_RST, 1600, 0, 0, NULL, 0);
+  sim_wait(clock_get() + 20 * MSEC);
+  CHECK(!sink_eof, "RST in the window closed the connection");
+  sim_tcp_send(t, SIM_TCP_RST, 1500, 0, 0, NULL, 0);
+  sim_wait(clock_get() + 20 * MSEC);
+  CHECK(sink_eof, "RST at rcv.nxt did not close the connection");
+}
+
+
+static void
+scn_rx_window(void)
+{
+  hosttest_log("---- receive: full window, probes, window update ----");
+  sim_tcp_t *t = peer_new(PORT_SINK);
+  sim_tcp_seg_t seg;
+
+  // The sink does not read. Its FIFO holds 2048 bytes
+  sink_pause = 1;
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  sink_send(t, 0, MSS);
+  CHECK(expect_ack(t, MSS, 50 * MSEC, "first segment") == 2048 - MSS,
+        "window after the first segment");
+
+  // More than fits: what fits is taken
+  sink_send(t, MSS, MSS + 1000);
+  CHECK(expect_ack(t, 2048, 50 * MSEC, "segment over the window") == 0,
+        "window not closed");
+
+  // Zero window probes are answered, every one of them
+  for(int i = 0; i < 10; i++) {
+    sink_send(t, 2048, 2049);
+    CHECK(expect_ack(t, 2048, 1 * MSEC, "zero window probe") == 0,
+          "window open during probes");
+    sim_wait(clock_get() + 200 * MSEC);
+  }
+
+  // The application reads again: Mios says so by itself
+  sink_pause = 0;
+  if(CHECK(sim_tcp_recv(t, &seg, 50 * MSEC), "no window update")) {
+    CHECK(seg.ack == 2048 && seg.wnd >= 1024, "window update: ack=%u wnd=%u",
+          seg.ack, seg.wnd);
+  }
+  // (The sink is waiting in a read now and stops after this one)
+  sink_pause = 1;
+  sink_send(t, 2048, MSS + 1000);
+  expect_ack(t, MSS + 1000, 50 * MSEC, "rest of the segment");
+  CHECK(sink_ok(MSS + 1000), "sink has %u bytes", sink_len);
+
+  // The last data and the FIN are both waiting when the application
+  // reads: it must get the data before it sees the end
+  sink_send(t, MSS + 1000, MSS + 1500);
+  expect_ack(t, MSS + 1500, 50 * MSEC, "last data");
+  sim_tcp_send(t, SIM_TCP_FIN | SIM_TCP_ACK, MSS + 1500, 0, 65535, NULL, 0);
+  expect_ack(t, MSS + 1501, 50 * MSEC, "FIN");
+  sink_pause = 0;
+  CHECK(sink_ok(MSS + 1500), "sink has %u bytes at the end", sink_len);
+  CHECK(sink_eof, "sink did not see the close");
+  if(CHECK(sim_tcp_recv(t, &seg, SEC) && (seg.flags & SIM_TCP_FIN),
+           "no FIN from Mios"))
+    sim_tcp_send(t, SIM_TCP_ACK, MSS + 1501, 1, 65535, NULL, 0);
+}
+
+
+static void
+scn_dup_ack_window(void)
+{
+  hosttest_log("---- receive: duplicate ACKs repeat the window ----");
+  sim_tcp_t *t = peer_new(PORT_SINK8K);
+
+  sink_pause = 1;
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // 1000 bytes sit in the FIFO when they are acked, then the
+  // application reads them. The window is now bigger than the last
+  // one we advertised, but not by enough for a window update
+  sink_send(t, 0, 1000);
+  const int wnd = expect_ack(t, 1000, 50 * MSEC, "first segment");
+  CHECK(wnd == 8192 - 1000, "window %d", wnd);
+  sink_pause = 0;
+  expect_quiet(t, 50 * MSEC, "after the application read");
+
+  // Segments behind a hole: the ACKs must be exact duplicates of the
+  // last one, window included. A peer does not count an ACK with a
+  // changed window as a duplicate (RFC 5681 section 2) and would
+  // never fast retransmit
+  for(int i = 0; i < 3; i++) {
+    sink_send(t, 2000, 3000);
+    CHECK(expect_ack(t, 1000, 1 * MSEC, "segment behind a hole") == wnd,
+          "duplicate ACK with another window");
+  }
+
+  // The ACK for the retransmission has the real window: 2000 bytes
+  // have just gone into an empty FIFO
+  sink_send(t, 1000, 2000);
+  CHECK(expect_ack(t, 3000, 1 * MSEC, "the hole") == 8192 - 2000,
+        "window after the hole was filled");
+  CHECK(sink_ok(3000), "sink has %u bytes", sink_len);
+
+  peer_close(t, 3000, 0);
+}
+
+
+static void
+scn_out_of_order(void)
+{
+  hosttest_log("---- receive: several holes ----");
+  sim_tcp_t *t = peer_new(PORT_SINK8K);
+  sim_tcp_seg_t seg;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Three separate blocks behind the first hole, arriving in no
+  // particular order and partly overlapping
+  sink_send(t, 3000, 3200);
+  expect_ack(t, 0, 1 * MSEC, "block 3");
+  sink_send(t, 1000, 1200);
+  expect_ack(t, 0, 1 * MSEC, "block 1");
+  sink_send(t, 2000, 2200);
+  expect_ack(t, 0, 1 * MSEC, "block 2");
+  sink_send(t, 2100, 2500);
+  expect_ack(t, 0, 1 * MSEC, "block 2 extended");
+  CHECK(sink_ok(0), "data behind a hole was delivered");
+
+  // Each hole filled moves the ACK to the next one
+  sink_send(t, 0, 1000);
+  expect_ack(t, 1200, 1 * MSEC, "first hole");
+  sink_send(t, 1200, 2000);
+  expect_ack(t, 2500, 1 * MSEC, "second hole");
+  sink_send(t, 2400, 3100); // Overlaps on both sides
+  expect_ack(t, 3200, 1 * MSEC, "third hole");
+  CHECK(sink_ok(3200), "sink has %u bytes", sink_len);
+
+  // More separate blocks than are tracked (four): the fifth is not
+  // kept, and gets no duplicate ACK that would claim it was
+  for(int i = 0; i < 4; i++) {
+    sink_send(t, 3300 + i * 200, 3400 + i * 200);
+    expect_ack(t, 3200, 1 * MSEC, "one of four blocks");
+  }
+  sink_send(t, 4100, 4200);
+  expect_quiet(t, 5 * MSEC, "fifth block");
+  sink_send(t, 3200, 3300);
+  expect_ack(t, 3400, 1 * MSEC, "hole before four blocks");
+  sink_send(t, 3400, 4100);
+  expect_ack(t, 4100, 1 * MSEC, "the rest");
+  CHECK(sink_ok(4100), "sink has %u bytes", sink_len);
+
+  // The FIN can wait behind a hole as well
+  uint8_t last[100];
+  for(int i = 0; i < 100; i++)
+    last[i] = pattern(4200 + i);
+  sim_tcp_send(t, SIM_TCP_FIN | SIM_TCP_ACK | SIM_TCP_PSH, 4200, 0, 65535,
+               last, sizeof(last));
+  expect_ack(t, 4100, 1 * MSEC, "last segment behind a hole");
+  CHECK(!sink_eof, "FIN behind a hole closed the stream");
+  sink_send(t, 4100, 4200);
+  // Data and FIN may be acked together or one after the other
+  uint32_t acked = 0;
+  while(acked != 4301 && sim_tcp_recv(t, &seg, 50 * MSEC))
+    acked = seg.ack;
+  CHECK(acked == 4301, "acked %u, expected the FIN at 4301", acked);
+  CHECK(sink_ok(4300), "sink has %u bytes at the end", sink_len);
+  CHECK(sink_eof, "sink did not see the close");
+  if(CHECK(sim_tcp_recv(t, &seg, SEC) && (seg.flags & SIM_TCP_FIN),
+           "no FIN from Mios"))
+    sim_tcp_send(t, SIM_TCP_ACK, 4301, 1, 65535, NULL, 0);
+}
+
+
+static void
+scn_ack_behind_hole(void)
+{
+  hosttest_log("---- receive: ACK on a segment behind a hole ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  uint32_t cmdseq = 0;
+  const uint8_t junk[8] = {};
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // The peer acks our data on a segment that we cannot take because
+  // one before it was lost. The ACK counts all the same: no
+  // retransmission
+  source_request(t, &cmdseq, 0, MSS);
+  CHECK(collect(t, 0, MSS) == 1, "expected one segment");
+  sim_tcp_send(t, SIM_TCP_ACK | SIM_TCP_PSH, cmdseq + 100, MSS, 65535,
+               junk, sizeof(junk));
+  expect_ack(t, cmdseq, 1 * MSEC, "segment behind a hole");
+  expect_quiet(t, SEC, "data was acked");
+
+  peer_close(t, cmdseq, MSS);
+}
+
+
 static void
 script_thread(void *arg)
 {
@@ -593,6 +895,11 @@ script_thread(void *arg)
   scn_timeout_recovery();
   scn_active_open();
   scn_write_before_established();
+  scn_rx_overlap();
+  scn_rx_window();
+  scn_dup_ack_window();
+  scn_out_of_order();
+  scn_ack_behind_hole();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);
