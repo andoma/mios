@@ -81,6 +81,18 @@
  */
 
 
+// Retransmission timeout. It follows the measured round trip time
+// (RFC 6298) between these limits and doubles for every timeout in a
+// row. The floor is well above the RFC's clock granularity: it has to
+// cover the peer's delayed ACK (up to 200 ms on Linux), and since
+// fast retransmit handles most losses the timeout is mainly for the
+// last segments of a burst.
+#define TCP_RTO_MIN  250 // ms, also the initial value
+#define TCP_RTO_MAX 4000 // ms
+
+#define TCP_EMIT_ACK   0x1 // Send an ACK even if there is no data to send
+#define TCP_EMIT_PROBE 0x2 // Send one byte even if the window is closed
+
 #define TCP_KEEPALIVE_INTERVAL 10000 // ms
 #define TCP_TIMEOUT_INTERVAL   21000 // ms
 #define TCP_TIMEOUT_HANDSHAKE   5000 // ms
@@ -184,9 +196,16 @@ typedef struct tcb {
   timer_t tcb_delayed_ack_timer;
   timer_t tcb_time_wait_timer;
 
-  int tcb_rto;  // in ms
-  int tcb_srtt;
-  int tcb_rttvar;
+  int tcb_rto;    // in ms
+  int tcb_srtt;   // in us, negative until there is a measurement
+  int tcb_rttvar; // in us
+
+  // Round trip time measurement: one segment at a time is timed, from
+  // when it is sent until snd.una reaches tcb_rtt_seq. Never a
+  // retransmitted one (Karn's algorithm)
+  uint8_t tcb_rtt_pending;
+  uint32_t tcb_rtt_seq;
+  uint64_t tcb_rtt_start;
 
   uint64_t tcb_tx_bytes;
   uint64_t tcb_rx_bytes;
@@ -420,8 +439,38 @@ tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
 }
 
 
+// Start timing a round trip if none is being timed
+static void
+tcp_rtt_start(tcb_t *tcb)
+{
+  if(tcb->tcb_rtt_pending || tcb->tcb_recovering)
+    return;
+  tcb->tcb_rtt_pending = 1;
+  tcb->tcb_rtt_seq = tcb->tcb_snd.nxt;
+  tcb->tcb_rtt_start = clock_get();
+}
+
+
+// RFC 6298 section 2
+static void
+tcp_rtt_sample(tcb_t *tcb, int rtt)
+{
+  if(tcb->tcb_srtt < 0) {
+    tcb->tcb_srtt = rtt;
+    tcb->tcb_rttvar = rtt / 2;
+  } else {
+    const int err = rtt > tcb->tcb_srtt ? rtt - tcb->tcb_srtt :
+      tcb->tcb_srtt - rtt;
+    tcb->tcb_rttvar += (err - tcb->tcb_rttvar) / 4;
+    tcb->tcb_srtt += (rtt - tcb->tcb_srtt) / 8;
+  }
+  const int rto = (tcb->tcb_srtt + 4 * tcb->tcb_rttvar) / 1000;
+  tcb->tcb_rto = MAX(TCP_RTO_MIN, MIN(TCP_RTO_MAX, rto));
+}
+
+
 static error_t
-tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
+tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags, const char *why)
 {
   if(pb == NULL) {
     pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
@@ -452,6 +501,8 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
     uint32_t in_flight = tcb->tcb_snd.nxt - tcb->tcb_snd.una;
     uint32_t wnd_room = tcb->tcb_snd.wnd > in_flight
                           ? tcb->tcb_snd.wnd - in_flight : 0;
+    if((flags & TCP_EMIT_PROBE) && !wnd_room && !in_flight)
+      wnd_room = 1;
     bytes_in_fifo = MIN(bytes_in_fifo, wnd_room);
   } else {
     // A retransmission: only what has been sent before. That was
@@ -471,7 +522,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
 
   } else if(!bytes_in_fifo) {
     // Nothing in FIFO to send, but send an ACK if asked to
-    if(gen_ack) {
+    if(flags & TCP_EMIT_ACK) {
       th->flg = TCP_F_ACK;
       th->seq = htonl(seq);
       return tcp_output_tcb(tcb, pb, "empty_ack");
@@ -543,6 +594,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
   if(tcb->tcb_snd.nxt == seq0) {
     tcb->tcb_snd.nxt += total;
     tcb->tcb_tx_bytes += total;
+    tcp_rtt_start(tcb);
   } else {
     tcb->tcb_rtx_bytes += total;
   }
@@ -560,6 +612,7 @@ tcp_send_syn(tcb_t *tcb, uint8_t flags, pbuf_t *pb)
 
   tcb->tcb_pending_syn = flags;
   tcb->tcb_snd.nxt++;
+  tcp_rtt_start(tcb);
   tcp_emit(tcb, pb, tcb->tcb_snd.nxt, 0, "SYN");
 }
 
@@ -583,7 +636,8 @@ arm_rtx(tcb_t *tcb, uint64_t now)
 {
   int rtx_duration_ms;
 
-  if(tcb->tcb_snd.una != tcb->tcb_snd.nxt) {
+  // Something in flight, or something waiting for the peer's window
+  if(tcb->tcb_snd.una != tcb->tcb_snd.wrptr) {
     rtx_duration_ms = tcb->tcb_rto;
   } else {
     rtx_duration_ms = TCP_KEEPALIVE_INTERVAL;
@@ -598,6 +652,19 @@ tcp_rtx_cb(void *opaque, uint64_t now)
   tcb_t *tcb = opaque;
 
   if(now > tcb->tcb_last_rx + tcb->tcb_timo) {
+    // Tell the peer, in case it is still there: otherwise it keeps its
+    // end of the connection until it next sends something
+    if(tcb->tcb_state != TCP_STATE_SYN_SENT) {
+      pbuf_t *pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
+      if(pb != NULL)
+        pb = pbuf_prepend(pb, sizeof(tcp_hdr_t), 0, 0);
+      if(pb != NULL) {
+        tcp_hdr_t *th = pbuf_data(pb, 0);
+        th->flg = TCP_F_RST | TCP_F_ACK;
+        th->seq = htonl(tcb->tcb_snd.nxt);
+        tcp_output_tcb(tcb, pb, "timeout");
+      }
+    }
     tcp_close(tcb, "TCP Timeout");
     return;
   }
@@ -623,10 +690,20 @@ tcp_rtx_cb(void *opaque, uint64_t now)
     if(pb)
       tcp_output_tcb(tcb, pb, "ka");
 
+  } else if(tcb->tcb_snd.una == tcb->tcb_snd.nxt) {
+    // Data is waiting but nothing is in flight: the peer's window is
+    // closed (or an earlier attempt to send failed). Send what the
+    // window allows now, and if that is nothing, one byte as a zero
+    // window probe. The byte is then in flight and retransmitted like
+    // any other, with backoff; the peer's answers show its window and
+    // that it is alive.
+    tcp_emit(tcb, NULL, tcb->tcb_snd.nxt, TCP_EMIT_PROBE, "probe");
   } else {
     tcb->tcb_dupacks = 0;
     tcb->tcb_recovering = 1;
     tcb->tcb_recover = tcb->tcb_snd.nxt;
+    tcb->tcb_rtt_pending = 0;
+    tcb->tcb_rto = MIN(tcb->tcb_rto * 2, TCP_RTO_MAX);
     tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "RTX");
   }
 
@@ -648,6 +725,7 @@ tcp_dup_ack(tcb_t *tcb)
   tcb->tcb_dupacks = 0;
   tcb->tcb_recovering = 1;
   tcb->tcb_recover = tcb->tcb_snd.nxt;
+  tcb->tcb_rtt_pending = 0;
   tcb->tcb_fast_rtx++;
   tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "fast-rtx");
   arm_rtx(tcb, clock_get());
@@ -663,6 +741,15 @@ tcp_ack(tcb_t *tcb, uint32_t count)
   tcb->tcb_snd.una += count;
   tcb->tcb_pending_syn = 0;
   task_wakeup(&tcb->tcb_tx_waitq, 1);
+
+  // A valid measurement also ends any backoff. Without one the
+  // backed-off timeout stays, for new segments too (RFC 6298 5.7)
+  if(tcb->tcb_rtt_pending &&
+     (int32_t)(tcb->tcb_snd.una - tcb->tcb_rtt_seq) >= 0) {
+    tcb->tcb_rtt_pending = 0;
+    tcp_rtt_sample(tcb, tcb->tcb_last_rx - tcb->tcb_rtt_start);
+  }
+
   arm_rtx(tcb, tcb->tcb_last_rx);
 
   tcb->tcb_dupacks = 0;
@@ -1349,7 +1436,8 @@ tcb_create(const char *name, size_t txfifo_size, size_t rxfifo_size)
 
   tcb->tcb_task.nt_cb = tcp_task_cb;
 
-  tcb->tcb_rto = 250;
+  tcb->tcb_rto = TCP_RTO_MIN;
+  tcb->tcb_srtt = -1;
 
   tcb->tcb_time_wait_timer.t_cb = tcp_time_wait_cb;
   tcb->tcb_time_wait_timer.t_opaque = tcb;
@@ -1686,8 +1774,10 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   case TCP_STATE_CLOSING:
     if(una_ack >= 0 && ack_nxt >= 0) {
 
+      // (ACKs that repeat a closed window answer our probes, they
+      // don't say that anything was lost)
       if(una_ack == 0 && seg_len == 0 &&
-         scaled_wnd == tcb->tcb_snd.wnd &&
+         scaled_wnd == tcb->tcb_snd.wnd && scaled_wnd != 0 &&
          tcb->tcb_snd.una != tcb->tcb_snd.nxt) {
         tcp_dup_ack(tcb);
       }
@@ -1698,9 +1788,19 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       int wl2_ack = ack - tcb->tcb_snd.wl2;
 
       if(wl1_seq > 0 || (wl1_seq == 0 && wl2_ack >= 0)) {
+        const int opened = scaled_wnd > tcb->tcb_snd.wnd;
+        const int was_closed = tcb->tcb_snd.wnd == 0;
         tcb->tcb_snd.wnd = scaled_wnd;
         tcb->tcb_snd.wl1 = seq;
         tcb->tcb_snd.wl2 = ack;
+
+        // More room: send what was waiting for it. If a zero window
+        // probe is in flight the peer has dropped it, send it again
+        // right away
+        if(opened && tcb->tcb_snd.wrptr != tcb->tcb_snd.nxt)
+          net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
+        if(opened && was_closed && tcb->tcb_snd.una != tcb->tcb_snd.nxt)
+          tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "wnd-open-rtx");
       }
 
     } else if(una_ack < 0) {
@@ -1963,7 +2063,8 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                tcb->tcb_rtx_bytes,
                tcb->tcb_fast_rtx,
                tcb->tcb_rtx_drop);
-    cli_printf(cli, "\tRTO: %d ms  Unacked bytes:%d", tcb->tcb_rto,
+    cli_printf(cli, "\tRTO: %d ms  SRTT: %d us  Unacked bytes:%d",
+               tcb->tcb_rto, tcb->tcb_srtt,
                tcb->tcb_snd.nxt  - tcb->tcb_snd.una);
     cli_printf(cli, "\tRX-FIFO:%d  TX-FIFO:%d\n",
                tcb_rxfifo_used(tcb),

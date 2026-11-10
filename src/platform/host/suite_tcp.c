@@ -968,6 +968,136 @@ scn_close_with_small_window(void)
 
 
 static void
+scn_backoff_and_timeout(void)
+{
+  hosttest_log("---- retransmission backoff, reset on timeout ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  sim_tcp_seg_t seg;
+  uint32_t cmdseq = 0;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // The peer goes away. The segment is retransmitted at doubling
+  // intervals up to a ceiling, and after 21 s of silence Mios gives
+  // up and says so with a RST
+  source_request(t, &cmdseq, 0, MSS);
+  CHECK(collect(t, 0, MSS) == 1, "expected one segment");
+  uint64_t prev = clock_get();
+  static const int expect_ms[] = { 250, 500, 1000, 2000, 4000, 4000, 4000, 4000 };
+  for(int i = 0; i < 8; i++) {
+    if(!CHECK(sim_tcp_recv(t, &seg, 10 * SEC), "no retransmission %d", i))
+      return;
+    const int ms = (seg.at - prev) / 1000;
+    CHECK(seg.seq == 0 && seg.len == MSS, "retransmission %d: seq=%u len=%d",
+          i, seg.seq, seg.len);
+    CHECK(ms >= expect_ms[i] - 10 && ms <= expect_ms[i] + 10,
+          "retransmission %d after %d ms, expected %d", i, ms, expect_ms[i]);
+    prev = seg.at;
+  }
+  if(CHECK(sim_tcp_recv(t, &seg, 10 * SEC), "no RST"))
+    CHECK((seg.flags & SIM_TCP_RST) && seg.seq == MSS, "flags=%x seq=%u",
+          seg.flags, seg.seq);
+  expect_quiet(t, 15 * SEC, "after the RST");
+}
+
+
+static void
+scn_slow_peer(void)
+{
+  hosttest_log("---- round trip time longer than the initial RTO ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  sim_tcp_seg_t seg;
+  uint32_t cmdseq = 0;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Every ACK takes 400 ms. The first segments are retransmitted
+  // before it comes, then the timeout has adapted
+  int rtx[8] = {};
+  for(int i = 0; i < 8; i++) {
+    source_request(t, &cmdseq, i * MSS, MSS);
+    CHECK(collect(t, i * MSS, (i + 1) * MSS) == 1, "expected one segment");
+    const uint64_t deadline = clock_get() + 400 * MSEC;
+    while(clock_get() < deadline &&
+          sim_tcp_recv(t, &seg, deadline - clock_get()))
+      rtx[i]++;
+    sim_wait(deadline);
+    ack(t, cmdseq, (i + 1) * MSS, 65535);
+  }
+  CHECK(rtx[0] + rtx[1] + rtx[2] <= 3, "retransmissions %d %d %d",
+        rtx[0], rtx[1], rtx[2]);
+  for(int i = 3; i < 8; i++)
+    CHECK(rtx[i] == 0, "round %d: %d spurious retransmissions", i, rtx[i]);
+
+  peer_close(t, cmdseq, 8 * MSS);
+}
+
+
+static void
+scn_zero_window(void)
+{
+  hosttest_log("---- peer's window closed for a long time ----");
+  sim_tcp_t *t = peer_new(0);
+  sim_tcp_seg_t seg;
+
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, 65535, NULL, SEC), "handshake failed"))
+    return;
+  client_wait();
+  ack(t, 0, 0, 0); // Window closed
+  sim_wait(clock_get() + 10 * MSEC);
+
+  // Data waits. Mios probes with one byte, at growing intervals; the
+  // peer answers that the window is still closed. That goes on for
+  // longer than the 21 s after which a silent peer is given up on
+  client(CLIENT_WRITE, 3000);
+  const uint64_t t0 = clock_get();
+  int probes = 0;
+  while(clock_get() < t0 + 40 * SEC) {
+    if(!sim_tcp_recv(t, &seg, 10 * SEC))
+      break;
+    if(seg.seq == (uint32_t)-1) {
+      ack(t, 0, 0, 0); // Keepalive
+      continue;
+    }
+    if(!CHECK(seg.seq == 0 && seg.len == 1 && data_ok(&seg),
+              "probe %d: seq=%u len=%d flags=%x", probes, seg.seq, seg.len,
+              seg.flags))
+      return;
+    if(probes == 0) {
+      const int ms = (seg.at - t0) / 1000;
+      CHECK(ms >= 200 && ms <= 300, "first probe after %d ms", ms);
+    }
+    probes++;
+    ack(t, 0, 0, 0);
+  }
+  CHECK(probes >= 8 && probes <= 20, "%d probes in 40 s", probes);
+
+  // The window opens: everything comes, at once
+  ack(t, 0, 0, 65535);
+  uint32_t rcv_nxt = 0;
+  const uint64_t t1 = clock_get();
+  while(rcv_nxt != 3000 && sim_tcp_recv(t, &seg, SEC)) {
+    if(seg.len && seg.seq <= rcv_nxt && seg.seq + seg.len > rcv_nxt) {
+      CHECK(data_ok(&seg), "bad data at %u", seg.seq);
+      rcv_nxt = seg.seq + seg.len;
+    }
+    ack(t, 0, rcv_nxt, 65535);
+  }
+  CHECK(rcv_nxt == 3000, "got %u bytes of 3000", rcv_nxt);
+  const int ms = (clock_get() - t1) / 1000;
+  CHECK(ms < 10, "data came %d ms after the window opened", ms);
+
+  client_wait();
+  sim_tcp_send(t, SIM_TCP_RST, 0, 0, 0, NULL, 0);
+  client(CLIENT_CLOSE, 0);
+  client_wait();
+}
+
+
+static void
 script_thread(void *arg)
 {
   scn_transfer();
@@ -985,6 +1115,9 @@ script_thread(void *arg)
   scn_ack_behind_hole();
   scn_rtx_with_unsent_tail();
   scn_close_with_small_window();
+  scn_backoff_and_timeout();
+  scn_slow_peer();
+  scn_zero_window();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);
