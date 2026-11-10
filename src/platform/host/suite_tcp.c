@@ -9,6 +9,7 @@
  */
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -273,6 +274,7 @@ scn_transfer(void)
     return;
   CHECK(synack.mss == MSS, "SYN-ACK mss=%d", synack.mss);
   CHECK(synack.wscale == -1, "SYN-ACK has a window scale we never offered");
+  CHECK(!synack.sack_permitted, "SYN-ACK has a SACK-permitted we never sent");
 
   source_request(t, &cmdseq, 0, 3000);
   CHECK(drain(t, &rcv_nxt, 3000, cmdseq), "data stopped at %u", rcv_nxt);
@@ -1097,6 +1099,220 @@ scn_zero_window(void)
 }
 
 
+// The SACK blocks for the peer's next ACKs: n pairs of start, end
+static void
+sack_set(sim_tcp_t *t, int n, ...)
+{
+  va_list ap;
+  va_start(ap, n);
+  t->nsack = n;
+  for(int i = 0; i < n; i++) {
+    t->sack[i][0] = va_arg(ap, uint32_t);
+    t->sack[i][1] = va_arg(ap, uint32_t);
+  }
+  va_end(ap);
+}
+
+// Expect an ACK for 'ackno' with exactly these n SACK blocks, in order
+static void
+expect_sack(sim_tcp_t *t, uint32_t ackno, const char *what, int n, ...)
+{
+  sim_tcp_seg_t seg;
+  if(!CHECK(sim_tcp_recv(t, &seg, 1 * MSEC), "%s: no ACK", what))
+    return;
+  CHECK(seg.flags == SIM_TCP_ACK && seg.len == 0 && seg.ack == ackno,
+        "%s: flags=%x len=%d ack=%u, expected ack=%u", what, seg.flags,
+        seg.len, seg.ack, ackno);
+  CHECK(seg.nsack == n, "%s: %d SACK blocks, expected %d", what,
+        seg.nsack, n);
+  va_list ap;
+  va_start(ap, n);
+  for(int i = 0; i < n && i < seg.nsack; i++) {
+    const uint32_t start = va_arg(ap, uint32_t);
+    const uint32_t end = va_arg(ap, uint32_t);
+    CHECK(seg.sack[i][0] == start && seg.sack[i][1] == end,
+          "%s: block %d is %u-%u, expected %u-%u", what, i,
+          seg.sack[i][0], seg.sack[i][1], start, end);
+  }
+  va_end(ap);
+}
+
+
+static void
+scn_sack_receive(void)
+{
+  hosttest_log("---- SACK: what Mios reports ----");
+  sim_tcp_t *t = peer_new(PORT_SINK8K);
+  sim_tcp_seg_t synack;
+
+  t->sack_permitted = 1;
+  if(!CHECK(sim_tcp_connect(t, 65535, &synack), "handshake failed"))
+    return;
+  CHECK(synack.sack_permitted, "SYN-ACK without SACK-permitted");
+
+  sink_send(t, 0, 1000);
+  expect_ack(t, 1000, 30 * MSEC, "in order");
+
+  // Blocks behind a hole: the one the segment went into comes first,
+  // then the others
+  sink_send(t, 2000, 3000);
+  expect_sack(t, 1000, "one block", 1, 2000, 3000);
+  sink_send(t, 4000, 5000);
+  expect_sack(t, 1000, "two blocks", 2, 4000, 5000, 2000, 3000);
+  sink_send(t, 6000, 7000);
+  expect_sack(t, 1000, "three blocks", 3, 6000, 7000, 2000, 3000,
+              4000, 5000);
+  sink_send(t, 2500, 3500);
+  expect_sack(t, 1000, "first block extended", 3, 2000, 3500, 4000, 5000,
+              6000, 7000);
+  sink_send(t, 3500, 4000);
+  expect_sack(t, 1000, "two blocks joined", 2, 2000, 5000, 6000, 7000);
+
+  // The hole is filled: what is left is still reported
+  sink_send(t, 1000, 2000);
+  expect_sack(t, 5000, "first hole filled", 1, 6000, 7000);
+  sink_send(t, 5000, 6000);
+  expect_sack(t, 7000, "all holes filled", 0);
+  CHECK(sink_ok(7000), "sink has %u bytes", sink_len);
+  peer_close(t, 7000, 0);
+
+  // Not without the peer's SACK-permitted
+  t = peer_new(PORT_SINK8K);
+  if(!CHECK(sim_tcp_connect(t, 65535, &synack), "handshake failed"))
+    return;
+  CHECK(!synack.sack_permitted, "SACK-permitted that was not asked for");
+  sink_send(t, 1000, 2000);
+  expect_sack(t, 0, "not negotiated", 0);
+  sink_send(t, 0, 1000);
+  expect_ack(t, 2000, 1 * MSEC, "hole filled");
+  peer_close(t, 2000, 0);
+}
+
+
+static void
+scn_sack_send(void)
+{
+  hosttest_log("---- SACK: several losses, recovered in one round trip ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  sim_tcp_seg_t seg;
+  uint32_t cmdseq = 0;
+
+  t->sack_permitted = 1;
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Ten segments; the second, fifth and sixth are lost. The peer acks
+  // the others as they arrive
+  source_request(t, &cmdseq, 0, 10 * MSS);
+  CHECK(collect(t, 0, 10 * MSS) == 10, "expected ten full segments");
+  const uint64_t t0 = clock_get();
+  ack(t, cmdseq, 1 * MSS, 65535);
+  sack_set(t, 1, 2 * MSS, 3 * MSS);
+  ack(t, cmdseq, 1 * MSS, 65535);
+  sack_set(t, 1, 2 * MSS, 4 * MSS);
+  ack(t, cmdseq, 1 * MSS, 65535);
+  expect_quiet(t, 10 * MSEC, "two segments behind the hole");
+
+  // The third one says that the first hole is a loss, and shows the
+  // second hole: both are retransmitted at once, all of them
+  sack_set(t, 2, 6 * MSS, 7 * MSS, 2 * MSS, 4 * MSS);
+  ack(t, cmdseq, 1 * MSS, 65535);
+  expect_rtx(t, 1 * MSS, 1 * MSEC, "first hole");
+  expect_rtx(t, 4 * MSS, 1 * MSEC, "second hole");
+  expect_rtx(t, 5 * MSS, 1 * MSEC, "second hole, second segment");
+
+  // The rest of the window arrives. Nothing is sent twice
+  for(int i = 8; i <= 10; i++) {
+    sack_set(t, 2, 6 * MSS, i * MSS, 2 * MSS, 4 * MSS);
+    ack(t, cmdseq, 1 * MSS, 65535);
+  }
+  expect_quiet(t, 10 * MSEC, "more of the same");
+
+  // The retransmissions arrive one by one
+  sack_set(t, 1, 6 * MSS, 10 * MSS);
+  ack(t, cmdseq, 4 * MSS, 65535);
+  ack(t, cmdseq, 5 * MSS, 65535);
+  sack_set(t, 0);
+  ack(t, cmdseq, 10 * MSS, 65535);
+  const int ms = (clock_get() - t0) / 1000;
+  CHECK(ms < 30, "recovery took %d ms", ms);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  // ACKs get lost too. One that reports three segments behind a hole
+  // is enough
+  source_request(t, &cmdseq, 10 * MSS, 6 * MSS);
+  CHECK(collect(t, 10 * MSS, 16 * MSS) == 6, "expected six full segments");
+  sack_set(t, 1, 11 * MSS, 14 * MSS);
+  ack(t, cmdseq, 10 * MSS, 65535);
+  expect_rtx(t, 10 * MSS, 1 * MSEC, "one ACK with three segments");
+
+  // If the retransmission is lost as well, the timeout sends it again.
+  // The peer no longer has what it reported: Mios must not rely on it
+  // but retransmit as partial ACKs come
+  sack_set(t, 0);
+  expect_rtx(t, 10 * MSS, 300 * MSEC, "timeout");
+  ack(t, cmdseq, 11 * MSS, 65535);
+  expect_rtx(t, 11 * MSS, 1 * MSEC, "reneged block");
+  ack(t, cmdseq, 16 * MSS, 65535);
+  if(sim_tcp_recv(t, &seg, 2 * SEC))
+    CHECK(seg.seq == (uint32_t)-1, "unexpected seq=%u len=%d", seg.seq,
+          seg.len);
+
+  peer_close(t, cmdseq, 16 * MSS);
+}
+
+
+static void
+scn_sack_active_open(void)
+{
+  hosttest_log("---- SACK: connection opened by Mios ----");
+  sim_tcp_t *t = peer_new(0);
+  sim_tcp_seg_t syn, seg;
+
+  // Mios offers it; this peer does not take it up
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, 65535, &syn, SEC), "handshake failed"))
+    return;
+  CHECK(syn.sack_permitted, "SYN without SACK-permitted");
+  client_wait();
+
+  static uint8_t data[1000];
+  for(size_t i = 0; i < sizeof(data); i++)
+    data[i] = pattern(1000 + i);
+  sim_tcp_send(t, SIM_TCP_ACK | SIM_TCP_PSH, 1000, 0, 65535, data,
+               sizeof(data));
+  expect_sack(t, 0, "not negotiated", 0);
+
+  sim_tcp_send(t, SIM_TCP_RST, 0, 0, 0, NULL, 0);
+  client(CLIENT_CLOSE, 0);
+  client_wait();
+
+  // This one does
+  t = peer_new(0);
+  t->sack_permitted = 1;
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, 65535, &syn, SEC), "handshake failed"))
+    return;
+  client_wait();
+  sim_tcp_send(t, SIM_TCP_ACK | SIM_TCP_PSH, 1000, 0, 65535, data,
+               sizeof(data));
+  expect_sack(t, 0, "negotiated", 1, 1000, 2000);
+
+  // And Mios acts on what the peer reports
+  client(CLIENT_WRITE, 5 * MSS);
+  CHECK(collect(t, 0, 5 * MSS) == 5, "expected five full segments");
+  sack_set(t, 1, 1 * MSS, 4 * MSS);
+  ack(t, 0, 0, 65535);
+  if(CHECK(sim_tcp_recv(t, &seg, 1 * MSEC), "no retransmission"))
+    CHECK(seg.seq == 0 && seg.len == MSS, "got seq=%u len=%d", seg.seq,
+          seg.len);
+
+  sim_tcp_send(t, SIM_TCP_RST, 0, 5 * MSS, 0, NULL, 0);
+  client(CLIENT_CLOSE, 0);
+  client_wait();
+}
+
+
 static void
 script_thread(void *arg)
 {
@@ -1118,6 +1334,9 @@ script_thread(void *arg)
   scn_backoff_and_timeout();
   scn_slow_peer();
   scn_zero_window();
+  scn_sack_receive();
+  scn_sack_send();
+  scn_sack_active_open();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);

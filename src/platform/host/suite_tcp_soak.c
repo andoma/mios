@@ -16,7 +16,7 @@
  *  - when it is over the connection is gone on Mios's side
  *
  *   build.host/mios.elf tcp-soak [--seed=N] [--rounds=N] [--conn=N]
- *                                [--verbose] [--trace]
+ *                                [--verbose] [--trace] [--sack=0|1]
  *
  * A failure prints the parameters of the connection. --conn=N runs
  * that connection alone, to look at one that failed, and --trace
@@ -297,6 +297,8 @@ static uint8_t soak_txmap[STREAM_MAX + 1]; // Bytes Mios has SACKed
 static uint8_t soak_rxmap[STREAM_MAX + 1]; // Bytes received
 static volatile int script_done;
 static volatile int soak_aborted;
+static uint64_t soak_busy;      // Time spent on the transfers themselves
+static int soak_sack = -1;      // --sack=0 or 1: never or always offer it
 static int soak_trace;
 static vnet_t *soak_vnet;
 static uint32_t peer_ip, mios_ip;
@@ -896,6 +898,8 @@ soak_connection(uint32_t seed, int conn)
   if(s->wnd > 65535 && t->wscale < 2)
     t->wscale = 2;
   t->sack_permitted = rnd(s, 4) != 0;
+  if(soak_sack >= 0)
+    t->sack_permitted = soak_sack;
   // Now and then one that wraps during the connection
   t->isn = rnd(s, 4) ? xorshift(&s->rng) : -1 - rnd(s, bytes + 2);
   t->tx = soak_tx;
@@ -936,6 +940,7 @@ soak_connection(uint32_t seed, int conn)
   // Mios may send its FIN again if our ACK was lost. Stay around until
   // it has been quiet for longer than it lingers in TIME_WAIT
   const uint64_t t1 = clock_get();
+  soak_busy += t1 - t0;
   s->last_in = t1;
   s->stall = 0;
   while(clock_get() < s->last_in + 6 * SEC && clock_get() < t1 + 120 * SEC)
@@ -1018,6 +1023,8 @@ run_tcp_soak(void)
   soak_rounds = (arg = host_arg("rounds")) != NULL && *arg ? atoi(arg) : 300;
   if((arg = host_arg("conn")) != NULL && *arg)
     soak_only = atoi(arg);
+  if((arg = host_arg("sack")) != NULL && *arg)
+    soak_sack = atoi(arg);
   if((arg = host_arg("trace")) != NULL)
     soak_trace = *arg ? atoi(arg) : 1;
 
@@ -1036,10 +1043,15 @@ run_tcp_soak(void)
     usleep(100000);
 
   hosttest_log("%d connections, %d of them given up on by Mios when "
-               "the link lost too much", soak_completed, soak_aborted);
+               "the link lost too much. The transfers took %d s",
+               soak_completed, soak_aborted, (int)(soak_busy / SEC));
   CHECK(soak_aborted * 50 <= soak_completed + 50,
         "too many connections given up on");
   return 0; // failures are counted by CHECK()
 }
 
 HOSTTEST_SUITE("tcp-soak", run_tcp_soak, 0);
+
+// The same with small packet buffers, so that segments and their
+// options span several
+HOSTTEST_SUITE_EX("tcp-soak-tight", run_tcp_soak, 0, 128);

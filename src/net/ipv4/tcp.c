@@ -42,6 +42,14 @@
  *  The NewReno Modification to TCP's Fast Recovery Algorithm
  *          https://datatracker.ietf.org/doc/html/rfc6582
  *
+ *  TCP Selective Acknowledgment Options
+ *          https://datatracker.ietf.org/doc/html/rfc2018
+ *
+ *  A Conservative Loss Recovery Algorithm Based on Selective
+ *  Acknowledgment (SACK) for TCP (the retransmission rules, there is
+ *  no congestion window for the rest of it to work on)
+ *          https://datatracker.ietf.org/doc/html/rfc6675
+ *
  */
 
 /*
@@ -56,6 +64,23 @@
  * stops short of tcb_recover (a partial ACK) points at the next hole,
  * which is retransmitted at once: n losses in one window cost about n
  * round trips rather than n timeouts.
+ *
+ * Selective acknowledgments
+ *
+ * If the peer agreed to SACK in the handshake, its ACKs say which
+ * blocks it has behind the hole, and we say the same in ours. What the
+ * peer has reported is kept in tcb_sack, a few blocks. In recovery all
+ * holes below the highest reported block are retransmitted as soon as
+ * they are known, each once (tcb_rtx_nxt tells how far that has got),
+ * so several losses in a window cost one round trip. A retransmission
+ * that is lost in turn waits for the timeout. After a timeout the
+ * reports are forgotten, the peer is allowed to drop what it reported.
+ * Forgetting a report, also when there are more blocks than fit, only
+ * costs a retransmission that was not needed.
+ *
+ * In our ACKs the blocks go in segments without data only. tcb_ooo is
+ * the list already, and the block the last segment went into is
+ * reported first as it should be.
  *
  * Out-of-order data
  *
@@ -98,6 +123,13 @@
 #define TCP_TIMEOUT_HANDSHAKE   5000 // ms
 
 #define TCP_OOO_BLOCKS 4
+#define TCP_SACK_BLOCKS 4
+
+// [start, end) in sequence numbers
+typedef struct {
+  uint32_t start;
+  uint32_t end;
+} tcp_block_t;
 
 #define TCP_STATE_CLOSED       0
 #define TCP_STATE_LISTEN       1
@@ -138,10 +170,15 @@ typedef struct tcb {
   uint8_t tcb_ooo_count;
   uint8_t tcb_ooo_fin;
   uint32_t tcb_ooo_fin_seq;
-  struct {
-    uint32_t start;
-    uint32_t end;
-  } tcb_ooo[TCP_OOO_BLOCKS];
+  uint32_t tcb_ooo_recent; // Where the last segment kept begins
+  tcp_block_t tcb_ooo[TCP_OOO_BLOCKS];
+
+  // Selective acknowledgments, see the comment at the top. tcb_sack is
+  // what the peer says it has beyond snd.una: sorted and apart
+  uint8_t tcb_sack_ok;     // Both sides sent SACK-permitted
+  uint8_t tcb_sack_count;
+  tcp_block_t tcb_sack[TCP_SACK_BLOCKS];
+  uint32_t tcb_rtx_nxt;    // Retransmitted up to here in this recovery
 
   // ACKs sent for segments we could not take, see tcp_reject_limit()
   uint8_t tcb_reject_count;
@@ -302,6 +339,44 @@ ltow_memcpy(uint8_t *fifo, const uint8_t *src,
 
 
 
+// Add [start, end) to a set of at most 'max' blocks, sorted and apart.
+// Blocks it touches are merged into it. 'base' is a sequence number
+// that is not after any of them, sequence numbers wrap. Returns 0 if
+// the set is full, it is then unchanged
+static int
+tcp_blocks_insert(tcp_block_t *v, uint8_t *count, int max, uint32_t base,
+                  uint32_t start, uint32_t end)
+{
+  int n = 0;
+
+  for(int i = 0; i < *count; i++) {
+    const uint32_t bs = v[i].start;
+    const uint32_t be = v[i].end;
+    if(be - base < start - base || bs - base > end - base) {
+      v[n++] = v[i];
+      continue;
+    }
+    if(bs - base < start - base)
+      start = bs;
+    if(be - base > end - base)
+      end = be;
+  }
+  *count = n;
+  if(n == max)
+    return 0; // Nothing was merged either, so nothing has changed
+
+  int pos = n;
+  while(pos > 0 && v[pos - 1].start - base > start - base) {
+    v[pos] = v[pos - 1];
+    pos--;
+  }
+  v[pos].start = start;
+  v[pos].end = end;
+  *count = n + 1;
+  return 1;
+}
+
+
 #define TCP_PBUF_HEADROOM (16 + sizeof(ipv4_header_t) + sizeof(tcp_hdr_t))
 
 static void tcp_close(tcb_t *tcb, const char *reason);
@@ -388,6 +463,44 @@ tcp_output(pbuf_t *pb, uint32_t local_addr, uint32_t remote_addr)
 }
 
 
+// Append a SACK option with what we hold behind the hole to a segment
+// that has no data. Returns the number of bytes added
+static size_t
+tcp_sack_option(tcb_t *tcb, pbuf_t *pb)
+{
+  if(!tcb->tcb_sack_ok || !tcb->tcb_ooo_count)
+    return 0;
+
+  // As many blocks as there is room for, in the packet buffer too
+  const size_t room = PBUF_DATA_SIZE - pb->pb_offset - pb->pb_buflen;
+  if(room < 12)
+    return 0;
+  const int n = MIN(tcb->tcb_ooo_count, (room - 4) / 8);
+
+  // The block that the last segment went into comes first
+  int first = 0;
+  for(int i = 0; i < tcb->tcb_ooo_count; i++) {
+    if(tcb->tcb_ooo_recent - tcb->tcb_ooo[i].start <
+       tcb->tcb_ooo[i].end - tcb->tcb_ooo[i].start)
+      first = i;
+  }
+
+  uint8_t *o = pbuf_append(pb, 4 + 8 * n);
+  o[0] = 1; // NOP
+  o[1] = 1; // NOP
+  o[2] = 5; // SACK
+  o[3] = 2 + 8 * n;
+  o += 4;
+  for(int i = 0; i < n; i++) {
+    const tcp_block_t *b = &tcb->tcb_ooo[(first + i) % tcb->tcb_ooo_count];
+    const uint32_t be[2] = { htonl(b->start), htonl(b->end) };
+    memcpy(o, be, 8);
+    o += 8;
+  }
+  return 4 + 8 * n;
+}
+
+
 static error_t
 tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
 {
@@ -430,9 +543,23 @@ tcp_output_tcb(tcb_t *tcb, pbuf_t *pb, const char *why)
       opt_words++;
     }
 
+    // SACK-permitted, on the same terms
+    if(!(th->flg & TCP_F_ACK) || tcb->tcb_sack_ok) {
+      uint8_t *sp = pbuf_append(pb, 4);
+      sp[0] = 1;   // NOP
+      sp[1] = 1;   // NOP
+      sp[2] = 4;   // kind = SACK-permitted
+      sp[3] = 2;   // length
+      opt_words++;
+    }
+
     th->off = ((sizeof(tcp_hdr_t) >> 2) + opt_words) << 4;
   } else {
-    th->off = (sizeof(tcp_hdr_t) >> 2) << 4;
+    size_t optlen = 0;
+    if(pb->pb_pktlen == sizeof(tcp_hdr_t))
+      optlen = tcp_sack_option(tcb, pb);
+    th = pbuf_data(pb, 0);
+    th->off = ((sizeof(tcp_hdr_t) + optlen) >> 2) << 4;
   }
 
   return tcp_output(pb, tcb->tcb_local_addr, tcb->tcb_remote_addr);
@@ -469,8 +596,12 @@ tcp_rtt_sample(tcb_t *tcb, int rtt)
 }
 
 
+// Send a segment that begins at seq, with as much data as there is and
+// fits. A retransmission (seq before snd.nxt) carries at most 'limit'
+// bytes
 static error_t
-tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags, const char *why)
+tcp_emit_limit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags,
+               uint32_t limit, const char *why)
 {
   if(pb == NULL) {
     pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
@@ -509,6 +640,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags, const char *why)
     // inside the window then, and anything written since is not ours
     // to send from here, snd.nxt would not account for it
     bytes_in_fifo = MIN(bytes_in_fifo, tcb->tcb_snd.nxt - seq);
+    bytes_in_fifo = MIN(bytes_in_fifo, limit);
   }
 
   // The FIN goes out only when all that is before it does
@@ -602,6 +734,13 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags, const char *why)
 }
 
 
+static error_t
+tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags, const char *why)
+{
+  return tcp_emit_limit(tcb, pb, seq, flags, UINT32_MAX, why);
+}
+
+
 static void
 tcp_send_syn(tcb_t *tcb, uint8_t flags, pbuf_t *pb)
 {
@@ -643,6 +782,133 @@ arm_rtx(tcb_t *tcb, uint64_t now)
     rtx_duration_ms = TCP_KEEPALIVE_INTERVAL;
   }
   net_timer_arm(&tcb->tcb_rtx_timer, now + rtx_duration_ms * 1000);
+}
+
+
+// snd.una is now 'una': forget what the peer reported below it
+static void
+tcp_sack_prune(tcb_t *tcb, uint32_t una)
+{
+  int n = 0;
+  for(int i = 0; i < tcb->tcb_sack_count; i++) {
+    tcp_block_t b = tcb->tcb_sack[i];
+    if((int32_t)(b.end - una) <= 0)
+      continue;
+    if((int32_t)(b.start - una) < 0)
+      b.start = una;
+    tcb->tcb_sack[n++] = b;
+  }
+  tcb->tcb_sack_count = n;
+}
+
+
+static uint32_t
+tcp_sack_bytes(const tcb_t *tcb)
+{
+  uint32_t r = 0;
+  for(int i = 0; i < tcb->tcb_sack_count; i++)
+    r += tcb->tcb_sack[i].end - tcb->tcb_sack[i].start;
+  return r;
+}
+
+
+// Take the SACK blocks from the options of a segment that acks 'ack'.
+// Returns nonzero if they told us something new
+static int
+tcp_sack_input(tcb_t *tcb, const uint8_t *opt, size_t len, uint32_t ack)
+{
+  tcp_sack_prune(tcb, ack);
+  const uint32_t before = tcp_sack_bytes(tcb);
+  const uint32_t sent = tcb->tcb_snd.nxt - ack;
+
+  while(len > 0 && opt[0] != 0) {
+    if(opt[0] == 1) {
+      opt++;
+      len--;
+      continue;
+    }
+    if(len < 2 || opt[1] < 2 || opt[1] > len)
+      break;
+
+    if(opt[0] == 5) {
+      for(int i = 2; i + 8 <= opt[1]; i += 8) {
+        uint32_t be[2];
+        memcpy(be, opt + i, 8);
+        const uint32_t start = ntohl(be[0]);
+        const uint32_t end = ntohl(be[1]);
+
+        // Beyond the ACK and within what we have sent. That leaves out
+        // reports of duplicates (RFC 2883), which lie below the ACK
+        if(end - ack > sent || start - ack >= end - ack || start == ack)
+          continue;
+
+        if(tcp_blocks_insert(tcb->tcb_sack, &tcb->tcb_sack_count,
+                             TCP_SACK_BLOCKS, ack, start, end))
+          continue;
+
+        // No room. The holes are filled from the lowest one up, so the
+        // highest block is the one we can best do without
+        tcp_block_t *last = &tcb->tcb_sack[TCP_SACK_BLOCKS - 1];
+        if(start - ack < last->start - ack) {
+          tcb->tcb_sack_count--;
+          tcp_blocks_insert(tcb->tcb_sack, &tcb->tcb_sack_count,
+                            TCP_SACK_BLOCKS, ack, start, end);
+        }
+      }
+    }
+    len -= opt[1];
+    opt += opt[1];
+  }
+  return tcp_sack_bytes(tcb) != before;
+}
+
+
+// Retransmit [seq, end), which may be several segments. Returns how
+// far it got
+static uint32_t
+tcp_rtx_range(tcb_t *tcb, uint32_t seq, uint32_t end)
+{
+  const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+  while(seq != end) {
+    const uint32_t len = MIN(end - seq, mss);
+    if(tcp_emit_limit(tcb, NULL, seq, 0, len, "rtx"))
+      break;
+    seq += len;
+  }
+  return seq;
+}
+
+
+// In recovery: retransmit what we know is missing and have not
+// retransmitted yet. With SACK that is every hole below the highest
+// block the peer has reported. If 'una_lost' the segment at snd.una is
+// known to be missing as well (recovery begins, or a partial ACK)
+static void
+tcp_recovery_rtx(tcb_t *tcb, int una_lost)
+{
+  const uint32_t una = tcb->tcb_snd.una;
+  uint32_t seq = una;
+
+  if(tcb->tcb_sack_ok && (int32_t)(tcb->tcb_rtx_nxt - una) > 0)
+    seq = tcb->tcb_rtx_nxt;
+
+  for(int i = 0; i < tcb->tcb_sack_count; i++) {
+    const tcp_block_t *b = &tcb->tcb_sack[i];
+    if((int32_t)(b->start - seq) > 0) {
+      seq = tcp_rtx_range(tcb, seq, b->start);
+      if(seq != b->start)
+        break; // Out of buffers, the rest another time
+    }
+    if((int32_t)(b->end - seq) > 0)
+      seq = b->end;
+  }
+
+  if(seq == una && una_lost) {
+    // Nothing reported beyond it: one segment
+    const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+    seq = tcp_rtx_range(tcb, una, una + MIN(mss, tcb->tcb_snd.nxt - una));
+  }
+  tcb->tcb_rtx_nxt = seq;
 }
 
 
@@ -704,30 +970,46 @@ tcp_rtx_cb(void *opaque, uint64_t now)
     tcb->tcb_recover = tcb->tcb_snd.nxt;
     tcb->tcb_rtt_pending = 0;
     tcb->tcb_rto = MIN(tcb->tcb_rto * 2, TCP_RTO_MAX);
-    tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "RTX");
+    // The peer may have dropped what it reported (RFC 2018 section 8)
+    tcb->tcb_sack_count = 0;
+    tcb->tcb_rtx_nxt = tcb->tcb_snd.una;
+    tcp_recovery_rtx(tcb, 1);
   }
 
   arm_rtx(tcb, now);
 }
 
 
-// A duplicate ACK (RFC 5681 section 2) arrived: the peer got a segment
-// that was not the one it is waiting for
+// An ACK arrived that says a segment got through which was not the one
+// the peer is waiting for: a duplicate ACK (RFC 5681 section 2), or
+// one that reports something new by SACK
 static void
-tcp_dup_ack(tcb_t *tcb)
+tcp_dup_ack(tcb_t *tcb, int dup)
 {
-  if(tcb->tcb_recovering)
+  if(tcb->tcb_recovering) {
+    if(tcb->tcb_sack_ok)
+      tcp_recovery_rtx(tcb, 0);
     return;
+  }
 
-  if(++tcb->tcb_dupacks < 3)
-    return;
+  if(dup && tcb->tcb_dupacks < 255)
+    tcb->tcb_dupacks++;
+
+  // Lost, if three segments have arrived after it. Counted in ACKs or,
+  // as ACKs get lost too, in what the peer says it has (RFC 6675)
+  if(tcb->tcb_dupacks < 3) {
+    const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+    if(tcp_sack_bytes(tcb) <= 2 * mss)
+      return;
+  }
 
   tcb->tcb_dupacks = 0;
   tcb->tcb_recovering = 1;
   tcb->tcb_recover = tcb->tcb_snd.nxt;
   tcb->tcb_rtt_pending = 0;
   tcb->tcb_fast_rtx++;
-  tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "fast-rtx");
+  tcb->tcb_rtx_nxt = tcb->tcb_snd.una;
+  tcp_recovery_rtx(tcb, 1);
   arm_rtx(tcb, clock_get());
 }
 
@@ -740,6 +1022,7 @@ tcp_ack(tcb_t *tcb, uint32_t count)
 
   tcb->tcb_snd.una += count;
   tcb->tcb_pending_syn = 0;
+  tcp_sack_prune(tcb, tcb->tcb_snd.una);
   task_wakeup(&tcb->tcb_tx_waitq, 1);
 
   // A valid measurement also ends any backoff. Without one the
@@ -758,7 +1041,7 @@ tcp_ack(tcb_t *tcb, uint32_t count)
       tcb->tcb_recovering = 0;
     } else {
       // Partial ACK: what is now first in line was lost as well
-      tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "partial-ack");
+      tcp_recovery_rtx(tcb, 1);
     }
   }
 
@@ -944,6 +1227,30 @@ tcp_reply(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
   return NULL;
 }
 
+// Answer a segment that was put aside behind a hole, reusing its
+// packet: an ACK for rcv.nxt that says what we have beyond it
+static pbuf_t *
+tcp_reply_dup_ack(tcb_t *tcb, struct pbuf *pb, uint32_t rcv_wnd)
+{
+  pbuf_reset(pb, pb->pb_offset, sizeof(tcp_hdr_t));
+
+  tcp_hdr_t *th = pbuf_data(pb, 0);
+  th->src_port = tcb->tcb_local_port;
+  th->dst_port = tcb->tcb_remote_port;
+  th->seq = htonl(tcb->tcb_snd.nxt);
+  th->ack = htonl(tcb->tcb_rcv.nxt);
+  th->flg = TCP_F_ACK;
+  th->wnd = htons(MIN(rcv_wnd, 65535));
+
+  const size_t optlen = tcp_sack_option(tcb, pb);
+  th = pbuf_data(pb, 0);
+  th->off = ((sizeof(tcp_hdr_t) + optlen) >> 2) << 4;
+
+  tcp_output(pb, tcb->tcb_local_addr, tcb->tcb_remote_addr);
+  return NULL;
+}
+
+
 struct pbuf *
 tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
            uint16_t port, uint32_t ack, const char *reason)
@@ -957,44 +1264,6 @@ tcp_reject(struct netif *ni, struct pbuf *pb, uint32_t remote_addr,
           remote_addr, port, reason);
   }
   return tcp_reply(ni, pb, remote_addr, 0, ack, TCP_F_ACK | TCP_F_RST, 0);
-}
-
-
-// Note that [start, end) has been received behind a hole. Returns 0 if
-// there are too many separate blocks already
-static int
-tcp_ooo_insert(tcb_t *tcb, uint32_t start, uint32_t end)
-{
-  // Compare as distances from rcv.nxt, sequence numbers wrap
-  const uint32_t base = tcb->tcb_rcv.nxt;
-  int n = 0;
-
-  // Blocks that touch the new one are merged into it
-  for(int i = 0; i < tcb->tcb_ooo_count; i++) {
-    const uint32_t bs = tcb->tcb_ooo[i].start;
-    const uint32_t be = tcb->tcb_ooo[i].end;
-    if(be - base < start - base || bs - base > end - base) {
-      tcb->tcb_ooo[n++] = tcb->tcb_ooo[i];
-      continue;
-    }
-    if(bs - base < start - base)
-      start = bs;
-    if(be - base > end - base)
-      end = be;
-  }
-  tcb->tcb_ooo_count = n;
-  if(n == TCP_OOO_BLOCKS)
-    return 0; // Nothing was merged either, so nothing has changed
-
-  int pos = n;
-  while(pos > 0 && tcb->tcb_ooo[pos - 1].start - base > start - base) {
-    tcb->tcb_ooo[pos] = tcb->tcb_ooo[pos - 1];
-    pos--;
-  }
-  tcb->tcb_ooo[pos].start = start;
-  tcb->tcb_ooo[pos].end = end;
-  tcb->tcb_ooo_count = n + 1;
-  return 1;
 }
 
 
@@ -1052,8 +1321,10 @@ tcp_ooo_store(tcb_t *tcb, const pbuf_t *pb, size_t hdr_len, uint32_t seq,
   }
 
   if(len) {
-    if(!tcp_ooo_insert(tcb, seq, seq + len))
+    if(!tcp_blocks_insert(tcb->tcb_ooo, &tcb->tcb_ooo_count, TCP_OOO_BLOCKS,
+                          tcb->tcb_rcv.nxt, seq, seq + len))
       return 0;
+    tcb->tcb_ooo_recent = seq;
     tcp_rxfifo_store(tcb, pb, hdr_len, seq, len);
   }
 
@@ -1163,6 +1434,11 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
         // Segments are cut to this size, so keep it sane
         tcb->tcb_max_segment_size = MAX(buf[3] | (buf[2] << 8), 64);
       }
+      break;
+    case 4:
+      // SACK-permitted. We always offer it, so this is the agreement
+      if(optlen == 2)
+        tcb->tcb_sack_ok = 1;
       break;
     case 3:
       // RFC 7323 Window Scale option. Length must be 3.
@@ -1797,15 +2073,24 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   case TCP_STATE_LAST_ACK:
     if(una_ack >= 0 && ack_nxt >= 0) {
 
-      // (ACKs that repeat a closed window answer our probes, they
-      // don't say that anything was lost)
-      if(una_ack == 0 && seg_len == 0 &&
-         scaled_wnd == tcb->tcb_snd.wnd && scaled_wnd != 0 &&
-         tcb->tcb_snd.una != tcb->tcb_snd.nxt) {
-        tcp_dup_ack(tcb);
+      int sack_new = 0;
+      if(tcb->tcb_sack_ok && hdr_len > sizeof(tcp_hdr_t) &&
+         !pbuf_pullup(pb, hdr_len)) {
+        sack_new = tcp_sack_input(tcb, pbuf_data(pb, sizeof(tcp_hdr_t)),
+                                  hdr_len - sizeof(tcp_hdr_t), ack);
       }
 
+      // (ACKs that repeat a closed window answer our probes, they
+      // don't say that anything was lost)
+      const int dup = una_ack == 0 &&
+        tcb->tcb_snd.una != tcb->tcb_snd.nxt &&
+        (sack_new || (seg_len == 0 && scaled_wnd == tcb->tcb_snd.wnd &&
+                      scaled_wnd != 0));
+
       tcp_ack(tcb, una_ack); // Handles una_ack=0 by doing nothing
+
+      if(dup || sack_new)
+        tcp_dup_ack(tcb, dup);
 
       int wl1_seq = seq - tcb->tcb_snd.wl1;
       int wl2_ack = ack - tcb->tcb_snd.wl2;
@@ -1892,9 +2177,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     // has read since: an ACK with a changed window is a window update
     // to the peer, not a duplicate ACK (RFC 5681 section 2), and would
     // not count towards its fast retransmit
-    return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
-                     tcb->tcb_rcv.nxt, TCP_F_ACK,
-                     MIN(rcv_wnd, tcb->tcb_rcv.adv_wnd));
+    return tcp_reply_dup_ack(tcb, pb, MIN(rcv_wnd, tcb->tcb_rcv.adv_wnd));
   }
 
   if(!take) {
@@ -2088,9 +2371,10 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                tcb->tcb_rtx_bytes,
                tcb->tcb_fast_rtx,
                tcb->tcb_rtx_drop);
-    cli_printf(cli, "\tRTO: %d ms  SRTT: %d us  Unacked bytes:%d",
+    cli_printf(cli, "\tRTO: %d ms  SRTT: %d us  Unacked bytes:%d%s",
                tcb->tcb_rto, tcb->tcb_srtt,
-               tcb->tcb_snd.nxt  - tcb->tcb_snd.una);
+               tcb->tcb_snd.nxt  - tcb->tcb_snd.una,
+               tcb->tcb_sack_ok ? "  SACK" : "");
     cli_printf(cli, "\tRX-FIFO:%d  TX-FIFO:%d\n",
                tcb_rxfifo_used(tcb),
                tcb_txfifo_used(tcb));
