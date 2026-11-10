@@ -74,6 +74,13 @@ uint32_t ipv4_cksum_pseudo(uint32_t src_addr, uint32_t dst_addr,
 
 uint16_t ipv4_cksum_pbuf(uint32_t sum, struct pbuf *pb, int offset, int length);
 
+// Check the TCP or UDP checksum of a received packet: the IPv4 header
+// is at the start of pb, the TCP or UDP header 'offset' bytes in, and
+// the packet ends where the datagram does. Returns nonzero if it is
+// good, or if the network interface has checked it already
+int ipv4_cksum_verify(struct netif *ni, struct pbuf *pb, int offset,
+                      uint8_t protocol);
+
 struct nexthop *ipv4_nexthop_resolve(uint32_t addr);
 
 // The interface the default route goes through, NULL if there is none

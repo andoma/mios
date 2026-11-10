@@ -1864,6 +1864,11 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     return pb; // Not for us
   }
 
+  if(!ipv4_cksum_verify(ni, pb, tcp_offset, IPPROTO_TCP)) {
+    atomic_inc(&ni->ni_tcp_bad_cksum);
+    return pb;
+  }
+
   uint32_t remote_addr = ip->src_addr;
   pb = pbuf_drop(pb, tcp_offset, 0);
   if(pbuf_pullup(pb, sizeof(tcp_hdr_t))) {

@@ -7,7 +7,8 @@
  * scripted situations, this one runs many connections with parameters
  * drawn from the seed and only checks what must always hold:
  *
- *  - every byte arrives, once, in order and unchanged, both ways
+ *  - every byte arrives, once, in order and unchanged, both ways, also
+ *    when the link damages frames (a bit flipped somewhere)
  *  - the stream ends where it should, and both sides see it end
  *  - Mios stays within the window and segment size the peer gave it,
  *    never acks what was not sent, never resets the connection
@@ -226,6 +227,7 @@ typedef struct {
   uint16_t len;
   uint8_t used;
   uint8_t out;                   // Towards Mios
+  uint8_t damaged;
   uint8_t data[1600];
 } qframe_t;
 
@@ -241,6 +243,7 @@ typedef struct soak {
   uint32_t tx_total;             // Bytes the peer sends
   uint32_t rx_expect;            // Bytes Mios sends
   int drop, dup, reorder;        // Per mille
+  int corrupt;                   // Per mille: one bit flipped
   uint32_t delay;                // One way, us
   uint32_t wnd;                  // The peer's receive buffer
   int seg_random;                // Segments of any size
@@ -313,11 +316,12 @@ static void
 soak_describe(const soak_t *s)
 {
   static const char *modes[] = { "sink", "source", "echo" };
-  hosttest_log("conn %d: %s tx=%u rx=%u drop=%d dup=%d reorder=%d "
+  hosttest_log("conn %d: %s tx=%u rx=%u drop=%d dup=%d reorder=%d corrupt=%d "
                "delay=%uus wnd=%u mss=%d wscale=%d sack=%d(%d) segrnd=%d "
                "ackevery=%d earlyfin=%d stall=%d slow=%d",
                s->conn, modes[s->mode], s->tx_total, s->rx_expect,
-               s->drop, s->dup, s->reorder, s->delay, s->wnd, s->t.mss,
+               s->drop, s->dup, s->reorder, s->corrupt, s->delay, s->wnd,
+               s->t.mss,
                s->t.wscale, s->t.sack_permitted, s->sack, s->seg_random,
                s->ack_every, s->early_fin, s->stall, app_slow);
 }
@@ -368,6 +372,12 @@ link_put(soak_t *s, int out, const uint8_t *f, size_t len)
     if(rnd(s, 1000) < s->reorder)
       q->at += rnd(s, 4 * s->delay + 2000);
     memcpy(q->data, f, len);
+
+    // Somewhere after the Ethernet header: there is no CRC on this
+    // link, the IP and TCP checksums are all there is
+    q->damaged = rnd(s, 1000) < s->corrupt;
+    if(q->damaged)
+      q->data[14 + rnd(s, len - 14)] ^= 1 << rnd(s, 8);
   }
 }
 
@@ -755,11 +765,18 @@ soak_run(soak_t *s, uint64_t deadline, int until_done)
       if(q->out) {
         if(soak_trace > 1)
           hosttest_log("  delivered flags=%02x", q->data[47]);
-        soak_delivered(s, q->data[47], now);
+        if(!q->damaged)
+          soak_delivered(s, q->data[47], now);
         vnet_peer_send(soak_vnet, q->data, q->len);
+      } else {
+        const int bad = sim_tcp_bad_cksum;
+        const int ok = sim_tcp_input(&s->t, q->data, q->len, &seg);
+        SOAK_CHECK(s, q->damaged || sim_tcp_bad_cksum == bad,
+                   "Mios sent a segment with a bad checksum");
+        SOAK_CHECK(s, !(q->damaged && ok), "damaged frame accepted");
+        if(ok)
+          soak_segment(s, &seg);
       }
-      else if(sim_tcp_input(&s->t, q->data, q->len, &seg))
-        soak_segment(s, &seg);
     }
 
     if(until_done && s->rx_done && s->snd_una == s->tx_total + 1)
@@ -878,6 +895,7 @@ soak_connection(uint32_t seed, int conn)
   s->dup = PICK(s, 0, 0, 10, 50);
   s->reorder = PICK(s, 0, 0, 20, 200);
   s->delay = PICK(s, 0, 500, 5000, 30000);
+  s->corrupt = PICK(s, 0, 0, 0, 5, 30);
   s->wnd = PICK(s, 65535, 262144, 16384, 4096, 1000);
   s->seg_random = rnd(s, 2);
   s->ack_every = 1 + rnd(s, 2);

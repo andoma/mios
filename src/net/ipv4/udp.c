@@ -12,7 +12,26 @@
 pbuf_t *
 udp_input_ipv4(netif_t *ni, pbuf_t *pb, size_t udp_offset)
 {
+  if(pb->pb_pktlen < udp_offset + sizeof(udp_hdr_t) ||
+     pbuf_pullup(pb, udp_offset + sizeof(udp_hdr_t)))
+    return pb;
+
   const udp_hdr_t *udp = pbuf_data(pb, udp_offset);
+
+  // The datagram may be shorter than the packet, never longer
+  const size_t length = ntohs(udp->length);
+  if(length < sizeof(udp_hdr_t) || length > pb->pb_pktlen - udp_offset)
+    return pb;
+  if(length < pb->pb_pktlen - udp_offset) {
+    pbuf_trim(pb, pb->pb_pktlen - udp_offset - length);
+    udp = pbuf_data(pb, udp_offset);
+  }
+
+  // A checksum of zero means that the sender did not compute one
+  if(udp->cksum && !ipv4_cksum_verify(ni, pb, udp_offset, IPPROTO_UDP)) {
+    atomic_inc(&ni->ni_udp_bad_cksum);
+    return pb;
+  }
 
   const uint16_t dst_port = ntohs(udp->dst_port);
 
@@ -55,7 +74,7 @@ udp_send(netif_t *ni, pbuf_t *pb, uint32_t dst_addr, nexthop_t *nh,
 
   udp->cksum = 0;
 
-  if(!(ni->ni_flags & NETIF_F_TX_IPV4_CKSUM_OFFLOAD)) {
+  if(!(ni->ni_flags & NETIF_F_TX_UDP_CKSUM_OFFLOAD)) {
     udp->cksum =
       ipv4_cksum_pbuf(ipv4_cksum_pseudo(ni->ni_ipv4_local_addr, dst_addr,
                                         IPPROTO_UDP, pb->pb_pktlen),

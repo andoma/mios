@@ -54,6 +54,9 @@ STAILQ_HEAD(pbuf_queue, pbuf);
 
 #define PBUF_SOP       0x1
 #define PBUF_EOP       0x2
+// Set by a network interface that has checked the packet's checksums:
+// that of the IPv4 header, and of TCP or UDP if it is one of those.
+// Without it they are checked in software
 #define PBUF_CKSUM_OK  0x4
 #define PBUF_SEQ       0x8
 #define PBUF_BCAST     0x10

@@ -74,6 +74,11 @@ typedef struct sim_tcp {
   uint8_t txframe[2048];
 } sim_tcp_t;
 
+// Frames from Mios with a wrong IPv4 header or TCP checksum. They are
+// dropped; a script that does not damage frames itself should find
+// this at zero
+extern int sim_tcp_bad_cksum;
+
 // Look at a frame Mios sent (for a script that receives from the vnet
 // itself). Returns 1 if it was a segment for this connection, described
 // in seg; seg->data points into the frame. ARP requests for the peer's

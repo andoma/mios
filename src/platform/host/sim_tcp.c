@@ -41,6 +41,8 @@ cksum_fold(uint32_t sum)
 }
 
 
+int sim_tcp_bad_cksum;
+
 static void
 sim_tcp_arp_reply(sim_tcp_t *t, const uint8_t *req)
 {
@@ -172,6 +174,17 @@ sim_tcp_input(sim_tcp_t *t, const uint8_t *f, size_t len, sim_tcp_seg_t *seg)
   const size_t hdrlen = (th[12] >> 4) * 4;
   if(hdrlen < 20 || hdrlen > iplen - 20)
     return 0;
+
+  uint8_t pseudo[12];
+  memcpy(pseudo, ip + 12, 8);
+  pseudo[8] = 0;
+  pseudo[9] = 6;
+  wr16(pseudo + 10, iplen - 20);
+  if(cksum_fold(cksum_add(0, ip, 20)) ||
+     cksum_fold(cksum_add(cksum_add(0, pseudo, 12), th, iplen - 20))) {
+    sim_tcp_bad_cksum++;
+    return 0;
+  }
 
   memcpy(t->mios_mac, f + 6, 6);
 

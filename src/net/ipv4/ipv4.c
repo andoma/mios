@@ -64,21 +64,47 @@ ipv4_cksum_fold(uint32_t sum)
 uint16_t
 ipv4_cksum_pbuf(uint32_t sum, pbuf_t *pb, int offset, int length)
 {
+  int odd = 0;
+
   for(; pb != NULL; pb = pb->pb_next) {
     if(length == 0)
       break;
 
-    if(offset > pb->pb_buflen) {
+    if(offset >= pb->pb_buflen) {
       offset -= pb->pb_buflen;
       continue;
     }
 
     int clen = MIN(length, pb->pb_buflen - offset);
-    sum = ipv4_cksum_add(sum, pb->pb_data + pb->pb_offset + offset, clen);
+    const void *data = pb->pb_data + pb->pb_offset + offset;
+    if(!odd) {
+      sum = ipv4_cksum_add(sum, data, clen);
+    } else {
+      // An odd number of bytes so far: this buffer's 16 bit words
+      // straddle those of the packet, so its sum has the bytes swapped
+      const uint16_t part = ipv4_cksum_fold(ipv4_cksum_add(0, data, clen));
+      sum += (uint16_t)((part << 8) | (part >> 8));
+    }
+    odd ^= clen & 1;
     length -= clen;
     offset = 0;
   }
   return ~ipv4_cksum_fold(sum);
+}
+
+
+int
+ipv4_cksum_verify(netif_t *ni, pbuf_t *pb, int offset, uint8_t protocol)
+{
+  if(pb->pb_flags & PBUF_CKSUM_OK)
+    return 1; // The network interface has checked it
+
+  const ipv4_header_t *ip = pbuf_data(pb, 0);
+  const int length = pb->pb_pktlen - offset;
+
+  return !ipv4_cksum_pbuf(ipv4_cksum_pseudo(ip->src_addr, ip->dst_addr,
+                                            protocol, length),
+                          pb, offset, length);
 }
 
 static int

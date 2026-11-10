@@ -1476,6 +1476,8 @@ run_tcp(void)
     usleep(1000);
   }
   CHECK(script_done, "script did not finish");
+  CHECK(!sim_tcp_bad_cksum, "%d segments from Mios had a bad checksum",
+        sim_tcp_bad_cksum);
   return 0; // failures are counted by CHECK()
 }
 
