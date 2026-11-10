@@ -60,6 +60,8 @@ SRCS += ${P}/host.c \
 	${P}/testterm.c \
 	${P}/sim_dhcpd.c \
 	${P}/suite_dhcp.c \
+	${P}/sim_tcp.c \
+	${P}/suite_tcp.c \
 	${P}/suite_pbuf.c \
 	${P}/suite_vcon.c \
 	${P}/suite_vcon_vllp.c \
