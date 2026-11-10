@@ -387,9 +387,13 @@ websocket_parser_execute(http_connection_t *hc,
         // Handle control messages in a special path
         switch(opcode) {
 
-        case WS_OPCODE_PING:   // Echo back payload
-          websocket_send_fragment(hc, ba->data, ba->used, 1,
-                                  WS_OPCODE_PONG, 0);
+        case WS_OPCODE_PING:
+          // Echo back payload, but only if it fits the socket's TX
+          // buffer right now. This thread serves every connection, so
+          // it must not wait for one peer to make room. A PING that
+          // goes unanswered is as good as answered by the next one.
+          websocket_send_fragment(hc, ba->data, ba->used, 1, WS_OPCODE_PONG,
+                                  STREAM_WRITE_NO_WAIT | STREAM_WRITE_ALL);
           break;
         case WS_OPCODE_CLOSE:
           if(hc->hc_ws_cb != NULL) {
@@ -419,9 +423,11 @@ websocket_parser_execute(http_connection_t *hc,
       }
 
       if(result) {
+        // Same here: the connection is going away, don't wait for it
         uint8_t payload[2] = {result >> 8, result};
         websocket_send_fragment(hc, payload, sizeof(payload), 1,
-                                WS_OPCODE_CLOSE, 0);
+                                WS_OPCODE_CLOSE,
+                                STREAM_WRITE_NO_WAIT | STREAM_WRITE_ALL);
         return ERR_NOT_CONNECTED;
       }
 
