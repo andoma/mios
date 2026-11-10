@@ -770,6 +770,20 @@ tcp_ack(tcb_t *tcb, uint32_t count)
 }
 
 
+// The handshake is done
+static void
+tcp_established(tcb_t *tcb, const char *reason)
+{
+  tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
+  tcp_set_state(tcb, TCP_STATE_ESTABLISHED, reason);
+
+  // If the application closed the stream in the meantime, this is
+  // when its data and the FIN can go out
+  if(tcb->tcb_app_closed)
+    net_task_raise(&tcb->tcb_task, TCP_EVENT_FLUSH | TCP_EVENT_CLOSE);
+}
+
+
 static void
 tcp_destroy(tcb_t *tcb)
 {
@@ -846,6 +860,7 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     case TCP_STATE_FIN_WAIT2:
     case TCP_STATE_CLOSE_WAIT:
     case TCP_STATE_CLOSING:
+    case TCP_STATE_LAST_ACK:
       if(tcb->tcb_snd.una == tcb->tcb_snd.nxt) {
         // Nothing currently outstanding, arm rtx timer
         net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + tcb->tcb_rto * 1000);
@@ -857,10 +872,9 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
         uint32_t wnd_room = tcb->tcb_snd.wnd > in_flight
                               ? tcb->tcb_snd.wnd - in_flight : 0;
 
-        // Send window exhausted — stop. When the peer ACKs, tcp_ack
-        // re-raises TCP_EVENT_EMIT and we'll pick up here. (No zero-
-        // window probe yet; if the peer truly advertises win=0 and
-        // the subsequent window-update ACK is lost, we'd deadlock.)
+        // Send window exhausted: stop. When the peer ACKs, tcp_ack
+        // re-raises TCP_EVENT_EMIT and we'll pick up here. If its
+        // window stays closed the retransmission timer probes it
         if(wnd_room == 0)
           break;
 
@@ -872,8 +886,11 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
            tcb->tcb_snd.una != tcb->tcb_snd.nxt)
           break;
 
-        if(tcp_emit(tcb, NULL, tcb->tcb_snd.nxt, 0, "event"))
+        const uint32_t nxt = tcb->tcb_snd.nxt;
+        if(tcp_emit(tcb, NULL, nxt, 0, "event"))
           break;
+        if(tcb->tcb_snd.nxt == nxt)
+          break; // Nothing more could be sent
       }
       break;
 
@@ -885,9 +902,10 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
   if(signals & TCP_EVENT_CLOSE) {
     tcb->tcb_app_closed = 1;
 
+    // (Closed during the handshake: the FIN is sent when the
+    // connection is established, see tcp_established())
     switch(tcb->tcb_state) {
     case TCP_STATE_ESTABLISHED:
-    case TCP_STATE_SYN_RECEIVED:
       tcp_set_state(tcb, TCP_STATE_FIN_WAIT1, "stream_close");
       tcp_send_fin(tcb, TCP_F_FIN | TCP_F_ACK);
       break;
@@ -1135,7 +1153,8 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
     int opt = buf[0];
     int optlen = buf[1];
 
-    if(optlen > len)
+    // (A length below 2 would not move us forward)
+    if(optlen < 2 || optlen > len)
       return;
 
     switch(opt) {
@@ -1559,6 +1578,11 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     tcb->tcb_rcv.nxt = seq + 1;
     tcb->tcb_rcv.rdptr = seq + 1;
 
+    // The handshake timeout counts from here. (Left at zero, the first
+    // retransmission timeout would give up on the connection instead
+    // of sending the SYN-ACK again)
+    tcb->tcb_last_rx = clock_get();
+
     if(!pbuf_pullup(pb, hdr_len)) {
       tcp_parse_options(tcb,
                         pbuf_data(pb, sizeof(tcp_hdr_t)),
@@ -1640,8 +1664,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       tcb->tcb_snd.wl2 = ack;
 
       if(una_iss > 0) {
-        tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
-        tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
+        tcp_established(tcb, "syn-ack-in-syn-sent");
         tcp_emit(tcb, pb, tcb->tcb_snd.nxt, 1, "ack-in-syn-recvd");
         return NULL;
       }
@@ -1756,15 +1779,14 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
   switch(tcb->tcb_state) {
   case TCP_STATE_SYN_RECEIVED:
-    if(una_ack >= 0 && ack_nxt <= 0) {
-      tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
-      tcp_set_state(tcb, TCP_STATE_ESTABLISHED, "ack-in-syn-recvd");
+    // It must ack our SYN and nothing that we have not sent
+    if(una_ack > 0 && ack_nxt >= 0) {
+      tcp_established(tcb, "ack-in-syn-recvd");
       tcb->tcb_snd.wnd = scaled_wnd;
       tcb->tcb_snd.wl1 = seq;
       tcb->tcb_snd.wl2 = ack;
     } else {
-      return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
-                       tcb->tcb_rcv.nxt, TCP_F_RST, 0);
+      return tcp_reply(ni, pb, remote_addr, ack, 0, TCP_F_RST, 0);
     }
     // FALLTHRU
   case TCP_STATE_ESTABLISHED:
@@ -1772,6 +1794,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   case TCP_STATE_FIN_WAIT2:
   case TCP_STATE_CLOSE_WAIT:
   case TCP_STATE_CLOSING:
+  case TCP_STATE_LAST_ACK:
     if(una_ack >= 0 && ack_nxt >= 0) {
 
       // (ACKs that repeat a closed window answer our probes, they
@@ -1787,7 +1810,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       int wl1_seq = seq - tcb->tcb_snd.wl1;
       int wl2_ack = ack - tcb->tcb_snd.wl2;
 
-      if(wl1_seq > 0 || (wl1_seq == 0 && wl2_ack >= 0)) {
+      // Take the window from the segment if it is newer than the one
+      // we took it from last. One that acks new data always is, even
+      // with an old sequence number (a retransmission): to keep the
+      // old window then would move its right edge along with snd.una,
+      // beyond anything the peer has offered
+      if(una_ack > 0 || wl1_seq > 0 || (wl1_seq == 0 && wl2_ack >= 0)) {
         const int opened = scaled_wnd > tcb->tcb_snd.wnd;
         const int was_closed = tcb->tcb_snd.wnd == 0;
         tcb->tcb_snd.wnd = scaled_wnd;
@@ -1811,28 +1839,25 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
                        tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
     }
 
+    // Has our FIN been acked? It is the last thing in the TX FIFO, and
+    // it may not even have been sent yet if data is waiting before it
+    if(tcb->tcb_snd.una != tcb->tcb_snd.wrptr)
+      break;
+
     switch(tcb->tcb_state) {
     case TCP_STATE_FIN_WAIT1:
-      if(ack_nxt == 0) {
-        tcp_set_state(tcb, TCP_STATE_FIN_WAIT2, "ACK in FIN_WAIT1");
-      }
-      break;
-    case TCP_STATE_FIN_WAIT2:
-      break;
-    case TCP_STATE_CLOSE_WAIT:
+      tcp_set_state(tcb, TCP_STATE_FIN_WAIT2, "ACK in FIN_WAIT1");
       break;
     case TCP_STATE_CLOSING:
-      if(ack_nxt == 0) {
-        tcp_set_state(tcb, TCP_STATE_FIN_WAIT2, "ACK in CLOSING");
-        // arm timer
-      }
+      tcp_time_wait(tcb, "ACK in CLOSING");
+      break;
+    case TCP_STATE_LAST_ACK:
+      // Frees the tcb, the application closed it already
+      tcp_close(tcb, "LAST_ACK");
+      return pb;
     }
     break;
 
-  case TCP_STATE_LAST_ACK:
-    // Frees the tcb, the application closed it already
-    tcp_close(tcb, "LAST_ACK");
-    return pb;
   case TCP_STATE_TIME_WAIT:
     tcp_set_state(tcb, TCP_STATE_TIME_WAIT, "ACK_IN_TIME_WAIT");
     break;
@@ -1970,7 +1995,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       tcp_set_state(tcb, TCP_STATE_CLOSE_WAIT, "FIN in ESTABLISHED");
       break;
     case TCP_STATE_FIN_WAIT1:
-      if(ack == tcb->tcb_snd.nxt) {
+      if(tcb->tcb_snd.una == tcb->tcb_snd.wrptr) {
         tcp_time_wait(tcb, "FIN in FIN_WAIT1");
       } else {
         tcp_set_state(tcb, TCP_STATE_CLOSING, "FIN in FIN_WAIT1");
