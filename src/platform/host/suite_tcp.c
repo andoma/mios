@@ -885,6 +885,89 @@ scn_ack_behind_hole(void)
 
 
 static void
+scn_rtx_with_unsent_tail(void)
+{
+  hosttest_log("---- retransmission while more data waits unsent ----");
+  sim_tcp_t *t = peer_new(0);
+  sim_tcp_seg_t seg;
+
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, 65535, NULL, SEC), "handshake failed"))
+    return;
+  client_wait();
+
+  // 100 bytes go out and are lost. 50 more are written while they are
+  // in flight and wait (Nagle)
+  client(CLIENT_WRITE, 100);
+  if(CHECK(sim_tcp_recv(t, &seg, SEC), "no data"))
+    CHECK(seg.seq == 0 && seg.len == 100, "seq=%u len=%d", seg.seq, seg.len);
+  client_wait();
+  client(CLIENT_WRITE, 50);
+  client_wait();
+
+  // The retransmission is acked, whatever it carried, and the rest
+  // follows. All 150 bytes get through and then it is quiet
+  uint32_t rcv_nxt = 0;
+  const uint64_t deadline = clock_get() + 2 * SEC;
+  while(rcv_nxt != 150 && clock_get() < deadline) {
+    if(!sim_tcp_recv(t, &seg, SEC))
+      break;
+    if(seg.len && seg.seq <= rcv_nxt && seg.seq + seg.len > rcv_nxt)
+      rcv_nxt = seg.seq + seg.len;
+    ack(t, 0, rcv_nxt, 65535);
+  }
+  CHECK(rcv_nxt == 150, "got %u bytes of 150", rcv_nxt);
+  expect_quiet(t, 2 * SEC, "all acked");
+  CHECK(t->rx_segments <= 5, "%d segments for 150 bytes", t->rx_segments);
+
+  sim_tcp_send(t, SIM_TCP_RST, 0, 0, 0, NULL, 0);
+  client(CLIENT_CLOSE, 0);
+  client_wait();
+}
+
+
+static void
+scn_close_with_small_window(void)
+{
+  hosttest_log("---- close with data waiting for the peer's window ----");
+  sim_tcp_t *t = peer_new(0);
+  sim_tcp_seg_t seg;
+
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, MSS + 1, NULL, SEC), "handshake failed"))
+    return;
+  client_wait();
+
+  // 5000 bytes and a close, into a window that has room for one
+  // segment and one byte. The FIN must come after all the data
+  client(CLIENT_WRITE, 5000);
+  client_wait();
+  client(CLIENT_CLOSE, 0);
+  client_wait();
+
+  // The peer acks only when Mios has filled the window and stopped
+  uint32_t rcv_nxt = 0;
+  int got_fin = 0;
+  for(int i = 0; i < 20 && !got_fin; i++) {
+    while(!got_fin && sim_tcp_recv(t, &seg, 10 * MSEC)) {
+      if(seg.seq == rcv_nxt) {
+        if(!CHECK(data_ok(&seg), "bad data at %u", seg.seq))
+          break;
+        rcv_nxt += seg.len;
+        if(seg.flags & SIM_TCP_FIN)
+          got_fin = 1;
+      }
+    }
+    sim_tcp_send(t, SIM_TCP_ACK, 0, rcv_nxt + got_fin, MSS + 1, NULL, 0);
+  }
+  CHECK(got_fin && rcv_nxt == 5000, "FIN:%d after %u bytes of 5000",
+        got_fin, rcv_nxt);
+  sim_tcp_send(t, SIM_TCP_FIN | SIM_TCP_ACK, 0, rcv_nxt + 1, MSS + 1, NULL, 0);
+  sim_tcp_recv(t, &seg, SEC);
+}
+
+
+static void
 script_thread(void *arg)
 {
   scn_transfer();
@@ -900,6 +983,8 @@ script_thread(void *arg)
   scn_dup_ack_window();
   scn_out_of_order();
   scn_ack_behind_hole();
+  scn_rtx_with_unsent_tail();
+  scn_close_with_small_window();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);

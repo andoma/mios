@@ -442,18 +442,26 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
 
   tcp_hdr_t *th = pbuf_data(pb, 0);
 
-  uint32_t bytes_in_fifo = tcb->tcb_snd.wrptr - seq;
+  // Everything from seq on, a pending FIN included: it has the last
+  // sequence number in the FIFO
+  const uint32_t fifo_tail = tcb->tcb_snd.wrptr - seq;
+  uint32_t bytes_in_fifo = fifo_tail;
 
-  // Honor the receiver's advertised send window. Only applies when
-  // we're sending fresh data (seq == snd.nxt); retransmits (seq ==
-  // snd.una) re-send data that was already inside the window when it
-  // was first transmitted and don't need re-checking.
   if(seq == tcb->tcb_snd.nxt) {
+    // Fresh data: honor the receiver's advertised window
     uint32_t in_flight = tcb->tcb_snd.nxt - tcb->tcb_snd.una;
     uint32_t wnd_room = tcb->tcb_snd.wnd > in_flight
                           ? tcb->tcb_snd.wnd - in_flight : 0;
     bytes_in_fifo = MIN(bytes_in_fifo, wnd_room);
+  } else {
+    // A retransmission: only what has been sent before. That was
+    // inside the window then, and anything written since is not ours
+    // to send from here, snd.nxt would not account for it
+    bytes_in_fifo = MIN(bytes_in_fifo, tcb->tcb_snd.nxt - seq);
   }
+
+  // The FIN goes out only when all that is before it does
+  const int fin = tcb->tcb_pending_fin && bytes_in_fifo == fifo_tail;
 
   if(tcb->tcb_pending_syn) {
     // If we have a pending SYN it's the only thing we may send
@@ -472,7 +480,7 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
     }
     return 0;
 
-  } else if(tcb->tcb_pending_fin) {
+  } else if(fin) {
 
     if(bytes_in_fifo == 1) {
       // We only have the last FIN left
