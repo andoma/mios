@@ -313,12 +313,155 @@ scn_rto(void)
 }
 
 
+// A pure ACK from the peer
+static void
+ack(sim_tcp_t *t, uint32_t cmdseq, uint32_t ackno, uint16_t wnd)
+{
+  sim_tcp_send(t, SIM_TCP_ACK, cmdseq, ackno, wnd, NULL, 0);
+}
+
+// Expect a retransmission of the full segment at 'seq' no later than
+// 'within' us from now
+static void
+expect_rtx(sim_tcp_t *t, uint32_t seq, uint64_t within, const char *what)
+{
+  sim_tcp_seg_t seg;
+  if(!CHECK(sim_tcp_recv(t, &seg, within), "%s: no retransmission of %u",
+            what, seq))
+    return;
+  CHECK(seg.seq == seq && seg.len == MSS && data_ok(&seg),
+        "%s: got seq=%u len=%d, expected seq=%u", what, seg.seq, seg.len, seq);
+}
+
+static void
+expect_quiet(sim_tcp_t *t, uint64_t duration, const char *what)
+{
+  sim_tcp_seg_t seg = {};
+  CHECK(!sim_tcp_recv(t, &seg, duration), "%s: unexpected seq=%u len=%d "
+        "flags=%x", what, seg.seq, seg.len, seg.flags);
+}
+
+
+static void
+scn_fast_retransmit(void)
+{
+  hosttest_log("---- fast retransmit ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  uint32_t cmdseq = 0;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Ten segments, of which the third "is lost"
+  source_request(t, &cmdseq, 0, 10 * MSS);
+  CHECK(collect(t, 0, 10 * MSS) == 10, "expected ten full segments");
+  ack(t, cmdseq, 2 * MSS, 65535);
+
+  // ACKs that change the window are window updates, not duplicates
+  ack(t, cmdseq, 2 * MSS, 65000);
+  ack(t, cmdseq, 2 * MSS, 64000);
+  ack(t, cmdseq, 2 * MSS, 63000);
+  expect_quiet(t, 10 * MSEC, "window updates");
+
+  // Segments four to ten arrive at the peer: seven duplicate ACKs. The
+  // third triggers the retransmission, right away
+  ack(t, cmdseq, 2 * MSS, 63000);
+  ack(t, cmdseq, 2 * MSS, 63000);
+  expect_quiet(t, 10 * MSEC, "two duplicate ACKs");
+  ack(t, cmdseq, 2 * MSS, 63000);
+  expect_rtx(t, 2 * MSS, 1 * MSEC, "third duplicate ACK");
+  for(int i = 0; i < 4; i++)
+    ack(t, cmdseq, 2 * MSS, 63000);
+  expect_quiet(t, 10 * MSEC, "further duplicate ACKs");
+
+  ack(t, cmdseq, 10 * MSS, 63000);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  // The next loss on the same connection is recovered the same way
+  source_request(t, &cmdseq, 10 * MSS, 5 * MSS);
+  CHECK(collect(t, 10 * MSS, 15 * MSS) == 5, "expected five full segments");
+  for(int i = 0; i < 3; i++)
+    ack(t, cmdseq, 10 * MSS, 65535); // The request's window
+  expect_rtx(t, 10 * MSS, 1 * MSEC, "second loss");
+  ack(t, cmdseq, 15 * MSS, 65535);
+  expect_quiet(t, 2 * SEC, "all acked again");
+
+  peer_close(t, cmdseq, 15 * MSS);
+}
+
+
+static void
+scn_multiple_losses(void)
+{
+  hosttest_log("---- several losses in one window ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  uint32_t cmdseq = 0;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Ten segments; the third, sixth and ninth are lost
+  source_request(t, &cmdseq, 0, 10 * MSS);
+  CHECK(collect(t, 0, 10 * MSS) == 10, "expected ten full segments");
+  const uint64_t t0 = clock_get();
+  ack(t, cmdseq, 2 * MSS, 65535);
+  for(int i = 0; i < 3; i++)
+    ack(t, cmdseq, 2 * MSS, 65535);
+  expect_rtx(t, 2 * MSS, 1 * MSEC, "first hole");
+
+  // Each retransmission fills one hole: the ACK stops at the next one
+  // (a partial ACK), which must be retransmitted without a timeout
+  ack(t, cmdseq, 5 * MSS, 65535);
+  expect_rtx(t, 5 * MSS, 1 * MSEC, "second hole");
+  ack(t, cmdseq, 8 * MSS, 65535);
+  expect_rtx(t, 8 * MSS, 1 * MSEC, "third hole");
+  ack(t, cmdseq, 10 * MSS, 65535);
+  const int ms = (clock_get() - t0) / 1000;
+  CHECK(ms < 10, "recovery took %d ms", ms);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  peer_close(t, cmdseq, 10 * MSS);
+}
+
+
+static void
+scn_timeout_recovery(void)
+{
+  hosttest_log("---- several losses, found by timeout ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  uint32_t cmdseq = 0;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // The whole burst of four is lost, so there are no duplicate ACKs.
+  // The timeout finds the first; the rest follow on the partial ACKs
+  source_request(t, &cmdseq, 0, 4 * MSS);
+  CHECK(collect(t, 0, 4 * MSS) == 4, "expected four full segments");
+  expect_rtx(t, 0, 300 * MSEC, "timeout");
+  const uint64_t t0 = clock_get();
+  for(int i = 1; i < 4; i++) {
+    ack(t, cmdseq, i * MSS, 65535);
+    expect_rtx(t, i * MSS, 1 * MSEC, "after timeout");
+  }
+  ack(t, cmdseq, 4 * MSS, 65535);
+  const int ms = (clock_get() - t0) / 1000;
+  CHECK(ms < 10, "recovery took %d ms", ms);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  peer_close(t, cmdseq, 4 * MSS);
+}
+
+
 static void
 script_thread(void *arg)
 {
   scn_transfer();
   scn_sink();
   scn_rto();
+  scn_fast_retransmit();
+  scn_multiple_losses();
+  scn_timeout_recovery();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);

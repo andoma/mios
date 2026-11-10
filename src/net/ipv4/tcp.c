@@ -36,6 +36,32 @@
  *  Computing TCP's Retransmission Timer
  *          https://datatracker.ietf.org/doc/html/rfc6298
  *
+ *  TCP Congestion Control (fast retransmit only)
+ *          https://datatracker.ietf.org/doc/html/rfc5681
+ *
+ *  The NewReno Modification to TCP's Fast Recovery Algorithm
+ *          https://datatracker.ietf.org/doc/html/rfc6582
+ *
+ */
+
+/*
+ * Loss recovery
+ *
+ * Sent data stays in the TX FIFO until it is acked, so any segment can
+ * be rebuilt from snd.una. A loss is detected by three duplicate ACKs
+ * (fast retransmit) or, failing that, by the retransmission timer.
+ * Either way the first unacked segment is sent again and the
+ * connection is "recovering" until everything sent up to that point
+ * (tcb_recover) is acked. While recovering, an ACK that advances but
+ * stops short of tcb_recover (a partial ACK) points at the next hole,
+ * which is retransmitted at once: n losses in one window cost about n
+ * round trips rather than n timeouts.
+ *
+ * There is no congestion window. The sender is limited by the peer's
+ * window, Nagle and the size of the TX FIFO only, and a loss does not
+ * slow it down. That fits what this stack is for, a few connections
+ * with small buffers on a local network, but it is a deliberate
+ * omission and not an oversight.
  */
 
 
@@ -78,6 +104,11 @@ typedef struct tcb {
   uint8_t rcv_window_closed;
 
   uint8_t fast_reject_limiter;
+
+  // Loss recovery, see the comment at the top
+  uint8_t tcb_dupacks;
+  uint8_t tcb_recovering;
+  uint32_t tcb_recover;  // snd.nxt when recovery began
 
   // RFC 7323 window scaling state, populated from the WSopt exchange at
   // SYN time. wnd_shift is the peer's announced shift — applied to any
@@ -129,6 +160,7 @@ typedef struct tcb {
   uint64_t tcb_tx_bytes;
   uint64_t tcb_rx_bytes;
   uint64_t tcb_rtx_bytes;
+  uint32_t tcb_fast_rtx;
 
   uint64_t tcb_last_rx;
   uint32_t tcb_timo;
@@ -550,10 +582,33 @@ tcp_rtx_cb(void *opaque, uint64_t now)
       tcp_output_tcb(tcb, pb, "ka");
 
   } else {
+    tcb->tcb_dupacks = 0;
+    tcb->tcb_recovering = 1;
+    tcb->tcb_recover = tcb->tcb_snd.nxt;
     tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "RTX");
   }
 
   arm_rtx(tcb, now);
+}
+
+
+// A duplicate ACK (RFC 5681 section 2) arrived: the peer got a segment
+// that was not the one it is waiting for
+static void
+tcp_dup_ack(tcb_t *tcb)
+{
+  if(tcb->tcb_recovering)
+    return;
+
+  if(++tcb->tcb_dupacks < 3)
+    return;
+
+  tcb->tcb_dupacks = 0;
+  tcb->tcb_recovering = 1;
+  tcb->tcb_recover = tcb->tcb_snd.nxt;
+  tcb->tcb_fast_rtx++;
+  tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "fast-rtx");
+  arm_rtx(tcb, clock_get());
 }
 
 
@@ -567,6 +622,16 @@ tcp_ack(tcb_t *tcb, uint32_t count)
   tcb->tcb_pending_syn = 0;
   task_wakeup(&tcb->tcb_tx_waitq, 1);
   arm_rtx(tcb, tcb->tcb_last_rx);
+
+  tcb->tcb_dupacks = 0;
+  if(tcb->tcb_recovering) {
+    if((int32_t)(tcb->tcb_snd.una - tcb->tcb_recover) >= 0) {
+      tcb->tcb_recovering = 0;
+    } else {
+      // Partial ACK: what is now first in line was lost as well
+      tcp_emit(tcb, NULL, tcb->tcb_snd.una, 0, "partial-ack");
+    }
+  }
 
   // An ACK may have cleared the in-flight condition that caused the
   // emit loop to hold a partial segment under Nagle. Re-trigger emit
@@ -1425,6 +1490,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   case TCP_STATE_CLOSING:
     if(una_ack >= 0 && ack_nxt >= 0) {
 
+      if(una_ack == 0 && seg_len == 0 &&
+         scaled_wnd == tcb->tcb_snd.wnd &&
+         tcb->tcb_snd.una != tcb->tcb_snd.nxt) {
+        tcp_dup_ack(tcb);
+      }
+
       tcp_ack(tcb, una_ack); // Handles una_ack=0 by doing nothing
 
       int wl1_seq = seq - tcb->tcb_snd.wl1;
@@ -1638,11 +1709,12 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                ntohs(tcb->tcb_local_port),
                tcb->tcb_remote_addr,
                ntohs(tcb->tcb_remote_port));
-    cli_printf(cli, "\t%s TX:%"PRIu64" RX:%"PRIu64" ReTX:%"PRIu64"  Failed ReTX:%d\n",
+    cli_printf(cli, "\t%s TX:%"PRIu64" RX:%"PRIu64" ReTX:%"PRIu64"  Fast ReTX:%d  Failed ReTX:%d\n",
                tcp_state_to_str(tcb->tcb_state),
                tcb->tcb_tx_bytes,
                tcb->tcb_rx_bytes,
                tcb->tcb_rtx_bytes,
+               tcb->tcb_fast_rtx,
                tcb->tcb_rtx_drop);
     cli_printf(cli, "\tRTO: %d ms  Unacked bytes:%d", tcb->tcb_rto,
                tcb->tcb_snd.nxt  - tcb->tcb_snd.una);
