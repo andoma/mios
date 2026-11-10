@@ -19,6 +19,7 @@
 #include <mios/task.h>
 
 #include <net/ether.h>
+#include <net/ipv4/tcp.h>
 
 #include "hosttest.h"
 #include "sim.h"
@@ -120,6 +121,18 @@ sink_open(stream_t *s)
 SERVICE_DEF_STREAM("tcptest-sink", PORT_SINK, sink_open);
 
 
+/* Client: a connection opened from Mios. The script asks for what it
+   wants done through client_op, and the suite's main thread, which is
+   allowed to call into Mios, does it. */
+
+#define CLIENT_CONNECT 1  // arg: the peer's port
+#define CLIENT_WRITE   2  // arg: number of pattern bytes
+#define CLIENT_CLOSE   3
+
+static volatile int client_op;
+static volatile uint32_t client_arg;
+
+
 // ---- Peer side: helpers for the scenarios ----
 
 static vnet_t *tcp_vnet;
@@ -202,6 +215,21 @@ collect(sim_tcp_t *t, uint32_t from, uint32_t end)
     n++;
   }
   return n;
+}
+
+// Have the main thread do a client operation. It notices within a ms
+static void
+client(int op, uint32_t arg)
+{
+  client_arg = arg;
+  client_op = op;
+}
+
+static void
+client_wait(void)
+{
+  while(client_op)
+    sim_wait(clock_get() + 100);
 }
 
 // Peer closes, Mios closes back
@@ -454,6 +482,107 @@ scn_timeout_recovery(void)
 
 
 static void
+scn_active_open(void)
+{
+  hosttest_log("---- connection opened by Mios: window scale ----");
+  sim_tcp_t *t = peer_new(0);
+  sim_tcp_seg_t syn, seg;
+  uint32_t rcv_nxt = 0;
+
+  // The peer scales its window by 2^7, like Linux with default buffers
+  t->wscale = 7;
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, 8192, &syn, SEC), "handshake failed"))
+    return;
+  CHECK(syn.mss == MSS, "SYN mss=%d", syn.mss);
+  CHECK(syn.wscale == 0, "SYN wscale=%d", syn.wscale);
+
+  // 512 << 7 is 64 kB. Read unscaled it would be a third of a segment
+  ack(t, 0, 0, 512);
+  client_wait();
+  client(CLIENT_WRITE, 20 * MSS);
+  CHECK(collect(t, 0, 20 * MSS) == 20, "window not filled");
+  ack(t, 0, 20 * MSS, 512);
+
+  client_wait();
+  client(CLIENT_CLOSE, 0);
+  if(CHECK(sim_tcp_recv(t, &seg, SEC) && (seg.flags & SIM_TCP_FIN),
+           "no FIN from Mios")) {
+    sim_tcp_send(t, SIM_TCP_FIN | SIM_TCP_ACK, 0, 20 * MSS + 1, 512, NULL, 0);
+    CHECK(sim_tcp_recv(t, &seg, SEC) && seg.ack == 1, "FIN not acked");
+  }
+  client_wait();
+
+
+  hosttest_log("---- connection opened by Mios: no window scale, small MSS ----");
+  t = peer_new(0);
+  t->mss = 1000;
+  client(CLIENT_CONNECT, t->port);
+  if(!CHECK(sim_tcp_accept(t, 8192, &syn, SEC), "handshake failed"))
+    return;
+
+  // No window scale in the SYN-ACK: 3000 means 3000, three segments of
+  // the peer's MSS
+  ack(t, 0, 0, 3000);
+  client_wait();
+  client(CLIENT_WRITE, 10000);
+  for(int i = 0; i < 3; i++) {
+    if(CHECK(sim_tcp_recv(t, &seg, SEC), "no segment %d", i))
+      CHECK(seg.seq == rcv_nxt && seg.len == 1000 && data_ok(&seg),
+            "segment %d: seq=%u len=%d", i, seg.seq, seg.len);
+    rcv_nxt += 1000;
+  }
+  expect_quiet(t, 100 * MSEC, "window full");
+
+  sim_tcp_send(t, SIM_TCP_RST, 0, 0, 0, NULL, 0);
+  client_wait();
+  client(CLIENT_CLOSE, 0);
+  client_wait();
+}
+
+
+static void
+scn_write_before_established(void)
+{
+  hosttest_log("---- data written before the handshake is done, then close ----");
+  sim_tcp_t *t = peer_new(0);
+  sim_tcp_seg_t seg;
+  uint32_t rcv_nxt = 0;
+  const uint32_t total = 30000;
+
+  // Most of a TX FIFO waits for the SYN-ACK, and the stream is closed
+  // behind it: all of it must arrive, in order, and then the FIN
+  t->wscale = 7;
+  client(CLIENT_CONNECT, t->port);
+  client_wait();
+  client(CLIENT_WRITE, total);
+  client_wait();
+  client(CLIENT_CLOSE, 0);
+  if(!CHECK(sim_tcp_accept_syn(t, 65535, NULL, SEC), "no SYN"))
+    return;
+
+  int got_fin = 0;
+  while(!got_fin && sim_tcp_recv(t, &seg, SEC)) {
+    if(seg.len) {
+      if(!CHECK(seg.seq == rcv_nxt && data_ok(&seg), "seq=%u len=%d, "
+                "expected seq=%u", seg.seq, seg.len, rcv_nxt))
+        break;
+      rcv_nxt += seg.len;
+    }
+    if(seg.flags & SIM_TCP_FIN) {
+      got_fin = 1;
+      CHECK(seg.seq + seg.len == total, "FIN at %u", seg.seq + seg.len);
+    }
+    sim_tcp_send(t, SIM_TCP_ACK, 0, rcv_nxt + got_fin, 512, NULL, 0);
+  }
+  CHECK(got_fin && rcv_nxt == total, "got %u bytes, FIN:%d", rcv_nxt, got_fin);
+  sim_tcp_send(t, SIM_TCP_FIN | SIM_TCP_ACK, 0, total + 1, 512, NULL, 0);
+  CHECK(sim_tcp_recv(t, &seg, SEC) && seg.ack == 1, "FIN not acked");
+  client_wait();
+}
+
+
+static void
 script_thread(void *arg)
 {
   scn_transfer();
@@ -462,6 +591,8 @@ script_thread(void *arg)
   scn_fast_retransmit();
   scn_multiple_losses();
   scn_timeout_recovery();
+  scn_active_open();
+  scn_write_before_established();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);
@@ -480,12 +611,6 @@ ip4(int a, int b, int c, int d)
 }
 
 static int
-pred_done(void *arg)
-{
-  return script_done;
-}
-
-static int
 run_tcp(void)
 {
   // A static address and no link-up event, so no DHCP client
@@ -499,7 +624,30 @@ run_tcp(void)
 
   sim_thread_create("tcp-script", script_thread, NULL, 0);
 
-  CHECK(hosttest_wait(pred_done, NULL, 600 * SEC), "script did not finish");
+  // Serve the script's client requests until it is done
+  static uint8_t buf[32768];
+  stream_t *sk = NULL;
+  const uint64_t deadline = clock_get() + 600 * SEC;
+  while(!script_done && clock_get() < deadline) {
+    switch(client_op) {
+    case CLIENT_CONNECT:
+      sk = tcp_create_socket("tcptest-client", 32768, 2048);
+      tcp_connect(sk, peer_ip, client_arg);
+      break;
+    case CLIENT_WRITE:
+      for(uint32_t i = 0; i < client_arg; i++)
+        buf[i] = pattern(i);
+      stream_write(sk, buf, client_arg, 0);
+      break;
+    case CLIENT_CLOSE:
+      stream_close(sk);
+      sk = NULL;
+      break;
+    }
+    client_op = 0;
+    usleep(1000);
+  }
+  CHECK(script_done, "script did not finish");
   return 0; // failures are counted by CHECK()
 }
 

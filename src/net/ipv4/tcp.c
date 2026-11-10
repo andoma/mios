@@ -465,7 +465,9 @@ tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int gen_ack, const char *why)
   th->seq = htonl(seq);
   int total = 0;
 
-  size_t max_pkt_size = 1460 + sizeof(tcp_hdr_t);
+  // No more than the peer said it can take (536 if it said nothing)
+  size_t max_pkt_size =
+    MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size) + sizeof(tcp_hdr_t);
 
   while(bytes_in_fifo && pb->pb_pktlen < max_pkt_size) {
     if(p->pb_offset + p->pb_buflen == PBUF_DATA_SIZE) {
@@ -887,7 +889,10 @@ tcp_parse_options(tcb_t *tcb, const uint8_t *buf, size_t len)
 
     switch(opt) {
     case 2:
-      tcb->tcb_max_segment_size = buf[3] | (buf[2] << 8);
+      if(optlen == 4) {
+        // Segments are cut to this size, so keep it sane
+        tcb->tcb_max_segment_size = MAX(buf[3] | (buf[2] << 8), 64);
+      }
       break;
     case 3:
       // RFC 7323 Window Scale option. Length must be 3.
@@ -1358,6 +1363,15 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
       tcb->tcb_rcv.nxt = seq + 1;
       tcb->tcb_rcv.rdptr = seq + 1;
+
+      // The peer's MSS and window scale. Our SYN offered window
+      // scaling; if the peer's SYN doesn't, the shift stays 0 and
+      // neither side scales (RFC 7323 section 2.2)
+      if(!pbuf_pullup(pb, hdr_len)) {
+        tcp_parse_options(tcb,
+                          pbuf_data(pb, sizeof(tcp_hdr_t)),
+                          hdr_len - sizeof(tcp_hdr_t));
+      }
 
       if(flag & TCP_F_ACK) {
         tcp_ack(tcb, una_ack);

@@ -235,8 +235,8 @@ sim_tcp_connect(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *synack)
 
 
 int
-sim_tcp_accept(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
-               uint64_t timeout)
+sim_tcp_accept_syn(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
+                   uint64_t timeout)
 {
   sim_tcp_seg_t seg;
   if(syn == NULL)
@@ -260,6 +260,17 @@ sim_tcp_accept(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
 
   sim_tcp_send_raw(t, SIM_TCP_SYN | SIM_TCP_ACK, t->isn, t->mios_isn + 1,
                    wnd, NULL, 0);
+  return 1;
+}
+
+
+int
+sim_tcp_accept(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
+               uint64_t timeout)
+{
+  sim_tcp_seg_t seg;
+  if(!sim_tcp_accept_syn(t, wnd, syn, timeout))
+    return 0;
   if(!sim_tcp_recv(t, &seg, 1000000))
     return 0;
   return seg.flags == SIM_TCP_ACK && seg.seq == 0 && seg.ack == 0;

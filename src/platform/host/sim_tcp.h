@@ -73,7 +73,13 @@ void sim_tcp_send(sim_tcp_t *t, int flags, uint32_t seq, uint32_t ack,
 // not NULL), ACK. Returns 1 on success
 int sim_tcp_connect(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *synack);
 
-// Passive open: wait for Mios's SYN (returned in syn if not NULL),
-// answer SYN-ACK, expect the ACK. Returns 1 on success
+// Passive open, first half: wait for Mios's SYN (returned in syn if not
+// NULL) and answer SYN-ACK. What Mios sends next is for the script to
+// receive. Returns 1 on success
+int sim_tcp_accept_syn(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
+                       uint64_t timeout);
+
+// Passive open: as above, and expect the bare ACK that completes the
+// handshake. Returns 1 on success
 int sim_tcp_accept(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
                    uint64_t timeout);
