@@ -30,6 +30,7 @@ SRCS += ${C}/systick.c \
 	${P}/stm32n6_idle.c \
 	${P}/stm32n6_iwdg.c \
 	${P}/stm32n6_info.c \
+	${P}/stm32n6_rng.c \
 	${P}/stm32n6_csi.c \
 	${P}/stm32n6_venc.c \
 	${P}/stm32n6_dcmipp.c \

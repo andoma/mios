@@ -25,6 +25,7 @@
 #define RCC_MEMENR        (RCC_BASE + 0x24C)
 
 #define RCC_AHB1ENR       (RCC_BASE + 0x250)
+#define RCC_AHB3ENR       (RCC_BASE + 0x258)
 #define RCC_AHB4ENR       (RCC_BASE + 0x25c)
 #define RCC_AHB5ENR       (RCC_BASE + 0x260)
 #define RCC_APB1LENR      (RCC_BASE + 0x264)
@@ -38,6 +39,8 @@
 
 
 #define CLK_BSEC      CLK_ID(RCC_APB4ENR2, 1)
+
+#define CLK_RNG       CLK_ID(RCC_AHB3ENR, 0)
 
 #define CLK_GPIO(x)   CLK_ID(RCC_AHB4ENR, (x))
 
