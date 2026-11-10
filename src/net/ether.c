@@ -224,6 +224,7 @@ ether_nexthop_periodic(ether_netif_t *eni)
     nh->nh_state--;
     if(nh->nh_state == 0) {
       nexthop_destroy(nh);
+      continue;
     } else if(nh->nh_state < NEXTHOP_ACTIVE && nh->nh_in_use) {
       arp_send_who_has(eni, nh->nh_addr);
     }
