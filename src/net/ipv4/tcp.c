@@ -42,6 +42,10 @@
  *  The NewReno Modification to TCP's Fast Recovery Algorithm
  *          https://datatracker.ietf.org/doc/html/rfc6582
  *
+ *  Improving TCP's Robustness to Blind In-Window Attacks (sections 3
+ *  to 5: RST, SYN and ACK that must match what we expect)
+ *          https://datatracker.ietf.org/doc/html/rfc5961
+ *
  *  TCP Selective Acknowledgment Options
  *          https://datatracker.ietf.org/doc/html/rfc2018
  *
@@ -146,6 +150,12 @@
 #define TCP_TIMEOUT_INTERVAL   21000 // ms
 #define TCP_TIMEOUT_HANDSHAKE   5000 // ms
 
+// Connections that have got a SYN and wait for the handshake to
+// finish. Each holds a tcb with its FIFOs, so there is a limit, and a
+// SYN beyond it takes the place of the oldest. A real client sends its
+// SYN again; one that never meant to answer does not notice
+#define TCP_MAX_HALF_OPEN 8
+
 #define TCP_OOO_BLOCKS 4
 #define TCP_SACK_BLOCKS 4
 
@@ -182,6 +192,10 @@ typedef struct tcb {
 
   uint8_t tcb_state;
   uint8_t tcb_app_closed;
+
+  // An accepted connection is handed to its service when the handshake
+  // is done, not before. Until then this says which one it is for
+  const service_t *tcb_svc;
 
   uint8_t tcb_pending_syn;
   uint8_t tcb_pending_fin;
@@ -431,6 +445,17 @@ tcp_set_netif(tcb_t *tcb, const netif_t *ni)
   const int mtu = ni->ni_mtu ? ni->ni_mtu : 1500;
   tcb->tcb_rcv.mss =
     MAX(mtu - (int)(sizeof(ipv4_header_t) + sizeof(tcp_hdr_t)), 64);
+}
+
+
+// Initial sequence number: one that cannot be guessed, which is what
+// keeps someone who is not on the path from forging segments. That is
+// as true as rand() is good; a target with a hardware generator
+// should have rand() use it. (rand() gives 31 bits)
+static uint32_t
+tcp_initial_seq(void)
+{
+  return ((uint32_t)rand() << 16) ^ (uint32_t)rand();
 }
 
 
@@ -1158,17 +1183,33 @@ tcp_ack(tcb_t *tcb, uint32_t count)
 }
 
 
-// The handshake is done
-static void
+// The handshake is done. Returns an error if the connection could not
+// be handed to its service, it is then to be reset
+static error_t
 tcp_established(tcb_t *tcb, const char *reason)
 {
   tcb->tcb_timo = TCP_TIMEOUT_INTERVAL * 1000;
   tcp_set_state(tcb, TCP_STATE_ESTABLISHED, reason);
 
+  if(tcb->tcb_svc != NULL) {
+    // An accepted connection: now there is someone at the other end,
+    // so now the service gets its stream (and may start a thread)
+    const service_t *svc = tcb->tcb_svc;
+    tcb->tcb_svc = NULL;
+    tcb->tcb_app_closed = 0;
+    const error_t err = svc->open_stream(&tcb->tcb_stream);
+    if(err) {
+      tcb->tcb_app_closed = 1;
+      return err;
+    }
+    return 0;
+  }
+
   // If the application closed the stream in the meantime, this is
   // when its data and the FIN can go out
   if(tcb->tcb_app_closed)
     net_task_raise(&tcb->tcb_task, TCP_EVENT_FLUSH | TCP_EVENT_CLOSE);
+  return 0;
 }
 
 
@@ -1217,10 +1258,13 @@ tcp_do_connect(tcb_t *tcb)
   // in tcp_rtx_cb()
   tcb->tcb_last_rx = clock_get();
 
-  // The MSS for our SYN, from the interface it leaves by
+  // The MSS for our SYN and our address, from the interface it
+  // leaves by
   nexthop_t *nh = ipv4_nexthop_resolve(tcb->tcb_remote_addr);
-  if(nh != NULL)
+  if(nh != NULL) {
     tcp_set_netif(tcb, nh->nh_netif);
+    tcb->tcb_local_addr = nh->nh_netif->ni_ipv4_local_addr;
+  }
 
   tcp_send_syn(tcb, TCP_F_SYN, NULL);
 
@@ -1491,6 +1535,25 @@ tcp_close(tcb_t *tcb, const char *reason)
   task_wakeup(&tcb->tcb_tx_waitq, 1);
 
   tcp_destroy(tcb);
+}
+
+
+// Make room for one more half-open connection, see TCP_MAX_HALF_OPEN
+static void
+tcp_half_open_limit(void)
+{
+  tcb_t *tcb, *oldest = NULL;
+  int count = 0;
+
+  // New ones go first in the list, so the last one found is the oldest
+  LIST_FOREACH(tcb, &tcbs, tcb_link) {
+    if(tcb->tcb_svc != NULL) {
+      oldest = tcb;
+      count++;
+    }
+  }
+  if(count >= TCP_MAX_HALF_OPEN)
+    tcp_close(oldest, "Too many half-open");
 }
 
 
@@ -1860,7 +1923,7 @@ tcb_create(const char *name, size_t txfifo_size, size_t rxfifo_size)
 
   tcb->tcb_rcv.mss = 1460;
 
-  tcb->tcb_iss = rand();
+  tcb->tcb_iss = tcp_initial_seq();
   tcb->tcb_snd.nxt = tcb->tcb_iss;
   tcb->tcb_snd.una = tcb->tcb_iss;
   tcb->tcb_snd.wrptr = tcb->tcb_iss + 1;
@@ -1956,11 +2019,18 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       svc->txfifo_size_log2 ? 1u << svc->txfifo_size_log2 : 4096;
     size_t rxfifo_size =
       svc->rxfifo_size_log2 ? 1u << svc->rxfifo_size_log2 : 2048;
+    tcp_half_open_limit();
+
     tcb_t *tcb = tcb_create(svc->name, txfifo_size, rxfifo_size);
     if(tcb == NULL) {
       return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
                         "no memory");
     }
+
+    // No application yet. If the handshake is never completed the tcb
+    // is ours alone to free
+    tcb->tcb_svc = svc;
+    tcb->tcb_app_closed = 1;
 
     tcb->tcb_local_addr = ni->ni_ipv4_local_addr;
     tcb->tcb_remote_addr = remote_addr;
@@ -1981,13 +2051,6 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       tcp_parse_options(tcb,
                         pbuf_data(pb, sizeof(tcp_hdr_t)),
                         hdr_len - sizeof(tcp_hdr_t));
-    }
-
-    error_t err = svc->open_stream(&tcb->tcb_stream);
-    if(err) {
-      free(tcb);
-      return tcp_reject(ni, pb, remote_addr, local_port_ho, seq + 1,
-                        error_to_string(err));
     }
 
     tcp_send_syn(tcb, TCP_F_SYN | TCP_F_ACK, pb);
@@ -2152,9 +2215,17 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   // Step 4: SYN Processing
   //
 
+  // A SYN on a connection that exists is answered with an ACK and
+  // otherwise ignored (RFC 5961 section 4). If it is from the peer,
+  // restarted, the peer resets us in reply to that ACK. If it is
+  // forged, the peer just drops the ACK. Sending a RST ourselves, as
+  // the original rule has it, would let anyone who can guess the
+  // sequence number have us reset the peer.
   if(flag & TCP_F_SYN) {
+    if(!tcp_reject_limit(tcb))
+      return pb;
     return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
-                     tcb->tcb_rcv.nxt, TCP_F_RST, 0);
+                     tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
   }
 
   //
@@ -2175,7 +2246,12 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
   case TCP_STATE_SYN_RECEIVED:
     // It must ack our SYN and nothing that we have not sent
     if(una_ack > 0 && ack_nxt >= 0) {
-      tcp_established(tcb, "ack-in-syn-recvd");
+      if(tcp_established(tcb, "ack-in-syn-recvd")) {
+        // The service would not take it
+        tcp_reply(ni, pb, remote_addr, ack, 0, TCP_F_RST, 0);
+        tcp_close(tcb, "Service refused");
+        return NULL;
+      }
       tcb->tcb_snd.wnd = scaled_wnd;
       tcb->tcb_snd.wl1 = seq;
       tcb->tcb_snd.wl2 = ack;
@@ -2235,7 +2311,17 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
       }
 
     } else if(una_ack < 0) {
-      // Old
+      // Old. A segment that is merely late acks something we sent not
+      // long ago, and no more than the TX FIFO holds was ever unacked.
+      // One that acks something from before that is not the peer's
+      // (RFC 5961 section 5): this is what makes data injected by
+      // someone who guessed the receive window fail
+      if((uint32_t)-una_ack > tcb->tcb_txfifo_size + 2) {
+        if(!tcp_reject_limit(tcb))
+          return pb;
+        return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,
+                         tcb->tcb_rcv.nxt, TCP_F_ACK, rcv_wnd);
+      }
     } else if(ack_nxt < 0) {
       // Too new
       return tcp_reply(ni, pb, remote_addr, tcb->tcb_snd.nxt,

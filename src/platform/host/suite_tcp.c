@@ -96,6 +96,7 @@ static uint8_t sink_buf[65536];
 static volatile uint32_t sink_len;
 static volatile int sink_eof;
 static volatile int sink_pause;
+static volatile int sink_opens;
 
 static void *
 sink_thread(void *arg)
@@ -120,6 +121,7 @@ sink_open(stream_t *s)
 {
   sink_len = 0;
   sink_eof = 0;
+  sink_opens++;
   return thread_create(sink_thread, s, 16384, "tcpsink",
                        TASK_DETACHED, 5) ? 0 : ERR_NO_MEMORY;
 }
@@ -1455,6 +1457,127 @@ scn_mtu(void)
 
 
 static void
+scn_half_open(void)
+{
+  hosttest_log("---- half-open connections: limit, service not started ----");
+  sim_tcp_t *t[9];
+  sim_tcp_seg_t seg;
+  const int opens = sink_opens;
+
+  // Nine SYNs and nothing more, as from someone who is not there. Each
+  // is answered, but only eight are remembered: the ninth takes the
+  // place of the first
+  for(int i = 0; i < 9; i++) {
+    t[i] = peer_new(PORT_SINK);
+    memset(t[i]->mios_mac, 0xff, 6);
+    sim_tcp_send(t[i], SIM_TCP_SYN, -1, 0, 65535, NULL, 0);
+    CHECK(sim_tcp_recv(t[i], &seg, 10 * MSEC) &&
+          seg.flags == (SIM_TCP_SYN | SIM_TCP_ACK), "SYN %d not answered", i);
+  }
+  CHECK(sink_opens == opens, "service started by a SYN alone");
+
+  // The first is forgotten: completing it now gets a RST
+  ack(t[0], 0, 0, 65535);
+  CHECK(sim_tcp_recv(t[0], &seg, 10 * MSEC) && (seg.flags & SIM_TCP_RST),
+        "the oldest half-open connection is still there");
+  CHECK(sink_opens == opens, "service started for a forgotten connection");
+
+  // The others complete as usual, and that is when the service starts
+  ack(t[8], 0, 0, 65535);
+  sim_wait(clock_get() + 1 * MSEC);
+  CHECK(sink_opens == opens + 1, "service not started by the handshake");
+  sink_send(t[8], 0, 1000);
+  expect_ack(t[8], 1000, 30 * MSEC, "data");
+  CHECK(sink_ok(1000), "sink has %u bytes", sink_len);
+  peer_close(t[8], 1000, 0);
+
+  for(int i = 1; i < 8; i++)
+    sim_tcp_send(t[i], SIM_TCP_RST, 0, 0, 0, NULL, 0);
+  sim_wait(clock_get() + 10 * MSEC);
+  CHECK(sink_opens == opens + 1, "service started %d times",
+        sink_opens - opens);
+}
+
+
+static void
+scn_blind_attacks(void)
+{
+  hosttest_log("---- segments that do not fit the connection ----");
+  sim_tcp_t *t = peer_new(PORT_SINK8K);
+  sim_tcp_seg_t seg;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+  sink_send(t, 0, 1000);
+  expect_ack(t, 1000, 30 * MSEC, "data");
+
+  // A SYN right where the next segment is expected: answered with an
+  // ACK, the connection stays
+  sim_tcp_send(t, SIM_TCP_SYN, 1000, 0, 65535, NULL, 0);
+  if(CHECK(sim_tcp_recv(t, &seg, 10 * MSEC), "SYN not answered"))
+    CHECK(seg.flags == SIM_TCP_ACK && seg.ack == 1000 && seg.seq == 0,
+          "SYN answered with flags=%x ack=%u seq=%u", seg.flags, seg.ack,
+          seg.seq);
+  sink_send(t, 1000, 2000);
+  expect_ack(t, 2000, 30 * MSEC, "data after the SYN");
+
+  // Data in the window, but with an ACK number from long before
+  // anything Mios has sent: not taken
+  static uint8_t data[500];
+  for(size_t i = 0; i < sizeof(data); i++)
+    data[i] = pattern(2000 + i);
+  sim_tcp_send(t, SIM_TCP_ACK | SIM_TCP_PSH, 2000, -100000, 65535, data,
+               sizeof(data));
+  expect_ack(t, 2000, 10 * MSEC, "ancient ACK number");
+  CHECK(sink_ok(2000), "sink has %u bytes", sink_len);
+
+  // The same with an ACK number that is only a little old is taken, a
+  // segment can be late
+  sim_tcp_send(t, SIM_TCP_ACK | SIM_TCP_PSH, 2000, -100, 65535, data,
+               sizeof(data));
+  expect_ack(t, 2500, 30 * MSEC, "late segment");
+  CHECK(sink_ok(2500), "sink has %u bytes", sink_len);
+
+  peer_close(t, 2500, 0);
+}
+
+
+static void
+scn_initial_seq(void)
+{
+  hosttest_log("---- initial sequence numbers ----");
+  sim_tcp_t *a = peer_new(PORT_SINK);
+  sim_tcp_t *b = peer_new(PORT_SINK);
+
+  if(!CHECK(sim_tcp_connect(a, 65535, NULL), "handshake failed"))
+    return;
+  const uint32_t isn0 = a->mios_isn;
+  if(!CHECK(sim_tcp_connect(b, 65535, NULL), "handshake failed"))
+    return;
+
+  // Two connections at the same instant: unrelated
+  const uint32_t apart = b->mios_isn - isn0;
+  CHECK(apart > 1000000 && -apart > 1000000,
+        "sequence numbers of two connections are %d apart", (int)apart);
+  peer_close(a, 0, 0);
+  peer_close(b, 0, 0);
+
+  // All 32 bits are used: the top one is not always the same. (Sixteen
+  // samples, so this fails by chance once in 32768 changes of seed)
+  int top[2] = {};
+  for(int i = 0; i < 16; i++) {
+    a = peer_new(PORT_SINK);
+    if(!CHECK(sim_tcp_connect(a, 65535, NULL), "handshake failed"))
+      return;
+    top[a->mios_isn >> 31]++;
+    peer_close(a, 0, 0);
+  }
+  CHECK(top[0] && top[1], "top bit of the sequence number: %d zeros, "
+        "%d ones", top[0], top[1]);
+}
+
+
+static void
 script_thread(void *arg)
 {
   scn_transfer();
@@ -1480,6 +1603,9 @@ script_thread(void *arg)
   scn_sack_active_open();
   scn_tail_loss();
   scn_mtu();
+  scn_half_open();
+  scn_blind_attacks();
+  scn_initial_seq();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);
