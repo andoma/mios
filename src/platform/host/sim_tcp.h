@@ -33,6 +33,9 @@ typedef struct sim_tcp_seg {
   const uint8_t *data;         // Valid until the next receive
   int mss;                     // From the options, -1 if absent
   int wscale;                  // From the options, -1 if absent
+  int sack_permitted;          // From the options
+  int nsack;                   // SACK blocks, relative to the peer's data
+  uint32_t sack[4][2];         // [start, end)
 } sim_tcp_seg_t;
 
 typedef struct sim_tcp {
@@ -48,6 +51,16 @@ typedef struct sim_tcp {
   // Options the peer puts in its SYN or SYN-ACK
   int mss;                     // 0: no MSS option
   int wscale;                  // -1: no window scale option
+  int sack_permitted;          // SACK-permitted option
+
+  // SACK blocks [start, end), relative to Mios's data, that go in every
+  // segment without SYN while nsack is not zero
+  int nsack;
+  uint32_t sack[4][2];
+
+  // If set, frames are handed to this instead of to the vnet, for a
+  // script that wants to lose or delay them
+  void (*tx)(struct sim_tcp *t, const uint8_t *frame, size_t len);
 
   uint32_t isn;                // The peer's initial sequence number
   uint32_t mios_isn;           // Learned from Mios's SYN
@@ -60,6 +73,13 @@ typedef struct sim_tcp {
   uint8_t rxframe[2048];
   uint8_t txframe[2048];
 } sim_tcp_t;
+
+// Look at a frame Mios sent (for a script that receives from the vnet
+// itself). Returns 1 if it was a segment for this connection, described
+// in seg; seg->data points into the frame. ARP requests for the peer's
+// address are answered
+int sim_tcp_input(sim_tcp_t *t, const uint8_t *frame, size_t len,
+                  sim_tcp_seg_t *seg);
 
 // Next segment Mios sends on this connection. Returns 0 if 'timeout'
 // (us) passes first. Segments for other connections are ignored

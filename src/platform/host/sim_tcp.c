@@ -82,6 +82,16 @@ sim_tcp_send_raw(sim_tcp_t *t, int flags, uint32_t seq, uint32_t ack,
     if(t->wscale >= 0) {
       *o++ = 1; *o++ = 3; *o++ = 3; *o++ = t->wscale;
     }
+    if(t->sack_permitted) {
+      *o++ = 1; *o++ = 1; *o++ = 4; *o++ = 2;
+    }
+  } else if(t->nsack) {
+    *o++ = 1; *o++ = 1; *o++ = 5; *o++ = 2 + 8 * t->nsack;
+    for(int i = 0; i < t->nsack; i++) {
+      wr32(o, t->mios_isn + 1 + t->sack[i][0]);
+      wr32(o + 4, t->mios_isn + 1 + t->sack[i][1]);
+      o += 8;
+    }
   }
   const size_t hdrlen = o - th;
   if(len)
@@ -117,7 +127,10 @@ sim_tcp_send_raw(sim_tcp_t *t, int flags, uint32_t seq, uint32_t ack,
   sum = cksum_add(sum, th, tcplen);
   wr16(th + 16, cksum_fold(sum));
 
-  vnet_peer_send(t->vnet, f, 14 + 20 + tcplen);
+  if(t->tx != NULL)
+    t->tx(t, f, 14 + 20 + tcplen);
+  else
+    vnet_peer_send(t->vnet, f, 14 + 20 + tcplen);
 }
 
 
@@ -131,9 +144,8 @@ sim_tcp_send(sim_tcp_t *t, int flags, uint32_t seq, uint32_t ack,
 }
 
 
-// Returns 1 if the frame was a segment for this connection
-static int
-sim_tcp_parse(sim_tcp_t *t, const uint8_t *f, size_t len, sim_tcp_seg_t *seg)
+int
+sim_tcp_input(sim_tcp_t *t, const uint8_t *f, size_t len, sim_tcp_seg_t *seg)
 {
   if(len < 14)
     return 0;
@@ -170,6 +182,8 @@ sim_tcp_parse(sim_tcp_t *t, const uint8_t *f, size_t len, sim_tcp_seg_t *seg)
   seg->data = th + hdrlen;
   seg->mss = -1;
   seg->wscale = -1;
+  seg->sack_permitted = 0;
+  seg->nsack = 0;
 
   const uint8_t *o = th + 20;
   const uint8_t *end = th + hdrlen;
@@ -184,6 +198,15 @@ sim_tcp_parse(sim_tcp_t *t, const uint8_t *f, size_t len, sim_tcp_seg_t *seg)
       seg->mss = rd16(o + 2);
     if(o[0] == 3 && o[1] == 3)
       seg->wscale = o[2];
+    if(o[0] == 4 && o[1] == 2)
+      seg->sack_permitted = 1;
+    if(o[0] == 5 && o[1] >= 10 && o[1] <= 34 && !((o[1] - 2) & 7)) {
+      seg->nsack = (o[1] - 2) / 8;
+      for(int i = 0; i < seg->nsack; i++) {
+        seg->sack[i][0] = rd32(o + 2 + i * 8) - (t->isn + 1);
+        seg->sack[i][1] = rd32(o + 6 + i * 8) - (t->isn + 1);
+      }
+    }
     o += o[1];
   }
 
@@ -209,7 +232,7 @@ sim_tcp_recv(sim_tcp_t *t, sim_tcp_seg_t *seg, uint64_t timeout)
                                      deadline);
     if(n < 0)
       return 0;
-    if(sim_tcp_parse(t, t->rxframe, n, seg))
+    if(sim_tcp_input(t, t->rxframe, n, seg))
       return 1;
   }
 }
@@ -254,7 +277,7 @@ sim_tcp_accept_syn(sim_tcp_t *t, uint16_t wnd, sim_tcp_seg_t *syn,
     if(n >= 54 && rd16(f + 12) == ETHERTYPE_IPV4 && f[14 + 9] == 6 &&
        rd16(f + 34 + 2) == t->port && f[34 + 13] == SIM_TCP_SYN)
       t->mios_port = rd16(f + 34);
-    if(sim_tcp_parse(t, f, n, syn) && syn->flags == SIM_TCP_SYN)
+    if(sim_tcp_input(t, f, n, syn) && syn->flags == SIM_TCP_SYN)
       break;
   }
 
