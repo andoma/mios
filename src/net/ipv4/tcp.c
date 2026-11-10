@@ -192,13 +192,13 @@ wtol_memcpy(uint8_t *dst, const uint8_t *fifo,
   const size_t mask = size - 1;
   offset &= mask;
 
-  uint32_t end = (offset + length) & mask;
-
-  if(end >= offset) {
+  // Compare without masking the end: a copy of the whole FIFO from a
+  // nonzero offset ends where it starts and still wraps
+  if(offset + length <= size) {
     memcpy(dst, fifo + offset, length);
   } else {
     memcpy(dst, fifo + offset, size - offset);
-    memcpy(dst + size - offset, fifo, end);
+    memcpy(dst + size - offset, fifo, length - (size - offset));
   }
 }
 
@@ -209,13 +209,12 @@ ltow_memcpy(uint8_t *fifo, const uint8_t *src,
 {
   const size_t mask = size - 1;
   offset &= mask;
-  uint32_t end = (offset + length) & mask;
 
-  if(end >= offset) {
+  if(offset + length <= size) {
     memcpy(fifo + offset, src, length);
   } else {
     memcpy(fifo + offset, src, size - offset);
-    memcpy(fifo, src + size - offset, end);
+    memcpy(fifo, src + size - offset, length - (size - offset));
   }
 }
 
