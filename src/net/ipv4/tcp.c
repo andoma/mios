@@ -961,7 +961,9 @@ tcp_stream_read(stream_t *s, void *buf, size_t size, size_t require)
     ssize_t used = tcb_rxfifo_user_bytes(tcb);
     if(used < 0) {
       irq_permit(q);
-      return used;
+      // End of stream. What we already copied comes first, the caller
+      // gets the error on its next read
+      return total ? total : used;
     }
 
     if(used == 0) {
