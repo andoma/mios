@@ -45,6 +45,10 @@
  *  TCP Selective Acknowledgment Options
  *          https://datatracker.ietf.org/doc/html/rfc2018
  *
+ *  The RACK-TLP Loss Detection Algorithm for TCP (the tail loss probe
+ *  of section 7 only)
+ *          https://datatracker.ietf.org/doc/html/rfc8985
+ *
  *  A Conservative Loss Recovery Algorithm Based on Selective
  *  Acknowledgment (SACK) for TCP (the retransmission rules, there is
  *  no congestion window for the rest of it to work on)
@@ -82,6 +86,21 @@
  * the list already, and the block the last segment went into is
  * reported first as it should be.
  *
+ * Tail loss probe
+ *
+ * Duplicate ACKs only come if something arrives after the loss. When
+ * the last segments of a burst are lost nothing does, and that would
+ * leave it to the retransmission timeout, which is long (250 ms at
+ * least) and backs off. So when data is in flight and no ACK has come
+ * for two round trip times (TCP_PTO_MIN at least, to let a delayed ACK
+ * through, and more if the round trip time varies), one segment is
+ * sent as a probe: new data if there is any
+ * and the window has room, otherwise the last segment again. If that
+ * was all that was missing, its ACK settles it. If not, the peer
+ * answers with a duplicate ACK, and after a probe a single one is
+ * enough to begin recovery. One probe per flight, then the timeout
+ * takes over as before.
+ *
  * Out-of-order data
  *
  * The RX FIFO is indexed by sequence number, so a segment that arrives
@@ -114,6 +133,11 @@
 // last segments of a burst.
 #define TCP_RTO_MIN  250 // ms, also the initial value
 #define TCP_RTO_MAX 4000 // ms
+
+// The least time without an ACK before a tail loss probe is sent. Above
+// the delayed ACK of common peers (40 ms on Linux, 20 ms here), or
+// every burst that ends in an odd segment would be probed for nothing
+#define TCP_PTO_MIN 50 // ms
 
 #define TCP_EMIT_ACK   0x1 // Send an ACK even if there is no data to send
 #define TCP_EMIT_PROBE 0x2 // Send one byte even if the window is closed
@@ -189,6 +213,10 @@ typedef struct tcb {
   uint8_t tcb_recovering;
   uint32_t tcb_recover;  // snd.nxt when recovery began
 
+  // Tail loss probe, see the comment at the top
+  uint8_t tcb_tlp_armed; // The retransmission timer is set for a probe
+  uint8_t tcb_tlp_out;   // A probe has been sent for this flight
+
   // RFC 7323 window scaling state, populated from the WSopt exchange at
   // SYN time. wnd_shift is the peer's announced shift — applied to any
   // wnd field we receive after the handshake. wnd_scale_ok means the
@@ -248,6 +276,7 @@ typedef struct tcb {
   uint64_t tcb_rx_bytes;
   uint64_t tcb_rtx_bytes;
   uint32_t tcb_fast_rtx;
+  uint32_t tcb_tlp_count;
 
   uint64_t tcb_last_rx;
   uint32_t tcb_timo;
@@ -775,13 +804,61 @@ arm_rtx(tcb_t *tcb, uint64_t now)
 {
   int rtx_duration_ms;
 
+  tcb->tcb_tlp_armed = 0;
+
   // Something in flight, or something waiting for the peer's window
   if(tcb->tcb_snd.una != tcb->tcb_snd.wrptr) {
     rtx_duration_ms = tcb->tcb_rto;
+
+    // A tail loss probe first, if it would come sooner. Not when the
+    // peer's window is closed: what is in flight then is a zero window
+    // probe, with a pace of its own
+    if(tcb->tcb_snd.una != tcb->tcb_snd.nxt && !tcb->tcb_recovering &&
+       !tcb->tcb_tlp_out && !tcb->tcb_pending_syn && tcb->tcb_srtt >= 0 &&
+       tcb->tcb_snd.wnd) {
+      // Two round trips, and no sooner than a timeout without its
+      // floor would be: a probe that was not needed cannot be told
+      // from one that was, so it should be rare
+      const int pto = MAX(MAX(2 * tcb->tcb_srtt,
+                              tcb->tcb_srtt + 4 * tcb->tcb_rttvar) / 1000,
+                          TCP_PTO_MIN);
+      if(pto < rtx_duration_ms) {
+        rtx_duration_ms = pto;
+        tcb->tcb_tlp_armed = 1;
+      }
+    }
   } else {
     rtx_duration_ms = TCP_KEEPALIVE_INTERVAL;
   }
   net_timer_arm(&tcb->tcb_rtx_timer, now + rtx_duration_ms * 1000);
+}
+
+
+// No ACK for a while with data in flight: send one segment to find out
+// if the end of it was lost
+static void
+tcp_tail_loss_probe(tcb_t *tcb)
+{
+  const uint32_t nxt = tcb->tcb_snd.nxt;
+  const uint32_t in_flight = nxt - tcb->tcb_snd.una;
+
+  tcb->tcb_tlp_out = 1;
+  tcb->tcb_tlp_count++;
+
+  // New data, if the window has room for it
+  if(tcb->tcb_snd.wrptr != nxt && tcb->tcb_snd.wnd > in_flight) {
+    tcp_emit(tcb, NULL, nxt, 0, "tlp");
+    if(tcb->tcb_snd.nxt != nxt)
+      return;
+  }
+
+  // The last segment again. A round trip measurement in progress is
+  // left to finish: if this probe was not needed it is because the
+  // path is slower than we think, and then the measurement is what
+  // tells us. (If the segment was in fact lost the result is too long
+  // by the time we waited, which errs on the safe side.)
+  const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+  tcp_emit(tcb, NULL, nxt - MIN(mss, in_flight), 0, "tlp-rtx");
 }
 
 
@@ -935,6 +1012,12 @@ tcp_rtx_cb(void *opaque, uint64_t now)
     return;
   }
 
+  if(tcb->tcb_tlp_armed && tcb->tcb_snd.una != tcb->tcb_snd.nxt) {
+    tcp_tail_loss_probe(tcb);
+    arm_rtx(tcb, now); // The timeout proper, from here
+    return;
+  }
+
   pbuf_t *pb;
   if(tcb->tcb_snd.una == tcb->tcb_snd.wrptr) {
     // Send keep-alive if ESTABLISHED
@@ -996,8 +1079,10 @@ tcp_dup_ack(tcb_t *tcb, int dup)
     tcb->tcb_dupacks++;
 
   // Lost, if three segments have arrived after it. Counted in ACKs or,
-  // as ACKs get lost too, in what the peer says it has (RFC 6675)
-  if(tcb->tcb_dupacks < 3) {
+  // as ACKs get lost too, in what the peer says it has (RFC 6675).
+  // After a tail loss probe there is nothing more to wait for: the
+  // peer has the probe and still misses something
+  if(tcb->tcb_dupacks < 3 && !(dup && tcb->tcb_tlp_out)) {
     const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
     if(tcp_sack_bytes(tcb) <= 2 * mss)
       return;
@@ -1022,6 +1107,7 @@ tcp_ack(tcb_t *tcb, uint32_t count)
 
   tcb->tcb_snd.una += count;
   tcb->tcb_pending_syn = 0;
+  tcb->tcb_tlp_out = 0;
   tcp_sack_prune(tcb, tcb->tcb_snd.una);
   task_wakeup(&tcb->tcb_tx_waitq, 1);
 
@@ -1144,10 +1230,9 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
     case TCP_STATE_CLOSE_WAIT:
     case TCP_STATE_CLOSING:
     case TCP_STATE_LAST_ACK:
-      if(tcb->tcb_snd.una == tcb->tcb_snd.nxt) {
-        // Nothing currently outstanding, arm rtx timer
-        net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + tcb->tcb_rto * 1000);
-      }
+    {
+      // (Nothing outstanding: the retransmission timer starts here)
+      const int idle = tcb->tcb_snd.una == tcb->tcb_snd.nxt;
 
       while(tcb->tcb_snd.wrptr != tcb->tcb_snd.nxt) {
         uint32_t unsent = tcb->tcb_snd.wrptr - tcb->tcb_snd.nxt;
@@ -1175,7 +1260,10 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
         if(tcb->tcb_snd.nxt == nxt)
           break; // Nothing more could be sent
       }
+      if(idle)
+        arm_rtx(tcb, clock_get());
       break;
+    }
 
     default:
       break;
@@ -2364,12 +2452,13 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                ntohs(tcb->tcb_local_port),
                tcb->tcb_remote_addr,
                ntohs(tcb->tcb_remote_port));
-    cli_printf(cli, "\t%s TX:%"PRIu64" RX:%"PRIu64" ReTX:%"PRIu64"  Fast ReTX:%d  Failed ReTX:%d\n",
+    cli_printf(cli, "\t%s TX:%"PRIu64" RX:%"PRIu64" ReTX:%"PRIu64"  Fast ReTX:%d  Probes:%d  Failed ReTX:%d\n",
                tcp_state_to_str(tcb->tcb_state),
                tcb->tcb_tx_bytes,
                tcb->tcb_rx_bytes,
                tcb->tcb_rtx_bytes,
                tcb->tcb_fast_rtx,
+               tcb->tcb_tlp_count,
                tcb->tcb_rtx_drop);
     cli_printf(cli, "\tRTO: %d ms  SRTT: %d us  Unacked bytes:%d%s",
                tcb->tcb_rto, tcb->tcb_srtt,

@@ -334,12 +334,20 @@ scn_rto(void)
   const uint64_t t0 = clock_get();
   CHECK(collect(t, 0, 4 * MSS) == 4, "expected four full segments");
 
-  // Nothing is acked: the first segment comes again after the RTO
+  // Nothing is acked. First the last segment comes again, as a tail
+  // loss probe. That is not answered either, and the first segment
+  // comes again after the RTO
+  if(CHECK(sim_tcp_recv(t, &seg, SEC), "no probe")) {
+    const int ms = (seg.at - t0) / 1000;
+    CHECK(seg.seq == 3 * MSS && seg.len == MSS && data_ok(&seg),
+          "probe seq=%u len=%d", seg.seq, seg.len);
+    CHECK(ms >= 40 && ms <= 60, "probe after %d ms", ms);
+  }
   if(CHECK(sim_tcp_recv(t, &seg, SEC), "no retransmission")) {
     const int ms = (seg.at - t0) / 1000;
     CHECK(seg.seq == 0 && seg.len == MSS && data_ok(&seg),
           "retransmitted seq=%u len=%d", seg.seq, seg.len);
-    CHECK(ms >= 200 && ms <= 300, "retransmitted after %d ms", ms);
+    CHECK(ms >= 250 && ms <= 350, "retransmitted after %d ms", ms);
   }
 
   // Ack everything: quiet from then on
@@ -472,10 +480,12 @@ scn_timeout_recovery(void)
   if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
     return;
 
-  // The whole burst of four is lost, so there are no duplicate ACKs.
-  // The timeout finds the first; the rest follow on the partial ACKs
+  // The whole burst of four is lost, and the tail loss probe after
+  // it, so there are no duplicate ACKs. The timeout finds the first;
+  // the rest follow on the partial ACKs
   source_request(t, &cmdseq, 0, 4 * MSS);
   CHECK(collect(t, 0, 4 * MSS) == 4, "expected four full segments");
+  expect_rtx(t, 3 * MSS, 60 * MSEC, "probe");
   expect_rtx(t, 0, 300 * MSEC, "timeout");
   const uint64_t t0 = clock_get();
   for(int i = 1; i < 4; i++) {
@@ -542,7 +552,7 @@ scn_active_open(void)
             "segment %d: seq=%u len=%d", i, seg.seq, seg.len);
     rcv_nxt += 1000;
   }
-  expect_quiet(t, 100 * MSEC, "window full");
+  expect_quiet(t, 40 * MSEC, "window full");
 
   sim_tcp_send(t, SIM_TCP_RST, 0, 0, 0, NULL, 0);
   client_wait();
@@ -980,14 +990,15 @@ scn_backoff_and_timeout(void)
   if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
     return;
 
-  // The peer goes away. The segment is retransmitted at doubling
-  // intervals up to a ceiling, and after 21 s of silence Mios gives
-  // up and says so with a RST
+  // The peer goes away. The segment is sent again as a tail loss
+  // probe, then retransmitted at doubling intervals up to a ceiling,
+  // and after 21 s of silence Mios gives up and says so with a RST
   source_request(t, &cmdseq, 0, MSS);
   CHECK(collect(t, 0, MSS) == 1, "expected one segment");
   uint64_t prev = clock_get();
-  static const int expect_ms[] = { 250, 500, 1000, 2000, 4000, 4000, 4000, 4000 };
-  for(int i = 0; i < 8; i++) {
+  static const int expect_ms[] = { 50, 250, 500, 1000, 2000, 4000, 4000, 4000,
+                                   4000 };
+  for(int i = 0; i < 9; i++) {
     if(!CHECK(sim_tcp_recv(t, &seg, 10 * SEC), "no retransmission %d", i))
       return;
     const int ms = (seg.at - prev) / 1000;
@@ -1314,6 +1325,78 @@ scn_sack_active_open(void)
 
 
 static void
+scn_tail_loss(void)
+{
+  hosttest_log("---- tail loss probe ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  uint32_t cmdseq = 0;
+
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Only the last of five segments is lost: nothing arrives after it,
+  // so no duplicate ACKs. The probe is that segment
+  source_request(t, &cmdseq, 0, 5 * MSS);
+  CHECK(collect(t, 0, 5 * MSS) == 5, "expected five full segments");
+  uint64_t t0 = clock_get();
+  ack(t, cmdseq, 4 * MSS, 65535);
+  expect_quiet(t, 40 * MSEC, "before the probe");
+  expect_rtx(t, 4 * MSS, 20 * MSEC, "probe");
+  ack(t, cmdseq, 5 * MSS, 65535);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  // The last three of ten are lost. The probe is the last one; the
+  // peer's answer, one duplicate ACK, shows that more is missing
+  source_request(t, &cmdseq, 5 * MSS, 10 * MSS);
+  CHECK(collect(t, 5 * MSS, 15 * MSS) == 10, "expected ten full segments");
+  t0 = clock_get();
+  ack(t, cmdseq, 12 * MSS, 65535);
+  expect_rtx(t, 14 * MSS, 60 * MSEC, "probe");
+  ack(t, cmdseq, 12 * MSS, 65535);
+  expect_rtx(t, 12 * MSS, 1 * MSEC, "first of the tail");
+  ack(t, cmdseq, 13 * MSS, 65535);
+  expect_rtx(t, 13 * MSS, 1 * MSEC, "second of the tail");
+  ack(t, cmdseq, 15 * MSS, 65535);
+  int ms = (clock_get() - t0) / 1000;
+  CHECK(ms < 70, "recovery took %d ms", ms);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  // One probe only: if it is lost as well the timeout takes over
+  source_request(t, &cmdseq, 15 * MSS, 3 * MSS);
+  CHECK(collect(t, 15 * MSS, 18 * MSS) == 3, "expected three full segments");
+  t0 = clock_get();
+  ack(t, cmdseq, 16 * MSS, 65535);
+  expect_rtx(t, 17 * MSS, 60 * MSEC, "probe");
+  expect_quiet(t, 200 * MSEC, "after the probe");
+  expect_rtx(t, 16 * MSS, 100 * MSEC, "timeout");
+  ms = (clock_get() - t0) / 1000;
+  CHECK(ms >= 290 && ms <= 310, "timeout after %d ms", ms);
+  ack(t, cmdseq, 18 * MSS, 65535);
+  expect_quiet(t, 2 * SEC, "all acked");
+  peer_close(t, cmdseq, 18 * MSS);
+
+  // With SACK the answer to the probe shows the whole hole
+  t = peer_new(PORT_SOURCE);
+  cmdseq = 0;
+  t->sack_permitted = 1;
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+  source_request(t, &cmdseq, 0, 10 * MSS);
+  CHECK(collect(t, 0, 10 * MSS) == 10, "expected ten full segments");
+  ack(t, cmdseq, 7 * MSS, 65535);
+  expect_rtx(t, 9 * MSS, 60 * MSEC, "probe");
+  sack_set(t, 1, 9 * MSS, 10 * MSS);
+  ack(t, cmdseq, 7 * MSS, 65535);
+  expect_rtx(t, 7 * MSS, 1 * MSEC, "first of the tail");
+  expect_rtx(t, 8 * MSS, 1 * MSEC, "second of the tail");
+  sack_set(t, 0);
+  ack(t, cmdseq, 10 * MSS, 65535);
+  expect_quiet(t, 2 * SEC, "all acked");
+  peer_close(t, cmdseq, 10 * MSS);
+}
+
+
+static void
 script_thread(void *arg)
 {
   scn_transfer();
@@ -1337,6 +1420,7 @@ script_thread(void *arg)
   scn_sack_receive();
   scn_sack_send();
   scn_sack_active_open();
+  scn_tail_loss();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);
