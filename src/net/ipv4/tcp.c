@@ -242,7 +242,8 @@ typedef struct tcb {
     uint32_t rdptr;
     uint32_t nxt;
     uint16_t up;
-    uint16_t mss;
+    uint16_t mss;     // Largest segment our interface carries, which is
+                      // also what we tell the peer to send at most
     uint16_t adv_wnd; // Window in the last segment we sent
   } tcb_rcv;
 
@@ -252,7 +253,7 @@ typedef struct tcb {
   uint16_t tcb_remote_port;
   uint16_t tcb_local_port;
 
-  uint16_t tcb_max_segment_size;
+  uint16_t tcb_max_segment_size; // The peer's MSS (536 if it said nothing)
 
   uint32_t tcb_txfifo_size; // Must be power of 2
   uint32_t tcb_rxfifo_size; // Must be power of 2
@@ -411,6 +412,26 @@ tcp_blocks_insert(tcp_block_t *v, uint8_t *count, int max, uint32_t base,
 static void tcp_close(tcb_t *tcb, const char *reason);
 
 static const char *tcp_state_to_str(int state);
+
+
+// The largest segment we send: no more than the peer said it can
+// take, nor than our interface carries
+static inline uint32_t
+tcp_snd_mss(const tcb_t *tcb)
+{
+  return MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+}
+
+
+// What fits in a packet on the interface the connection uses, with
+// IPv4 and TCP headers without options
+static void
+tcp_set_netif(tcb_t *tcb, const netif_t *ni)
+{
+  const int mtu = ni->ni_mtu ? ni->ni_mtu : 1500;
+  tcb->tcb_rcv.mss =
+    MAX(mtu - (int)(sizeof(ipv4_header_t) + sizeof(tcp_hdr_t)), 64);
+}
 
 
 static void
@@ -717,9 +738,7 @@ tcp_emit_limit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags,
   th->seq = htonl(seq);
   int total = 0;
 
-  // No more than the peer said it can take (536 if it said nothing)
-  size_t max_pkt_size =
-    MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size) + sizeof(tcp_hdr_t);
+  size_t max_pkt_size = tcp_snd_mss(tcb) + sizeof(tcp_hdr_t);
 
   while(bytes_in_fifo && pb->pb_pktlen < max_pkt_size) {
     if(p->pb_offset + p->pb_buflen == PBUF_DATA_SIZE) {
@@ -857,7 +876,7 @@ tcp_tail_loss_probe(tcb_t *tcb)
   // path is slower than we think, and then the measurement is what
   // tells us. (If the segment was in fact lost the result is too long
   // by the time we waited, which errs on the safe side.)
-  const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+  const uint32_t mss = tcp_snd_mss(tcb);
   tcp_emit(tcb, NULL, nxt - MIN(mss, in_flight), 0, "tlp-rtx");
 }
 
@@ -945,7 +964,7 @@ tcp_sack_input(tcb_t *tcb, const uint8_t *opt, size_t len, uint32_t ack)
 static uint32_t
 tcp_rtx_range(tcb_t *tcb, uint32_t seq, uint32_t end)
 {
-  const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+  const uint32_t mss = tcp_snd_mss(tcb);
   while(seq != end) {
     const uint32_t len = MIN(end - seq, mss);
     if(tcp_emit_limit(tcb, NULL, seq, 0, len, "rtx"))
@@ -982,7 +1001,7 @@ tcp_recovery_rtx(tcb_t *tcb, int una_lost)
 
   if(seq == una && una_lost) {
     // Nothing reported beyond it: one segment
-    const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+    const uint32_t mss = tcp_snd_mss(tcb);
     seq = tcp_rtx_range(tcb, una, una + MIN(mss, tcb->tcb_snd.nxt - una));
   }
   tcb->tcb_rtx_nxt = seq;
@@ -1083,7 +1102,7 @@ tcp_dup_ack(tcb_t *tcb, int dup)
   // After a tail loss probe there is nothing more to wait for: the
   // peer has the probe and still misses something
   if(tcb->tcb_dupacks < 3 && !(dup && tcb->tcb_tlp_out)) {
-    const uint32_t mss = MIN(tcb->tcb_rcv.mss, tcb->tcb_max_segment_size);
+    const uint32_t mss = tcp_snd_mss(tcb);
     if(tcp_sack_bytes(tcb) <= 2 * mss)
       return;
   }
@@ -1198,6 +1217,11 @@ tcp_do_connect(tcb_t *tcb)
   // in tcp_rtx_cb()
   tcb->tcb_last_rx = clock_get();
 
+  // The MSS for our SYN, from the interface it leaves by
+  nexthop_t *nh = ipv4_nexthop_resolve(tcb->tcb_remote_addr);
+  if(nh != NULL)
+    tcp_set_netif(tcb, nh->nh_netif);
+
   tcp_send_syn(tcb, TCP_F_SYN, NULL);
 
   mutex_lock(&tcbs_mutex);
@@ -1250,7 +1274,7 @@ tcp_task_cb(net_task_t *nt, uint32_t signals)
         // in flight. A FLUSH event (explicit stream flush / close path)
         // bypasses this and drains everything.
         if(!force &&
-           unsent < tcb->tcb_max_segment_size &&
+           unsent < tcp_snd_mss(tcb) &&
            tcb->tcb_snd.una != tcb->tcb_snd.nxt)
           break;
 
@@ -1687,7 +1711,7 @@ tcp_stream_writev(struct stream *s, struct iovec *iov, size_t iovcnt,
   // unACKed data in flight — safe to send a small segment without
   // starving the wire). Partial-segment tails on an active pipeline are
   // held by the emit loop below and flushed when the next ACK arrives.
-  if(unsent >= tcb->tcb_max_segment_size || pipeline_idle)
+  if(unsent >= tcp_snd_mss(tcb) || pipeline_idle)
     net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
 
   return written;
@@ -1940,6 +1964,7 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
 
     tcb->tcb_local_addr = ni->ni_ipv4_local_addr;
     tcb->tcb_remote_addr = remote_addr;
+    tcp_set_netif(tcb, ni);
 
     tcb->tcb_local_port = local_port;
     tcb->tcb_remote_port = remote_port;
@@ -2465,8 +2490,8 @@ cmd_tcp(cli_t *cli, int argc, char **argv)
                tcb->tcb_fast_rtx,
                tcb->tcb_tlp_count,
                tcb->tcb_rtx_drop);
-    cli_printf(cli, "\tRTO: %d ms  SRTT: %d us  Unacked bytes:%d%s",
-               tcb->tcb_rto, tcb->tcb_srtt,
+    cli_printf(cli, "\tRTO: %d ms  SRTT: %d us  MSS: %d  Unacked bytes:%d%s",
+               tcb->tcb_rto, tcb->tcb_srtt, (int)tcp_snd_mss(tcb),
                tcb->tcb_snd.nxt  - tcb->tcb_snd.una,
                tcb->tcb_sack_ok ? "  SACK" : "");
     cli_printf(cli, "\tRX-FIFO:%d  TX-FIFO:%d\n",

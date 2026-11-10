@@ -35,6 +35,7 @@ typedef struct sim_dhcpd {
   uint32_t lease_time;         // seconds
   uint32_t ntp_server;         // 0: don't include
   uint32_t dns_server;         // 0: don't include
+  uint16_t mtu;                // Interface MTU option, 0: don't include
 
   // DNS server on server_ip, names not in the table get NXDOMAIN
   const sim_dns_record_t *dns_records;

@@ -145,6 +145,7 @@ static volatile uint32_t client_arg;
 // ---- Peer side: helpers for the scenarios ----
 
 static vnet_t *tcp_vnet;
+static netif_t *tcp_ni;        // Mios's interface on it
 static uint32_t peer_ip, mios_ip;
 static volatile int script_done;
 
@@ -1397,6 +1398,63 @@ scn_tail_loss(void)
 
 
 static void
+scn_mtu(void)
+{
+  hosttest_log("---- segment size follows the interface MTU ----");
+
+  // An interface that carries less than Ethernet does. (The script may
+  // set this: nothing else runs while it does)
+  tcp_ni->ni_mtu = 1000;
+
+  // Accepted connection: Mios asks for segments that fit, and sends
+  // no larger ones itself although the peer would take them
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  sim_tcp_seg_t synack, syn, seg;
+  uint32_t cmdseq = 0, rcv_nxt = 0;
+  if(!CHECK(sim_tcp_connect(t, 65535, &synack), "handshake failed"))
+    return;
+  CHECK(synack.mss == 960, "SYN-ACK mss=%d", synack.mss);
+  source_request(t, &cmdseq, 0, 3000);
+  static const int expect[] = { 960, 960, 960, 120 };
+  for(int i = 0; i < 4; i++) {
+    if(!CHECK(sim_tcp_recv(t, &seg, SEC), "no segment %d", i))
+      break;
+    CHECK(seg.seq == rcv_nxt && seg.len == expect[i] && data_ok(&seg),
+          "segment %d: seq=%u len=%d", i, seg.seq, seg.len);
+    rcv_nxt += seg.len;
+    ack(t, cmdseq, rcv_nxt, 65535);
+  }
+  peer_close(t, cmdseq, rcv_nxt);
+
+  // Connection opened by Mios: the same, from the interface the route
+  // to the peer goes by
+  t = peer_new(0);
+  client(CLIENT_CONNECT, t->port);
+  if(CHECK(sim_tcp_accept(t, 65535, &syn, SEC), "handshake failed")) {
+    CHECK(syn.mss == 960, "SYN mss=%d", syn.mss);
+    client_wait();
+    client(CLIENT_WRITE, 2000);
+    static const int expect2[] = { 960, 960, 80 };
+    rcv_nxt = 0;
+    for(int i = 0; i < 3; i++) {
+      if(!CHECK(sim_tcp_recv(t, &seg, SEC), "no segment %d", i))
+        break;
+      CHECK(seg.seq == rcv_nxt && seg.len == expect2[i],
+            "segment %d: seq=%u len=%d", i, seg.seq, seg.len);
+      rcv_nxt += seg.len;
+      ack(t, 0, rcv_nxt, 65535);
+    }
+    client_wait();
+    sim_tcp_send(t, SIM_TCP_RST, 0, 0, 0, NULL, 0);
+    client(CLIENT_CLOSE, 0);
+    client_wait();
+  }
+
+  tcp_ni->ni_mtu = 1500;
+}
+
+
+static void
 script_thread(void *arg)
 {
   scn_transfer();
@@ -1421,6 +1479,7 @@ script_thread(void *arg)
   scn_sack_send();
   scn_sack_active_open();
   scn_tail_loss();
+  scn_mtu();
   script_done = 1;
   while(1)
     sim_wait(SIM_NEVER);
@@ -1444,7 +1503,7 @@ run_tcp(void)
   // A static address and no link-up event, so no DHCP client
   const uint8_t mac[6] = { 0x02, 0xc0, 0x00, 0x00, 0x09, 0x02 };
   tcp_vnet = vnet_create("veth9", mac);
-  netif_t *ni = &vnet_eni(tcp_vnet)->eni_ni;
+  netif_t *ni = tcp_ni = &vnet_eni(tcp_vnet)->eni_ni;
   mios_ip = ip4(10, 9, 0, 2);
   peer_ip = ip4(10, 9, 0, 1);
   ni->ni_ipv4_local_addr = mios_ip;

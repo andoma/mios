@@ -250,6 +250,7 @@ typedef struct soak {
   int ack_every;                 // 2: delayed ACKs
   int early_fin;                 // Source: close before the data came
   int stall;                     // The peer stops reading now and then
+  int mtu;                       // Of Mios's interface
 
   // Negotiated
   int established;
@@ -304,6 +305,7 @@ static uint64_t soak_busy;      // Time spent on the transfers themselves
 static int soak_sack = -1;      // --sack=0 or 1: never or always offer it
 static int soak_trace;
 static vnet_t *soak_vnet;
+static netif_t *soak_ni;        // Mios's interface on it
 static uint32_t peer_ip, mios_ip;
 
 static uint32_t
@@ -317,11 +319,11 @@ soak_describe(const soak_t *s)
 {
   static const char *modes[] = { "sink", "source", "echo" };
   hosttest_log("conn %d: %s tx=%u rx=%u drop=%d dup=%d reorder=%d corrupt=%d "
-               "delay=%uus wnd=%u mss=%d wscale=%d sack=%d(%d) segrnd=%d "
+               "delay=%uus wnd=%u mss=%d mtu=%d wscale=%d sack=%d(%d) segrnd=%d "
                "ackevery=%d earlyfin=%d stall=%d slow=%d",
                s->conn, modes[s->mode], s->tx_total, s->rx_expect,
                s->drop, s->dup, s->reorder, s->corrupt, s->delay, s->wnd,
-               s->t.mss,
+               s->t.mss, s->mtu,
                s->t.wscale, s->t.sack_permitted, s->sack, s->seg_random,
                s->ack_every, s->early_fin, s->stall, app_slow);
 }
@@ -596,6 +598,10 @@ soak_segment(soak_t *s, const sim_tcp_seg_t *seg)
       s->mios_wnd = seg->wnd;
       s->rx_mss = s->t.mss ? s->t.mss : 536;
       s->mss = MIN(seg->mss > 0 ? seg->mss : 536, s->rx_mss);
+      // Mios must stay within its interface as well
+      SOAK_CHECK(s, seg->mss == s->mtu - 40, "SYN-ACK mss=%d with MTU %d",
+                 seg->mss, s->mtu);
+      s->rx_mss = MIN(s->rx_mss, s->mtu - 40);
       if(s->t.wscale >= 0 && seg->wscale >= 0) {
         s->ws = s->t.wscale;
         s->mios_ws = seg->wscale;
@@ -896,6 +902,8 @@ soak_connection(uint32_t seed, int conn)
   s->reorder = PICK(s, 0, 0, 20, 200);
   s->delay = PICK(s, 0, 500, 5000, 30000);
   s->corrupt = PICK(s, 0, 0, 0, 5, 30);
+  s->mtu = PICK(s, 1500, 1500, 1500, 1280, 576);
+  soak_ni->ni_mtu = s->mtu;
   s->wnd = PICK(s, 65535, 262144, 16384, 4096, 1000);
   s->seg_random = rnd(s, 2);
   s->ack_every = 1 + rnd(s, 2);
@@ -1049,7 +1057,7 @@ run_tcp_soak(void)
   // A static address and no link-up event, so no DHCP client
   const uint8_t mac[6] = { 0x02, 0xc0, 0x00, 0x00, 0x0a, 0x02 };
   soak_vnet = vnet_create("veth10", mac);
-  netif_t *ni = &vnet_eni(soak_vnet)->eni_ni;
+  netif_t *ni = soak_ni = &vnet_eni(soak_vnet)->eni_ni;
   mios_ip = ip4(10, 10, 0, 2);
   peer_ip = ip4(10, 10, 0, 1);
   ni->ni_ipv4_local_addr = mios_ip;

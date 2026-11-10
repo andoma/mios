@@ -47,6 +47,7 @@ typedef struct dhcp_hdr {
 #define DHCP_SUBNET_MASK               1
 #define DHCP_GATEWAY                   3
 #define DHCP_DNS_SERVER                6
+#define DHCP_INTERFACE_MTU             26
 #define DHCP_NTP_SERVER                42
 #define DHCP_VENDOR_SPECIFIC_INFO      43
 #define DHCP_REQUESTED_IP_ADDRESS      50
@@ -122,16 +123,17 @@ static void
 append_parameter_request_list(pbuf_t *pb)
 {
 #ifdef ENABLE_DNS_CLIENT
-  uint8_t *ci = make_option(pb, DHCP_PARAMETER_REQUEST_LIST, 4);
+  uint8_t *ci = make_option(pb, DHCP_PARAMETER_REQUEST_LIST, 5);
 #else
-  uint8_t *ci = make_option(pb, DHCP_PARAMETER_REQUEST_LIST, 3);
+  uint8_t *ci = make_option(pb, DHCP_PARAMETER_REQUEST_LIST, 4);
 #endif
   if(ci != NULL) {
     ci[0] = DHCP_SUBNET_MASK;
     ci[1] = DHCP_GATEWAY;
     ci[2] = DHCP_LEASE_TIME;
+    ci[3] = DHCP_INTERFACE_MTU;
 #ifdef ENABLE_DNS_CLIENT
-    ci[3] = DHCP_DNS_SERVER;
+    ci[4] = DHCP_DNS_SERVER;
 #endif
   }
 }
@@ -329,6 +331,7 @@ typedef struct parsed_opts {
 #define PO_SERVER_IDENTIFIER 0x10
 #define PO_NTP_SERVER        0x20
 #define PO_VENDOR_INFO       0x40
+#define PO_MTU               0x80
   uint8_t msgtype;
 
   uint32_t gateway;
@@ -336,6 +339,7 @@ typedef struct parsed_opts {
   uint32_t lease_time;
   uint32_t server_identifer;
   uint32_t ntp_server;
+  uint16_t mtu; // Network byte order, like the rest
 #ifdef ENABLE_DNS_CLIENT
   uint32_t dns[2];
 #endif
@@ -355,7 +359,8 @@ static const struct {
   { PO_GATEWAY, DHCP_GATEWAY, 4, offsetof(parsed_opts_t, gateway) },
   { PO_LEASE_TIME, DHCP_LEASE_TIME, 4, offsetof(parsed_opts_t, lease_time) },
   { PO_SERVER_IDENTIFIER, DHCP_SERVER_IDENTIFIER, 4, offsetof(parsed_opts_t, server_identifer) },
-  { PO_NTP_SERVER, DHCP_NTP_SERVER, 4, offsetof(parsed_opts_t, ntp_server) }
+  { PO_NTP_SERVER, DHCP_NTP_SERVER, 4, offsetof(parsed_opts_t, ntp_server) },
+  { PO_MTU, DHCP_INTERFACE_MTU, 2, offsetof(parsed_opts_t, mtu) }
 };
 
 #define REQUIRED_OPTIONS_FROM_SERVER \
@@ -523,6 +528,13 @@ dhcpv4_input(struct netif *ni, pbuf_t *pb, size_t udp_offset)
 #ifdef ENABLE_DNS_CLIENT
       memcpy(eni->eni_ni.ni_ipv4_dns, po.dns, sizeof(po.dns));
 #endif
+      // The network may carry less than an Ethernet frame holds (a
+      // tunnel or a cellular link behind the server). Never more, and
+      // not less than every IPv4 host must accept
+      if(po.valid & PO_MTU) {
+        const int mtu = ntohs(po.mtu);
+        eni->eni_ni.ni_mtu = MAX(576, MIN(mtu, ETHER_MTU));
+      }
       eni->eni_dhcp_state = DHCP_STATE_BOUND;
       dhcpv4_update(&eni->eni_ni, &po.vsi, &po.bootfile);
       net_timer_arm(&eni->eni_dhcp_timer,

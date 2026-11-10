@@ -36,6 +36,9 @@ typedef struct netif {
 
   struct nexthop_list ni_nexthops;
 
+  // Largest packet the interface carries (for IPv4: header included).
+  // Ethernet interfaces start at 1500; DHCP can lower it, and so can
+  // board code that knows the path beyond the interface
   uint16_t ni_mtu;
   uint16_t ni_flags;
 

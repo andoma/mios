@@ -6,6 +6,9 @@
 #include "netif.h"
 #include "ptp.h"
 
+// Payload of an Ethernet frame
+#define ETHER_MTU 1500
+
 #define ETHERTYPE_IPV4  0x0800
 #define ETHERTYPE_ARP   0x0806
 #define ETHERTYPE_PTPv2 0x88f7

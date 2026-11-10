@@ -319,6 +319,7 @@ ether_netif_init(ether_netif_t *eni,
                  const ethmac_device_class_t *edc)
 {
   netif_init(&eni->eni_ni, name, &edc->dc);
+  eni->eni_ni.ni_mtu = ETHER_MTU;
   task_waitable_init(&eni->eni_phy_waitq, "phypoll");
 }
 
@@ -389,8 +390,9 @@ ether_print(ether_netif_t *en, struct stream *st)
            atomic_get(&en->eni_ni.ni_tcp_bad_cksum),
            atomic_get(&en->eni_ni.ni_udp_bad_cksum));
 
-  stprintf(st, "IP address: %Id/%d\n", en->eni_ni.ni_ipv4_local_addr,
-           en->eni_ni.ni_ipv4_local_prefixlen);
+  stprintf(st, "IP address: %Id/%d  MTU: %d\n",
+           en->eni_ni.ni_ipv4_local_addr,
+           en->eni_ni.ni_ipv4_local_prefixlen, en->eni_ni.ni_mtu);
 
   dhcpv4_print(en, st);
 }

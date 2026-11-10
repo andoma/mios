@@ -118,6 +118,8 @@ test_basic(void)
         sc->srv.gateway);
   CHECK(ipv4_default_route() == &sc->eni->eni_ni,
         "default route should go via the only bound interface");
+  CHECK(sc->eni->eni_ni.ni_mtu == 1500, "mtu=%d without the option",
+        sc->eni->eni_ni.ni_mtu);
 
   // Renewal timer at half the lease
   const int64_t renew_in = sc->eni->eni_dhcp_timer.t_expire - clock_get();
@@ -276,6 +278,32 @@ test_slower_than_retry(void)
 }
 
 
+// 9. The server says what the network carries (option 26). Taken as
+// it is within what Ethernet and IPv4 allow
+static void
+test_mtu(void)
+{
+  static const struct {
+    int offered;
+    int expect;
+  } cases[] = {
+    { 1400, 1400 },
+    { 9000, 1500 },
+    { 100, 576 },
+  };
+
+  for(int i = 0; i < 3; i++) {
+    scenario_t *sc = scenario_begin(11 + i, "interface MTU");
+    sc->srv.mtu = cases[i].offered;
+    scenario_start(sc);
+    CHECK(hosttest_wait(pred_bound, sc, 2 * SEC), "client did not bind");
+    CHECK(sc->eni->eni_ni.ni_mtu == cases[i].expect,
+          "mtu=%d when offered %d, expected %d", sc->eni->eni_ni.ni_mtu,
+          cases[i].offered, cases[i].expect);
+  }
+}
+
+
 static int
 run_dhcp_client(void)
 {
@@ -287,6 +315,7 @@ run_dhcp_client(void)
   test_link_flap();
   test_delayed_server();
   test_slower_than_retry();
+  test_mtu();
   return 0; // failures are counted by CHECK()
 }
 

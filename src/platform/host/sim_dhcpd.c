@@ -103,6 +103,9 @@ sim_dhcpd_reply(sim_dhcpd_t *d, int msgtype, const uint8_t *client_mac,
     if(d->dns_server) {
       *o++ = 6; *o++ = 4; wr32n(o, d->dns_server); o += 4;
     }
+    if(d->mtu) {
+      *o++ = 26; *o++ = 2; *o++ = d->mtu >> 8; *o++ = d->mtu;
+    }
   }
   *o++ = 255;
 
