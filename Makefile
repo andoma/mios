@@ -94,6 +94,7 @@ ENABLE_PROFILE ?= no
 ENABLE_PERFTEST ?= no
 ENABLE_VCON ?= no
 ENABLE_HEAP_MMAP ?= no
+ENABLE_PBUF_MMAP ?= no
 
 # The VLLP client role (vllp_client_create and friends). Only a client can
 # establish a link and open channels, so a device that merely *serves*

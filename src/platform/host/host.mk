@@ -12,6 +12,9 @@ ENABLE_TASK_DEBUG := yes
 # One mmap per allocation, unmapped on free: a use-after-free faults on
 # the spot instead of corrupting whatever got the block next.
 ENABLE_HEAP_MMAP := yes
+# The same for packet buffers: a page each, gone when the buffer is
+# returned to its pool. See cpu/host/pbuf_mmap.c.
+ENABLE_PBUF_MMAP := yes
 ENABLE_PERFTEST := yes
 ENABLE_NET_IPV4 := yes
 ENABLE_DNS_CLIENT := yes

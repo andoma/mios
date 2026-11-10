@@ -23,7 +23,18 @@ typedef struct pbuf_pool {
   task_waitable_t pp_wait;
   int pp_avail;
   int pp_total;
+#ifdef ENABLE_PBUF_MMAP
+  size_t pp_item_size;
+#endif
 } pbuf_pool_t;
+
+#ifdef ENABLE_PBUF_MMAP
+// Host debugging aid, see cpu/host/pbuf_mmap.c. The pool only counts;
+// each buffer is a page of its own that goes away when it is returned,
+// so a use after free faults. The arena the pool was given is unused.
+void *pbuf_mmap_get(size_t size);
+void pbuf_mmap_put(void *buf);
+#endif
 
 static struct pbuf_pool pbuf_datas = { . pp_wait = WAITABLE_INITIALIZER("pbufdata")};
 static struct pbuf_pool pbufs  = { . pp_wait = WAITABLE_INITIALIZER("pbuf")};
@@ -94,9 +105,13 @@ net_buffers_available(void)
 static void
 pbuf_pool_put(pbuf_pool_t *pp, void *item)
 {
-  pbuf_item_t *pi = item;
   assert(((unsigned long)item & 0x3) == 0);
+#ifdef ENABLE_PBUF_MMAP
+  pbuf_mmap_put(item);
+#else
+  pbuf_item_t *pi = item;
   SLIST_INSERT_HEAD(&pp->pp_items, pi, pi_link);
+#endif
 
   if(pp->pp_avail == 0) {
     task_wakeup(&pp->pp_wait, 0);
@@ -106,6 +121,21 @@ pbuf_pool_put(pbuf_pool_t *pp, void *item)
 }
 
 #include <stdlib.h>
+
+// Take a buffer out of a pool that has one
+static void *
+pbuf_pool_take(pbuf_pool_t *pp)
+{
+  pp->pp_avail--;
+#ifdef ENABLE_PBUF_MMAP
+  return pbuf_mmap_get(pp->pp_item_size);
+#else
+  pbuf_item_t *pi = SLIST_FIRST(&pp->pp_items);
+  SLIST_REMOVE_HEAD(&pp->pp_items, pi_link);
+  return pi;
+#endif
+}
+
 
 __attribute__((malloc, warn_unused_result))
 static void *
@@ -130,20 +160,14 @@ pbuf_pool_get(pbuf_pool_t *pp, int wait PBUF_ORIGIN_ARG_DECL)
       return NULL;
     }
 
-    pbuf_item_t *pi = SLIST_FIRST(&pp->pp_items);
-    SLIST_REMOVE_HEAD(&pp->pp_items, pi_link);
-    pp->pp_avail--;
-    return pi;
+    return pbuf_pool_take(pp);
   }
 
   while(pp->pp_avail == 0) {
     task_sleep(&pp->pp_wait);
   }
 
-  pbuf_item_t *pi = SLIST_FIRST(&pp->pp_items);
-  SLIST_REMOVE_HEAD(&pp->pp_items, pi_link);
-  pp->pp_avail--;
-  return pi;
+  return pbuf_pool_take(pp);
 }
 
 
@@ -152,11 +176,18 @@ pbuf_pool_add(pbuf_pool_t *pp, void *start, void *end, size_t item_size)
 {
   memset(start, 0, end - start);
   size_t count = 0;
+#ifdef ENABLE_PBUF_MMAP
+  // Only the number of buffers the arena has room for matters
+  count = (end - start) / item_size;
+  pp->pp_item_size = item_size;
+  pp->pp_avail += count;
+#else
   while(start + item_size <= end) {
     pbuf_pool_put(pp, start);
     start += item_size;
     count++;
   }
+#endif
   pp->pp_total += count;
   return count;
 }
