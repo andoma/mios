@@ -1463,8 +1463,9 @@ tcp_input_ipv4(struct netif *ni, struct pbuf *pb, int tcp_offset)
     break;
 
   case TCP_STATE_LAST_ACK:
+    // Frees the tcb, the application closed it already
     tcp_close(tcb, "LAST_ACK");
-    break;
+    return pb;
   case TCP_STATE_TIME_WAIT:
     tcp_set_state(tcb, TCP_STATE_TIME_WAIT, "ACK_IN_TIME_WAIT");
     break;
