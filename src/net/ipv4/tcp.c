@@ -81,7 +81,10 @@
  * holes below the highest reported block are retransmitted as soon as
  * they are known, each once (tcb_rtx_nxt tells how far that has got),
  * so several losses in a window cost one round trip. A retransmission
- * that is lost in turn waits for the timeout. After a timeout the
+ * that is lost in turn is found out when the peer reports data that
+ * was sent after it (tcb_rtx_mark) and still has the hole: the holes
+ * are then retransmitted again. If nothing more is sent, it waits for
+ * the timeout. After a timeout the
  * reports are forgotten, the peer is allowed to drop what it reported.
  * Forgetting a report, also when there are more blocks than fit, only
  * costs a retransmission that was not needed.
@@ -223,6 +226,7 @@ typedef struct tcb {
   uint8_t tcb_sack_count;
   tcp_block_t tcb_sack[TCP_SACK_BLOCKS];
   uint32_t tcb_rtx_nxt;    // Retransmitted up to here in this recovery
+  uint32_t tcb_rtx_mark;   // snd.nxt when the last of that was sent
 
   // ACKs sent for segments we could not take, see tcp_reject_limit()
   uint8_t tcb_reject_count;
@@ -1038,8 +1042,18 @@ tcp_recovery_rtx(tcb_t *tcb, int una_lost)
   const uint32_t una = tcb->tcb_snd.una;
   uint32_t seq = una;
 
-  if(tcb->tcb_sack_ok && (int32_t)(tcb->tcb_rtx_nxt - una) > 0)
+  if(tcb->tcb_sack_ok && (int32_t)(tcb->tcb_rtx_nxt - una) > 0) {
     seq = tcb->tcb_rtx_nxt;
+
+    // The peer reports data that was sent after our retransmissions
+    // and still has holes: the retransmissions were lost as well.
+    // Send them again rather than wait for the timeout
+    if(tcb->tcb_sack_count &&
+       (int32_t)(tcb->tcb_sack[tcb->tcb_sack_count - 1].end -
+                 tcb->tcb_rtx_mark) > (int32_t)(2 * tcp_snd_mss(tcb)))
+      seq = una;
+  }
+  const uint64_t rtx_bytes = tcb->tcb_rtx_bytes;
 
   for(int i = 0; i < tcb->tcb_sack_count; i++) {
     const tcp_block_t *b = &tcb->tcb_sack[i];
@@ -1057,6 +1071,8 @@ tcp_recovery_rtx(tcb_t *tcb, int una_lost)
     const uint32_t mss = tcp_snd_mss(tcb);
     seq = tcp_rtx_range(tcb, una, una + MIN(mss, tcb->tcb_snd.nxt - una));
   }
+  if(tcb->tcb_rtx_bytes != rtx_bytes)
+    tcb->tcb_rtx_mark = tcb->tcb_snd.nxt;
   tcb->tcb_rtx_nxt = seq;
 }
 

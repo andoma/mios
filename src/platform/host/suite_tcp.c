@@ -1328,6 +1328,55 @@ scn_sack_active_open(void)
 
 
 static void
+scn_lost_retransmission(void)
+{
+  hosttest_log("---- SACK: a retransmission is lost as well ----");
+  sim_tcp_t *t = peer_new(PORT_SOURCE);
+  uint32_t cmdseq = 0;
+
+  t->sack_permitted = 1;
+  if(!CHECK(sim_tcp_connect(t, 65535, NULL), "handshake failed"))
+    return;
+
+  // Six segments, the first is lost and so is its retransmission
+  source_request(t, &cmdseq, 0, 6 * MSS);
+  CHECK(collect(t, 0, 6 * MSS) == 6, "expected six full segments");
+  sack_set(t, 1, 1 * MSS, 4 * MSS);
+  ack(t, cmdseq, 0, 65535);
+  expect_rtx(t, 0, 1 * MSEC, "the hole");
+  sack_set(t, 1, 1 * MSS, 6 * MSS);
+  ack(t, cmdseq, 0, 65535);
+  expect_quiet(t, 10 * MSEC, "all of it was sent before the retransmission");
+
+  // More data follows. Its arrival at the peer, with the hole still
+  // there, shows that the retransmission did not make it: it is sent
+  // again right away, there is no need to wait for the timeout
+  const uint64_t t0 = clock_get();
+  source_request(t, &cmdseq, 0, 4 * MSS);
+  CHECK(collect(t, 6 * MSS, 10 * MSS) == 4, "expected four full segments");
+  sack_set(t, 1, 1 * MSS, 8 * MSS);
+  ack(t, cmdseq, 0, 65535);
+  expect_quiet(t, 10 * MSEC, "two segments past the retransmission");
+  sack_set(t, 1, 1 * MSS, 9 * MSS);
+  ack(t, cmdseq, 0, 65535);
+  expect_rtx(t, 0, 1 * MSEC, "the hole again");
+  const int ms = (clock_get() - t0) / 1000;
+  CHECK(ms < 50, "second retransmission after %d ms", ms);
+
+  // Once per evidence: the last segment was sent before this one
+  sack_set(t, 1, 1 * MSS, 10 * MSS);
+  ack(t, cmdseq, 0, 65535);
+  expect_quiet(t, 10 * MSEC, "nothing newer than the retransmission");
+
+  sack_set(t, 0);
+  ack(t, cmdseq, 10 * MSS, 65535);
+  expect_quiet(t, 2 * SEC, "all acked");
+
+  peer_close(t, cmdseq, 10 * MSS);
+}
+
+
+static void
 scn_tail_loss(void)
 {
   hosttest_log("---- tail loss probe ----");
@@ -1600,6 +1649,7 @@ script_thread(void *arg)
   scn_zero_window();
   scn_sack_receive();
   scn_sack_send();
+  scn_lost_retransmission();
   scn_sack_active_open();
   scn_tail_loss();
   scn_mtu();
