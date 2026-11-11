@@ -154,9 +154,17 @@ sim_thread_create(const char *name, void (*fn)(void *arg), void *arg,
    The second is process CPU time, not wall clock, so a loaded machine
    does not trip it. The timer signals the Mios CPU thread by tid: a
    process-directed signal could land on a peer, and the panic should
-   show the Mios thread that is spinning. */
+   show the Mios thread that is spinning.
 
-#define SIM_WATCHDOG_SEC 1
+   In a simulation the limit has to be far more than that second,
+   though. A peer that answers at once keeps Mios busy without the
+   clock moving, and a whole transfer can go by that way: the OTA
+   suite with 8 byte frames needs most of a second of CPU for one on a
+   fast machine, the bulk of it system calls (thread handoffs, and the
+   page per packet buffer of pbuf_mmap.c), which cost several times
+   more on a virtual machine such as a CI runner. */
+
+#define SIM_WATCHDOG_SEC 10
 
 static int sim_watchdog_id = -1;
 
