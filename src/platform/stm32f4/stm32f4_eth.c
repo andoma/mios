@@ -102,6 +102,14 @@ typedef struct {
 #define ETH_RDES0_OWN (1 << 31)
 #define ETH_RDES0_FD  (1 << 9)  // First descriptor in packet
 #define ETH_RDES0_LD  (1 << 8)  // Last descriptor in packet
+#define ETH_RDES0_ESA (1 << 0)  // Extended status in RDES4 (EDFE=1, LD set)
+
+// RDES4, extended status (RM0090 Rev 19, 33.6.8)
+#define ETH_RDES4_IPV4PR (1 << 6) // IPv4 packet received
+#define ETH_RDES4_IPCB   (1 << 5) // Checksum offload engine bypassed
+#define ETH_RDES4_IPPE   (1 << 4) // TCP, UDP or ICMP checksum error
+#define ETH_RDES4_IPHE   (1 << 3) // IPv4 header checksum error
+#define ETH_RDES4_IPPT   (7 << 0) // Payload: 1 UDP, 2 TCP, 3 ICMP
 
 #define ETH_RDES1_RCH (1 << 14)
 
@@ -288,12 +296,24 @@ eth_irq_rx(stm32f4_eth_t *se)
         } else {
           pb->pb_offset = 0;
         }
+        int cksum_ok = 0;
         if(w0 & ETH_RDES0_LD) {
           flags |= PBUF_EOP;
+
+          // The MAC has checked the IPv4 header and the checksum of
+          // a payload it knows. Anything else (errors, fragments,
+          // other protocols) is left for the stack to check
+          if(w0 & ETH_RDES0_ESA) {
+            const uint32_t w4 = rx->w4;
+            if((w4 & (ETH_RDES4_IPV4PR | ETH_RDES4_IPCB |
+                      ETH_RDES4_IPPE | ETH_RDES4_IPHE)) == ETH_RDES4_IPV4PR &&
+               (w4 & ETH_RDES4_IPPT) >= 1 && (w4 & ETH_RDES4_IPPT) <= 3)
+              cksum_ok = PBUF_CKSUM_OK;
+          }
         }
 
         pb->pb_data = buf - DMA_BUFFER_PAD;
-        pb->pb_flags = flags;
+        pb->pb_flags = flags | cksum_ok;
 
         if(flags == (PBUF_SOP | PBUF_EOP)) {
 
@@ -341,6 +361,7 @@ eth_irq_rx(stm32f4_eth_t *se)
           if(flags & PBUF_EOP) {
             pbuf_t *first = STAILQ_FIRST(&se->se_rx_scatter_queue);
             first->pb_pktlen = len;
+            first->pb_flags |= cksum_ok;
             se->se_eni.eni_stats.rx_byte += pb->pb_pktlen;
             se->se_eni.eni_stats.rx_pkt++;
 
@@ -660,6 +681,7 @@ stm32f4_thread(stm32f4_eth_t *se, gpio_t phyrst,
 
   reg_set_bit(ETH_MACCR, 13); // Receive-Own-Disable
   reg_set_bit(ETH_MACCR, 25); // Strip CRC
+  reg_set_bit(ETH_MACCR, 10); // IPCO: Verify IPv4, TCP, UDP, ICMP checksums
 
   reg_wr(ETH_MACFFR, (1 << 31)); // Receive all
 
