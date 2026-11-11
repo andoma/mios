@@ -34,6 +34,7 @@
 
 #define RCC_RSR           (RCC_BASE + 0xd0)
 #define RCC_AHB1ENR       (RCC_BASE + 0xd8)
+#define RCC_AHB2ENR       (RCC_BASE + 0xdc)
 #define RCC_AHB4ENR       (RCC_BASE + 0xe0)
 #define RCC_APB1LENR      (RCC_BASE + 0xe8)
 #define RCC_APB1HENR      (RCC_BASE + 0xec)
@@ -56,6 +57,8 @@
 #define CLK_ETH1RXEN  CLK_ID(RCC_AHB1ENR, 16)
 #define CLK_ETH1TXEN  CLK_ID(RCC_AHB1ENR, 17)
 #define CLK_OTG       CLK_ID(RCC_AHB1ENR, 25)
+
+#define CLK_RNG       CLK_ID(RCC_AHB2ENR, 6)
 
 #define CLK_GPIO(x)   CLK_ID(RCC_AHB4ENR, (x))
 
