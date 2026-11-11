@@ -143,6 +143,12 @@
 // every burst that ends in an odd segment would be probed for nothing
 #define TCP_PTO_MIN 50 // ms
 
+// A segment that could not be handed to the network interface (its
+// transmit queue is full, or there are no buffers) is tried again
+// after this long. Nothing else would: the interface does not tell us
+// when it has room, and an ACK may not be on its way to do it
+#define TCP_TX_RETRY 1000 // us
+
 #define TCP_EMIT_ACK   0x1 // Send an ACK even if there is no data to send
 #define TCP_EMIT_PROBE 0x2 // Send one byte even if the window is closed
 
@@ -230,6 +236,7 @@ typedef struct tcb {
   // Tail loss probe, see the comment at the top
   uint8_t tcb_tlp_armed; // The retransmission timer is set for a probe
   uint8_t tcb_tlp_out;   // A probe has been sent for this flight
+  uint8_t tcb_tx_blocked; // A segment could not be sent, try again soon
 
   // RFC 7323 window scaling state, populated from the WSopt exchange at
   // SYN time. wnd_shift is the peer's announced shift — applied to any
@@ -675,8 +682,8 @@ tcp_rtt_sample(tcb_t *tcb, int rtt)
 // fits. A retransmission (seq before snd.nxt) carries at most 'limit'
 // bytes
 static error_t
-tcp_emit_limit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags,
-               uint32_t limit, const char *why)
+tcp_emit_segment(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags,
+                 uint32_t limit, const char *why)
 {
   if(pb == NULL) {
     pb = pbuf_make(TCP_PBUF_HEADROOM, 0);
@@ -808,6 +815,21 @@ tcp_emit_limit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags,
 
 
 static error_t
+tcp_emit_limit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags,
+               uint32_t limit, const char *why)
+{
+  const error_t err = tcp_emit_segment(tcb, pb, seq, flags, limit, why);
+  if(err && !tcb->tcb_pending_syn &&
+     tcb->tcb_snd.una != tcb->tcb_snd.wrptr) {
+    // Data is waiting and this did not get out
+    tcb->tcb_tx_blocked = 1;
+    net_timer_arm(&tcb->tcb_rtx_timer, clock_get() + TCP_TX_RETRY);
+  }
+  return err;
+}
+
+
+static error_t
 tcp_emit(tcb_t *tcb, pbuf_t *pb, uint32_t seq, int flags, const char *why)
 {
   return tcp_emit_limit(tcb, pb, seq, flags, UINT32_MAX, why);
@@ -849,6 +871,12 @@ arm_rtx(tcb_t *tcb, uint64_t now)
   int rtx_duration_ms;
 
   tcb->tcb_tlp_armed = 0;
+
+  if(tcb->tcb_tx_blocked) {
+    // Before anything else: what could not be sent
+    net_timer_arm(&tcb->tcb_rtx_timer, now + TCP_TX_RETRY);
+    return;
+  }
 
   // Something in flight, or something waiting for the peer's window
   if(tcb->tcb_snd.una != tcb->tcb_snd.wrptr) {
@@ -1053,6 +1081,18 @@ tcp_rtx_cb(void *opaque, uint64_t now)
       }
     }
     tcp_close(tcb, "TCP Timeout");
+    return;
+  }
+
+  if(tcb->tcb_tx_blocked) {
+    // Another attempt at what the network interface had no room for.
+    // The timeout proper counts from here
+    tcb->tcb_tx_blocked = 0;
+    if(tcb->tcb_recovering)
+      tcp_recovery_rtx(tcb, (int32_t)(tcb->tcb_rtx_nxt -
+                                      tcb->tcb_snd.una) <= 0);
+    net_task_raise(&tcb->tcb_task, TCP_EVENT_EMIT);
+    arm_rtx(tcb, now);
     return;
   }
 
