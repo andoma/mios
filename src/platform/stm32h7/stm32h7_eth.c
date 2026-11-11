@@ -41,6 +41,15 @@ typedef struct {
 #define ETH_RDES3_BUF1V         0x01000000
 
 #define ETH_RDES3_CTX           0x40000000
+#define ETH_RDES3_RS1V          0x04000000 // Status in RDES1 is valid
+
+// RDES1 of the last descriptor of a packet
+#define ETH_RDES1_TSA           0x00004000 // Timestamp available
+#define ETH_RDES1_IPCE          0x00000080 // TCP, UDP or ICMP checksum error
+#define ETH_RDES1_IPCB          0x00000040 // Checksum not checked
+#define ETH_RDES1_IPV4          0x00000010 // IPv4 header present
+#define ETH_RDES1_IPHE          0x00000008 // IPv4 header checksum error
+#define ETH_RDES1_PT            0x00000003 // Payload: 1 UDP, 2 TCP, 3 ICMP
 // Status bits in RDES3 write-back format, valid when LD is set
 #define ETH_RDES3_CE            0x01000000  // CRC error
 #define ETH_RDES3_OE            0x00200000  // Rx FIFO overflow (partial pkt)
@@ -497,6 +506,7 @@ stm32h7_thread(stm32h7_eth_t *se, gpio_t phyrst,
   reg_wr(ETH_DMACIER, (1 << 15) | (1 << 6) | (1 << 2) | (1 << 0));
 
   reg_set_bit(ETH_MACCR, 21); // CST: Strip CRC for type packets in RX path
+  reg_set_bit(ETH_MACCR, 27); // IPC: Verify IPv4, TCP, UDP, ICMP checksums
 
   reg_set_bit(ETH_MACCR, 0); // Enable RX
   reg_set_bit(ETH_MACCR, 1); // Enable TX
@@ -601,6 +611,7 @@ handle_irq_rx(stm32h7_eth_t *se)
         } else {
           int flags = 0;
           int tsa = 0;
+          int cksum_ok = 0;
 
           if(w3 & ETH_RDES3_FD) {
             flags |= PBUF_SOP;
@@ -610,12 +621,18 @@ handle_irq_rx(stm32h7_eth_t *se)
           }
           if(w3 & ETH_RDES3_LD) {
             flags |= PBUF_EOP;
-            if(w3 & (1 << 26)) {
-              // RDES1 is valid
-              if(rx->w1 & (1 << 14)) {
-                // Time stamp available
+            if(w3 & ETH_RDES3_RS1V) {
+              const uint32_t w1 = rx->w1;
+              if(w1 & ETH_RDES1_TSA)
                 tsa = 1;
-              }
+
+              // The MAC has checked the IPv4 header and the checksum
+              // of a payload it knows. Anything else (errors, fragments,
+              // other protocols) is left for the stack to check
+              if((w1 & (ETH_RDES1_IPV4 | ETH_RDES1_IPHE |
+                        ETH_RDES1_IPCB | ETH_RDES1_IPCE)) == ETH_RDES1_IPV4 &&
+                 (w1 & ETH_RDES1_PT))
+                cksum_ok = PBUF_CKSUM_OK;
             }
           }
 
@@ -623,6 +640,7 @@ handle_irq_rx(stm32h7_eth_t *se)
           pb->pb_flags = flags;
 
           if((flags == (PBUF_SOP | PBUF_EOP)) && likely(!tsa)) {
+            pb->pb_flags |= cksum_ok;
             pb->pb_buflen = len;
             pb->pb_pktlen = len;
             se->se_eni.eni_stats.rx_pkt++;
@@ -639,6 +657,7 @@ handle_irq_rx(stm32h7_eth_t *se)
             if(flags & PBUF_EOP) {
               pbuf_t *first = STAILQ_FIRST(&se->se_rx_scatter_queue);
               first->pb_pktlen = len;
+              first->pb_flags |= cksum_ok;
 
               if(likely(!tsa)) {
                 se->se_eni.eni_stats.rx_pkt++;
