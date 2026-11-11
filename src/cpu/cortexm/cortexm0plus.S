@@ -14,6 +14,7 @@ __sync_add_and_fetch_4:
         bx lr
 
 
+        .thumb_func
         .global mpu_disable
 mpu_disable:
         bx lr
