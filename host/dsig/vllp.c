@@ -669,6 +669,21 @@ channel_send_close(vllp_t *v, vllp_channel_t *vc, int error_code)
   channel_send_vp(v, vc, vp);
 }
 
+// Free everything queued for transmit except a CLOSE
+static void
+channel_drop_tx_data(struct vllp_pkt_queue *q)
+{
+  vllp_pkt_t *vp, *n;
+  for(vp = TAILQ_FIRST(q); vp != NULL; vp = n) {
+    n = TAILQ_NEXT(vp, link);
+    if(vp->type == VLLP_PKT_EOF)
+      continue;
+    TAILQ_REMOVE(q, vp, link);
+    free(vp);
+  }
+}
+
+
 static int
 vllp_channel_receive(vllp_t *v, vllp_pkt_t *vp, int channel_id)
 {
@@ -1311,18 +1326,16 @@ cmc_handle_close(vllp_t *v, int target_channel, const uint8_t *data, size_t len)
 
   case VLLP_CHANNEL_STATE_ACTIVE:
   case VLLP_CHANNEL_STATE_ESTABLISHED: {
-    // The peer is closing: whatever we still have queued for this
+    // The peer is closing: whatever data we still have queued for this
     // channel is thrown away on arrival, so drop it here and let the
     // CLOSE response go out right away instead of behind the backlog.
-    vllp_pkt_t *vp;
-    while((vp = TAILQ_FIRST(&vc->mtxq)) != NULL) {
-      TAILQ_REMOVE(&vc->mtxq, vp, link);
-      free(vp);
-    }
-    while((vp = TAILQ_FIRST(&vc->txq)) != NULL) {
-      TAILQ_REMOVE(&vc->txq, vp, link);
-      free(vp);
-    }
+    //
+    // Our own CLOSE may already be queued (both ends closing at once).
+    // It stays: channel_send_close() below is then a no-op, and that
+    // CLOSE is the response. Dropping it would leave the channel on the
+    // active list with nothing to send.
+    channel_drop_tx_data(&vc->mtxq);
+    channel_drop_tx_data(&vc->txq);
     vc->close_is_response = 1;
     channel_send_close(v, vc, error_code);
     channel_enq_rx_meta(vc, error_code, VLLP_PKT_EOF);
