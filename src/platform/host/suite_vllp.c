@@ -380,6 +380,44 @@ phase_discard(scenario_t *sc)
   hosttest_log("   %d msgs sent", sent);
 }
 
+// Both ends close the same channel at once. The message is far over the
+// server's limit, so the server closes the channel part way through it,
+// while the rest of the message and our own CLOSE are still queued here.
+static void
+phase_close_race(scenario_t *sc)
+{
+  hosttest_log("-- close race (both ends close at once)");
+  for(int i = 0; i < 4; i++) {
+    hvllp_channel_t *ch = hvllp_channel_create(sc->v, "discard", 0, NULL,
+                                               NULL, NULL, NULL);
+    SCHECK(sc, ch != NULL, "close race: open %d failed", i);
+    if(ch == NULL)
+      return;
+    static uint8_t buf[4096];
+    memset(buf, 0x5a, sizeof(buf));
+    // A small message first, drained, so the channel is established
+    hvllp_channel_send(ch, buf, 8);
+    int64_t dl = clock_get() + 3 * SEC;
+    while(hvllp_channel_tx_pending(ch) > 0 && clock_get() < dl)
+      hvllp_sim_poll(sc->v, dl);
+    SCHECK(sc, hvllp_channel_tx_pending(ch) == 0,
+           "close race: first message did not drain");
+    hvllp_channel_send(ch, buf, sizeof(buf));
+    hvllp_channel_close(ch, 0, 1);
+  }
+  hvllp_sim_run(sc->v, clock_get() + SEC);
+  SCHECK(sc, hvllp_is_connected(sc->v), "close race: link dropped");
+
+  hvllp_channel_t *ch = open_echo(sc);
+  SCHECK(sc, ch != NULL, "close race: echo open failed afterwards");
+  if(ch == NULL)
+    return;
+  SCHECK(sc, echo_rt(sc, ch, 32, 1) == 0,
+         "close race: echo failed afterwards");
+  hvllp_channel_close(ch, 0, 1);
+}
+
+
 static void
 phase_bidir(scenario_t *sc)
 {
@@ -569,6 +607,7 @@ scenario_fn(void *arg)
   phase_multichannel(sc);
   phase_chargen(sc);
   phase_discard(sc);
+  phase_close_race(sc);
   phase_bidir(sc);
   phase_faults(sc, "loss-5", (faults_t){ .drop = 5 }, 0);
   phase_faults(sc, "loss-20", (faults_t){ .drop = 20 }, 0);
