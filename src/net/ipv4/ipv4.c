@@ -168,7 +168,8 @@ ipv4_nexthop_resolve(uint32_t addr)
     return ipv4_nexthop_resolve(ni->ni_ipv4_gateway);
   }
 
-  nh = xalloc(sizeof(nexthop_t), 0, MEM_MAY_FAIL);
+  // Cleared: nh_hwaddr is only written by an ARP reply
+  nh = xalloc(sizeof(nexthop_t), 0, MEM_MAY_FAIL | MEM_CLEAR);
   if(nh == NULL)
     return NULL;
 

@@ -4,8 +4,9 @@
  * DHCP server for a vnet, running as a simulation thread (see
  * cpu/host/sim.h): a blocking receive loop with a deadline, like a real
  * server program. Also answers ARP for its own address so unicast
- * renewals can be delivered, and optionally DNS queries for a small
- * table of names. Behaviour knobs let a suite drive the client's state
+ * renewals can be delivered (unless arp_silent), optionally DNS queries
+ * for a small table of names, and counts the other frames sent to its
+ * address by the MAC they went to. Behaviour knobs let a suite drive the client's state
  * machine through its corners; the suite sets them from the Mios main
  * thread, which is safe because only one participant runs at a time.
  */
@@ -47,6 +48,7 @@ typedef struct sim_dhcpd {
   int ignore_discovers;        // Ignore this many DISCOVERs, then answer
   int nak_requests;            // NAK this many REQUESTs, then ACK
   uint32_t reply_delay;        // us, 0 = reply synchronously
+  int arp_silent;              // Count ARP requests, answer none
 
   // Observations
   int rx_discover;
@@ -57,6 +59,14 @@ typedef struct sim_dhcpd {
   int tx_ack;
   int tx_nak;
   int rx_dns_query;
+  // Frames for server_ip other than DHCP and DNS (what a suite sends
+  // the server): by the MAC they were addressed to. A frame for our
+  // address at another MAC is one the client sent to an address it
+  // never resolved
+  int rx_other;
+  int rx_other_to_us;
+  int rx_other_misaddressed;
+  uint8_t last_misaddressed_mac[6];
   uint32_t last_xid;
   uint32_t last_discover_xid;
   uint32_t last_request_xid;

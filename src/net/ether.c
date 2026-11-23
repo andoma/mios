@@ -221,8 +221,12 @@ ether_nexthop_periodic(ether_netif_t *eni)
   for(nh = LIST_FIRST(&eni->eni_ni.ni_nexthops); nh != NULL; nh = next) {
     next = LIST_NEXT(nh, nh_netif_link);
 
-    nh->nh_state--;
-    if(nh->nh_state == 0) {
+    // NEXTHOP_IDLE is not a count to go on from: nothing has been sent
+    // through the entry yet, or sends while resolving counted it down.
+    // Decremented, it would wrap to 255, what an ARP reply sets, and
+    // frames would go to a MAC nobody wrote. It goes instead, and the
+    // next send looks the address up again.
+    if(nh->nh_state == NEXTHOP_IDLE || --nh->nh_state == NEXTHOP_IDLE) {
       nexthop_destroy(nh);
       continue;
     } else if(nh->nh_state < NEXTHOP_ACTIVE && nh->nh_in_use) {
