@@ -63,6 +63,7 @@ SRCS += ${P}/host.c \
 	${P}/testterm.c \
 	${P}/sim_dhcpd.c \
 	${P}/suite_dhcp.c \
+	${P}/suite_arp.c \
 	${P}/sim_tcp.c \
 	${P}/suite_tcp.c \
 	${P}/suite_tcp_soak.c \

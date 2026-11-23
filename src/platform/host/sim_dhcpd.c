@@ -415,7 +415,8 @@ sim_dhcpd_rx(sim_dhcpd_t *d, const uint8_t *frame, size_t len)
     const uint8_t *a = frame + 14;
     if(rd16(a + 6) == 1 && rd32n(a + 24) == d->server_ip) {
       d->rx_arp_request++;
-      sim_dhcpd_arp_reply(d, frame);
+      if(!d->arp_silent)
+        sim_dhcpd_arp_reply(d, frame);
     }
     return;
   }
@@ -423,6 +424,21 @@ sim_dhcpd_rx(sim_dhcpd_t *d, const uint8_t *frame, size_t len)
   if(etype != ETHERTYPE_IPV4 || len < 14 + 20 + 8)
     return;
   const uint8_t *ip = frame + 14;
+
+  if(rd32n(ip + 16) == d->server_ip) {
+    const int dport = ip[9] == 17 ? rd16(ip + 20 + 2) : -1;
+    if(dport != 67 && dport != 53) {
+      d->rx_other++;
+      if(!memcmp(frame, d->mac, 6)) {
+        d->rx_other_to_us++;
+      } else {
+        d->rx_other_misaddressed++;
+        memcpy(d->last_misaddressed_mac, frame, 6);
+      }
+      return;
+    }
+  }
+
   if(ip[0] != 0x45 || ip[9] != 17)
     return;
   const size_t iplen = rd16(ip + 2);
