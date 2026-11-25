@@ -78,6 +78,8 @@ SRCS += ${P}/host.c \
 	${P}/suite_rtp_h264.c \
 	${P}/suite_evlog.c \
 	${P}/vspiflash.c \
+	${P}/vgpio.c \
+	${P}/suite_vbus.c \
 	${P}/host_ota.c \
 	${T}host/dsig/vllp.c \
 	${T}host/dsig/vllp_logstream.c \
