@@ -79,6 +79,9 @@ SRCS += ${P}/host.c \
 	${P}/suite_evlog.c \
 	${P}/vspiflash.c \
 	${P}/vgpio.c \
+	${P}/vi2c.c \
+	${P}/vspi.c \
+	${P}/vregfile.c \
 	${P}/suite_vbus.c \
 	${P}/host_ota.c \
 	${T}host/dsig/vllp.c \
