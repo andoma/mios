@@ -30,6 +30,9 @@ ENABLE_VCON := yes
 # suite_vcon_vllp.c.
 ENABLE_VLLP_CLIENT := yes
 
+# The HTTP server and its websockets, exercised by suite_http.c
+ENABLE_NET_HTTP := yes
+
 P := ${SRC}/platform/host
 
 GLOBALDEPS += ${P}/host.mk
@@ -70,6 +73,7 @@ SRCS += ${P}/host.c \
 	${P}/sim_tcp.c \
 	${P}/suite_tcp.c \
 	${P}/suite_tcp_soak.c \
+	${P}/suite_http.c \
 	${P}/suite_pbuf.c \
 	${P}/suite_vcon.c \
 	${P}/suite_vcon_vllp.c \
