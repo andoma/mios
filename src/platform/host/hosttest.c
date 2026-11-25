@@ -114,8 +114,21 @@ hosttest_wait(int (*pred)(void *arg), void *arg, uint64_t timeout)
 }
 
 
-int
-main(void)
+// A suite named on the command line (or --list) takes over the process;
+// otherwise main() runs, an app's own or the kernel's shell. A constructor
+// after multitasking_mark (kernel/mios.c), so it runs on the main thread
+// just before main(); not 65535, the default priority, whose section the
+// host linker scripts do not keep.
+static void __attribute__((constructor(9999)))
+hosttest_entry(void)
+{
+  if(host_arg("list") != NULL || host_positional(0) != NULL)
+    hosttest_main();
+}
+
+
+void
+hosttest_main(void)
 {
   if(host_arg("list") != NULL) {
     for(const hosttest_suite_t *s = _hosttest_array_begin;
@@ -127,11 +140,8 @@ main(void)
   }
 
   const char *name = host_positional(0);
-  if(name == NULL) {
-    cli_console('>');
-    printf("No console input\n");
-    return 0;
-  }
+  if(name == NULL)
+    return;
 
   const hosttest_suite_t *s = hosttest_find(name);
   if(s == NULL) {
