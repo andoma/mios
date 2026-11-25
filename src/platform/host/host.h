@@ -6,6 +6,11 @@
 #define HOST_MACHINE "aarch64"
 #endif
 
+#ifndef ASM
+// stdin is a terminal (console.c; 0 in a test suite, which leaves it alone)
+int host_console_is_tty(void);
+#endif
+
 // Anonymous mmap backing the Mios heap. Pages are only committed on
 // first touch, so this is an upper bound, not a cost.
 #define HOST_HEAP_SIZE (64 * 1024 * 1024)

@@ -60,13 +60,15 @@ host_platform_pbuf_pool_count(const char *suite)
 }
 
 
-// Overrides the weak default in kernel/panic.c: a panic while a suite is
-// running must terminate the process (halt() exits non-zero) rather than
-// wait for input that is never coming.
+// Overrides the weak default in kernel/panic.c: a panic terminates the
+// process (halt() exits non-zero) unless someone at a terminal can use the
+// crash shell. Not while a suite runs, and not with stdin a pipe or a file
+// (a harness running an app, `echo cmd | mios`), where the shell would wait
+// for input that never comes and hide the crash from whoever runs it.
 int
 panic_enter_console(void)
 {
-  return !hosttest_running;
+  return !hosttest_running && host_console_is_tty();
 }
 
 
