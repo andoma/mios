@@ -82,7 +82,9 @@ SRCS += ${P}/host.c \
 	${P}/vi2c.c \
 	${P}/vspi.c \
 	${P}/vregfile.c \
+	${P}/vtps92682.c \
 	${P}/suite_vbus.c \
+	${P}/suite_tps92682.c \
 	${P}/host_ota.c \
 	${T}host/dsig/vllp.c \
 	${T}host/dsig/vllp_logstream.c \
