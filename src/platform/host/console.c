@@ -166,6 +166,13 @@ static const stream_vtable_t console_vtable = {
 static stream_t console_stream = { &console_vtable };
 
 
+int
+host_console_is_tty(void)
+{
+  return console_is_tty;
+}
+
+
 static void __attribute__((constructor(110)))
 console_init(void)
 {
