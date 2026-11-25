@@ -1,6 +1,7 @@
 #include "libmios.h"
 #include "hostlib.h"
 #include "vcan.h"
+#include "vregfile.h"
 
 #include <unistd.h>          /* clock_get */
 
@@ -13,28 +14,66 @@ EXPORT void     mios_sim_boot(void)            { host_lib_boot(); }
 EXPORT void     mios_sim_step(uint64_t dt)     { host_lib_step(dt); }
 EXPORT uint64_t mios_sim_time(void)            { return clock_get(); }
 
+/* The register files the harness reads and writes. In .data, not .bss:
+   mios's init() clears .bss when the object boots, and a harness must be
+   able to preset registers (chip ids, ready bits, calibration) before
+   mios_sim_boot() so the drivers' probe sequences in main() find a
+   plausible chip. */
+static vregfile_t g_i2c_files[128] __attribute__((section(".data")));
+static vregfile_t g_spi_files[HOSTLIB_SPI_NDEV] __attribute__((section(".data")));
+
+static i2c_t *g_i2c;
+static spi_t *g_spi;
+
+i2c_t *
+hostlib_i2c(void)
+{
+  if(g_i2c == NULL) {
+    g_i2c = vi2c_create("vi2c");
+    for(int a = 0; a < 128; a++)
+      vregfile_attach_i2c(&g_i2c_files[a], g_i2c, a);
+  }
+  return g_i2c;
+}
+
+spi_t *
+hostlib_spi(void)
+{
+  if(g_spi == NULL) {
+    g_spi = vspi_create("vspi");
+    for(int cs = 0; cs < HOSTLIB_SPI_NDEV; cs++) {
+      gpio_set_output(cs, 1);
+      gpio_conf_output(cs, GPIO_PUSH_PULL, GPIO_SPEED_HIGH, GPIO_PULL_NONE);
+      vregfile_attach_spi(&g_spi_files[cs], g_spi, cs);
+    }
+  }
+  return g_spi;
+}
+
 EXPORT void
 mios_sim_i2c_set(uint8_t addr, uint8_t reg, uint8_t val)
 {
-  vi2c_set_reg(addr, reg, val);
+  if(addr < 128)
+    g_i2c_files[addr].regs[reg] = val;
 }
 
 EXPORT uint8_t
 mios_sim_i2c_get(uint8_t addr, uint8_t reg)
 {
-  return vi2c_get_reg(addr, reg);
+  return addr < 128 ? g_i2c_files[addr].regs[reg] : 0xff;
 }
 
 EXPORT void
 mios_sim_spi_set(uint8_t dev, uint8_t reg, uint8_t val)
 {
-  vspi_set_reg(dev, reg, val);
+  if(dev < HOSTLIB_SPI_NDEV)
+    g_spi_files[dev].regs[reg] = val;
 }
 
 EXPORT uint8_t
 mios_sim_spi_get(uint8_t dev, uint8_t reg)
 {
-  return vspi_get_reg(dev, reg);
+  return dev < HOSTLIB_SPI_NDEV ? g_spi_files[dev].regs[reg] : 0xff;
 }
 
 

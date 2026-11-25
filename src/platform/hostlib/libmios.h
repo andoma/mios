@@ -30,8 +30,9 @@ void    mios_sim_i2c_set(uint8_t addr, uint8_t reg, uint8_t val);
 uint8_t mios_sim_i2c_get(uint8_t addr, uint8_t reg);
 
 /* Virtual SPI register file access. dev is the chip select (the nss the
-   driver was created with), 0..VSPI_NDEV-1. See vspi.h for the wire
-   protocol the firmware side sees. */
+   driver was created with), 0..HOSTLIB_SPI_NDEV-1 (hostlib.h). See
+   platform/host/vregfile.h for the wire protocol the firmware side
+   sees. */
 void    mios_sim_spi_set(uint8_t dev, uint8_t reg, uint8_t val);
 uint8_t mios_sim_spi_get(uint8_t dev, uint8_t reg);
 

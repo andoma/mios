@@ -28,7 +28,7 @@ static int16_t be16(const uint8_t *p) { return (int16_t)((p[0] << 8) | p[1]); }
 int
 main(void)
 {
-  i2c_t *bus = vi2c_bus();
+  i2c_t *bus = hostlib_i2c();
   printf("thermostat: setpoint 20.0 C, +/-0.5 C hysteresis\n");
 
   int heater = 0;

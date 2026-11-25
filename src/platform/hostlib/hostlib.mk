@@ -55,9 +55,13 @@ SRCS-${ENABLE_HEAP_MMAP} += ${C}/heap_mmap.c
 
 SRCS += ${P}/hostlib.c \
 	${P}/console_lib.c \
-	${P}/vi2c.c \
-	${P}/vspi.c \
 	${P}/libmios.c \
 	${SRC}/platform/host/vcan.c \
+	${SRC}/platform/host/vgpio.c \
+	${SRC}/platform/host/vi2c.c \
+	${SRC}/platform/host/vspi.c \
+	${SRC}/platform/host/vregfile.c \
+	${SRC}/platform/host/vtps92682.c \
+	${SRC}/platform/host/vtcal9539.c \
 
 SRCS += ${HOSTLIB_APP}

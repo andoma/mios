@@ -23,17 +23,20 @@ to any embedded controller.
   mios and the harness are one OS thread, swapped by a coroutine
   (`cpu_coswitch`); no signals are involved.
 - Each step the harness publishes the room temperature to a **virtual I2C
-  bus** (`vi2c`); the firmware reads it through the real mios I2C HAL in its
-  control loop and switches the heater; the harness reads the heater state
-  back and advances its thermal model. Closed loop, in virtual time.
+  bus** (`hostlib_i2c()`); the firmware reads it through the real mios I2C
+  HAL in its control loop and switches the heater; the harness reads the
+  heater state back and advances its thermal model. Closed loop, in
+  virtual time.
 
 ## Layout
 
 - Platform (reusable), `src/platform/hostlib/`: the `.so` build, the library
   boot/step (`src/cpu/host/cpu.c`, `host_lib_boot`/`host_lib_step`), the
-  virtual buses -- I2C (`vi2c.c`) and SPI (`vspi.c`) register files, and a
-  virtual CAN interface (`hostlib_can()`, a real `can_netif` so DSIG/VLLP
-  run unmodified; the mios side is `platform/host/vcan.c`) -- the
+  virtual buses -- I2C and SPI (`hostlib_i2c()`, `hostlib_spi()`: the host
+  platform's `vi2c.c` and `vspi.c` with a register file, `vregfile.c`, on
+  each address and chip select the harness reaches) and a virtual CAN
+  interface (`hostlib_can()`, a real `can_netif` so DSIG/VLLP run
+  unmodified; the mios side is `platform/host/vcan.c`) -- the
   write-only console, and the ABI (`libmios.c`/`libmios.h`,
   `hostlib.syms`). An app's board file gets all of it from `hostlib.h`.
 - Test (here): `thermostat.c` is stand-in firmware (a real build's
