@@ -12,7 +12,7 @@ SRCS-${ENABLE_LITTLEFS} += \
 LITTLEFS_CFLAGS += -include ${SRC}/lib/littlefs_mios.h
 
 ${MOS}/lib/littlefs/%.o : CFLAGS += \
-	-Wframe-larger-than=192 ${LITTLEFS_CFLAGS} ${NOFPU}
+	-Wframe-larger-than=${FRAME_LIMIT} ${LITTLEFS_CFLAGS} ${NOFPU}
 
 ${MOS}/lib/fs.o : CFLAGS += ${LITTLEFS_CFLAGS} ${NOFPU}
 ${MOS}/lib/fs_stream.o : CFLAGS += ${NOFPU}

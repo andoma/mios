@@ -1,4 +1,4 @@
-#ifdef HAVE_FPU
+#if defined(HAVE_FPU) || defined(MIOS_HOST)
 
 #include <mios/pmbus.h>
 

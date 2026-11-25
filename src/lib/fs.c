@@ -141,7 +141,7 @@ fs_init(block_iface_t *bi)
     free(bi);
   } else {
     evlog(LOG_INFO,"FS mounted ok (%d kbyte)",
-                   bi->block_size * bi->num_blocks / 1024);
+                   (int)(bi->block_size * bi->num_blocks / 1024));
     g_fs = fs;
   }
 }
