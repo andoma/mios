@@ -50,6 +50,11 @@ typedef struct hosttest_suite {
 
 #define HOSTTEST_SUITE(name, fn, flags) HOSTTEST_SUITE_EX(name, fn, flags, 0)
 
+// --list, or run the suite named on the command line, and exit; returns
+// if neither was asked for. Runs before main() (an app's or the kernel's),
+// so an app built for the host platform has the suites too.
+void hosttest_main(void);
+
 // Log with a timestamp prefix
 void hosttest_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
