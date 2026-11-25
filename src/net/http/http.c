@@ -745,14 +745,14 @@ http_connection_shutdown(http_connection_t *hc, http_server_t *hs,
 
   timer_disarm(&hc->hc_timer);
 
-  hs->hs_connections[hc->hc_index] = NULL;
-  http_connection_release(hc);
-
   free(hc->hc_ctrl);
   hc->hc_ctrl = NULL;
 
   free(hc->hc_payload);
   hc->hc_payload = NULL;
+
+  hs->hs_connections[hc->hc_index] = NULL;
+  http_connection_release(hc);  // May free hc
 }
 
 static void
