@@ -10,6 +10,13 @@
 #define RPC_ARGS_MAX_FLT 4
 #endif
 
+#elif defined(__x86_64__) || defined(__aarch64__)
+// The host port. Integer and pointer arguments go in the integer
+// registers, floats in the vector ones (SysV x86-64, AAPCS64), as on a
+// hard-float ARM: the same trampoline works.
+#define RPC_ARGS_MAX_GPR 3
+#define RPC_ARGS_MAX_FLT 4
+
 #else
 #error Unsupported arch for RPC
 #endif
