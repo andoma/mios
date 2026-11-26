@@ -134,6 +134,11 @@ ethphy_link_poll(ether_netif_t *eni)
     ethphy_mii_read(eni, MII_BMSR);
     int n = ethphy_mii_read(eni, MII_BMSR);
     int up = !!(n & BMSR_LINK_STATUS);
+    // A PHY held in reset (or not answering on the MDIO bus) reads all ones,
+    // which has the link bit set. That is not a link, and it must not start
+    // DHCP. A failed read is negative and is not a link either.
+    if(n < 0 || (n & 0xffff) == 0xffff)
+      up = 0;
 
     if(!current_up && up) {
 
