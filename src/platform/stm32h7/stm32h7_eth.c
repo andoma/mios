@@ -216,7 +216,6 @@ static error_t stm32h7_eth_output(struct ether_netif *eni, pbuf_t *pb,
 static void stm32h7_eth_irq(void *arg);
 
 
-
 static void
 rx_desc_give(stm32h7_eth_t *se, size_t index, void *buf)
 {
@@ -433,41 +432,126 @@ stm32h7_thread(stm32h7_eth_t *se, gpio_t phyrst,
 {
   device_t *self = &se->se_eni.eni_ni.ni_dev;
 
-  if(phyrst != GPIO_UNUSED) {
-    gpio_conf_output(phyrst, GPIO_PUSH_PULL,
-                     GPIO_SPEED_LOW, GPIO_PULL_NONE);
-    gpio_set_output(phyrst, 0);
-    usleep(100000);
-    gpio_set_output(phyrst, 1);
-    usleep(100000);
-  }
-
-  clk_enable(CLK_ETH1MACEN);
-  clk_enable(CLK_ETH1TXEN);
-  clk_enable(CLK_ETH1RXEN);
-
-  reset_peripheral(CLK_ETH1MACEN);
-
-  ethphy_init_t *init = driver_probe(DRIVER_TYPE_ETHPHY, self);
-
-  if(init == NULL) {
-    evlog(LOG_ERR, "%s: No PHY driver found", self->d_name);
-    thread_exit(0);
-  }
-
-  se->se_eni.eni_phy = init(&se->se_eni, miimode, 0);
-
-  // Soft reset
-  reg_set_bit(ETH_DMAMR, 0);
-
-  int i = 0;
-  while(reg_rd(ETH_DMAMR) & 1) {
-    i++;
-    usleep(10);
-    if(i == 100) {
-      evlog(LOG_ERR, "Ethernet MAC failed to initialize, no clock?");
-      thread_exit(0);
+  // Retry the PHY and MAC bring-up forever instead of giving up, resetting
+  // the PHY again before every retry.
+  //  - Every attempt resets the PHY: the reset pin if there is one,
+  //    otherwise a BMCR soft reset once a PHY has been found.
+  //  - Any PHY reset, soft or hard, reloads the strap values (DP83826
+  //    SNLS647I section 8.4.1), including the MII/RMII bit in RCSR. So the
+  //    PHY driver's init function is called after every reset, not just
+  //    the first. It reapplies the configuration and creates the PHY
+  //    device only on its first call.
+  // Retries 1..10 are logged one by one. From retry 11 on the log stays
+  // quiet: one line says so, and one line gives the total when the bring-up
+  // finally works.
+  const int phyaddr_default = se->se_phyaddr;
+  ethphy_init_t *phy_init = NULL;
+  for(int attempt = 0;; attempt++) {
+    const int quiet = attempt > 10;
+    if(attempt > 0) {
+      if(attempt == 11)
+        evlog(LOG_ERR, "%s: Ethernet bring-up still failing after 10 retries, "
+              "not logging further retries",
+              self->d_name);
+      else if(!quiet)
+        evlog(LOG_INFO, "%s: Ethernet bring-up retry %d", self->d_name,
+              attempt);
+      usleep(1000000);
     }
+
+    // DP83826 needs 2 ms after reset before the first MDIO access, and
+    // 50 ms after power-up. 100 ms covers both.
+    if(phyrst != GPIO_UNUSED) {
+      gpio_conf_output(phyrst, GPIO_PUSH_PULL,
+                       GPIO_SPEED_LOW, GPIO_PULL_NONE);
+      gpio_set_output(phyrst, 0);
+      usleep(100000);
+      gpio_set_output(phyrst, 1);
+      usleep(100000);
+    } else if(se->se_eni.eni_phy != NULL && attempt > 0) {
+      ethphy_mii_write(&se->se_eni, 0x0000, 0x8000); // BMCR soft reset
+      usleep(100000);
+    }
+
+    clk_enable(CLK_ETH1MACEN);
+    clk_enable(CLK_ETH1TXEN);
+    clk_enable(CLK_ETH1RXEN);
+
+    reset_peripheral(CLK_ETH1MACEN);
+
+    if(phy_init == NULL) {
+      // Scan all 32 SMI addresses for a PHY and use the first one that
+      // returns a plausible ID (not all ones, not all zeros). The address
+      // comes from the PHY's straps, so it can differ between board
+      // variants. This also keeps the generic PHY driver's "No PHY
+      // responding" error from being logged on every failed probe.
+      int found = -1;
+      for(int a = 0; a < 32 && found < 0; a++) {
+        se->se_phyaddr = a;
+        const int id1 = ethphy_mii_read(&se->se_eni, 0x02);
+        const int id2 = ethphy_mii_read(&se->se_eni, 0x03);
+        if((id1 == 0xffff && id2 == 0xffff) || (id1 == 0 && id2 == 0))
+          continue;
+        found = a;
+        if(!quiet)
+          evlog(LOG_INFO, "%s: PHY found at SMI address %d (ID %04x:%04x)",
+                self->d_name, a, id1, id2);
+      }
+      if(found < 0) {
+        se->se_phyaddr = phyaddr_default;
+        if(!quiet)
+          evlog(LOG_ERR, "%s: No PHY answers at any SMI address (0-31)",
+                self->d_name);
+        continue;
+      }
+
+      phy_init = driver_probe(DRIVER_TYPE_ETHPHY, self);
+
+      if(phy_init == NULL) {
+        if(!quiet)
+          evlog(LOG_ERR, "%s: No PHY driver found", self->d_name);
+        continue;
+      }
+    }
+
+    // Configure the PHY after every reset. The strap overrides (RMII mode,
+    // isolate off, advertisement, auto-MDIX, LED polarity) live in the PHY
+    // driver, which writes them whatever the straps latched.
+    device_t *phy = phy_init(&se->se_eni, miimode, 0);
+    if(phy == NULL) {
+      // PHY not answering at this address. Rescan on the next attempt: a
+      // DP83826 with ModeSelect in the strap dead band can latch the
+      // other mode after a reset, which moves it between SMI address 1
+      // (BASIC) and 0 (ENHANCED).
+      phy_init = NULL;
+      continue;
+    }
+    se->se_eni.eni_phy = phy;
+
+    // Soft reset. In RMII the MAC needs the PHY's 50 MHz REF_CLK to finish,
+    // and the PHY only starts driving it once RCSR selects RMII, just
+    // above. Allow 10 ms rather than 1 ms for the clock to come up.
+    reg_set_bit(ETH_DMAMR, 0);
+
+    int i = 0;
+    int mac_ok = 1;
+    while(reg_rd(ETH_DMAMR) & 1) {
+      i++;
+      usleep(10);
+      if(i == 1000) {
+        if(!quiet)
+          evlog(LOG_ERR, "Ethernet MAC failed to initialize, no clock?");
+        mac_ok = 0;
+        break;
+      }
+    }
+    if(!mac_ok)
+      continue;
+
+    if(quiet)
+      evlog(LOG_INFO, "%s: Ethernet up after %d retries", self->d_name,
+            attempt);
+    break;
   }
   usleep(10);
 
@@ -888,6 +972,8 @@ stm32h7_eth_init(gpio_t phyrst, const uint8_t *gpios, size_t gpio_count,
     rx_desc_give(se, i, buf);
   }
 
-  thread_createv(stm32h7_thread, 512, "eth", 0, 4, se, phyrst, mode, flags);
+  // The Ethernet thread runs the PHY bring-up, whose log lines with many
+  // arguments overflow a 512 byte stack.
+  thread_createv(stm32h7_thread, 2048, "eth", 0, 4, se, phyrst, mode, flags);
 }
 
