@@ -7,8 +7,8 @@
  *
  * The buses are the host platform's (platform/host/vi2c.c, vspi.c) with
  * a register file (vregfile.c) on each address and chip select the
- * harness reaches; a board file may create more buses and attach other
- * models (vtps92682.c, vtcal9539.c, ...) itself.
+ * harness reaches; a board file may create more buses and attach models
+ * of its own chips itself.
  */
 #include <mios/io.h>
 

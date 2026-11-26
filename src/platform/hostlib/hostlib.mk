@@ -61,7 +61,5 @@ SRCS += ${P}/hostlib.c \
 	${SRC}/platform/host/vi2c.c \
 	${SRC}/platform/host/vspi.c \
 	${SRC}/platform/host/vregfile.c \
-	${SRC}/platform/host/vtps92682.c \
-	${SRC}/platform/host/vtcal9539.c \
 
 SRCS += ${HOSTLIB_APP}

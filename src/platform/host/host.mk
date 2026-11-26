@@ -37,9 +37,6 @@ P := ${SRC}/platform/host
 
 GLOBALDEPS += ${P}/host.mk
 
-# Expander driver for suite_tcal9539.c, run against vtcal9539.c
-ENABLE_TCAL9539 := yes
-
 # Buffer size picked at startup instead of compiled in, so one binary can
 # run each test suite at the pool size that suite cares about. Host only;
 # see the rationale in src/net/pbuf.h.
@@ -89,11 +86,7 @@ SRCS += ${P}/host.c \
 	${P}/vi2c.c \
 	${P}/vspi.c \
 	${P}/vregfile.c \
-	${P}/vtps92682.c \
-	${P}/vtcal9539.c \
 	${P}/suite_vbus.c \
-	${P}/suite_tps92682.c \
-	${P}/suite_tcal9539.c \
 	${P}/host_ota.c \
 	${T}host/dsig/vllp.c \
 	${T}host/dsig/vllp_logstream.c \
